@@ -1,6 +1,6 @@
 mod prosemirror;
 
-use magnus::{exception, function, method, prelude::*, Error, RString, Ruby, TryConvert, Value};
+use magnus::{function, method, prelude::*, Error, RString, Ruby, TryConvert, Value};
 use yrs::encoding::read::{Cursor, Read};
 use yrs::sync::protocol::MessageReader;
 use yrs::sync::{Awareness, DefaultProtocol, Message, Protocol, SyncMessage};
@@ -92,10 +92,12 @@ where
     }
 }
 
-/// Helper to create a binary Ruby string from bytes
+/// Helper to create a binary Ruby string from bytes. Called only with the GVL
+/// held (after the native work finishes), so `Ruby::get` always succeeds.
 fn binary_string(bytes: &[u8]) -> RString {
-    let s = RString::from_slice(bytes);
-    let _ = s.enc_associate(magnus::encoding::Index::ascii8bit());
+    let ruby = Ruby::get().unwrap();
+    let s = ruby.str_from_slice(bytes);
+    let _ = s.enc_associate(ruby.ascii8bit_encindex());
     s
 }
 
@@ -105,7 +107,7 @@ fn copy_bytes(s: RString) -> Vec<u8> {
 }
 
 fn runtime_error(msg: String) -> Error {
-    Error::new(exception::runtime_error(), msg)
+    Error::new(Ruby::get().unwrap().exception_runtime_error(), msg)
 }
 
 // ============================================================================
@@ -343,7 +345,7 @@ impl RbDoc {
 fn extract_prosemirror_json(args: &[Value]) -> Result<String, Error> {
     if args.is_empty() || args.len() > 2 {
         return Err(Error::new(
-            exception::arg_error(),
+            Ruby::get().unwrap().exception_arg_error(),
             format!(
                 "wrong number of arguments (given {}, expected 1..2)",
                 args.len()
