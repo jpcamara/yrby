@@ -66,6 +66,74 @@ byte-for-byte CRDT convergence, the server-side extraction endpoint, and
 prompt presence reaping when a client disconnects (only the departed client's
 cursor is cleared, well under the client-side timeout).
 
+## Authoritative audit mode
+
+Boot with `AUDIT=1` and the channel records every change durably — in a
+single total order, *before* it is applied or broadcast — via yrb-lite's
+`on_change` hook (see [`app/lib/audit_log.rb`](app/lib/audit_log.rb), an
+fsync'd append-only log). `GET /docs/:id/audit` returns the log as base64
+CRDT deltas.
+
+```bash
+AUDIT=1 RAILS_MAX_THREADS=16 CABLE_WORKERS=16 bin/rails s -p 3777
+
+cd frontend && bun audit.mjs
+```
+
+A client makes a series of edits; the test then fetches the audit log,
+replays it into a fresh `Y.Doc` with **no** help from the live server, and
+asserts the result matches the server's live document byte-for-byte — i.e.
+the recorded log is a complete, authoritative history. (Storing before
+distributing means a synchronous durable write per change; that's the
+trade-off you opt into with `on_change`.)
+
+For the hostile cases, `bun audit_scenarios.mjs` drives a fault-injectable
+store (slow / failing, via `POST /docs/:id/audit/control`) across multiple
+real clients and asserts the core guarantee — **no one else sees a change
+until it's stored** — under:
+
+1. **Slow store** — mid-store, no other client sees the change: not via live
+   broadcast, not via `GET /content`, and not via a fresh client's resync
+   (the back door). After the store completes, everyone converges and it's
+   logged.
+2. **Store failure** — a failed store leaks nothing to anyone and is absent
+   from the log (the originating client keeps its optimistic edit, diverged).
+3. **Self-heal** — after a failure, the client reconnects and re-offers the
+   change; the recovered store records it and everyone converges.
+4. **Offline catch-up** — edits made offline are recorded (as one merged
+   diff) when the client reconnects, before others see them.
+
+## Hostile input (chaos)
+
+```bash
+AUDIT=1 bin/rails s -p 3777
+cd frontend && bun chaos.mjs
+```
+
+A vandal client sprays malformed frames — bad base64, random bytes,
+truncated / oversized / multi-message / unknown-type protocol messages,
+spoofed awareness, broken envelopes — while good clients edit. Asserts the
+server stays up, the good clients still converge byte-for-byte, a second room
+is untouched, and (in audit mode) the garbage is never logged as a change.
+Malformed or multi-message frames are dropped before they can be processed or
+relayed, so one bad client can't disrupt the others.
+
+## Crash recovery
+
+```bash
+AUDIT=1 bin/rails s -p 3777
+cd frontend && ROOM=crash-1 PHASE=write bun crash_recovery.mjs
+# ... kill -9 the server, then restart it ...
+AUDIT=1 bin/rails s -p 3777
+cd frontend && ROOM=crash-1 PHASE=verify bun crash_recovery.mjs
+```
+
+Because audit mode records every change (fsync) *before* it's applied or
+broadcast, every acknowledged edit is on disk when the server dies. After a
+hard `kill -9` and restart, `on_load` replays the log (`AuditLog.replay`,
+tolerant of a torn final line from a crash mid-append) and the document is
+whole — no loss window, unlike a server that persists on a debounce.
+
 ## Stress test
 
 ```bash

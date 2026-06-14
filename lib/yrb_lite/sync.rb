@@ -41,6 +41,16 @@ module YrbLite
     MSG_AWARENESS = 1
     MSG_SYNC_STEP1 = 0
 
+    # Validated frame kinds from Awareness#message_kind. A frame only gets a
+    # non-DROP kind if it is exactly one well-formed message; anything
+    # malformed, truncated, multi-message, or unknown is dropped before it can
+    # be processed or relayed.
+    MSG_KIND_DROP = 0
+    MSG_KIND_SYNC_STEP1 = 1
+    MSG_KIND_UPDATE = 2
+    MSG_KIND_AWARENESS = 3
+    MSG_KIND_AWARENESS_QUERY = 4
+
     def self.included(base)
       base.extend(ClassMethods)
     end
@@ -59,6 +69,21 @@ module YrbLite
         @on_save = callable || block if callable || block
         @on_save
       end
+
+      # Record every document change durably *before* it is applied or
+      # distributed (authoritative audit mode). Called with (key, update) —
+      # the exact CRDT update delta — synchronously, serialized per document
+      # so the recorded order is the authoritative apply order. If the block
+      # raises, the change is rejected: it is neither applied to the shared
+      # document nor broadcast to other subscribers.
+      #
+      # Registering an on_change switches that channel onto the strict path
+      # (record -> apply -> broadcast). Without it, the default fast path
+      # (apply -> broadcast, optional on_save snapshot) is used.
+      def on_change(callable = nil, &block)
+        @on_change = callable || block if callable || block
+        @on_change
+      end
     end
 
     # Call from `subscribed`. Streams broadcasts for this document and
@@ -67,6 +92,7 @@ module YrbLite
       @sync_key = key.to_s
       @sync_origin = SecureRandom.hex(8)
       @sync_clients = [] # awareness client IDs seen on this connection
+      Sync.subscribe(@sync_key)
       awareness = sync_awareness
 
       stream_from sync_stream_name, coder: ActiveSupport::JSON do |payload|
@@ -80,21 +106,33 @@ module YrbLite
     # Call from `receive`. Applies the client's message, replies directly
     # when the protocol calls for it, and relays document/awareness changes
     # to the other subscribers.
+    #
+    # If an `on_change` recorder is registered, document changes take the
+    # strict authoritative path (record -> apply -> broadcast, serialized per
+    # document); otherwise the fast path is used.
     def sync_receive(data)
-      bytes = Base64.strict_decode64(data["m"])
+      m = data.is_a?(Hash) ? data["m"] : nil
+      return unless m.is_a?(String)
+
+      begin
+        bytes = Base64.strict_decode64(m)
+      rescue ArgumentError
+        return # not valid base64 — ignore the frame, keep the connection
+      end
+
       awareness = sync_awareness
-      sync_track_clients(awareness, bytes)
-      response = awareness.handle(bytes)
+      kind = awareness.message_kind(bytes)
+      # Malformed / truncated / multi-message / unknown frames are dropped
+      # before they can be processed or relayed to other clients.
+      return if kind == MSG_KIND_DROP
 
-      transmit({ "m" => Base64.strict_encode64(response) }) unless response.empty?
+      sync_track_clients(awareness, bytes) if kind == MSG_KIND_AWARENESS
 
-      return unless sync_broadcast?(bytes)
-
-      ActionCable.server.broadcast(
-        sync_stream_name,
-        { "m" => data["m"], "origin" => @sync_origin }
-      )
-      sync_persist if sync_modifies_doc?(bytes)
+      if kind == MSG_KIND_UPDATE && self.class.on_change
+        sync_apply_authoritative(awareness, m, bytes)
+      else
+        sync_apply_fast(awareness, m, bytes)
+      end
     end
 
     # Call from `unsubscribed`. Clears the presence states this connection
@@ -108,10 +146,20 @@ module YrbLite
       @sync_clients = []
       return if removal.empty?
 
-      ActionCable.server.broadcast(
-        sync_stream_name,
-        { "m" => Base64.strict_encode64(removal), "origin" => @sync_origin }
-      )
+      sync_distribute(Base64.strict_encode64(removal))
+    end
+
+    # Call from `unsubscribed`. Clears this connection's presence and, when the
+    # last subscriber for the document leaves, persists and unloads it from
+    # memory (only if an `on_load` is configured to bring it back — otherwise
+    # the in-memory document is the only copy and is kept). Prevents a
+    # long-running server from accumulating every document it has ever served.
+    def sync_unsubscribed
+      sync_clear_presence
+      saver = self.class.on_save
+      Sync.release(@sync_key, evictable: !self.class.on_load.nil?) do |awareness|
+        saver&.call(@sync_key, awareness.encode_state_as_update)
+      end
     end
 
     # The shared Awareness (document + presence) for this channel's key.
@@ -122,6 +170,53 @@ module YrbLite
     end
 
     private
+
+    # Default path: apply the message, answer direct requests, relay
+    # state-changing messages to the other subscribers. An optional on_save
+    # snapshot is taken after a document change.
+    def sync_apply_fast(awareness, encoded, bytes)
+      response = awareness.handle(bytes)
+      transmit({ "m" => Base64.strict_encode64(response) }) unless response.empty?
+
+      return unless sync_broadcast?(bytes)
+
+      sync_distribute(encoded)
+      sync_persist if sync_modifies_doc?(bytes)
+    end
+
+    # Authoritative path: record the change durably, THEN apply it to the
+    # shared document, THEN distribute it. The whole sequence runs under a
+    # per-document lock so changes are recorded in a single total order that
+    # matches the order they are applied, and nothing is ever distributed (or
+    # even applied) before it has been recorded. If the recorder raises, the
+    # change is rejected — not applied, not broadcast — and the exception
+    # propagates so the channel can surface it / the client can resync.
+    def sync_apply_authoritative(awareness, encoded, bytes)
+      recorder = self.class.on_change
+
+      modified = Sync.lock_for(@sync_key).synchronize do
+        update = awareness.update_from_message(bytes)
+        # A no-op message (e.g. the empty SyncStep2 in a client's opening
+        # handshake) carries no change — nothing to record, apply, or relay.
+        next false unless update
+
+        recorder.call(@sync_key, update) # durable write; raise to reject
+        awareness.apply_update(update)   # only recorded changes reach the doc
+        sync_distribute(encoded)         # ...and only then the wire
+        true
+      end
+
+      sync_persist if modified
+    end
+
+    # Single broadcast point for both paths (and presence removal), so the
+    # relay semantics live in one place and tests can observe distribution.
+    def sync_distribute(encoded)
+      ActionCable.server.broadcast(
+        sync_stream_name,
+        { "m" => encoded, "origin" => @sync_origin }
+      )
+    end
 
     # Record the awareness client IDs carried by an incoming message so we
     # can clear exactly those states when this connection closes.
@@ -161,6 +256,8 @@ module YrbLite
     # -- Shared document registry ------------------------------------------
 
     @registry = {}
+    @locks = {}
+    @subscribers = Hash.new(0)
     @registry_mutex = Mutex.new
 
     class << self
@@ -180,13 +277,61 @@ module YrbLite
         end
       end
 
+      # Per-document mutex serializing the authoritative record -> apply ->
+      # broadcast section, so a document's audit log is a single total order.
+      # Only briefly holds the registry mutex to fetch/create the lock; the
+      # durable write itself runs while holding only this per-key lock.
+      def lock_for(key)
+        @registry_mutex.synchronize { @locks[key] ||= Mutex.new }
+      end
+
+      # Count a new subscriber for a document.
+      def subscribe(key)
+        @registry_mutex.synchronize { @subscribers[key] += 1 }
+      end
+
+      # Drop a subscriber. When the last one leaves and the document is
+      # evictable (there's an on_load to bring it back, so unloading can't lose
+      # data), persist it via the given block and unload it from memory — so a
+      # long-running server doesn't accumulate every document and lock it has
+      # ever seen. Returns true if the document was evicted.
+      #
+      # The persist runs outside the registry lock (it may do I/O), and we
+      # re-check the subscriber count afterward: if someone reconnected while
+      # we were saving, eviction is aborted and the warm document is kept.
+      def release(key, evictable:)
+        awareness = @registry_mutex.synchronize do
+          @subscribers[key] -= 1 if @subscribers[key].positive?
+          next nil unless (@subscribers[key]).zero?
+
+          @subscribers.delete(key)
+          evictable ? @registry[key] : nil
+        end
+        return false unless awareness
+
+        yield awareness if block_given?
+
+        @registry_mutex.synchronize do
+          # A subscriber may have returned during the persist above.
+          next false unless @subscribers[key].zero?
+
+          @subscribers.delete(key)
+          @locks.delete(key)
+          !@registry.delete(key).nil?
+        end
+      end
+
       def registry
         @registry_mutex.synchronize { @registry.dup }
       end
 
       # Clear all documents (useful for testing).
       def reset!
-        @registry_mutex.synchronize { @registry = {} }
+        @registry_mutex.synchronize do
+          @registry = {}
+          @locks = {}
+          @subscribers = Hash.new(0)
+        end
       end
     end
   end

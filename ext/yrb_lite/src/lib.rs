@@ -3,7 +3,7 @@ mod prosemirror;
 use magnus::{
     exception, function, method, prelude::*, Error, RString, Ruby, TryConvert, Value,
 };
-use yrs::encoding::read::Cursor;
+use yrs::encoding::read::{Cursor, Read};
 use yrs::sync::protocol::MessageReader;
 use yrs::sync::{Awareness, DefaultProtocol, Message, Protocol, SyncMessage};
 use yrs::updates::decoder::{Decode, DecoderV1};
@@ -472,6 +472,75 @@ impl RbAwareness {
         .map_err(runtime_error)
     }
 
+    /// Classify a frame for safe routing/relay. Returns a code ONLY when the
+    /// frame is exactly one well-formed message that consumes the whole buffer
+    /// — so a malformed, truncated, multi-message, or trailing-garbage frame
+    /// (which a malicious client could craft to disrupt others if relayed) is
+    /// rejected up front:
+    ///   0 = drop (malformed / multiple / unknown / empty)
+    ///   1 = sync step1   (a request — respond, do not relay)
+    ///   2 = sync step2/update (a document change — record/apply/relay)
+    ///   3 = awareness    (presence — relay)
+    ///   4 = awareness query (a request — respond, do not relay)
+    fn message_kind(&self, data: RString) -> u8 {
+        let data_bytes = copy_bytes(data);
+        nogvl(move || {
+            let mut decoder = DecoderV1::new(Cursor::new(&data_bytes));
+            let msg = match Message::decode(&mut decoder) {
+                Ok(msg) => msg,
+                Err(_) => return 0, // empty or malformed
+            };
+            // Any remaining byte means a second message or trailing garbage —
+            // reject (read_u8 fails only at a clean end of buffer).
+            if decoder.read_u8().is_ok() {
+                return 0;
+            }
+            match msg {
+                Message::Sync(SyncMessage::SyncStep1(_)) => 1,
+                Message::Sync(SyncMessage::SyncStep2(_)) => 2,
+                Message::Sync(SyncMessage::Update(_)) => 2,
+                Message::Awareness(_) => 3,
+                Message::AwarenessQuery => 4,
+                _ => 0, // Auth / Custom: not part of our model — don't relay
+            }
+        })
+    }
+
+    /// Extract the document-update delta carried by a protocol message —
+    /// the payloads of any Update / SyncStep2 sub-messages, merged into a
+    /// single update. Returns nil if the message carries no document change
+    /// (e.g. a SyncStep1 request or an awareness update). The strict audit
+    /// path records this exact delta before applying it.
+    fn update_from_message(&self, data: RString) -> Result<Option<RString>, Error> {
+        let data_bytes = copy_bytes(data);
+        let merged = nogvl(move || -> Result<Option<Vec<u8>>, String> {
+            let mut decoder = DecoderV1::new(Cursor::new(&data_bytes));
+            let mut updates: Vec<Vec<u8>> = Vec::new();
+            for msg in MessageReader::new(&mut decoder) {
+                match msg.map_err(|e| e.to_string())? {
+                    Message::Sync(SyncMessage::Update(u))
+                    | Message::Sync(SyncMessage::SyncStep2(u)) => updates.push(u),
+                    _ => {}
+                }
+            }
+            let bytes = match updates.len() {
+                0 => return Ok(None),
+                1 => updates.pop().unwrap(),
+                _ => yrs::merge_updates_v1(&updates).map_err(|e| e.to_string())?,
+            };
+            // A SyncStep2 with nothing new (e.g. the empty one every client
+            // sends during its opening handshake) carries no document change.
+            // Don't treat it as a recordable/applicable change.
+            let update = yrs::Update::decode_v1(&bytes).map_err(|e| e.to_string())?;
+            if update.state_vector().is_empty() && update.delete_set().is_empty() {
+                return Ok(None);
+            }
+            Ok(Some(bytes))
+        })
+        .map_err(runtime_error)?;
+        Ok(merged.map(|b| binary_string(&b)))
+    }
+
     /// Mark the given clients as disconnected and return an awareness protocol
     /// message (null-state, bumped clock) announcing their removal to peers.
     /// Only clients currently known to this Awareness are removed; unknown
@@ -573,6 +642,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbAwareness::awareness_client_ids, 1),
     )?;
     awareness_class.define_method("remove_clients", method!(RbAwareness::remove_clients, 1))?;
+    awareness_class.define_method(
+        "update_from_message",
+        method!(RbAwareness::update_from_message, 1),
+    )?;
+    awareness_class.define_method("message_kind", method!(RbAwareness::message_kind, 1))?;
 
     // Define message type constants
     module.const_set("MSG_SYNC", 0u8)?;

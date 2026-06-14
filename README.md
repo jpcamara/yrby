@@ -115,17 +115,69 @@ types), answers SyncStep1s directly, relays document and awareness changes
 to other subscribers without echoing them back to the sender, and calls
 `on_save` after every message that modified the document.
 
-`sync_clear_presence` (from `unsubscribed`) tracks the awareness client IDs
-seen on a connection and broadcasts a removal when it closes, so a dropped
-socket or closed tab doesn't leave a stale cursor lingering until the
-client-side timeout reaps it. It's optional but recommended for clean
-presence.
+`sync_unsubscribed` (from `unsubscribed`) does two things: clears this
+connection's presence (so a dropped socket or closed tab doesn't leave a
+stale cursor until the client-side timeout reaps it), and — when the last
+subscriber for a document leaves — persists and unloads the document from
+memory, so a long-running server doesn't accumulate every document it has
+ever served. Unloading only happens when an `on_load` is configured (so the
+document can be brought back); otherwise the in-memory copy is kept.
+
+**Hostile input is handled defensively.** Every incoming frame is validated
+as exactly one well-formed protocol message before it is processed or
+relayed; malformed, truncated, multi-message, oversized, or unknown frames
+are dropped. So a malicious client can't crash the server (a Rust panic is
+caught at the FFI boundary and surfaced as a Ruby exception, never a process
+death) or relay garbage that disrupts the other clients in a room.
 
 Messages are the standard y-protocols binary messages, base64-encoded as
 `{ "m" => "<base64>" }`. A complete working example — Rails app, Tiptap
 editor, custom browser-side `ActionCableProvider`, and an automated
 end-to-end test — lives in
 [`examples/actioncable-demo`](examples/actioncable-demo).
+
+#### Authoritative audit mode (record before distribute)
+
+By default a change is applied and broadcast immediately (fast path). If you
+need to **durably record every change before anyone else sees it** — for
+auditing, or to guarantee nothing is distributed until it's stored — register
+an `on_change` recorder:
+
+```ruby
+class DocumentChannel < ApplicationCable::Channel
+  include YrbLite::Sync
+
+  on_change do |key, update|
+    # Synchronous, durable write. `update` is the exact CRDT delta.
+    AuditLog.append!(key, update)   # raise to REJECT the change
+  end
+
+  def subscribed = sync_for(params[:id])
+  def receive(data) = sync_receive(data)
+  def unsubscribed = sync_clear_presence
+end
+```
+
+With `on_change` registered, document changes take the strict path:
+
+1. **Record** the change (the raw CRDT update delta) — synchronously.
+2. **Apply** it to the shared document — only after it's recorded.
+3. **Broadcast** it to other subscribers — only after it's applied.
+
+The whole sequence runs under a per-document lock, so a document's changes
+are recorded in a **single total order that matches the order they're
+applied** — the recorded log is authoritative. If the recorder raises (e.g.
+the store is unavailable), the change is **rejected**: not applied to the
+document, not sent to anyone. Replaying the recorded deltas in order onto a
+fresh `Y.Doc` reconstructs the document exactly. (The cost is the one you're
+asking for: a synchronous durable write per change serializes that document's
+writes. Different documents use different locks and proceed in parallel.)
+
+`on_change` and `on_save` are independent — `on_save` snapshots the whole
+document opportunistically; `on_change` is the per-change authoritative log.
+The demo's `AUDIT=1` mode (see [`examples/actioncable-demo`](examples/actioncable-demo))
+wires this to an fsync'd append-only log and proves, end to end, that the log
+alone rebuilds the document.
 
 ### User Awareness/Presence
 
