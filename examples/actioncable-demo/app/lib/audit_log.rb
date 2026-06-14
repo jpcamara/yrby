@@ -15,8 +15,9 @@ require "fileutils"
 # tests can drive the store's behavior and prove that no other client ever
 # sees a change before it's stored.
 class AuditLog
-  @mutex = Mutex.new
-  @control_mutex = Mutex.new
+  @locks = Hash.new { |h, k| h[k] = Mutex.new } # per-document, so different
+  @locks_guard = Mutex.new                       # docs record concurrently
+  @handles = {}                                  # cached append handles per key
 
   class << self
     # Synchronously persist a change. Writes + fsyncs before returning, so a
@@ -27,16 +28,17 @@ class AuditLog
     # appends to the same file (O_APPEND is atomic), so the audit history is
     # global across a multi-process deployment, not per-process.
     def record(key, update)
-      simulate_latency(key)
-      raise "audit store unavailable (injected for #{key})" if fail_injected?(key)
+      Fault.simulate(key)
 
       encoded = Base64.strict_encode64(update)
-      @mutex.synchronize do
-        File.open(path_for(key), "a") do |file|
-          file.write("#{encoded}\n")
-          file.flush
-          file.fsync
-        end
+      # Per-document lock + a cached append handle: different documents record
+      # in parallel (like distinct rows in a real DB), while a single document's
+      # log stays correctly ordered. Still fsync-durable before returning.
+      lock_for(key).synchronize do
+        file = handle_for(key)
+        file.write("#{encoded}\n")
+        file.flush
+        file.fsync
       end
     end
 
@@ -72,72 +74,24 @@ class AuditLog
       applied.zero? ? nil : doc.encode_state_as_update
     end
 
-    # -- Fault injection / test controls -----------------------------------
-    #
-    # State lives in a file so it works ACROSS processes — under AnyCable the
-    # control endpoint runs in Puma but `record` runs in the RPC server.
-
-    def set_delay(key, seconds)
-      update_fault(key) { |f| f["delay_ms"] = seconds.to_f * 1000 }
-    end
-
-    def fail_next(key)
-      update_fault(key) { |f| f["fail_once"] = true }
-    end
-
     def reset!(key)
-      @mutex.synchronize do
-        [path_for(key), fault_path(key)].each { |p| File.delete(p) if File.exist?(p) }
+      lock_for(key).synchronize do
+        if (handle = @handles.delete(key))
+          handle.close rescue nil
+        end
+        File.delete(path_for(key)) if File.exist?(path_for(key))
       end
+      Fault.reset!(key)
     end
 
     private
 
-    def simulate_latency(key)
-      fault = read_fault(key)
-      delay = fault["delay_ms"].to_f / 1000
-      sleep(delay) if delay.positive?
+    def lock_for(key)
+      @locks_guard.synchronize { @locks[key] }
     end
 
-    # Consume a one-shot failure flag (atomically rewrites the fault file).
-    def fail_injected?(key)
-      @control_mutex.synchronize do
-        fault = read_fault(key)
-        next false unless fault["fail_once"]
-
-        fault.delete("fail_once")
-        write_fault(key, fault)
-        true
-      end
-    end
-
-    def update_fault(key)
-      @control_mutex.synchronize do
-        fault = read_fault(key)
-        yield fault
-        write_fault(key, fault)
-      end
-    end
-
-    def read_fault(key)
-      path = fault_path(key)
-      return {} unless File.exist?(path)
-
-      JSON.parse(File.read(path))
-    rescue StandardError
-      {}
-    end
-
-    def write_fault(key, fault)
-      if fault.empty?
-        File.delete(fault_path(key)) if File.exist?(fault_path(key))
-      else
-        File.write(fault_path(key), JSON.generate(fault))
-      end
-    end
-
-    def fault_path(key)
-      Pathname.new("#{path_for(key)}.fault")
+    def handle_for(key)
+      @handles[key] ||= File.open(path_for(key), "a")
     end
 
     def path_for(key)

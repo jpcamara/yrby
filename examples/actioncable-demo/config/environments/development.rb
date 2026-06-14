@@ -50,6 +50,10 @@ Rails.application.configure do
   # CABLE_URL=ws://localhost:8080/cable); action_cable_meta_tag emits it.
   config.action_cable.url = ENV["CABLE_URL"] if ENV["CABLE_URL"].present?
   config.action_cable.allowed_request_origins = [/.*/]
+  # Schema is created out-of-band (see README); skip the migration-version
+  # checks (their schema-dump path hits a broken native `date` on this box).
+  config.active_record.migration_error = false
+  config.active_record.dump_schema_after_migration = false
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true

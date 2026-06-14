@@ -1,0 +1,20 @@
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch("PGHOST", "/tmp") %>
+  username: <%= ENV.fetch("PGUSER", ENV["USER"]) %>
+  # The AnyCable RPC server runs ~30 worker threads; give the pool headroom so
+  # concurrent record/replay calls don't queue on connection checkout.
+  pool: <%= ENV.fetch("DB_POOL", 50) %>
+
+development:
+  <<: *default
+  database: yrb_lite_demo_development
+
+test:
+  <<: *default
+  database: yrb_lite_demo_test
+
+production:
+  <<: *default
+  database: yrb_lite_demo_production

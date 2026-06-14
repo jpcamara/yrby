@@ -33,3 +33,6 @@ gem "yrb-lite", path: "../.."
 
 # AnyCable (multi-process WebSocket server) — for the AnyCable harness/test
 gem "anycable-rails", "~> 1.6"
+
+# PostgreSQL store (realistic durable store with concurrent commits)
+gem "pg"

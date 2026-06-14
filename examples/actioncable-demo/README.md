@@ -99,13 +99,34 @@ browser survived (counted per contributor) — including a max-contention round
 where all four type at the same position. Verified single-process and across
 two Redis-backed processes.
 
+## Durable store: Postgres or file
+
+`AUDIT=1` wires yrb-lite's `on_load`/`on_change` to a durable store. Two are
+included, selected by `STORE_KIND`:
+
+- **`pg`** (default) — [`app/lib/pg_store.rb`](app/lib/pg_store.rb): a
+  `document_changes` table, one committed row per change (a lean parameterized
+  INSERT with a binary `bytea` bind; `synchronous_commit=on` so the row is
+  durable before `record` returns). The realistic production store — one
+  consistent source of truth across every node, and the audit log *is* the
+  database.
+- **`file`** ([`app/lib/audit_log.rb`](app/lib/audit_log.rb)) — an fsync'd
+  append-only log per document; no database needed.
+
+Set up the table once:
+
+```bash
+bin/rails db:prepare   # creates yrb_lite_demo_development + document_changes
+```
+
+(`config/database.yml` defaults to the local socket as `$USER`.) `GET
+/docs/:id/audit` returns the stored deltas (base64).
+
 ## Authoritative audit mode
 
 Boot with `AUDIT=1` and the channel records every change durably — in a
 single total order, *before* it is applied or broadcast — via yrb-lite's
-`on_change` hook (see [`app/lib/audit_log.rb`](app/lib/audit_log.rb), an
-fsync'd append-only log). `GET /docs/:id/audit` returns the log as base64
-CRDT deltas.
+`on_change` hook. `GET /docs/:id/audit` returns the log as base64 CRDT deltas.
 
 ```bash
 AUDIT=1 RAILS_MAX_THREADS=16 CABLE_WORKERS=16 bin/rails s -p 3777

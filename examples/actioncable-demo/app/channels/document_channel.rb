@@ -13,8 +13,8 @@ class DocumentChannel < ApplicationCable::Channel
   # on_load rebuilds a document from its audit log, so a document survives an
   # eviction *or a server crash* — the fsync'd log is the source of truth.
   if ENV["AUDIT"].present?
-    on_load  { |key| AuditLog.replay(key) }
-    on_change { |key, update| AuditLog.record(key, update) }
+    on_load  { |key| Store.current.replay(key) }
+    on_change { |key, update| Store.current.record(key, update) }
   end
 
   # SYNC_BACKEND=store uses the stateless, store-backed path (works under

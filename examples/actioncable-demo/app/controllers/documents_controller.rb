@@ -18,7 +18,7 @@ class DocumentsController < ApplicationController
     # process), so read it from the store. Otherwise use the in-memory replica.
     update =
       if ENV["AUDIT"].present?
-        AuditLog.replay(params[:id])
+        Store.current.replay(params[:id])
       else
         YrbLite::Sync.registry[params[:id]]&.encode_state_as_update
       end
@@ -33,7 +33,7 @@ class DocumentsController < ApplicationController
   # change, in order, as base64 CRDT update deltas. Replaying them rebuilds
   # the document exactly.
   def audit
-    entries = AuditLog.entries(params[:id])
+    entries = Store.current.entries(params[:id])
     render json: { count: entries.length, updates: entries }
   end
 
@@ -45,9 +45,9 @@ class DocumentsController < ApplicationController
   def audit_control
     return head :forbidden unless ENV["AUDIT"].present?
 
-    AuditLog.reset!(params[:id]) if params[:reset]
-    AuditLog.set_delay(params[:id], params[:delay_ms].to_f / 1000) if params[:delay_ms]
-    AuditLog.fail_next(params[:id]) if params[:fail_once]
+    Store.current.reset!(params[:id]) if params[:reset]
+    Fault.set_delay(params[:id], params[:delay_ms].to_f / 1000) if params[:delay_ms]
+    Fault.fail_next(params[:id]) if params[:fail_once]
     head :no_content
   end
 end
