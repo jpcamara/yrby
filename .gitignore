@@ -1,0 +1,46 @@
+# Bundler
+/.bundle/
+/vendor/bundle/
+Gemfile.lock
+
+# Build artifacts
+/tmp/
+*.bundle
+*.so
+*.o
+*.a
+*.dll
+*.dylib
+Makefile
+mkmf.log
+
+# Extension build directory
+/ext/yrb_lite/Makefile
+/ext/yrb_lite/*.o
+/ext/yrb_lite/*.so
+/ext/yrb_lite/*.bundle
+/lib/yrb_lite/*.bundle
+/lib/yrb_lite/*.so
+
+# Gem packages
+*.gem
+/pkg/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# macOS
+.DS_Store
+
+# Coverage
+/coverage/
+
+# Documentation
+/doc/
+/.yardoc/
+
+target

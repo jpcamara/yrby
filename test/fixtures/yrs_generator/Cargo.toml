@@ -1,0 +1,16 @@
+[package]
+name = "yrs_generator"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "yrs_generator"
+path = "src/main.rs"
+
+[dependencies]
+yrs = { version = "0.21", features = ["sync"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"

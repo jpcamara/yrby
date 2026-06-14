@@ -1,0 +1,18 @@
+[package]
+name = "yrb_lite"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name"]
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+magnus = "0.7"
+yrs = { version = "0.21", features = ["sync"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+rb-sys-env = "0.1"
