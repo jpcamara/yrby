@@ -3,25 +3,108 @@ mod prosemirror;
 use magnus::{
     exception, function, method, prelude::*, Error, RString, Ruby, TryConvert, Value,
 };
-use std::cell::RefCell;
 use yrs::sync::{Awareness, DefaultProtocol, Message, Protocol, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::{Encode, Encoder, EncoderV1};
 use yrs::{Doc, ReadTxn, Transact};
 
-/// Wrapper around yrs Doc
+/// Wrapper around yrs Doc.
+///
+/// Thread safety: `yrs::Doc` is `Send + Sync` — its `transact()`/`transact_mut()`
+/// acquire an internal RwLock with *blocking* semantics, so concurrent access
+/// from multiple Ruby threads serializes safely instead of panicking. No
+/// interior-mutability wrapper (RefCell etc.) is needed or wanted here: every
+/// method opens and closes its transaction within a single call.
 #[magnus::wrap(class = "YrbLite::Doc", free_immediately, size)]
-struct RbDoc(RefCell<Doc>);
+struct RbDoc(Doc);
 
-/// Wrapper around yrs Awareness (which contains a Doc)
+/// Wrapper around yrs Awareness (which contains a Doc).
+///
+/// Thread safety: `yrs::sync::Awareness` keeps client states in a `DashMap`
+/// and exposes all functionality through `&self` — it is designed for
+/// multi-threaded server use.
 #[magnus::wrap(class = "YrbLite::Awareness", free_immediately, size)]
-struct RbAwareness(RefCell<Awareness>);
+struct RbAwareness(Awareness);
+
+/// Compile-time proof that the wrapped types are thread-safe. If a future
+/// yrs upgrade makes Doc or Awareness lose Send/Sync, this fails the build
+/// instead of silently shipping a thread-unsafe gem.
+#[allow(dead_code)]
+fn assert_thread_safe() {
+    fn is_send_sync<T: Send + Sync>() {}
+    is_send_sync::<Doc>();
+    is_send_sync::<Awareness>();
+}
+
+/// Run `f` with the GVL (Global VM Lock) released, allowing other Ruby
+/// threads — including ones calling into this extension — to run in parallel.
+///
+/// SAFETY RULES for the closure:
+/// - It must NOT touch any Ruby object or call any Ruby API. Inputs are
+///   copied out of Ruby strings before entering, results are converted to
+///   Ruby objects after returning.
+/// - It must be `Send` (it runs while other threads own the GVL). `&Doc` and
+///   `&Awareness` are fine: both types are `Sync` (asserted above).
+/// - Any doc lock it takes is acquired AND released inside the closure, so we
+///   never reacquire the GVL while holding a yrs lock (no lock-order deadlock).
+///
+/// Panics inside the closure are caught and re-raised (resumed) after the GVL
+/// is reacquired, where magnus converts them to Ruby exceptions.
+fn nogvl<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
+{
+    use std::ffi::c_void;
+    use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
+    struct Ctx<F, R> {
+        func: Option<F>,
+        result: Option<std::thread::Result<R>>,
+    }
+
+    unsafe extern "C" fn callback<F, R>(arg: *mut c_void) -> *mut c_void
+    where
+        F: FnOnce() -> R,
+    {
+        let ctx = &mut *(arg as *mut Ctx<F, R>);
+        let func = ctx.func.take().expect("nogvl callback invoked twice");
+        ctx.result = Some(catch_unwind(AssertUnwindSafe(func)));
+        std::ptr::null_mut()
+    }
+
+    let mut ctx: Ctx<F, R> = Ctx {
+        func: Some(f),
+        result: None,
+    };
+    unsafe {
+        rb_sys::rb_thread_call_without_gvl(
+            Some(callback::<F, R>),
+            &mut ctx as *mut Ctx<F, R> as *mut c_void,
+            None,
+            std::ptr::null_mut(),
+        );
+    }
+    match ctx.result.expect("nogvl callback did not run") {
+        Ok(result) => result,
+        Err(panic) => resume_unwind(panic),
+    }
+}
 
 /// Helper to create a binary Ruby string from bytes
 fn binary_string(bytes: &[u8]) -> RString {
     let s = RString::from_slice(bytes);
     let _ = s.enc_associate(magnus::encoding::Index::ascii8bit());
     s
+}
+
+/// Copy a Ruby string's bytes so they can be used without the GVL.
+fn copy_bytes(s: RString) -> Vec<u8> {
+    unsafe { s.as_slice() }.to_vec()
+}
+
+fn runtime_error(msg: String) -> Error {
+    Error::new(exception::runtime_error(), msg)
 }
 
 // ============================================================================
@@ -37,119 +120,132 @@ impl RbDoc {
             let client_id: u64 = TryConvert::try_convert(args[0])?;
             Doc::with_client_id(client_id)
         };
-        Ok(RbDoc(RefCell::new(doc)))
+        Ok(RbDoc(doc))
     }
 
     /// Get the client ID
     fn client_id(&self) -> u64 {
-        self.0.borrow().client_id()
+        self.0.client_id()
     }
 
     /// Get the document GUID
     fn guid(&self) -> String {
-        self.0.borrow().guid().to_string()
+        self.0.guid().to_string()
     }
 
     /// Get the current state vector encoded as bytes
     fn encode_state_vector(&self) -> RString {
-        let doc = self.0.borrow();
-        let txn = doc.transact();
-        binary_string(&txn.state_vector().encode_v1())
+        let doc = &self.0;
+        let sv = nogvl(move || {
+            let txn = doc.transact();
+            txn.state_vector().encode_v1()
+        });
+        binary_string(&sv)
     }
 
     /// Encode state as update (optionally diffed against a state vector)
     fn encode_state_as_update(&self, args: &[Value]) -> Result<RString, Error> {
-        let doc = self.0.borrow();
-        let txn = doc.transact();
-
-        if args.is_empty() {
-            Ok(binary_string(
-                &txn.encode_state_as_update_v1(&yrs::StateVector::default()),
-            ))
+        let sv_bytes: Option<Vec<u8>> = if args.is_empty() {
+            None
         } else {
             let sv_string: RString = TryConvert::try_convert(args[0])?;
-            let sv_bytes = unsafe { sv_string.as_slice() };
-            let sv = yrs::StateVector::decode_v1(sv_bytes)
-                .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-            Ok(binary_string(&txn.encode_state_as_update_v1(&sv)))
-        }
+            Some(copy_bytes(sv_string))
+        };
+        let doc = &self.0;
+        let update = nogvl(move || -> Result<Vec<u8>, String> {
+            let sv = match &sv_bytes {
+                None => yrs::StateVector::default(),
+                Some(bytes) => yrs::StateVector::decode_v1(bytes).map_err(|e| e.to_string())?,
+            };
+            let txn = doc.transact();
+            Ok(txn.encode_state_as_update_v1(&sv))
+        })
+        .map_err(runtime_error)?;
+        Ok(binary_string(&update))
     }
 
     /// Apply a V1 update to the document
     fn apply_update(&self, update: RString) -> Result<(), Error> {
-        let doc = self.0.borrow();
-        let update_bytes = unsafe { update.as_slice() };
-        let update = yrs::Update::decode_v1(update_bytes)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-        let mut txn = doc.transact_mut();
-        txn.apply_update(update)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-        Ok(())
+        let update_bytes = copy_bytes(update);
+        let doc = &self.0;
+        nogvl(move || -> Result<(), String> {
+            let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
+            let mut txn = doc.transact_mut();
+            txn.apply_update(update).map_err(|e| e.to_string())
+        })
+        .map_err(runtime_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
     fn sync_step1(&self) -> RString {
-        let doc = self.0.borrow();
-        let txn = doc.transact();
-        let sv = txn.state_vector();
-        let msg = Message::Sync(SyncMessage::SyncStep1(sv));
-        binary_string(&msg.encode_v1())
+        let doc = &self.0;
+        let encoded = nogvl(move || {
+            let txn = doc.transact();
+            let sv = txn.state_vector();
+            Message::Sync(SyncMessage::SyncStep1(sv)).encode_v1()
+        });
+        binary_string(&encoded)
     }
 
     /// Sync step 2: Create a sync message with updates for the given state vector
     fn sync_step2(&self, sv_bytes: RString) -> Result<RString, Error> {
-        let doc = self.0.borrow();
-        let sv_data = unsafe { sv_bytes.as_slice() };
-        let sv = yrs::StateVector::decode_v1(sv_data)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-        let txn = doc.transact();
-        let update = txn.encode_state_as_update_v1(&sv);
-        let msg = Message::Sync(SyncMessage::SyncStep2(update));
-        Ok(binary_string(&msg.encode_v1()))
+        let sv_data = copy_bytes(sv_bytes);
+        let doc = &self.0;
+        let encoded = nogvl(move || -> Result<Vec<u8>, String> {
+            let sv = yrs::StateVector::decode_v1(&sv_data).map_err(|e| e.to_string())?;
+            let txn = doc.transact();
+            let update = txn.encode_state_as_update_v1(&sv);
+            Ok(Message::Sync(SyncMessage::SyncStep2(update)).encode_v1())
+        })
+        .map_err(runtime_error)?;
+        Ok(binary_string(&encoded))
     }
 
     /// Handle a sync message and return response (if any)
     /// Returns [message_type, sync_type, response_bytes] or nil
     fn handle_sync_message(&self, data: RString) -> Result<Option<(u8, u8, RString)>, Error> {
-        let doc = self.0.borrow();
-        let data_bytes = unsafe { data.as_slice() };
+        let data_bytes = copy_bytes(data);
+        let doc = &self.0;
 
-        let msg = Message::decode_v1(data_bytes)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
+        let (msg_type, sync_type, response) =
+            nogvl(move || -> Result<(u8, u8, Vec<u8>), String> {
+                let msg = Message::decode_v1(&data_bytes).map_err(|e| e.to_string())?;
 
-        match msg {
-            Message::Sync(sync_msg) => match sync_msg {
-                SyncMessage::SyncStep1(sv) => {
-                    // Respond with SyncStep2
-                    let txn = doc.transact();
-                    let update = txn.encode_state_as_update_v1(&sv);
-                    let response = Message::Sync(SyncMessage::SyncStep2(update));
-                    Ok(Some((0, 0, binary_string(&response.encode_v1()))))
+                match msg {
+                    Message::Sync(sync_msg) => match sync_msg {
+                        SyncMessage::SyncStep1(sv) => {
+                            // Respond with SyncStep2
+                            let txn = doc.transact();
+                            let update = txn.encode_state_as_update_v1(&sv);
+                            let response = Message::Sync(SyncMessage::SyncStep2(update));
+                            Ok((0, 0, response.encode_v1()))
+                        }
+                        SyncMessage::SyncStep2(update_bytes) => {
+                            // Apply the update
+                            let update = yrs::Update::decode_v1(&update_bytes)
+                                .map_err(|e| e.to_string())?;
+                            let mut txn = doc.transact_mut();
+                            txn.apply_update(update).map_err(|e| e.to_string())?;
+                            Ok((0, 1, Vec::new()))
+                        }
+                        SyncMessage::Update(update_bytes) => {
+                            // Apply the update
+                            let update = yrs::Update::decode_v1(&update_bytes)
+                                .map_err(|e| e.to_string())?;
+                            let mut txn = doc.transact_mut();
+                            txn.apply_update(update).map_err(|e| e.to_string())?;
+                            Ok((0, 2, Vec::new()))
+                        }
+                    },
+                    Message::Awareness(_) => Ok((1, 0, Vec::new())),
+                    Message::AwarenessQuery => Ok((3, 0, Vec::new())),
+                    Message::Auth(_) => Ok((2, 0, Vec::new())),
+                    Message::Custom(tag, _) => Ok((tag, 0, Vec::new())),
                 }
-                SyncMessage::SyncStep2(update_bytes) => {
-                    // Apply the update
-                    let update = yrs::Update::decode_v1(&update_bytes)
-                        .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-                    let mut txn = doc.transact_mut();
-                    txn.apply_update(update)
-                        .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-                    Ok(Some((0, 1, binary_string(&[]))))
-                }
-                SyncMessage::Update(update_bytes) => {
-                    // Apply the update
-                    let update = yrs::Update::decode_v1(&update_bytes)
-                        .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-                    let mut txn = doc.transact_mut();
-                    txn.apply_update(update)
-                        .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-                    Ok(Some((0, 2, binary_string(&[]))))
-                }
-            },
-            Message::Awareness(_) => Ok(Some((1, 0, binary_string(&[])))),
-            Message::AwarenessQuery => Ok(Some((3, 0, binary_string(&[])))),
-            Message::Auth(_) => Ok(Some((2, 0, binary_string(&[])))),
-            Message::Custom(tag, _) => Ok(Some((tag, 0, binary_string(&[])))),
-        }
+            })
+            .map_err(runtime_error)?;
+
+        Ok(Some((msg_type, sync_type, binary_string(&response))))
     }
 
     /// Encode raw update bytes as a sync Update message
@@ -168,11 +264,13 @@ impl RbDoc {
         } else {
             TryConvert::try_convert(args[0])?
         };
-        let doc = self.0.borrow();
-        let txn = doc.transact();
-        let value = prosemirror::extract_from_txn(&txn, fragment.as_deref())
-            .map_err(|e| Error::new(exception::runtime_error(), e))?;
-        Ok(value.to_string())
+        let doc = &self.0;
+        nogvl(move || -> Result<String, String> {
+            let txn = doc.transact();
+            let value = prosemirror::extract_from_txn(&txn, fragment.as_deref())?;
+            Ok(value.to_string())
+        })
+        .map_err(runtime_error)
     }
 }
 
@@ -191,10 +289,12 @@ fn extract_prosemirror_json(args: &[Value]) -> Result<String, Error> {
     } else {
         None
     };
-    let bytes = unsafe { update.as_slice() };
-    let value = prosemirror::extract_from_update(bytes, fragment.as_deref())
-        .map_err(|e| Error::new(exception::runtime_error(), e))?;
-    Ok(value.to_string())
+    let bytes = copy_bytes(update);
+    nogvl(move || -> Result<String, String> {
+        let value = prosemirror::extract_from_update(&bytes, fragment.as_deref())?;
+        Ok(value.to_string())
+    })
+    .map_err(runtime_error)
 }
 
 // ============================================================================
@@ -210,51 +310,59 @@ impl RbAwareness {
             let client_id: u64 = TryConvert::try_convert(args[0])?;
             Awareness::new(Doc::with_client_id(client_id))
         };
-        Ok(RbAwareness(RefCell::new(awareness)))
+        Ok(RbAwareness(awareness))
     }
 
     /// Get the client ID of the underlying document
     fn client_id(&self) -> u64 {
-        self.0.borrow().doc().client_id()
+        self.0.doc().client_id()
     }
 
     /// Get the document GUID
     fn guid(&self) -> String {
-        self.0.borrow().doc().guid().to_string()
+        self.0.doc().guid().to_string()
     }
 
     /// Create initial sync messages to send when connection opens.
     /// Returns binary data containing SyncStep1 + Awareness update.
     fn start(&self) -> Result<RString, Error> {
-        let protocol = DefaultProtocol;
-        let awareness = self.0.borrow();
-        let mut encoder = EncoderV1::new();
-        protocol
-            .start(&awareness, &mut encoder)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-        Ok(binary_string(&encoder.to_vec()))
+        let awareness = &self.0;
+        let encoded = nogvl(move || -> Result<Vec<u8>, String> {
+            let protocol = DefaultProtocol;
+            let mut encoder = EncoderV1::new();
+            protocol
+                .start(awareness, &mut encoder)
+                .map_err(|e| e.to_string())?;
+            Ok(encoder.to_vec())
+        })
+        .map_err(runtime_error)?;
+        Ok(binary_string(&encoded))
     }
 
     /// Handle incoming message and return response messages (if any).
     /// Returns binary data containing response messages, or empty if no response needed.
     fn handle(&self, data: RString) -> Result<RString, Error> {
-        let protocol = DefaultProtocol;
-        let awareness = self.0.borrow();
-        let data_bytes = unsafe { data.as_slice() };
+        let data_bytes = copy_bytes(data);
+        let awareness = &self.0;
 
-        let responses = protocol
-            .handle(&awareness, data_bytes)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
+        let encoded = nogvl(move || -> Result<Vec<u8>, String> {
+            let protocol = DefaultProtocol;
+            let responses = protocol
+                .handle(awareness, &data_bytes)
+                .map_err(|e| e.to_string())?;
 
-        if responses.is_empty() {
-            return Ok(binary_string(&[]));
-        }
+            if responses.is_empty() {
+                return Ok(Vec::new());
+            }
 
-        let mut encoder = EncoderV1::new();
-        for msg in responses {
-            msg.encode(&mut encoder);
-        }
-        Ok(binary_string(&encoder.to_vec()))
+            let mut encoder = EncoderV1::new();
+            for msg in responses {
+                msg.encode(&mut encoder);
+            }
+            Ok(encoder.to_vec())
+        })
+        .map_err(runtime_error)?;
+        Ok(binary_string(&encoded))
     }
 
     /// Encode an update message for broadcasting changes to peers.
@@ -266,43 +374,49 @@ impl RbAwareness {
 
     /// Get the current state vector encoded as bytes
     fn encode_state_vector(&self) -> RString {
-        let awareness = self.0.borrow();
-        let txn = awareness.doc().transact();
-        binary_string(&txn.state_vector().encode_v1())
+        let awareness = &self.0;
+        let sv = nogvl(move || {
+            let txn = awareness.doc().transact();
+            txn.state_vector().encode_v1()
+        });
+        binary_string(&sv)
     }
 
     /// Encode state as update (optionally diffed against a state vector)
     fn encode_state_as_update(&self, args: &[Value]) -> Result<RString, Error> {
-        let awareness = self.0.borrow();
-        let txn = awareness.doc().transact();
-
-        if args.is_empty() {
-            Ok(binary_string(
-                &txn.encode_state_as_update_v1(&yrs::StateVector::default()),
-            ))
+        let sv_bytes: Option<Vec<u8>> = if args.is_empty() {
+            None
         } else {
             let sv_string: RString = TryConvert::try_convert(args[0])?;
-            let sv_bytes = unsafe { sv_string.as_slice() };
-            let sv = yrs::StateVector::decode_v1(sv_bytes)
-                .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-            Ok(binary_string(&txn.encode_state_as_update_v1(&sv)))
-        }
+            Some(copy_bytes(sv_string))
+        };
+        let awareness = &self.0;
+        let update = nogvl(move || -> Result<Vec<u8>, String> {
+            let sv = match &sv_bytes {
+                None => yrs::StateVector::default(),
+                Some(bytes) => yrs::StateVector::decode_v1(bytes).map_err(|e| e.to_string())?,
+            };
+            let txn = awareness.doc().transact();
+            Ok(txn.encode_state_as_update_v1(&sv))
+        })
+        .map_err(runtime_error)?;
+        Ok(binary_string(&update))
     }
 
     /// Set local awareness state (JSON string)
     fn set_local_state(&self, json: String) -> Result<(), Error> {
-        let awareness = self.0.borrow();
-        let value: serde_json::Value = serde_json::from_str(&json)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
+        let awareness = &self.0;
+        let value: serde_json::Value =
+            serde_json::from_str(&json).map_err(|e| runtime_error(e.to_string()))?;
         awareness
             .set_local_state(value)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| runtime_error(e.to_string()))?;
         Ok(())
     }
 
     /// Get local awareness state as JSON string (or nil if not set)
     fn local_state(&self) -> Option<String> {
-        let awareness = self.0.borrow();
+        let awareness = &self.0;
         awareness
             .local_state::<serde_json::Value>()
             .map(|v| v.to_string())
@@ -310,30 +424,30 @@ impl RbAwareness {
 
     /// Clear local awareness state
     fn clear_local_state(&self) {
-        let awareness = self.0.borrow();
+        let awareness = &self.0;
         awareness.clean_local_state();
     }
 
     /// Get awareness update for broadcasting to peers
     fn encode_awareness_update(&self) -> Result<RString, Error> {
-        let awareness = self.0.borrow();
+        let awareness = &self.0;
         let update = awareness
             .update()
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| runtime_error(e.to_string()))?;
         let msg = Message::Awareness(update);
         Ok(binary_string(&msg.encode_v1()))
     }
 
     /// Apply a raw update to the underlying document
     fn apply_update(&self, update: RString) -> Result<(), Error> {
-        let awareness = self.0.borrow();
-        let update_bytes = unsafe { update.as_slice() };
-        let update = yrs::Update::decode_v1(update_bytes)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-        let mut txn = awareness.doc().transact_mut();
-        txn.apply_update(update)
-            .map_err(|e| Error::new(exception::runtime_error(), e.to_string()))?;
-        Ok(())
+        let update_bytes = copy_bytes(update);
+        let awareness = &self.0;
+        nogvl(move || -> Result<(), String> {
+            let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
+            let mut txn = awareness.doc().transact_mut();
+            txn.apply_update(update).map_err(|e| e.to_string())
+        })
+        .map_err(runtime_error)
     }
 }
 

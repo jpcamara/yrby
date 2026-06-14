@@ -9,7 +9,7 @@ This gem provides minimal functionality needed to synchronize Y.js documents bet
 - **Built on yrs**: Uses the official Rust y-crdt implementation
 - **Complete sync protocol**: Full y-websocket protocol support via `yrs::sync`
 - **Awareness support**: User presence/cursor state management
-- **Thread-safe**: Rust's memory safety guarantees
+- **Actually thread-safe**: share `Doc`/`Awareness` across Ruby threads — see [Thread Safety](#thread-safety)
 - **ProseMirror extraction**: Read ProseMirror/Tiptap editor content from Y.Doc updates without JavaScript
 
 ## Installation
@@ -165,6 +165,52 @@ content = YrbLite::ProseMirrorExtractor.extract(update_bytes, fragment: "prosemi
 
 See [docs/PROSEMIRROR.md](docs/PROSEMIRROR.md) and [docs/ACCURACY.md](docs/ACCURACY.md)
 for the research behind the ProseMirror <-> Y.Doc mapping.
+
+## Thread Safety
+
+Unlike the official `y-rb` gem, yrb-lite is safe to share across Ruby threads —
+a `Doc` or `Awareness` can be used concurrently from Puma workers, ActionCable
+connection threads, or background jobs without external locking.
+
+Why this is true by construction, not by accident:
+
+- **`yrs::Doc` is `Send + Sync`.** Every operation acquires the document's
+  internal RwLock with *blocking* semantics (`read_blocking`/`write_blocking`),
+  so concurrent access serializes instead of erroring or corrupting state.
+- **`yrs::sync::Awareness` is designed for multi-threaded servers** — client
+  states live in a concurrent map (`DashMap`) and the whole API is `&self`.
+- **No interior-mutability hacks in the extension.** There is no `RefCell`
+  (whose re-entrant borrow would panic and kill the Ruby process). Every native
+  method opens and closes its transaction within a single call — no lock or
+  borrow is ever held across calls, so there is nothing to deadlock on.
+- **Compile-time enforcement**: `lib.rs` contains a `Send + Sync` static
+  assertion for both wrapped types. If a future yrs upgrade regressed this,
+  the gem would fail to build rather than silently become thread-unsafe.
+
+`test/thread_safety_test.rb` exercises shared docs, the full sync handshake,
+fan-in sync, awareness state, and ProseMirror extraction from 8 threads
+concurrently and asserts CRDT convergence is unaffected by interleaving.
+
+### True Parallelism (GVL Release)
+
+Every method that does real CRDT work (applying updates, encoding state,
+handling sync messages, ProseMirror extraction) releases Ruby's Global VM
+Lock (`rb_thread_call_without_gvl`) while the native code runs. That means:
+
+- **Heavy CRDT operations run in parallel across Ruby threads** — on MRI,
+  not just JRuby/TruffleRuby. `bench/parallelism_bench.rb` shows >2x
+  wall-clock speedup running concurrent extractions of a ~900 KB document
+  update (GVL-held native code can never beat serial time).
+- **A slow operation can't stall the VM.** A thread applying a large update
+  holds the doc's internal write lock *without* holding the GVL, so other
+  Ruby threads keep running instead of queueing behind it.
+
+The pattern inside each method: copy the Ruby byte string, release the GVL,
+do all yrs work (acquiring and releasing the doc lock entirely inside the
+closure), reacquire the GVL, then build Ruby result objects. No Ruby API is
+touched without the GVL, and no doc lock is ever held across a GVL
+boundary — so the lock ordering is deadlock-free by construction. Panics in
+native code are caught and re-raised as Ruby exceptions.
 
 ## Message Type Constants
 
