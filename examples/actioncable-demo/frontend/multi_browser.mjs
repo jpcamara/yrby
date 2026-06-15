@@ -7,6 +7,7 @@
 //   bin/rails s -p 3777            (optionally a 2nd process for multi-process)
 //   cd frontend && bun multi_browser.mjs
 import { chromium } from "playwright-core"
+import { serverText as serverTextRead } from "./server_read.mjs"
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 const PORTS = (process.env.PORTS || "3777").split(",").map(Number)
@@ -57,12 +58,7 @@ const typeNewLine = async (page, token) => {
   await page.keyboard.type(token, { delay: 12 })
 }
 
-const serverText = async (port, room) => {
-  const res = await fetch(`${BASE(port)}/docs/${room}/content`)
-  if (res.status !== 200) return ""
-  const j = await res.json()
-  return (j.content || []).flatMap((n) => (n.content || []).map((t) => t.text)).join("")
-}
+const serverText = (port, room) => serverTextRead(BASE(port), room)
 
 // --- run --------------------------------------------------------------------
 
@@ -96,7 +92,7 @@ try {
   check("every browser has identical document", (await Promise.all(pages.map(docXml))).every((x) => x === conv1))
   check("every typed line is present", tokens.every((t) => conv1.includes(t)))
   const srv1 = await serverText(users[0].port, room1)
-  check("server-side extraction matches the browsers", tokens.every((t) => srv1.includes(t)))
+  check("server-side read matches the browsers", tokens.every((t) => srv1.includes(t)))
 
   // ===== Scenario 2: presence / live cursors ==============================
   console.log("\n--- Scenario 2: presence & cursors across browsers ---")
@@ -157,7 +153,7 @@ try {
   const expectedChars = BURST * 4 // 4 bursts; the 4 Enters add empty paragraphs, not chars
   check(`characters conserved (${visibleChars(conv5)} >= ${expectedChars})`, visibleChars(conv5) >= expectedChars)
   const srv5 = await serverText(stormUsers[0].port, room5)
-  check("server extraction converged with the browsers",
+  check("server state converged with the browsers",
     srv5.replace(/\s/g, "").length === visibleChars(conv5))
 
   for (const u of [...users, ...stormUsers]) await u.ctx.close()

@@ -27,8 +27,6 @@ provider as-is. Tiptap, ProseMirror, and BlockNote all sync through it.
 - The y-websocket protocol (document sync plus awareness/presence) as a
   one-include ActionCable concern.
 - A store-backed mode for AnyCable and multi-process deployments.
-- Server-side reads: pull Tiptap/ProseMirror JSON straight out of a Y.Doc
-  without running a browser.
 - An optional authoritative mode that records each change durably before it
   goes out to anyone.
 
@@ -326,24 +324,6 @@ awareness.apply_update(update_bytes)
 message = awareness.encode_update(update_bytes)
 ```
 
-### ProseMirror Content Extraction
-
-Extract ProseMirror/Tiptap editor content from Y.Doc data without JavaScript.
-The conversion runs natively in the Rust extension, reading the same CRDT
-structures y-prosemirror reads in the browser:
-
-```ruby
-# From a raw binary update
-content = YrbLite::ProseMirrorExtractor.extract(update_bytes)
-# => {"type" => "doc", "content" => [...]}
-
-# From a Doc
-content = YrbLite::ProseMirrorExtractor.extract_from_doc(doc)
-
-# Specify the XML fragment name (defaults to trying "prosemirror", "default", "doc")
-content = YrbLite::ProseMirrorExtractor.extract(update_bytes, fragment: "prosemirror")
-```
-
 ## Thread Safety
 
 Unlike the official `y-rb` gem, yrb-lite is safe to share across Ruby threads. A
@@ -366,19 +346,19 @@ That comes from how the underlying types work, not from locking on top:
   turning thread-unsafe.
 
 `test/thread_safety_test.rb` runs shared docs, the full sync handshake, fan-in
-sync, awareness state, and ProseMirror extraction across 8 threads at once, and
-checks the interleaving doesn't change convergence.
+sync, and awareness state across 8 threads at once, and checks the interleaving
+doesn't change convergence.
 
 ### Parallelism (GVL release)
 
 Every method that does real CRDT work (applying updates, encoding state,
-handling sync messages, ProseMirror extraction) releases Ruby's Global VM Lock
+handling sync messages) releases Ruby's Global VM Lock
 (`rb_thread_call_without_gvl`) while the native code runs. That buys two things.
 
 CRDT work runs in parallel across Ruby threads on MRI, not just
 JRuby/TruffleRuby. `bench/parallelism_bench.rb` measures over 2x wall-clock
-speedup on concurrent extractions of a ~900 KB update; native code that held the
-GVL couldn't beat serial time.
+speedup applying a ~900 KB update concurrently; native code that held the GVL
+couldn't beat serial time.
 
 A slow operation also can't stall the VM. A thread applying a large update holds
 the doc's write lock without holding the GVL, so other Ruby threads keep running

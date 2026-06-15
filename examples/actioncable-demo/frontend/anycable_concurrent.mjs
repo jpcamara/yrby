@@ -6,6 +6,7 @@ import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverText } from "./server_read.mjs"
 
 const WS_PORT = process.env.WS_PORT || 8080
 const HTTP_PORT = process.env.HTTP_PORT || 3777
@@ -100,9 +101,7 @@ const t0 = clients[0].text()
 check(`every token present across clients (${tokens.length})`, tokens.every((t) => t0.includes(t)))
 
 // The store (Puma /content, a separate process from the RPC server) agrees.
-const res = await fetch(`http://localhost:${HTTP_PORT}/docs/${ROOM}/content`)
-const json = await res.json()
-const srv = JSON.stringify(json)
+const srv = await serverText(`http://localhost:${HTTP_PORT}`, ROOM)
 check("Puma /content reflects every edit (cross-process via store)", tokens.every((t) => srv.includes(t)))
 
 clients.forEach((c) => c.ws.close())

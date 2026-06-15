@@ -9,9 +9,9 @@ class DocumentsController < ApplicationController
     @document_id = params[:id]
   end
 
-  # Server-side read of the live document. The ProseMirror JSON is extracted
-  # from the CRDT in Ruby, with no JavaScript involved. Open it in another tab
-  # while editing to watch it change.
+  # Server-side read of the live document: the raw CRDT state, base64-encoded.
+  # The server holds the whole Y.Doc, so a client can fetch this and apply it to
+  # a fresh Y.Doc to see exactly what the server sees.
   def content
     # In AUDIT/store-backed mode the document lives in the shared store rather
     # than this process's memory (under AnyCable the editing happens in another
@@ -24,9 +24,7 @@ class DocumentsController < ApplicationController
       end
     return render json: { error: "No such document" }, status: :not_found unless update
 
-    render json: YrbLite::ProseMirrorExtractor.extract(update)
-  rescue RuntimeError => e
-    render json: { error: e.message }, status: :unprocessable_entity
+    render json: { state: Base64.strict_encode64(update) }
   end
 
   # The audit log for a document (AUDIT mode): every recorded change, in order,

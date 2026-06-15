@@ -21,6 +21,7 @@ import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverText as readServerText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777
 const BASE = `http://localhost:${PORT}`
@@ -133,12 +134,7 @@ const control = (room, params) => {
   return fetch(`${BASE}/docs/${room}/audit/control?${qs}`, { method: "POST" })
 }
 const auditLog = async (room) => (await fetch(`${BASE}/docs/${room}/audit`)).json()
-const serverText = async (room) => {
-  const res = await fetch(`${BASE}/docs/${room}/content`)
-  if (res.status !== 200) return ""
-  const json = await res.json()
-  return (json.content || []).flatMap((n) => (n.content || []).map((t) => t.text)).join("\n")
-}
+const serverText = (room) => readServerText(BASE, room)
 
 // === Scenario 1: slow store, invisible until stored ========================
 

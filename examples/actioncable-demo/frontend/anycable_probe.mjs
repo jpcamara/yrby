@@ -13,6 +13,7 @@ import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverDoc } from "./server_read.mjs"
 
 const WS_PORT = process.env.WS_PORT || 8080
 const HTTP_PORT = process.env.HTTP_PORT || 3777
@@ -102,10 +103,9 @@ await sleep(1200)
 console.log(`\nLIVENESS  B received A's edit:        ${b.text().includes("hello-from-A")}`)
 console.log(`ECHO      A got its own edit back:     ${a.echoed > 0} (count ${a.echoed})`)
 
-const res = await fetch(`http://localhost:${HTTP_PORT}/docs/${ROOM}/content`)
-let serverView
-try { serverView = JSON.stringify(await res.json()) } catch { serverView = `status ${res.status}` }
-console.log(`SERVER    Puma /content (different process than RPC): ${res.status} ${serverView.slice(0, 120)}`)
+const { status, doc } = await serverDoc(`http://localhost:${HTTP_PORT}`, ROOM)
+const serverView = doc ? doc.getXmlFragment("default").toString() : `status ${status}`
+console.log(`SERVER    Puma /content (different process than RPC): ${status} ${serverView.slice(0, 120)}`)
 
 a.ws.close(); b.ws.close()
 process.exit(0)

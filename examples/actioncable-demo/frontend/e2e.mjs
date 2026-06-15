@@ -5,12 +5,13 @@
 //   2. Run:                    cd frontend && bun e2e.mjs
 //
 // Checks document convergence in both directions, awareness propagation, and
-// the server-side ProseMirror extraction endpoint.
+// the server-side content endpoint (the server's CRDT state).
 import * as Y from "yjs"
 import * as awarenessProtocol from "y-protocols/awareness"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverDoc, serverText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777
 const ROOM = `e2e-${process.pid}`
@@ -162,17 +163,16 @@ await waitFor("docs converge byte-for-byte", () => {
   return a.length === b.length && a.every((byte, i) => byte === b[i])
 })
 
-// Server-side native extraction of the live document.
-const response = await fetch(`http://localhost:${PORT}/docs/${ROOM}/content`)
-const json = await response.json()
-if (response.status !== 200 || json.type !== "doc") {
-  throw new Error(`extraction endpoint failed: ${response.status} ${JSON.stringify(json)}`)
+// Server-side view of the live document (the server's CRDT state).
+const { status, doc } = await serverDoc(`http://localhost:${PORT}`, ROOM)
+if (status !== 200 || !doc) {
+  throw new Error(`content endpoint failed: ${status}`)
 }
-const texts = json.content.flatMap((node) => (node.content || []).map((t) => t.text))
-if (!texts.includes("Hello from Alice") || !texts.includes("Hi from Bob")) {
-  throw new Error(`extraction missing content: ${JSON.stringify(json)}`)
+const serverContent = await serverText(`http://localhost:${PORT}`, ROOM)
+if (!serverContent.includes("Hello from Alice") || !serverContent.includes("Hi from Bob")) {
+  throw new Error(`server content missing edits: ${serverContent}`)
 }
-console.log("ok: server-side ProseMirror extraction matches both edits")
+console.log("ok: server-side CRDT state matches both edits")
 
 // Presence reaping: when a client disconnects, the server should clear its
 // awareness state and tell the others right away, rather than leaving a ghost

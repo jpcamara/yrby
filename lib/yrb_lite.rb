@@ -2,7 +2,6 @@
 
 require_relative "yrb_lite/version"
 require_relative "yrb_lite/yrb_lite"
-require_relative "yrb_lite/prosemirror_extractor"
 
 module YrbLite
   # Error class is defined in Rust extension

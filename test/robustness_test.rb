@@ -33,7 +33,6 @@ class RobustnessTest < Minitest::Test
       safe { doc.sync_step2(bytes) }
       safe { doc.handle_sync_message(bytes) }
       safe { doc.encode_update_message(bytes) }
-      safe { doc.prosemirror_json }
     end
     # Reaching here means nothing crashed the process; the runtime still works.
     assert_kind_of String, YrbLite::Doc.new.encode_state_vector
@@ -52,17 +51,6 @@ class RobustnessTest < Minitest::Test
     end
 
     assert_kind_of Integer, YrbLite::Awareness.new.client_id
-  end
-
-  def test_extractor_survives_garbage
-    garbage_corpus.each do |bytes|
-      safe { YrbLite::ProseMirrorExtractor.extract(bytes) }
-    end
-
-    # The extractor still produces JSON for a valid document afterward.
-    extracted = YrbLite::ProseMirrorExtractor.extract(YjsFixtures::ProseMirrorDoc::UPDATE)
-
-    assert_equal "doc", extracted["type"]
   end
 
   def test_garbage_does_not_corrupt_a_good_document

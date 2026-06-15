@@ -194,7 +194,7 @@ module YrbLite
 
     # The shared Awareness (document + presence) for this channel's key.
     # Also useful for server-side reads, e.g.:
-    #   YrbLite::ProseMirrorExtractor.extract(sync_awareness.encode_state_as_update)
+    #   sync_awareness.encode_state_as_update
     def sync_awareness
       Sync.awareness_for(@sync_key, self.class.on_load)
     end

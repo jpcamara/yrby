@@ -5,7 +5,7 @@
       Document <code><%= @document_id %></code> —
       open this page in another window to edit together.
       <a href="<%= document_content_path(@document_id) %>" target="_blank">
-        View server-side ProseMirror JSON</a> (extracted natively from the CRDT, no JS).
+        View server-side state</a> (the raw CRDT, base64, read in Ruby with no JS).
     </p>
     <p id="status" class="status">connecting…</p>
   </header>

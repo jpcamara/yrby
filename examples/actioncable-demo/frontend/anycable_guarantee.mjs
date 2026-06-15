@@ -6,6 +6,7 @@ import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverText } from "./server_read.mjs"
 
 const WS_PORT = process.env.WS_PORT || 8080
 const HTTP_PORT = process.env.HTTP_PORT || 3777
@@ -66,7 +67,7 @@ class Client {
 const control = (room, params) =>
   fetch(`${BASE}/docs/${room}/audit/control?${new URLSearchParams(params)}`, { method: "POST" })
 const auditCount = async (room) => (await (await fetch(`${BASE}/docs/${room}/audit`)).json()).count
-const serverHas = async (room, tok) => JSON.stringify(await (await fetch(`${BASE}/docs/${room}/content`)).json()).includes(tok)
+const serverHas = async (room, tok) => (await serverText(BASE, room)).includes(tok)
 
 // ===== Scenario 1: slow store, invisible until stored =======================
 async function slowStore() {

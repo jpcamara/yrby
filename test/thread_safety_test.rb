@@ -24,14 +24,13 @@ class ThreadSafetyTest < Minitest::Test
     doc = YrbLite::Doc.new
     updates = [
       YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
-      YjsFixtures::TwoDocsMerged::DOC2_UPDATE,
-      YjsFixtures::ProseMirrorDoc::UPDATE
+      YjsFixtures::TwoDocsMerged::DOC2_UPDATE
     ]
 
     errors = run_threads do |i|
       ITERATIONS.times do
         if i.even?
-          doc.apply_update(updates[i % updates.length])
+          doc.apply_update(updates[(i / 2) % updates.length])
         else
           doc.encode_state_vector
           doc.encode_state_as_update
@@ -120,22 +119,6 @@ class ThreadSafetyTest < Minitest::Test
 
     assert_includes 0...THREADS, final["thread"]
     assert_equal ITERATIONS - 1, final["tick"]
-  end
-
-  def test_concurrent_prosemirror_extraction
-    doc = YrbLite::Doc.new
-    doc.apply_update(YjsFixtures::ProseMirrorDoc::UPDATE)
-    update = doc.encode_state_as_update
-
-    errors = run_threads do
-      ITERATIONS.times do
-        from_doc = YrbLite::ProseMirrorExtractor.extract_from_doc(doc)
-        from_update = YrbLite::ProseMirrorExtractor.extract(update)
-        raise "extraction mismatch" unless from_doc == from_update
-      end
-    end
-
-    assert_empty errors
   end
 
   private

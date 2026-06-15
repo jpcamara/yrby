@@ -73,9 +73,9 @@ threads = THREADS.times.map do |i|
         shared.set_local_state(JSON.generate({ "t" => i, "n" => local[:aware] }))
         shared.encode_awareness_update
         local[:aware] += 1
-      when 5 # heavyweight read: ProseMirror extraction from live doc state
+      when 5 # heavyweight read: full state encode from the live doc
         if LARGE_UPDATE
-          YrbLite.extract_prosemirror_json(shared.encode_state_as_update, nil)
+          shared.encode_state_as_update
           local[:extract] += 1
         else
           shared.local_state

@@ -11,7 +11,7 @@
 //     shared paragraph, each tagged with a unique token, plus awareness churn
 //   - LATE clients join mid-storm and must catch up
 //   - KILLERS finish their edits, then drop the socket abruptly mid-traffic
-//   - POLLERS hit GET /docs/:id/content (server-side extraction) during the
+//   - POLLERS hit GET /docs/:id/content (server-side read) during the
 //     storm: concurrent native readers against concurrent writers
 //   - afterward, a fresh verifier client syncs from the server alone
 //
@@ -25,6 +25,7 @@ import * as awarenessProtocol from "y-protocols/awareness"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777
 const CLIENTS = parseInt(process.env.CLIENTS || "30", 10)
@@ -221,7 +222,7 @@ console.log(`ok: ${CLIENTS} clients connected and subscribed concurrently`)
 // Churn clients (disjoint from killers) reconnect mid-storm with offline edits.
 initialClients.slice(KILLERS, KILLERS + CHURN).forEach((c) => (c.churn = true))
 
-// HTTP pollers hammer server-side extraction during the storm.
+// HTTP pollers hammer server-side read during the storm.
 let polling = true
 let pollCount = 0
 let pollErrors = 0
@@ -342,36 +343,31 @@ for (const room of rooms) {
     }
   }
 
-  // Server-side extraction sees the same converged content.
-  const res = await fetch(`http://localhost:${PORT}/docs/${room}/content`)
-  const json = await res.json()
-  const extractedChars = JSON.stringify(json)
-  const extractedLength = (json.content || []).reduce(
-    (sum, node) => sum + (node.content || []).reduce((s, t) => s + (t.text || "").length, 0),
-    0
-  )
-  if (res.status !== 200 || extractedLength !== expectedChars) {
+  // The server's CRDT state sees the same converged content.
+  const serverDocText = await serverText(`http://localhost:${PORT}`, room)
+  const extractedLength = serverDocText.length
+  if (extractedLength !== expectedChars) {
     throw new Error(
-      `${room}: extraction has ${extractedLength}/${expectedChars} chars (status ${res.status}): ${extractedChars.slice(0, 200)}`
+      `${room}: server state has ${extractedLength}/${expectedChars} chars: ${serverDocText.slice(0, 200)}`
     )
   }
 
   verifier.close()
   console.log(
     `ok: ${room} with ${tokens.length} edits / ${expectedChars} chars conserved, ` +
-      `${survivors(room).length + 1} docs byte-identical, server extraction matches`
+      `${survivors(room).length + 1} docs byte-identical, server state matches`
   )
 }
 
 polling = false
 await Promise.all(pollers)
-if (pollErrors > 0) throw new Error(`${pollErrors} extraction requests returned 5xx`)
+if (pollErrors > 0) throw new Error(`${pollErrors} /content requests returned 5xx`)
 
 for (const room of rooms) clientsByRoom.get(room).forEach((c) => c.close())
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
 console.log(
   `\nPASS in ${elapsed}s: ${messagesSent} cable messages sent, ${messagesReceived} received, ` +
-    `${pollCount} concurrent extraction reads (0 server errors)`
+    `${pollCount} concurrent /content reads (0 server errors)`
 )
 process.exit(0)

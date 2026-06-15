@@ -9,8 +9,9 @@ Browser (Tiptap + Yjs) ⇄ ActionCable ⇄ DocumentChannel (YrbLite::Sync)
 ```
 
 The server can read the document too. `GET /docs/:id/content` returns the live
-ProseMirror JSON, pulled straight from the CRDT
-(`YrbLite::ProseMirrorExtractor`) with no headless browser and no JS.
+CRDT state (base64), pulled straight from the server's own Y.Doc with no
+headless browser and no JS. Apply it to a fresh Y.Doc to see what the server
+sees.
 
 ## Run it
 
@@ -70,8 +71,8 @@ cd frontend && bun e2e.mjs
 
 Two simulated clients connect over raw WebSockets and check late-joiner
 catch-up through the server, live updates in both directions, awareness
-propagation, byte-for-byte CRDT convergence, the server-side extraction
-endpoint, and presence reaping on disconnect (only the departed client's cursor
+propagation, byte-for-byte CRDT convergence, the server-side state read
+(`/content`), and presence reaping on disconnect (only the departed client's cursor
 clears, well under the client-side timeout).
 
 `bun provider_check.mjs` exercises the standard provider on its own: it drives
@@ -278,7 +279,7 @@ cd frontend && bun stress.mjs
 A storm of concurrent clients edit shared documents at random offsets, with
 late joiners, abrupt mid-traffic disconnects, clients that go offline, keep
 editing, and reconnect (merging via the step1/step2 handshake), and HTTP pollers
-hitting the extraction endpoint the whole time. It checks byte-for-byte
+hitting the `/content` endpoint the whole time. It checks byte-for-byte
 convergence across every doc, including a fresh verifier that syncs from the
 server alone, and exact character conservation: nothing lost, nothing applied
 twice.
@@ -288,7 +289,7 @@ offsets in one Y.XmlText can legally interleave inside other clients' runs, so
 conservation and convergence are the invariants that actually hold.
 
 Reference run (M-series MacBook, 16 Puma threads and 16 cable workers): 100
-clients, 8,800 edits, ~360k cable messages, 41k concurrent extraction reads, all
+clients, 8,800 edits, ~360k cable messages, 41k concurrent `/content` reads, all
 103 docs byte-identical, zero errors.
 
 ## Production notes

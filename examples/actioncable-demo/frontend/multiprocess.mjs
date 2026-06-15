@@ -14,6 +14,7 @@ import * as awarenessProtocol from "y-protocols/awareness"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverText as serverTextRead } from "./server_read.mjs"
 
 const PORTS = (process.env.PORTS || "3777,3778").split(",").map(Number)
 const ROOM = `mp-${process.pid}`
@@ -104,12 +105,7 @@ class Client {
   state() { return Y.encodeStateAsUpdate(this.doc) }
 }
 
-const serverText = async (port, room = ROOM) => {
-  const res = await fetch(`http://localhost:${port}/docs/${room}/content`)
-  if (res.status !== 200) return ""
-  const j = await res.json()
-  return (j.content || []).flatMap((n) => (n.content || []).map((t) => t.text)).join("\n")
-}
+const serverText = (port, room = ROOM) => serverTextRead(`http://localhost:${port}`, room)
 const auditCount = async (port) =>
   (await (await fetch(`http://localhost:${port}/docs/${ROOM}/audit`)).json()).count
 

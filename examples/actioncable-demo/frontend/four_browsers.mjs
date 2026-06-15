@@ -5,6 +5,7 @@
 //   bin/rails s -p 3777          (or two processes; pass PORTS=3777,3778)
 //   cd frontend && bun four_browsers.mjs
 import { chromium } from "playwright-core"
+import { serverText } from "./server_read.mjs"
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 const PORTS = (process.env.PORTS || "3777").split(",").map(Number)
@@ -100,11 +101,9 @@ try {
   check(`total characters conserved (${t2.length} == ${PER * 8})`, t2.length === PER * 8)
 
   // ---- Server-side view agrees ------------------------------------------
-  const res = await fetch(`${BASE(portOf(0))}/docs/${room}/content`)
-  const json = await res.json()
-  const srv = (json.content || []).flatMap((n) => (n.content || []).map((t) => t.text)).join("")
+  const srv = await serverText(BASE(portOf(0)), room)
   for (let i = 0; i < 4; i++) {
-    check(`server extraction has all of browser ${i + 1}'s '${DIGITS[i]}'`, countChar(srv, DIGITS[i]) === PER * 2)
+    check(`server state has all of browser ${i + 1}'s '${DIGITS[i]}'`, countChar(srv, DIGITS[i]) === PER * 2)
   }
   check("no uncaught browser errors during the storm", errors === 0)
 

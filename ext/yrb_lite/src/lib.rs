@@ -1,5 +1,3 @@
-mod prosemirror;
-
 use magnus::{function, method, prelude::*, Error, RString, Ruby, TryConvert, Value};
 use yrs::encoding::read::{Cursor, Read};
 use yrs::sync::protocol::MessageReader;
@@ -321,49 +319,6 @@ impl RbDoc {
         binary_string(&msg.encode_v1())
     }
 
-    /// Extract ProseMirror content from this document as a JSON string.
-    /// Optionally takes the name of the XML fragment to read (defaults to
-    /// trying "prosemirror", "default", "doc").
-    fn prosemirror_json(&self, args: &[Value]) -> Result<String, Error> {
-        let fragment: Option<String> = if args.is_empty() {
-            None
-        } else {
-            TryConvert::try_convert(args[0])?
-        };
-        let doc = &self.0;
-        nogvl(move || -> Result<String, String> {
-            let txn = doc.transact();
-            let value = prosemirror::extract_from_txn(&txn, fragment.as_deref())?;
-            Ok(value.to_string())
-        })
-        .map_err(runtime_error)
-    }
-}
-
-/// Extract ProseMirror content from a raw V1 update as a JSON string.
-/// Args: (update, fragment_name = nil)
-fn extract_prosemirror_json(args: &[Value]) -> Result<String, Error> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(Error::new(
-            Ruby::get().unwrap().exception_arg_error(),
-            format!(
-                "wrong number of arguments (given {}, expected 1..2)",
-                args.len()
-            ),
-        ));
-    }
-    let update: RString = TryConvert::try_convert(args[0])?;
-    let fragment: Option<String> = if args.len() > 1 {
-        TryConvert::try_convert(args[1])?
-    } else {
-        None
-    };
-    let bytes = copy_bytes(update);
-    nogvl(move || -> Result<String, String> {
-        let value = prosemirror::extract_from_update(&bytes, fragment.as_deref())?;
-        Ok(value.to_string())
-    })
-    .map_err(runtime_error)
 }
 
 // ============================================================================
@@ -631,13 +586,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method(
         "encode_update_message",
         method!(RbDoc::encode_update_message, 1),
-    )?;
-    doc_class.define_method("prosemirror_json", method!(RbDoc::prosemirror_json, -1))?;
-
-    // Module-level ProseMirror extraction from a raw update
-    module.define_module_function(
-        "extract_prosemirror_json",
-        function!(extract_prosemirror_json, -1),
     )?;
 
     // Define Awareness class

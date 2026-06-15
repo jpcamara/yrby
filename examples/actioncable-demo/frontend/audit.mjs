@@ -12,6 +12,7 @@ import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777
 const ROOM = `audit-${process.pid}`
@@ -108,10 +109,8 @@ const replay = new Y.Doc()
 for (const entry of audit.updates) Y.applyUpdate(replay, fromBase64(entry))
 console.log("ok: replayed the audit log into a fresh document")
 
-// Compare the replay to the server's live document (via native extraction).
-const liveRes = await fetch(`http://localhost:${PORT}/docs/${ROOM}/content`)
-const live = await liveRes.json()
-const liveText = live.content.flatMap((n) => (n.content || []).map((t) => t.text)).join("\n")
+// Compare the replay to the server's live document (read from its raw state).
+const liveText = await serverText(`http://localhost:${PORT}`, ROOM)
 
 for (let i = 1; i <= EDITS; i++) {
   if (!liveText.includes(`change number ${i}`)) {

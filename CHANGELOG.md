@@ -15,8 +15,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protocol (document sync plus awareness/presence). It's wire-compatible with
   the [`@y-rb/actioncable`](https://www.npmjs.com/package/@y-rb/actioncable)
   browser provider, and accepts its `{ update: ... }` envelope and `{ m: ... }`.
-- Native ProseMirror/Tiptap extraction (`YrbLite::ProseMirrorExtractor`) for
-  reading document content server-side without JavaScript.
 - A "record-before-distribute" mode via an `on_change` hook, so every change is
   recorded durably before it's applied or relayed.
 - Presence cleanup on disconnect, and idle-document eviction.

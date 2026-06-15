@@ -10,7 +10,7 @@ Gem::Specification.new do |spec|
   spec.description = "yrb-lite is a thread-safe Ruby binding over the Rust y-crdt (yrs) library plus an " \
                      "ActionCable concern implementing the full y-websocket sync protocol and awareness. It " \
                      "lets a Rails app be the collaboration server for Y.js editors (Tiptap, ProseMirror, " \
-                     "BlockNote) with no Node sidecar, including native server-side ProseMirror extraction."
+                     "BlockNote) with no Node sidecar."
   spec.homepage = "https://github.com/jpcamara/yrb-lite"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"

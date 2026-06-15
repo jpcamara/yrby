@@ -40,13 +40,4 @@ module YjsFixtures
     STATE_VECTOR = YjsFixtures.b64("AA==")
     UPDATE = YjsFixtures.b64("AAA=")
   end
-  # Fixture 5: ProseMirror document (fragment name 'prosemirror')
-  # Structure:
-  #   heading(level: "1") > "Title"
-  #   paragraph > "Hello " + bold("bold") + " and a " + link("link", https://example.com)
-  module ProseMirrorDoc
-    UPDATE = YjsFixtures.b64(
-      "AQ78hLntAgAHAQtwcm9zZW1pcnJvcgMHaGVhZGluZwcA/IS57QIABgQA/IS57QIBBVRpdGxlKAD8hLntAgAFbGV2ZWwBdwExh/yEue0CAAMJcGFyYWdyYXBoBwD8hLntAggGBAD8hLntAgkGSGVsbG8ghvyEue0CDwRib2xkBHRydWWE/IS57QIQBGJvbGSG/IS57QIUBGJvbGQEbnVsbIT8hLntAhUHIGFuZCBhIIb8hLntAhwEbGluaxUiaHR0cHM6Ly9leGFtcGxlLmNvbSKE/IS57QIdBGxpbmuG/IS57QIhBGxpbmsEbnVsbAA="
-    )
-  end
 end
