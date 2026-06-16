@@ -1,7 +1,23 @@
-// Vendored from @y-rb/actioncable (dist/actioncable.esm.js, v0.3.x),
-// detranspiled to readable ESM. This commit is the upstream `WebsocketProvider`
-// with no behavior changes; yrb-lite's reliable-delivery layer is added in the
-// next commit so its diff stands on its own.
+// The @y-rb/actioncable WebsocketProvider, vendored and augmented with
+// yrb-lite's reliable-delivery layer. Everything below the marked sections is
+// upstream (detranspiled from dist/actioncable.esm.js, v0.3.x); the additions
+// give "no acknowledged edit is ever silently lost" without changing the wire
+// protocol or the `{ update: ... }` envelope, so it stays a drop-in replacement.
+//
+// How it works (document updates only):
+//   * Each outgoing batch carries an "id". yrb-lite replies `{ ack: <id> }` once
+//     it has *accepted* the update (recorded in audit mode, applied in fast
+//     mode). A causally-gapped update is not acked -- it gets a resync.
+//   * "Sync since last ack": unacknowledged local updates are kept in a queue
+//     and sent as their MERGE -- one causally-complete delta -- so the server
+//     never sees an internal gap. The id is the highest sequence in the batch,
+//     so a single ack cumulatively confirms everything up to it.
+//   * Retransmit on a timer and on reconnect until the ack lands; idempotent
+//     CRDT apply makes resends free.
+//
+// Awareness/presence stays fire-and-forget (ephemeral, no point acking).
+// Against a server that doesn't implement acks the provider warns once and
+// falls back to plain delivery. `reliable: false` opts out entirely.
 import { writeVarUint, writeVarUint8Array, createEncoder, length, toUint8Array } from "lib0/encoding"
 import { readVarUint8Array, createDecoder, readVarUint } from "lib0/decoding"
 import {
@@ -19,6 +35,7 @@ import {
 } from "y-protocols/awareness"
 import { readAuthMessage } from "y-protocols/auth"
 import { publish, subscribe, unsubscribe } from "lib0/broadcastchannel"
+import * as Y from "yjs" // [reliable] mergeUpdates for sync-since-last-ack
 
 const MessageType = { Sync: 0, Awareness: 1, Auth: 2, QueryAwareness: 3 }
 
@@ -49,7 +66,20 @@ const messageHandlers = {
 }
 
 export class WebsocketProvider {
-  constructor(doc, consumer, channel, params, { awareness = new Awareness(doc), disableBc = false } = {}) {
+  constructor(
+    doc,
+    consumer,
+    channel,
+    params,
+    {
+      awareness = new Awareness(doc),
+      disableBc = false,
+      // [reliable] opt-in delivery guarantee (on by default).
+      reliable = true,
+      resendInterval = 1000,
+      maxUnconfirmedResends = 8,
+    } = {}
+  ) {
     this.consumer = consumer
     this.channel = undefined
     this.params = params
@@ -61,6 +91,17 @@ export class WebsocketProvider {
     this.disableBc = disableBc
     this._synced = false
 
+    // [reliable] delivery state.
+    this.reliable = reliable
+    this.resendInterval = resendInterval
+    this.maxUnconfirmedResends = maxUnconfirmedResends
+    this.pending = [] // unacked local updates: [{ seq, update }], in order
+    this.nextSeq = 1
+    this.everAcked = false
+    this._resendsSinceProgress = 0
+    this._serverConnected = false
+    this._resendTimer = undefined
+
     this.bcSubscriber = (data, origin) => {
       if (origin !== this) {
         const encoder = this.process(new Uint8Array(data), false)
@@ -69,10 +110,17 @@ export class WebsocketProvider {
     }
     this.updateHandler = (update, origin) => {
       if (origin !== this) {
-        const encoder = createEncoder()
-        writeVarUint(encoder, MessageType.Sync)
-        writeUpdate(encoder, update)
-        this.send(toUint8Array(encoder))
+        // [reliable] queue the local update and send the merged unacked tail;
+        // otherwise behave like upstream (one fire-and-forget Sync/Update).
+        if (this.reliable) {
+          this.pending.push({ seq: this.nextSeq++, update })
+          this.flushToServer()
+        } else {
+          const encoder = createEncoder()
+          writeVarUint(encoder, MessageType.Sync)
+          writeUpdate(encoder, update)
+          this.send(toUint8Array(encoder))
+        }
       }
     }
     this.unloadHandler = () => {
@@ -110,11 +158,62 @@ export class WebsocketProvider {
     this.doc.off("update", this.updateHandler)
   }
 
-  send(buffer, { whisper = false } = {}) {
+  send(buffer, { whisper = false, id = undefined } = {}) {
     const update = encodeBinaryToBase64(buffer)
-    if (whisper && hasWhisper(this.channel)) this.channel.whisper({ update })
-    else this.channel?.send({ update })
+    // [reliable] include the batch id when present so the server can ack it.
+    const payload = id === undefined ? { update } : { update, id }
+    if (whisper && hasWhisper(this.channel)) this.channel.whisper(payload)
+    else this.channel?.send(payload)
     if (this.bcconnected) publish(this.bcChannelName, buffer, this)
+  }
+
+  // [reliable] Send the whole unacked tail as one merged delta (sync since last
+  // ack). The id is the highest queued sequence, so one ack confirms the batch.
+  flushToServer() {
+    if (this.pending.length === 0) return
+    const merged = Y.mergeUpdates(this.pending.map((p) => p.update))
+    const id = this.pending[this.pending.length - 1].seq
+    const encoder = createEncoder()
+    writeVarUint(encoder, MessageType.Sync)
+    writeUpdate(encoder, merged)
+    this.send(toUint8Array(encoder), { id })
+  }
+
+  // [reliable] A `{ ack: id }` cumulatively confirms every queued update <= id.
+  onAck(id) {
+    this.everAcked = true
+    this._resendsSinceProgress = 0
+    this.pending = this.pending.filter((p) => p.seq > id)
+  }
+
+  // [reliable] Periodic resend of the unacked tail while connected. The first
+  // round-trip sets everAcked; if we keep resending on a live connection and
+  // never get an ack, the server doesn't support them, so warn once and fall
+  // back to fire-and-forget rather than loop forever.
+  onResendTick() {
+    if (!this._serverConnected || this.pending.length === 0) return
+    if (!this.everAcked && ++this._resendsSinceProgress > this.maxUnconfirmedResends) {
+      console.warn(
+        `[reliable] no acks from ${this.channelName} after ${this.maxUnconfirmedResends} ` +
+          "resends; server appears not to support reliable delivery. Falling back."
+      )
+      this.reliable = false
+      this.pending = []
+      this.stopResendTimer()
+      return
+    }
+    this.flushToServer()
+  }
+
+  startResendTimer() {
+    if (this._resendTimer || !this.reliable) return
+    this._resendTimer = setInterval(() => this.onResendTick(), this.resendInterval)
+    if (typeof this._resendTimer?.unref === "function") this._resendTimer.unref()
+  }
+
+  stopResendTimer() {
+    if (this._resendTimer) clearInterval(this._resendTimer)
+    this._resendTimer = undefined
   }
 
   process(buffer, emitSynced) {
@@ -134,6 +233,11 @@ export class WebsocketProvider {
       { channel: this.channelName, ...this.params },
       {
         received(message) {
+          // [reliable] a delivery ack confirms and prunes the local queue.
+          if (message?.ack !== undefined) {
+            provider.onAck(message.ack)
+            return
+          }
           const encodedUpdate = message.update
           const update = decodeBase64ToBinary(encodedUpdate)
           const encoder = provider.process(update, true)
@@ -141,6 +245,8 @@ export class WebsocketProvider {
         },
         disconnected() {
           provider.synced = false
+          provider._serverConnected = false // [reliable]
+          provider.stopResendTimer() // [reliable] (queue is kept for reconnect)
           // update awareness (all users except local left)
           removeAwarenessStates(
             provider.awareness,
@@ -149,6 +255,7 @@ export class WebsocketProvider {
           )
         },
         connected() {
+          provider._serverConnected = true // [reliable]
           // always send sync step 1 when connected
           const encoder = createEncoder()
           writeVarUint(encoder, MessageType.Sync)
@@ -164,6 +271,9 @@ export class WebsocketProvider {
             )
             provider.send(toUint8Array(encoderAwarenessState))
           }
+          // [reliable] resend any unacked tail and (re)start the resend timer.
+          provider.flushToServer()
+          provider.startResendTimer()
         },
       }
     )
@@ -209,6 +319,8 @@ export class WebsocketProvider {
   }
 
   disconnect() {
+    this.stopResendTimer() // [reliable]
+    this._serverConnected = false // [reliable]
     this.disconnectBc()
     this.channel?.unsubscribe()
     if (this.channel != null) this.channel = undefined
@@ -233,3 +345,7 @@ function decodeBase64ToBinary(update) {
 function hasWhisper(channel) {
   return channel !== undefined && "whisper" in channel && typeof channel.whisper === "function"
 }
+
+// [reliable] Preferred name for the augmented provider. `WebsocketProvider`
+// stays exported so it remains a drop-in for code importing the upstream name.
+export { WebsocketProvider as ReliableActionCableProvider }

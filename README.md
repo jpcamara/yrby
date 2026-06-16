@@ -320,9 +320,27 @@ and no dependence on a later edit happening to trigger a resync.
 
 This is entirely **self-gating**: stock clients send no `"id"`, so they never get
 acks and behave exactly as before. Only a client that opts in by tagging its
-frames participates. A reference reliable client and an end-to-end test that loses
-an update mid-flight and recovers it purely by retransmit live in
-[`examples/actioncable-demo/frontend/reliable.mjs`](examples/actioncable-demo/frontend/reliable.mjs).
+frames participates.
+
+Two client examples ship in the demo:
+
+- [`frontend/reliable.mjs`](examples/actioncable-demo/frontend/reliable.mjs) — a
+  minimal reference client showing the raw mechanism (tag with an id, retain,
+  retransmit on a timer, drain on ack), with an end-to-end test that loses an
+  update mid-flight and recovers it purely by retransmit.
+- [`frontend/provider/reliable_actioncable_provider.mjs`](examples/actioncable-demo/frontend/provider/reliable_actioncable_provider.mjs)
+  — the standard `@y-rb/actioncable` `WebsocketProvider`, vendored and augmented
+  for production use. It's a drop-in replacement that speaks the same protocol
+  and envelope, and adds reliability with **sync-since-last-ack** framing: rather
+  than retransmitting updates one by one, it keeps the unacknowledged local
+  updates in a queue and sends their *merge* as a single causally-complete delta,
+  with the id being the highest sequence in the batch (so one `{ ack: id }`
+  cumulatively confirms everything up to it). Because the whole unacked tail goes
+  as one self-contained delta, the server never sees an internal gap and never
+  has to round-trip a resync for a lost middle update — the next edit, or the
+  next timer tick, carries it. Awareness stays fire-and-forget; against a server
+  that doesn't implement acks it warns once and falls back to plain delivery; and
+  `reliable: false` opts out entirely. The demo's editor uses this provider.
 
 ### User Awareness/Presence
 
