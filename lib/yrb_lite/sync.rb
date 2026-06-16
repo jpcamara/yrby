@@ -128,6 +128,13 @@ module YrbLite
     # If an `on_change` recorder is registered, document changes take the
     # strict authoritative path (record -> apply -> broadcast, serialized per
     # document); otherwise the fast path is used.
+    #
+    # Reliable delivery (opt-in, client-driven): if the frame carries an "id",
+    # the server replies `{ "ack" => id }` once the update has been accepted
+    # (recorded in audit mode, applied in fast mode). A causally-gapped update
+    # is not acked -- it gets a resync instead -- so an ack-aware client knows
+    # to retransmit until the update lands. Stock clients send no "id", never
+    # get acks, and are completely unaffected.
     def sync_receive(data, key = nil)
       # Pass `key` (params[:id]) when your transport doesn't keep the channel
       # instance alive across actions. Under AnyCable each RPC command gets a
@@ -139,13 +146,23 @@ module YrbLite
       m = data.is_a?(Hash) ? (data["m"] || data["update"]) : nil
       return unless m.is_a?(String)
 
+      # Optional client-supplied id for reliable delivery (see sync_send_ack).
+      id = data.is_a?(Hash) ? data["id"] : nil
+
       begin
         bytes = Base64.strict_decode64(m)
       rescue ArgumentError
         return # not valid base64; ignore the frame and keep the connection
       end
 
-      return sync_receive_store_backed(m, bytes) if self.class.sync_backend == :store
+      sync_send_ack(id, sync_dispatch(m, bytes))
+    end
+
+    # Route a decoded frame to the backend/path that handles it and return the
+    # outcome symbol (:recorded/:applied/:gap/:noop) used by the reliable-
+    # delivery ack. A dropped frame returns nil (never acked).
+    def sync_dispatch(encoded, bytes)
+      return sync_receive_store_backed(encoded, bytes) if self.class.sync_backend == :store
 
       awareness = sync_awareness
       kind = awareness.message_kind(bytes)
@@ -156,9 +173,9 @@ module YrbLite
       sync_track_clients(awareness, bytes) if kind == MSG_KIND_AWARENESS
 
       if kind == MSG_KIND_UPDATE && self.class.on_change
-        sync_apply_authoritative(awareness, m, bytes)
+        sync_apply_authoritative(awareness, encoded, bytes)
       else
-        sync_apply_fast(awareness, m, bytes, kind)
+        sync_apply_fast(awareness, encoded, bytes, kind)
       end
     end
 
@@ -207,6 +224,10 @@ module YrbLite
     # Document changes (SyncStep2, Update) and awareness get relayed; requests
     # (SyncStep1, awareness-query) are answered above and not relayed. An
     # optional on_save snapshot is taken after a document change.
+    #
+    # Returns an outcome symbol for the reliable-delivery ack: :applied when a
+    # document update was integrated and relayed, :gap when it was rejected for
+    # a resync, :noop for everything else (requests, awareness, empty updates).
     def sync_apply_fast(awareness, encoded, bytes, kind)
       # A document update that isn't causally ready (an earlier one was lost in
       # transit) would relay an un-integrable change to peers and stall the
@@ -214,16 +235,26 @@ module YrbLite
       # the missing piece. See sync_apply_authoritative for the durable variant.
       if kind == MSG_KIND_UPDATE
         update = awareness.update_from_message(bytes)
-        return sync_request_resync(awareness) if update && !awareness.update_ready?(update)
+        # A no-op message (e.g. the empty SyncStep2 in an opening handshake)
+        # carries no change, so there's nothing to relay, persist, or ack.
+        return :noop unless update
+
+        unless awareness.update_ready?(update)
+          sync_request_resync(awareness)
+          return :gap
+        end
       end
 
       response = awareness.handle(bytes)
       sync_transmit(response) unless response.empty?
 
-      return unless [MSG_KIND_UPDATE, MSG_KIND_AWARENESS].include?(kind)
+      return :noop unless [MSG_KIND_UPDATE, MSG_KIND_AWARENESS].include?(kind)
 
       sync_distribute(encoded)
-      sync_persist if kind == MSG_KIND_UPDATE
+      return :noop unless kind == MSG_KIND_UPDATE
+
+      sync_persist
+      :applied
     end
 
     # Authoritative path: record the change durably, then apply it to the
@@ -261,6 +292,11 @@ module YrbLite
       when :recorded then sync_persist
       when :gap      then sync_request_resync(awareness)
       end
+
+      # Surface the outcome for the reliable-delivery ack: :recorded means the
+      # update is durably written (and will be acked); :gap triggered a resync
+      # (no ack); :noop carried no change.
+      outcome
     end
 
     # Ask this connection's client to resync: re-send SyncStep1 carrying the
@@ -269,6 +305,23 @@ module YrbLite
     # delta -- which heals the gap that triggered the resync.
     def sync_request_resync(awareness)
       sync_transmit(awareness.sync_step1)
+    end
+
+    # Reliable delivery: acknowledge an accepted update back to the sending
+    # connection. An ack-aware client tags each outgoing update with an "id"
+    # and retains it until the matching `{ "ack" => id }` returns, retransmitting
+    # on a timer or reconnect; idempotent CRDT apply makes resends free. We ack
+    # only when the client supplied an id (so stock clients are unaffected) and
+    # the update was actually accepted -- recorded in audit mode, applied in fast
+    # mode. A gapped update gets no ack (it got a resync), so the client keeps
+    # retransmitting until the missing range lands and the update can integrate.
+    def sync_send_ack(id, outcome)
+      return if id.nil?
+      return unless %i[recorded applied].include?(outcome)
+
+      # Braces are load-bearing: a bare hash would bind to transmit's `via:`
+      # keyword instead of its positional data argument.
+      transmit({ "ack" => id })
     end
 
     # Single broadcast point for both paths (and presence removal), so the
@@ -343,14 +396,19 @@ module YrbLite
     # changes are recorded durably before relay and then broadcast, and
     # awareness is relayed best-effort. Echoing back to the sender is harmless,
     # since the CRDT apply is idempotent.
+    #
+    # Returns an outcome symbol for the reliable-delivery ack: :recorded when a
+    # document update was durably recorded and relayed, :gap when it was
+    # rejected for a resync, :noop for everything else.
     def sync_receive_store_backed(encoded, bytes)
       case Sync.codec.message_kind(bytes)
       when MSG_KIND_SYNC_STEP1
         result = sync_load_doc.handle_sync_message(bytes)
         sync_transmit(result[2]) if result
+        :noop
       when MSG_KIND_UPDATE
         update = Sync.codec.update_from_message(bytes)
-        return unless update
+        return :noop unless update
 
         # Store mode keeps no warm replica, so to tell whether this update is
         # causally ready we rebuild the doc from the store and check against it.
@@ -359,12 +417,19 @@ module YrbLite
         # its record failed -- is rejected and the client asked to resync,
         # rather than written to the log as a permanently-pending entry.
         doc = sync_load_doc
-        return sync_transmit(doc.sync_step1) unless doc.update_ready?(update)
+        unless doc.update_ready?(update)
+          sync_transmit(doc.sync_step1)
+          return :gap
+        end
 
         self.class.on_change&.call(@sync_key, update) # record before relay
         sync_distribute(encoded)
+        :recorded
       when MSG_KIND_AWARENESS
         sync_distribute(encoded)
+        :noop
+      else
+        :noop
       end
     end
 

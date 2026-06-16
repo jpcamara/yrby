@@ -532,6 +532,98 @@ class SyncTest < Minitest::Test
                  "replaying the audit log reproduces the authoritative state"
   end
 
+  # -- Reliable delivery (acks) --------------------------------------------
+
+  # A fast-path channel-like object (no on_change) that captures transmits and
+  # distributions. Used to observe acks without touching ActionCable.
+  def fast_helper(key, transmits:, broadcasts:)
+    klass = Class.new do
+      include YrbLite::Sync
+
+      attr_accessor :_t, :_b
+
+      def transmit(data) = @_t << data
+      define_method(:sync_distribute) { |encoded| @_b << encoded }
+    end
+    helper = klass.new
+    helper._t = transmits
+    helper._b = broadcasts
+    helper.instance_variable_set(:@sync_key, key)
+    helper.instance_variable_set(:@sync_origin, "origin-#{key}")
+    helper.instance_variable_set(:@sync_clients, [])
+    helper
+  end
+
+  def acks_in(transmits)
+    transmits.filter_map { |t| t["ack"] if t.is_a?(Hash) && t.key?("ack") }
+  end
+
+  def test_fast_path_acks_an_applied_update_carrying_an_id
+    transmits = []
+    helper = fast_helper("ack-fast", transmits: transmits, broadcasts: [])
+
+    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE).merge("id" => 7))
+
+    assert_equal [7], acks_in(transmits), "an applied update with an id is acked"
+  end
+
+  def test_authoritative_path_acks_a_recorded_update_carrying_an_id
+    transmits = []
+    recorded = []
+    helper = authoritative_helper("ack-auth", broadcasts: []) { |_k, u| recorded << u }
+    helper.define_singleton_method(:transmit) { |data| transmits << data }
+
+    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE).merge("id" => "abc"))
+
+    assert_equal ["abc"], acks_in(transmits), "a recorded update with an id is acked"
+  end
+
+  def test_store_path_acks_a_recorded_update_carrying_an_id
+    transmits = []
+    helper = store_backed_helper(loader: ->(_k) {}, recorder: ->(_k, _u) {},
+                                 transmits: transmits, broadcasts: [])
+    msg = YrbLite::Awareness.new.encode_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+
+    helper.sync_receive({ "update" => Base64.strict_encode64(msg), "id" => 42 }, "doc-key")
+
+    assert_equal [42], acks_in(transmits), "store mode acks a recorded update with an id"
+  end
+
+  def test_no_ack_without_an_id
+    # Stock clients send no id and must be completely unaffected -- no ack frame.
+    transmits = []
+    helper = fast_helper("no-ack", transmits: transmits, broadcasts: [])
+
+    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE))
+
+    assert_empty acks_in(transmits), "an update without an id is never acked"
+  end
+
+  def test_gapped_update_is_not_acked
+    # A causally-gapped update gets a resync, not an ack, so an ack-aware client
+    # keeps retransmitting until the missing range lands and it can integrate.
+    transmits = []
+    helper = fast_helper("ack-gap", transmits: transmits, broadcasts: [])
+
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1).merge("id" => 1)) # ready
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3).merge("id" => 2)) # gap
+
+    assert_equal [1], acks_in(transmits),
+                 "only the integrable update is acked; the gapped one is not"
+  end
+
+  def test_no_op_update_is_not_acked
+    # The empty SyncStep2 in an opening handshake carries no change; even with an
+    # id, there's nothing to ack.
+    transmits = []
+    helper = fast_helper("ack-noop", transmits: transmits, broadcasts: [])
+
+    empty = YrbLite::Awareness.new.encode_update(YjsFixtures::EmptyDoc::UPDATE)
+    helper.sync_receive({ "m" => Base64.strict_encode64(empty), "id" => 9 })
+
+    assert_empty acks_in(transmits), "a no-op update is not acked"
+  end
+
   def test_handle_sync_message_returns_tuple
     doc = YrbLite::Doc.new
 

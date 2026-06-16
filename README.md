@@ -292,6 +292,38 @@ mode (in [`examples/actioncable-demo`](examples/actioncable-demo)) wires
 `on_change` to an fsync'd append-only log and checks, end to end, that the log
 alone rebuilds the document.
 
+#### Reliable delivery (acks)
+
+The y-websocket protocol is fire-and-forget. If a client's update is lost in
+transit (a flaky socket, a send that never lands) and the client makes no
+further edits, the server stays idle and never asks anyone to resync, so that
+edit is gone -- even though the client believes it was saved. CRDTs converge the
+state everyone *has*; they don't recover an update that never arrived.
+
+yrb-lite closes that gap with an opt-in, client-driven acknowledgement. If an
+incoming frame carries an `"id"`, the server replies `{ "ack": <id> }` once the
+update has been **accepted** -- recorded in audit mode, applied in fast mode. A
+causally-gapped update is not acked (it gets a resync instead), so the client
+knows it hasn't landed yet.
+
+```
+client -> server   { "m": "<base64 update>", "id": 42 }
+server -> client    { "ack": 42 }     # update accepted; safe to forget
+```
+
+That's the whole server side. A reliable client tags each outgoing update with
+an incrementing id, keeps it in a pending buffer, and retransmits on a timer (and
+on reconnect) until the matching ack returns. Because CRDT apply is idempotent, a
+resend that already landed is a harmless no-op that just re-acks. An update lost
+in transit is recovered by the client's own retransmit -- no reconnect required,
+and no dependence on a later edit happening to trigger a resync.
+
+This is entirely **self-gating**: stock clients send no `"id"`, so they never get
+acks and behave exactly as before. Only a client that opts in by tagging its
+frames participates. A reference reliable client and an end-to-end test that loses
+an update mid-flight and recovers it purely by retransmit live in
+[`examples/actioncable-demo/frontend/reliable.mjs`](examples/actioncable-demo/frontend/reliable.mjs).
+
 ### User Awareness/Presence
 
 ```ruby
