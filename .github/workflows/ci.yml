@@ -119,3 +119,4 @@ jobs:
           PORT=3777 bun audit.mjs
           PORT=3777 bun reliable.mjs
           PORT=3777 bun reliable_provider.mjs
+          PORT=3777 bun reliable_stress.mjs
