@@ -49,6 +49,60 @@ jobs:
           path: ${{ steps.cross-gem.outputs.gem-path }}
           if-no-files-found: error
 
-  # After this workflow, download the artifacts and `gem push` each .gem
-  # (plus a source gem via `rake build`). Kept manual so a tag never publishes
-  # without a human + RubyGems credentials.
+  # Install a built precompiled gem on its real platform and require it, with no
+  # Rust toolchain present -- exactly the path a user hits with `gem install`.
+  # This catches packaging/loader bugs the build itself can't (e.g. shipping the
+  # native lib in a per-Ruby-version subdir while the loader only knows the flat
+  # path -- a real beta bug that installed fine but failed to load). We can only
+  # natively load the gem whose platform matches the runner, so we cover the two
+  # platforms people install on most (Linux x86_64, macOS arm64) across both
+  # Ruby versions the fat gems target; the loader logic is shared, so this
+  # exercises the same code path the musl/Windows gems use.
+  smoke-test:
+    name: Smoke-test ${{ matrix.platform }} (Ruby ${{ matrix.ruby }})
+    needs: cross-gem
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: x86_64-linux, ruby: "3.4" }
+          - { os: ubuntu-latest, platform: x86_64-linux, ruby: "4.0" }
+          - { os: macos-latest, platform: arm64-darwin, ruby: "3.4" }
+          - { os: macos-latest, platform: arm64-darwin, ruby: "4.0" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-gem-${{ matrix.platform }}
+          path: pkg
+      - name: Install the precompiled gem (no Rust) and require it
+        shell: bash
+        run: |
+          set -euo pipefail
+          gem_file=$(ls pkg/*.gem)
+          echo "installing $gem_file"
+          gem install "$gem_file" --no-document
+          # A precompiled platform gem has no extensions, so install never
+          # compiles. The versioned-subdir assertion below confirms the prebuilt
+          # binary was loaded: a source fallback would install to the flat path
+          # and fail the check, so we don't need to scrub the Rust toolchain.
+          ruby -e '
+            require "yrb_lite"
+            lib = $LOADED_FEATURES.grep(/yrb_lite\.(bundle|so)/).first
+            abi = RUBY_VERSION[/\d+\.\d+/]
+            raise "no native library loaded" unless lib
+            raise "expected the precompiled #{abi} subdir, got #{lib}" unless lib.include?("/#{abi}/")
+            # Exercise the actual native surface, including the recent gap-check API.
+            a = YrbLite::Awareness.new
+            a.set_local_state(%q({"u":"ci"}))
+            raise "awareness broken" unless a.local_state.include?("ci")
+            raise "missing update_ready? (stale binary?)" unless YrbLite::Doc.new.respond_to?(:update_ready?)
+            puts "ok: yrb-lite #{YrbLite::VERSION} loaded from #{lib} with no Rust"
+          '
+
+  # After this workflow (and once smoke-test is green), download the artifacts
+  # and `gem push` each .gem (plus a source gem via `rake build`). Kept manual so
+  # a tag never publishes without a human + RubyGems credentials.
