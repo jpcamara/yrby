@@ -14,32 +14,57 @@
 //   const reply = receive(frame)  -> a binary protocol frame arrived; send `reply` if non-null
 // Local document edits and awareness changes are picked up automatically via the
 // doc's / awareness's "update" events.
-import * as Y from "yjs";
+import { mergeUpdates, type Doc } from "yjs";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 import { readSyncMessage, writeSyncStep1, writeUpdate, messageYjsSyncStep2 } from "y-protocols/sync";
-import { encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness";
+import {
+  encodeAwarenessUpdate,
+  applyAwarenessUpdate,
+  removeAwarenessStates,
+  type Awareness,
+} from "y-protocols/awareness";
 import { readAuthMessage } from "y-protocols/auth";
-import { ReliableSync } from "./reliable_sync.js";
+import { ReliableSync, type TimerHandle } from "./reliable_sync.js";
 
-export const MessageType = { Sync: 0, Awareness: 1, Auth: 2, QueryAwareness: 3 };
+export const MessageType = { Sync: 0, Awareness: 1, Auth: 2, QueryAwareness: 3 } as const;
+
+export interface SyncEngineOptions {
+  /**
+   * Transmit one raw protocol frame; `id` is set only for reliable document
+   * updates (tag it onto your envelope so the server can ack).
+   */
+  send: (frame: Uint8Array, id: number | undefined) => void;
+  /** Optional awareness/presence. When omitted, awareness frames are ignored. */
+  awareness?: Awareness | null;
+  /** Use ack-tracked reliable delivery (default true). */
+  reliable?: boolean;
+  /** Forwarded to ReliableSync. */
+  resendInterval?: number;
+  /** Forwarded to ReliableSync. */
+  maxUnconfirmedResends?: number;
+  /** Forwarded to ReliableSync. */
+  onFallback?: () => void;
+  /** Injectable timer hooks (forwarded to ReliableSync); handy for tests. */
+  setInterval?: (handler: () => void, ms: number) => TimerHandle;
+  clearInterval?: (handle: TimerHandle) => void;
+}
+
+type AwarenessChange = { added: number[]; updated: number[]; removed: number[] };
 
 export class SyncEngine {
-  /**
-   * @param {Y.Doc} doc
-   * @param {object} opts
-   * @param {(frame: Uint8Array, id: number|undefined) => void} opts.send
-   *   transmit one raw protocol frame; `id` is set only for reliable document
-   *   updates (tag it onto your envelope so the server can ack).
-   * @param {import("y-protocols/awareness").Awareness} [opts.awareness]
-   * @param {boolean} [opts.reliable=true] use ack-tracked reliable delivery
-   * @param {number} [opts.resendInterval] forwarded to ReliableSync
-   * @param {number} [opts.maxUnconfirmedResends] forwarded to ReliableSync
-   * @param {() => void} [opts.onFallback] forwarded to ReliableSync
-   */
-  constructor(
-    doc,
-    {
+  readonly doc: Doc;
+  readonly awareness: Awareness | null;
+  reliable: boolean;
+
+  private _send: SyncEngineOptions["send"];
+  private _synced = false;
+  private _delivery: ReliableSync;
+  private _onDocUpdate: (update: Uint8Array, origin: unknown) => void;
+  private _onAwarenessUpdate?: (change: AwarenessChange, origin: unknown) => void;
+
+  constructor(doc: Doc, opts: SyncEngineOptions) {
+    const {
       send,
       awareness = null,
       reliable = true,
@@ -48,8 +73,7 @@ export class SyncEngine {
       onFallback,
       setInterval: setIntervalFn,
       clearInterval: clearIntervalFn,
-    } = {}
-  ) {
+    } = opts ?? ({} as SyncEngineOptions);
     if (!doc) throw new TypeError("SyncEngine requires a Y.Doc");
     if (typeof send !== "function") throw new TypeError("SyncEngine requires a send(frame, id) function");
 
@@ -57,10 +81,9 @@ export class SyncEngine {
     this.awareness = awareness;
     this.reliable = reliable;
     this._send = send;
-    this._synced = false;
 
     this._delivery = new ReliableSync({
-      merge: Y.mergeUpdates,
+      merge: mergeUpdates,
       send: (update, id) => this._send(this._frameUpdate(update), id),
       resendInterval,
       maxUnconfirmedResends,
@@ -69,7 +92,7 @@ export class SyncEngine {
       clearInterval: clearIntervalFn,
     });
 
-    this._onDocUpdate = (update, origin) => {
+    this._onDocUpdate = (update: Uint8Array, origin: unknown) => {
       if (origin === this) return; // applied from the server; don't echo it back
       if (this.reliable && this._delivery.reliable) this._delivery.enqueue(update);
       else this._send(this._frameUpdate(update), undefined);
@@ -77,7 +100,7 @@ export class SyncEngine {
     this.doc.on("update", this._onDocUpdate);
 
     if (this.awareness) {
-      this._onAwarenessUpdate = ({ added, updated, removed }) => {
+      this._onAwarenessUpdate = ({ added, updated, removed }: AwarenessChange) => {
         const changed = added.concat(updated, removed);
         this._send(this._frameAwareness(changed), undefined); // presence: fire-and-forget
       };
@@ -86,17 +109,17 @@ export class SyncEngine {
   }
 
   /** True once we've received the server's SyncStep2 (the document is caught up). */
-  get synced() {
+  get synced(): boolean {
     return this._synced;
   }
 
   /** True while there are unacknowledged local document updates in flight. */
-  get hasPending() {
+  get hasPending(): boolean {
     return this._delivery.hasPending;
   }
 
   /** Transport connected: send the opening handshake and replay the unacked tail. */
-  onConnect() {
+  onConnect(): void {
     this._send(this._frameSyncStep1(), undefined);
     if (this.awareness && this.awareness.getLocalState() !== null) {
       this._send(this._frameAwareness([this.doc.clientID]), undefined);
@@ -105,7 +128,7 @@ export class SyncEngine {
   }
 
   /** Transport dropped: pause retransmits (queue kept) and clear remote presence. */
-  onDisconnect() {
+  onDisconnect(): void {
     this._synced = false;
     this._delivery.onDisconnect();
     if (this.awareness) {
@@ -115,7 +138,7 @@ export class SyncEngine {
   }
 
   /** A reliable-delivery `{ ack: id }` envelope arrived. */
-  ack(id) {
+  ack(id: number): void {
     this._delivery.onAck(id);
   }
 
@@ -123,10 +146,8 @@ export class SyncEngine {
    * Decode and apply one incoming binary protocol frame (document sync, awareness,
    * query, or auth). Returns a reply frame to transmit (e.g. SyncStep2 answering a
    * SyncStep1, or an awareness reply to a query), or null if there's nothing to send.
-   * @param {Uint8Array} frame
-   * @returns {Uint8Array|null}
    */
-  receive(frame) {
+  receive(frame: Uint8Array): Uint8Array | null {
     const decoder = decoding.createDecoder(frame);
     const encoder = encoding.createEncoder();
     const type = decoding.readVarUint(decoder);
@@ -158,30 +179,30 @@ export class SyncEngine {
   }
 
   /** Detach doc/awareness listeners and stop retransmits. */
-  destroy() {
+  destroy(): void {
     this.doc.off("update", this._onDocUpdate);
     if (this.awareness && this._onAwarenessUpdate) this.awareness.off("update", this._onAwarenessUpdate);
     this._delivery.destroy();
   }
 
-  _frameSyncStep1() {
+  private _frameSyncStep1(): Uint8Array {
     const e = encoding.createEncoder();
     encoding.writeVarUint(e, MessageType.Sync);
     writeSyncStep1(e, this.doc);
     return encoding.toUint8Array(e);
   }
 
-  _frameUpdate(update) {
+  private _frameUpdate(update: Uint8Array): Uint8Array {
     const e = encoding.createEncoder();
     encoding.writeVarUint(e, MessageType.Sync);
     writeUpdate(e, update);
     return encoding.toUint8Array(e);
   }
 
-  _frameAwareness(clients) {
+  private _frameAwareness(clients: number[]): Uint8Array {
     const e = encoding.createEncoder();
     encoding.writeVarUint(e, MessageType.Awareness);
-    encoding.writeVarUint8Array(e, encodeAwarenessUpdate(this.awareness, clients));
+    encoding.writeVarUint8Array(e, encodeAwarenessUpdate(this.awareness as Awareness, clients));
     return encoding.toUint8Array(e);
   }
 }

@@ -27,6 +27,10 @@ npm install yrb-lite-reliable
 them). `ReliableSync` has **no dependencies**; import it on its own via
 `yrb-lite-reliable/reliable` if that's all you want.
 
+Written in **TypeScript** and ships bundled type declarations, so TS projects get
+full types (typed options, methods, and errors) with no `@types` package — and
+plain-JS projects use the same compiled ESM with nothing extra to install.
+
 ## SyncEngine
 
 ```js

@@ -1,21 +1,34 @@
 {
   "name": "yrb-lite-reliable",
   "version": "0.1.0",
-  "description": "Client core for the yrb-lite y-websocket protocol: sync steps, message encode/decode, awareness, and reliable delivery (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Bring your own transport.",
+  "description": "Client core for the yrb-lite y-websocket protocol: sync steps, message encode/decode, awareness, and reliable delivery (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Written in TypeScript with bundled types; usable from plain JS. Bring your own transport.",
   "type": "module",
-  "main": "src/index.js",
-  "module": "src/index.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
-    "./reliable": "./src/reliable_sync.js",
-    "./base64": "./src/base64.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./reliable": {
+      "types": "./dist/reliable_sync.d.ts",
+      "default": "./dist/reliable_sync.js"
+    },
+    "./base64": {
+      "types": "./dist/base64.d.ts",
+      "default": "./dist/base64.js"
+    }
   },
   "files": [
-    "src",
+    "dist",
     "README.md"
   ],
   "scripts": {
-    "test": "node --test"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test"
   },
   "license": "MIT",
   "author": "JP Camara <jp@jpcamara.com>",
@@ -34,7 +47,8 @@
     "yrb-lite",
     "reliable-delivery",
     "actioncable",
-    "y-websocket"
+    "y-websocket",
+    "typescript"
   ],
   "publishConfig": {
     "access": "public"
@@ -53,6 +67,7 @@
   },
   "devDependencies": {
     "yjs": "^13.6.0",
-    "y-protocols": "^1.0.5"
+    "y-protocols": "^1.0.5",
+    "typescript": "^5.6.0"
   }
 }

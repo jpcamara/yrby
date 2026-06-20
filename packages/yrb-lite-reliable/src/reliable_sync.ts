@@ -19,61 +19,83 @@
 // Awareness/presence is intentionally out of scope -- it stays fire-and-forget
 // in the provider.
 
+/** An opaque timer handle (number in browsers, Timeout in Node). */
+export type TimerHandle = unknown;
+
+export interface ReliableSyncOptions {
+  /**
+   * Transmit one update. `update` is the raw merged update bytes; `id` is the
+   * cumulative sequence to ack against (undefined once we've fallen back).
+   */
+  send: (update: Uint8Array, id: number | undefined) => void;
+  /** Merge an array of update byte-arrays into one (typically Y.mergeUpdates). */
+  merge: (updates: Uint8Array[]) => Uint8Array;
+  /** Milliseconds between retransmits of the unacked tail (default 1000). */
+  resendInterval?: number;
+  /**
+   * Number of resends with no ack before deciding the server doesn't support
+   * reliable delivery and falling back to fire-and-forget (default 8).
+   */
+  maxUnconfirmedResends?: number;
+  /** Called once if that fallback trips. */
+  onFallback?: () => void;
+  /** Injectable timer hooks (default to globals); handy for tests. */
+  setInterval?: (handler: () => void, ms: number) => TimerHandle;
+  clearInterval?: (handle: TimerHandle) => void;
+}
+
 const DEFAULTS = { resendInterval: 1000, maxUnconfirmedResends: 8 };
 
+interface Pending {
+  seq: number;
+  update: Uint8Array;
+}
+
 export class ReliableSync {
-  /**
-   * @param {object} opts
-   * @param {(update: Uint8Array, id: number|undefined) => void} opts.send
-   * @param {(updates: Uint8Array[]) => Uint8Array} opts.merge
-   * @param {number} [opts.resendInterval=1000] ms between retransmits
-   * @param {number} [opts.maxUnconfirmedResends=8] resends with no ack before
-   *   deciding the server doesn't support reliable delivery and falling back
-   * @param {() => void} [opts.onFallback] called once if that fallback trips
-   * @param {(fn: () => void, ms: number) => any} [opts.setInterval]
-   * @param {(handle: any) => void} [opts.clearInterval]
-   */
-  constructor({
-    send,
-    merge,
-    resendInterval = DEFAULTS.resendInterval,
-    maxUnconfirmedResends = DEFAULTS.maxUnconfirmedResends,
-    onFallback,
-    setInterval: setIntervalFn,
-    clearInterval: clearIntervalFn,
-  } = {}) {
+  /** False after the no-ack fallback trips; updates then go fire-and-forget. */
+  reliable = true;
+  /** Unacked local updates, in order. */
+  pending: Pending[] = [];
+
+  private _send: ReliableSyncOptions["send"];
+  private _merge: ReliableSyncOptions["merge"];
+  private resendInterval: number;
+  private maxUnconfirmedResends: number;
+  private _onFallback?: () => void;
+  private _setInterval: (handler: () => void, ms: number) => TimerHandle;
+  private _clearInterval: (handle: TimerHandle) => void;
+
+  private nextSeq = 1;
+  private everAcked = false;
+  private _resendsSinceProgress = 0;
+  private _connected = false;
+  private _timer: TimerHandle | undefined = undefined;
+
+  constructor(opts: ReliableSyncOptions) {
+    const { send, merge, resendInterval, maxUnconfirmedResends, onFallback } = opts ?? ({} as ReliableSyncOptions);
     if (typeof send !== "function") throw new TypeError("ReliableSync requires a send(update, id) function");
     if (typeof merge !== "function") throw new TypeError("ReliableSync requires a merge(updates) function");
 
     this._send = send;
     this._merge = merge;
-    this.resendInterval = resendInterval;
-    this.maxUnconfirmedResends = maxUnconfirmedResends;
+    this.resendInterval = resendInterval ?? DEFAULTS.resendInterval;
+    this.maxUnconfirmedResends = maxUnconfirmedResends ?? DEFAULTS.maxUnconfirmedResends;
     this._onFallback = onFallback;
     // Injectable timer hooks make the resend loop testable; default to globals.
-    this._setInterval = setIntervalFn || ((fn, ms) => setInterval(fn, ms));
-    this._clearInterval = clearIntervalFn || ((h) => clearInterval(h));
-
-    this.reliable = true; // flips false after the no-ack fallback
-    this.pending = []; // unacked local updates: [{ seq, update }], in order
-    this.nextSeq = 1;
-    this.everAcked = false;
-    this._resendsSinceProgress = 0;
-    this._connected = false;
-    this._timer = undefined;
+    this._setInterval = opts.setInterval ?? ((fn, ms) => setInterval(fn, ms));
+    this._clearInterval = opts.clearInterval ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
   }
 
   /** True while there are unacknowledged local updates. */
-  get hasPending() {
+  get hasPending(): boolean {
     return this.pending.length > 0;
   }
 
   /**
    * Record a local document update. While reliable, it's queued and the unacked
    * tail is flushed; once we've fallen back, it's sent fire-and-forget.
-   * @param {Uint8Array} update
    */
-  enqueue(update) {
+  enqueue(update: Uint8Array): void {
     if (!this.reliable) {
       this._send(update, undefined);
       return;
@@ -87,7 +109,7 @@ export class ReliableSync {
    * in the batch, so a single { ack } cumulatively confirms everything up to it.
    * No-op while disconnected (the tail is replayed on the next onConnect).
    */
-  flush() {
+  flush(): void {
     if (!this._connected || this.pending.length === 0) return;
     const updates = this.pending.map((p) => p.update);
     const merged = updates.length === 1 ? updates[0] : this._merge(updates);
@@ -95,25 +117,22 @@ export class ReliableSync {
     this._send(merged, id);
   }
 
-  /**
-   * Confirm delivery up to `id`: prune every queued update with seq <= id.
-   * @param {number} id
-   */
-  onAck(id) {
+  /** Confirm delivery up to `id`: prune every queued update with seq <= id. */
+  onAck(id: number): void {
     this.everAcked = true;
     this._resendsSinceProgress = 0;
     this.pending = this.pending.filter((p) => p.seq > id);
   }
 
   /** Transport (re)connected: replay the unacked tail and resume retransmits. */
-  onConnect() {
+  onConnect(): void {
     this._connected = true;
     this.flush();
     this._startTimer();
   }
 
   /** Transport dropped: keep the queue (for reconnect replay), pause the timer. */
-  onDisconnect() {
+  onDisconnect(): void {
     this._connected = false;
     this._stopTimer();
   }
@@ -124,7 +143,7 @@ export class ReliableSync {
    * an ack, the server doesn't support reliable delivery, so fall back to
    * fire-and-forget (and stop tracking, since idempotent CRDT sync covers it).
    */
-  onTick() {
+  onTick(): void {
     if (!this._connected || this.pending.length === 0) return;
     if (!this.everAcked && ++this._resendsSinceProgress > this.maxUnconfirmedResends) {
       this.reliable = false;
@@ -137,18 +156,19 @@ export class ReliableSync {
   }
 
   /** Stop timers and drop references. Call when the provider is destroyed. */
-  destroy() {
+  destroy(): void {
     this._stopTimer();
     this.pending = [];
   }
 
-  _startTimer() {
-    if (this._timer || !this.reliable) return;
+  private _startTimer(): void {
+    if (this._timer !== undefined || !this.reliable) return;
     this._timer = this._setInterval(() => this.onTick(), this.resendInterval);
-    if (this._timer && typeof this._timer.unref === "function") this._timer.unref();
+    const t = this._timer as { unref?: () => void };
+    if (t && typeof t.unref === "function") t.unref();
   }
 
-  _stopTimer() {
+  private _stopTimer(): void {
     if (this._timer !== undefined) this._clearInterval(this._timer);
     this._timer = undefined;
   }

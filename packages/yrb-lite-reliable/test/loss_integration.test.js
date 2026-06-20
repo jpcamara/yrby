@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ReliableSync } from "../src/index.js";
+import { ReliableSync } from "../dist/index.js";
 
 // End-to-end property under a lossy link: every enqueued update eventually
 // reaches the server and the client's queue drains -- without a real socket or

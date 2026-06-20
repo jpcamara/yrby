@@ -4,7 +4,7 @@ import * as Y from "yjs";
 import * as encoding from "lib0/encoding";
 import { writeSyncStep1, writeUpdate } from "y-protocols/sync";
 import { Awareness, encodeAwarenessUpdate } from "y-protocols/awareness";
-import { SyncEngine, MessageType } from "../src/sync_engine.js";
+import { SyncEngine, MessageType } from "../dist/sync_engine.js";
 
 const MSG = MessageType;
 

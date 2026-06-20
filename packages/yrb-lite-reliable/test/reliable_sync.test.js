@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ReliableSync } from "../src/index.js";
+import { ReliableSync } from "../dist/index.js";
 
 // Test harness: capture sends, fake-merge by tagging, and control the timer.
 function harness(opts = {}) {
