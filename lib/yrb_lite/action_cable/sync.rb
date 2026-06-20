@@ -107,6 +107,17 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         @sync_backend = mode if mode
         @sync_backend || :memory
       end
+
+      # Enable AnyCable client-to-client whispering on this channel's stream (off
+      # by default). When on AND running under AnyCable, a client that opts into
+      # whisper delivery (the provider's `awarenessWhisper: true`) has its
+      # presence frames broadcast straight to other subscribers, no server
+      # round-trip. No effect on plain ActionCable (no whisper support; presence
+      # stays server-relayed). Document updates are never whispered.
+      def sync_whisper(value = nil)
+        @sync_whisper = value unless value.nil?
+        @sync_whisper || false
+      end
     end
 
     # Call from `subscribed`. Streams broadcasts for this document and
@@ -121,7 +132,7 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       Sync.subscribe(@sync_key)
       awareness = sync_awareness
 
-      stream_from sync_stream_name, coder: ActiveSupport::JSON do |payload|
+      sync_stream sync_stream_name, coder: ActiveSupport::JSON do |payload|
         sync_on_broadcast(payload)
       end
 
@@ -399,8 +410,17 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # outside Ruby) relays them directly. Send the opening SyncStep1 built from
     # the durable store. No warm replica is kept.
     def sync_for_store_backed
-      stream_from sync_stream_name
+      sync_stream sync_stream_name
       sync_transmit(sync_load_doc.sync_step1)
+    end
+
+    # Subscribe to the document's broadcast stream. When `sync_whisper` is on and
+    # the transport supports it (AnyCable adds `whispers_to`), enable
+    # client-to-client whispering on that stream; on plain ActionCable the option
+    # is omitted (it isn't supported), so presence stays server-relayed.
+    def sync_stream(name, **opts, &)
+      opts[:whisper] = true if self.class.sync_whisper && respond_to?(:whispers_to)
+      stream_from(name, **opts, &)
     end
 
     # Stateless per message: no warm replica, no assumptions about which process

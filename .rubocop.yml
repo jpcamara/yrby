@@ -38,7 +38,7 @@ Metrics/CyclomaticComplexity:
 Metrics/PerceivedComplexity:
   Max: 12
 Metrics/ModuleLength:
-  Max: 250
+  Max: 280 # YrbLite::ActionCable::Sync is one cohesive protocol concern
 Layout/LineLength:
   Max: 120
   Exclude:

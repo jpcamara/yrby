@@ -99,6 +99,42 @@ class SyncTest < Minitest::Test
     assert_equal :store, klass.sync_backend
   end
 
+  def test_sync_whisper_defaults_off_and_is_settable
+    klass = Class.new { include YrbLite::ActionCable::Sync }
+
+    refute klass.sync_whisper
+    klass.sync_whisper true
+
+    assert klass.sync_whisper
+  end
+
+  # `whisper: true` is passed to stream_from only when whispering is opted in AND
+  # the transport supports it (AnyCable adds a `whispers_to` method); otherwise
+  # the option is omitted so plain ActionCable isn't handed an unknown kwarg.
+  def whisper_stream_opts(anycable:, whisper:)
+    captured = []
+    klass = Class.new do
+      include YrbLite::ActionCable::Sync
+
+      define_method(:stream_from) { |_name, **opts, &_blk| captured << opts }
+      define_method(:sync_stream_name) { "yrb_lite:doc" }
+    end
+    klass.sync_whisper(whisper)
+    instance = klass.new
+    instance.define_singleton_method(:whispers_to) { |_b| nil } if anycable
+    instance.send(:sync_stream, "yrb_lite:doc")
+    captured.last
+  end
+
+  def test_sync_stream_enables_whisper_only_under_anycable_when_opted_in
+    assert whisper_stream_opts(anycable: true, whisper: true)[:whisper],
+           "AnyCable + opted in -> whisper enabled"
+    refute whisper_stream_opts(anycable: false, whisper: true).key?(:whisper),
+           "plain ActionCable -> no whisper option"
+    refute whisper_stream_opts(anycable: true, whisper: false).key?(:whisper),
+           "not opted in -> no whisper even under AnyCable"
+  end
+
   def test_store_backed_answers_sync_step1_from_the_store
     source = YrbLite::Doc.new
     source.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)

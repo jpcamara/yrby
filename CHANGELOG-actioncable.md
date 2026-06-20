@@ -6,6 +6,18 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0.beta2] - 2026-06-20
+
+### Added
+
+- `sync_whisper` channel option (default off). When enabled and running under
+  AnyCable, the channel enables client-to-client whispering on its stream
+  (`stream_from key, whisper: true`), so a client that opts into whisper delivery
+  (the JS provider's `awarenessWhisper: true`) has its presence frames broadcast
+  directly to other subscribers with no server round-trip. It has no effect on
+  plain ActionCable (which has no whisper support), so presence there stays
+  server-relayed. Document updates are never whispered.
+
 ## [0.1.0.beta1] - 2026-06-18
 
 ### Added
@@ -23,4 +35,5 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly.
 
 [Unreleased]: https://github.com/jpcamara/yrb-lite/commits/main
+[0.1.0.beta2]: https://github.com/jpcamara/yrb-lite/commits/main
 [0.1.0.beta1]: https://github.com/jpcamara/yrb-lite/releases/tag/v0.1.0.beta5
