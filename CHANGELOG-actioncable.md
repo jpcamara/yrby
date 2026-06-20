@@ -10,13 +10,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `awareness_whisper` channel option (default off). When enabled and running under
-  AnyCable, the channel enables client-to-client whispering on its stream
-  (`stream_from key, whisper: true`), so a client that opts into whisper delivery
-  (the JS provider's `awarenessWhisper: true`) has its presence frames broadcast
-  directly to other subscribers with no server round-trip. It has no effect on
-  plain ActionCable (which has no whisper support), so presence there stays
-  server-relayed. Document updates are never whispered.
+- Automatic AnyCable whispering for awareness/presence. When running under
+  AnyCable, the channel now enables client-to-client whispering on its stream
+  (`stream_from key, whisper: true`), so a client that whispers awareness has its
+  presence frames broadcast directly to other subscribers with no server
+  round-trip. It's automatic -- no configuration -- and a no-op on plain
+  ActionCable (no whisper support), where presence stays server-relayed. Document
+  updates are never whispered.
 
 ## [0.1.0.beta1] - 2026-06-18
 

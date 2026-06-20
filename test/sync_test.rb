@@ -99,19 +99,10 @@ class SyncTest < Minitest::Test
     assert_equal :store, klass.sync_backend
   end
 
-  def test_awareness_whisper_defaults_off_and_is_settable
-    klass = Class.new { include YrbLite::ActionCable::Sync }
-
-    refute klass.awareness_whisper
-    klass.awareness_whisper true
-
-    assert klass.awareness_whisper
-  end
-
-  # `whisper: true` is passed to stream_from only when whispering is opted in AND
-  # the transport supports it (AnyCable adds a `whispers_to` method); otherwise
-  # the option is omitted so plain ActionCable isn't handed an unknown kwarg.
-  def whisper_stream_opts(anycable:, whisper:)
+  # `whisper: true` is passed to stream_from automatically under AnyCable (which
+  # adds a `whispers_to` method), and omitted on plain ActionCable (where it
+  # isn't supported). No configuration either way.
+  def whisper_stream_opts(anycable:)
     captured = []
     klass = Class.new do
       include YrbLite::ActionCable::Sync
@@ -119,20 +110,17 @@ class SyncTest < Minitest::Test
       define_method(:stream_from) { |_name, **opts, &_blk| captured << opts }
       define_method(:sync_stream_name) { "yrb_lite:doc" }
     end
-    klass.awareness_whisper(whisper)
     instance = klass.new
     instance.define_singleton_method(:whispers_to) { |_b| nil } if anycable
     instance.send(:sync_stream, "yrb_lite:doc")
     captured.last
   end
 
-  def test_sync_stream_enables_whisper_only_under_anycable_when_opted_in
-    assert whisper_stream_opts(anycable: true, whisper: true)[:whisper],
-           "AnyCable + opted in -> whisper enabled"
-    refute whisper_stream_opts(anycable: false, whisper: true).key?(:whisper),
+  def test_sync_stream_enables_whisper_automatically_under_anycable
+    assert whisper_stream_opts(anycable: true)[:whisper],
+           "AnyCable -> whisper enabled automatically"
+    refute whisper_stream_opts(anycable: false).key?(:whisper),
            "plain ActionCable -> no whisper option"
-    refute whisper_stream_opts(anycable: true, whisper: false).key?(:whisper),
-           "not opted in -> no whisper even under AnyCable"
   end
 
   def test_store_backed_answers_sync_step1_from_the_store

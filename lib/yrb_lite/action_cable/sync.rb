@@ -107,18 +107,6 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         @sync_backend = mode if mode
         @sync_backend || :memory
       end
-
-      # Let awareness/presence frames travel over AnyCable's whisper -- broadcast
-      # straight to other subscribers with no server round-trip (off by default).
-      # When on AND running under AnyCable, the channel enables whispering on its
-      # stream so a client that opts in (the provider's `awarenessWhisper: true`)
-      # delivers presence this way. Only awareness is whispered; document updates
-      # always go through the server (recorded/acked). No effect on plain
-      # ActionCable (no whisper support; presence stays server-relayed).
-      def awareness_whisper(value = nil)
-        @awareness_whisper = value unless value.nil?
-        @awareness_whisper || false
-      end
     end
 
     # Call from `subscribed`. Streams broadcasts for this document and
@@ -415,12 +403,14 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       sync_transmit(sync_load_doc.sync_step1)
     end
 
-    # Subscribe to the document's broadcast stream. When `awareness_whisper` is
-    # on and the transport supports it (AnyCable adds `whispers_to`), enable
-    # client-to-client whispering on that stream; on plain ActionCable the option
-    # is omitted (it isn't supported), so presence stays server-relayed.
+    # Subscribe to the document's broadcast stream. Under AnyCable (which adds a
+    # `whispers_to` method) this also enables client-to-client whispering on the
+    # stream, so a client that whispers awareness (any AnyCable consumer can)
+    # reaches other subscribers with no server round-trip. On plain ActionCable
+    # the option is omitted -- there's no whisper support -- so presence is
+    # server-relayed. It's automatic either way; nothing to configure.
     def sync_stream(name, **opts, &)
-      opts[:whisper] = true if self.class.awareness_whisper && respond_to?(:whispers_to)
+      opts[:whisper] = true if respond_to?(:whispers_to)
       stream_from(name, **opts, &)
     end
 
