@@ -9,11 +9,11 @@ documents.
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include YrbLite::Sync
+  include YrbLite::ActionCable::Sync
 
   def subscribed   = sync_for(params[:id])
   def receive(data) = sync_receive(data)
-  def unsubscribed = sync_clear_presence
+  def unsubscribed = sync_unsubscribed(params[:id])
 end
 ```
 
@@ -45,7 +45,11 @@ welcome.
 ## Install
 
 ```ruby
+# Core CRDT + protocol primitives:
 gem "yrb-lite"
+
+# For the Rails/ActionCable server concern (YrbLite::ActionCable::Sync):
+gem "yrb-lite-actioncable"
 ```
 
 Requires Ruby 3.4 or newer. Precompiled gems ship for Linux and macOS on Ruby
@@ -128,13 +132,14 @@ send_to_peer(response) unless response.empty?
 
 ### ActionCable Integration
 
-`YrbLite::Sync` is a channel concern that implements the full y-websocket
-protocol (document sync + awareness/presence) over ActionCable:
+`YrbLite::ActionCable::Sync` (from the `yrb-lite-actioncable` gem) is a channel
+concern that implements the full y-websocket protocol (document sync +
+awareness/presence) over ActionCable:
 
 ```ruby
 # app/channels/document_channel.rb
 class DocumentChannel < ApplicationCable::Channel
-  include YrbLite::Sync
+  include YrbLite::ActionCable::Sync
 
   # Optional persistence:
   # on_load { |key| Document.find_by(key: key)&.content }
@@ -149,7 +154,7 @@ class DocumentChannel < ApplicationCable::Channel
   end
 
   def unsubscribed
-    sync_clear_presence
+    sync_unsubscribed(params[:id])
   end
 end
 ```
@@ -211,7 +216,7 @@ copy.
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include YrbLite::Sync
+  include YrbLite::ActionCable::Sync
   sync_backend :store
 
   on_load  { |key| MyStore.load(key) }          # required: source of truth
@@ -261,7 +266,7 @@ auditing or to guarantee nothing is distributed until it's stored, register an
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include YrbLite::Sync
+  include YrbLite::ActionCable::Sync
 
   on_change do |key, update|
     # Synchronous, durable write. `update` is the exact CRDT delta.
@@ -270,7 +275,7 @@ class DocumentChannel < ApplicationCable::Channel
 
   def subscribed = sync_for(params[:id])
   def receive(data) = sync_receive(data)
-  def unsubscribed = sync_clear_presence
+  def unsubscribed = sync_unsubscribed(params[:id])
 end
 ```
 

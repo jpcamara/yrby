@@ -52,6 +52,11 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     MSG_KIND_AWARENESS = 3
     MSG_KIND_AWARENESS_QUERY = 4
 
+    # Default incoming-frame size cap (decoded bytes). Generous enough for a
+    # large initial SyncStep2, small enough to bound a single message's
+    # allocation/parse cost. Override per channel with `max_frame_bytes`.
+    DEFAULT_MAX_FRAME_BYTES = 8 * 1024 * 1024
+
     def self.included(base)
       base.extend(ClassMethods)
     end
@@ -61,14 +66,26 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # return a binary Y.js update (or nil for a fresh document).
       def on_load(callable = nil, &block)
         @on_load = callable || block if callable || block
-        @on_load
+        return @on_load if defined?(@on_load) && @on_load
+
+        superclass.respond_to?(:on_load) ? superclass.on_load : nil
       end
 
-      # Persist document state. Called with (key, update) after every
+      # Persist a document *snapshot*. Called with (key, update) after every
       # message that modified the document.
+      #
+      # NOTE: on_save is best-effort snapshotting, not authoritative durability.
+      # It runs outside the per-document apply lock, so against a last-write-wins
+      # store two overlapping saves can race and an older snapshot can land last.
+      # For durable, ordered, accepted-change guarantees use `on_change` (which
+      # records under the lock, before apply/broadcast); pair it with on_save only
+      # as a read-path optimization (a snapshot to load from instead of replaying
+      # the whole change log).
       def on_save(callable = nil, &block)
         @on_save = callable || block if callable || block
-        @on_save
+        return @on_save if defined?(@on_save) && @on_save
+
+        superclass.respond_to?(:on_save) ? superclass.on_save : nil
       end
 
       # Record every document change durably before it is applied or
@@ -90,7 +107,9 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # and broadcasts, with an optional on_save snapshot.
       def on_change(callable = nil, &block)
         @on_change = callable || block if callable || block
-        @on_change
+        return @on_change if defined?(@on_change) && @on_change
+
+        superclass.respond_to?(:on_change) ? superclass.on_change : nil
       end
 
       # Select the document backend:
@@ -103,9 +122,28 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       #     store (`on_load`); changes are recorded (`on_change`) and relayed.
       #     Works under AnyCable (broadcasts handled outside Ruby, no worker
       #     affinity) and across processes. Requires `on_load` and `on_change`.
+      #
+      #     Presence in :store mode is peer-whisper only: the server relays
+      #     awareness but keeps no ephemeral awareness state and answers no
+      #     awareness query, so a late joiner sees other cursors as they next
+      #     move rather than immediately. Document data is fully consistent; only
+      #     presence is best-effort.
       def sync_backend(mode = nil)
         @sync_backend = mode if mode
-        @sync_backend || :memory
+        return @sync_backend if defined?(@sync_backend) && @sync_backend
+
+        superclass.respond_to?(:sync_backend) ? superclass.sync_backend : :memory
+      end
+
+      # Maximum size, in decoded bytes, of an incoming document/awareness frame.
+      # Oversized frames are dropped before base64 decode and before native
+      # parsing, so a client can't force huge allocations/CPU (a DoS vector).
+      # Defaults to DEFAULT_MAX_FRAME_BYTES; set to nil to disable the cap.
+      def max_frame_bytes(bytes = :__unset__)
+        @max_frame_bytes = bytes unless bytes == :__unset__
+        return @max_frame_bytes if defined?(@max_frame_bytes)
+
+        superclass.respond_to?(:max_frame_bytes) ? superclass.max_frame_bytes : DEFAULT_MAX_FRAME_BYTES
       end
     end
 
@@ -161,11 +199,19 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # Optional client-supplied id for reliable delivery (see sync_send_ack).
       id = data.is_a?(Hash) ? data["id"] : nil
 
+      # Frame-size cap: drop oversized frames before decoding (the encoded form
+      # is ~4/3 the decoded size) and again after, so a client can't force large
+      # base64 decodes / native parses / merges. A dropped frame is never acked.
+      cap = self.class.max_frame_bytes
+      return if cap && m.bytesize > (cap * 4 / 3) + 4
+
       begin
         bytes = Base64.strict_decode64(m)
       rescue ArgumentError
         return # not valid base64; ignore the frame and keep the connection
       end
+
+      return if cap && bytes.bytesize > cap
 
       sync_send_ack(id, sync_dispatch(m, bytes))
     end
@@ -399,8 +445,26 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # outside Ruby) relays them directly. Send the opening SyncStep1 built from
     # the durable store. No warm replica is kept.
     def sync_for_store_backed
+      sync_require_store_recorder!
       sync_stream sync_stream_name
       sync_transmit(sync_load_doc.sync_step1)
+    end
+
+    # Store mode acks updates as *durably recorded*, so it MUST have both a
+    # loader (to rebuild the doc and detect causal gaps) and a recorder (to
+    # actually persist before acking). Fail closed at subscribe time rather than
+    # silently acking and broadcasting updates that were never stored -- which a
+    # cold load or reconnect would then lose.
+    def sync_require_store_recorder!
+      missing = []
+      missing << :on_load unless self.class.on_load
+      missing << :on_change unless self.class.on_change
+      return if missing.empty?
+
+      raise YrbLite::Error,
+            "sync_backend :store requires #{missing.join(" and ")}. Store mode acks " \
+            "updates as durably recorded; without a recorder an ack would claim a " \
+            "persistence that never happened, and a cold load would lose the edit."
     end
 
     # Subscribe to the document's broadcast stream. Under AnyCable (which adds a
@@ -445,9 +509,13 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
           return :gap
         end
 
-        if (recorder = self.class.on_change)
-          sync_record_change(recorder, update) # record before relay
-        end
+        # Defense in depth: sync_require_store_recorder! makes this unreachable
+        # without a recorder, but never broadcast/ack as :recorded if one is
+        # somehow absent -- that would acknowledge an unstored update.
+        recorder = self.class.on_change
+        return :noop unless recorder
+
+        sync_record_change(recorder, update) # record before relay
         sync_distribute(encoded)
         :recorded
       when MSG_KIND_AWARENESS

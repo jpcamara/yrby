@@ -34,6 +34,12 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "base64", "~> 0.2"
   spec.add_dependency "yrb-lite", ">= 0.1.0.beta5"
+  # The concern references ActionCable (channels, streaming, broadcasting) and
+  # ActiveSupport (Concern, JSON coder) constants directly. Rails apps already
+  # bundle these, but declaring them makes use outside a full Rails bundle fail
+  # at install time with a clear message instead of at runtime with a NameError.
+  spec.add_dependency "actioncable", ">= 7.0"
+  spec.add_dependency "activesupport", ">= 7.0"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"

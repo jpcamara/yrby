@@ -722,4 +722,70 @@ class SyncTest < Minitest::Test
     assert_equal 0, result[1] # Responding to STEP1
     assert_kind_of String, result[2] # Response bytes (SyncStep2)
   end
+
+  # --- Audit hardening ---------------------------------------------------
+
+  def test_store_backend_fails_closed_without_recorder
+    klass = Class.new do
+      include YrbLite::ActionCable::Sync
+
+      sync_backend :store
+      on_load { |_key| nil }
+      # deliberately no on_change
+    end
+    err = assert_raises(YrbLite::Error) { klass.new.send(:sync_require_store_recorder!) }
+    assert_match(/on_change/, err.message)
+  end
+
+  def test_store_backend_requires_loader_too
+    klass = Class.new do
+      include YrbLite::ActionCable::Sync
+
+      sync_backend :store
+      on_change { |_key, _update| nil }
+      # deliberately no on_load
+    end
+    err = assert_raises(YrbLite::Error) { klass.new.send(:sync_require_store_recorder!) }
+    assert_match(/on_load/, err.message)
+  end
+
+  def test_store_backend_with_both_callbacks_passes
+    klass = Class.new do
+      include YrbLite::ActionCable::Sync
+
+      sync_backend :store
+      on_load { |_key| nil }
+      on_change { |_key, _update| nil }
+    end
+    klass.new.send(:sync_require_store_recorder!) # must not raise
+  end
+
+  def test_config_is_inherited_by_subclasses
+    base = Class.new do
+      include YrbLite::ActionCable::Sync
+
+      sync_backend :store
+      on_load { |_key| nil }
+      on_change { |_key, _update| nil }
+    end
+    sub = Class.new(base)
+
+    assert_equal :store, sub.sync_backend, "sync_backend inherits"
+    refute_nil sub.on_load, "on_load inherits"
+    refute_nil sub.on_change, "on_change inherits"
+  end
+
+  def test_max_frame_bytes_default_override_and_disable
+    klass = Class.new { include YrbLite::ActionCable::Sync }
+
+    assert_equal YrbLite::ActionCable::Sync::DEFAULT_MAX_FRAME_BYTES, klass.max_frame_bytes
+
+    klass.max_frame_bytes 1024
+
+    assert_equal 1024, klass.max_frame_bytes
+
+    klass.max_frame_bytes nil # explicitly disable the cap
+
+    assert_nil klass.max_frame_bytes
+  end
 end
