@@ -58,6 +58,13 @@ export interface YProtocolSessionOptions {
   maxUnconfirmedResends?: number;
   /** Forwarded to ReliableSync. */
   onFallback?: () => void;
+  /**
+   * Called when an incoming frame can't be decoded/applied (malformed bytes,
+   * truncated message, unexpected structure). The frame is dropped and the
+   * session keeps running. `context` names where it happened (e.g. "receive").
+   * Defaults to a `console.warn`.
+   */
+  onError?: (error: unknown, context: string) => void;
   /** Injectable timer hooks (forwarded to ReliableSync); handy for tests. */
   setInterval?: (handler: () => void, ms: number) => TimerHandle;
   clearInterval?: (handle: TimerHandle) => void;
@@ -71,6 +78,7 @@ export class YProtocolSession {
   reliable: boolean;
 
   private _send: YProtocolSessionOptions["send"];
+  private _onError: (error: unknown, context: string) => void;
   private _synced = false;
   private _delivery: ReliableSync;
   private _onDocUpdate: (update: Uint8Array, origin: unknown) => void;
@@ -84,6 +92,7 @@ export class YProtocolSession {
       resendInterval,
       maxUnconfirmedResends,
       onFallback,
+      onError,
       setInterval: setIntervalFn,
       clearInterval: clearIntervalFn,
     } = opts ?? ({} as YProtocolSessionOptions);
@@ -94,6 +103,7 @@ export class YProtocolSession {
     this.awareness = awareness;
     this.reliable = reliable;
     this._send = send;
+    this._onError = onError ?? ((error, context) => console.warn(`[yrb-lite] ${context}:`, error));
 
     this._delivery = new ReliableSync({
       merge: mergeUpdates,
@@ -161,34 +171,41 @@ export class YProtocolSession {
    * SyncStep1, or an awareness reply to a query), or null if there's nothing to send.
    */
   receive(frame: Uint8Array): Uint8Array | null {
-    const decoder = decoding.createDecoder(frame);
-    const encoder = encoding.createEncoder();
-    const type = decoding.readVarUint(decoder);
-    switch (type) {
-      case MessageType.Sync: {
-        encoding.writeVarUint(encoder, MessageType.Sync);
-        const syncType = readSyncMessage(decoder, encoder, this.doc, this);
-        if (!this._synced && syncType === messageYjsSyncStep2) this._synced = true;
-        break;
+    // A malformed/truncated frame must never take down the transport callback:
+    // decode + apply defensively, drop the frame on error, keep the session live.
+    try {
+      const decoder = decoding.createDecoder(frame);
+      const encoder = encoding.createEncoder();
+      const type = decoding.readVarUint(decoder);
+      switch (type) {
+        case MessageType.Sync: {
+          encoding.writeVarUint(encoder, MessageType.Sync);
+          const syncType = readSyncMessage(decoder, encoder, this.doc, this);
+          if (!this._synced && syncType === messageYjsSyncStep2) this._synced = true;
+          break;
+        }
+        case MessageType.Awareness:
+          if (this.awareness) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
+          return null;
+        case MessageType.QueryAwareness:
+          if (!this.awareness) return null;
+          encoding.writeVarUint(encoder, MessageType.Awareness);
+          encoding.writeVarUint8Array(
+            encoder,
+            encodeAwarenessUpdate(this.awareness, [...this.awareness.getStates().keys()])
+          );
+          break;
+        case MessageType.Auth:
+          readAuthMessage(decoder, this.doc, (_doc, reason) => console.warn(`[yrb-lite] auth denied: ${reason}`));
+          return null;
+        default:
+          return null; // unknown message type: ignore
       }
-      case MessageType.Awareness:
-        if (this.awareness) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
-        return null;
-      case MessageType.QueryAwareness:
-        if (!this.awareness) return null;
-        encoding.writeVarUint(encoder, MessageType.Awareness);
-        encoding.writeVarUint8Array(
-          encoder,
-          encodeAwarenessUpdate(this.awareness, [...this.awareness.getStates().keys()])
-        );
-        break;
-      case MessageType.Auth:
-        readAuthMessage(decoder, this.doc, (_doc, reason) => console.warn(`[yrb-lite] auth denied: ${reason}`));
-        return null;
-      default:
-        return null;
+      return encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
+    } catch (error) {
+      this._onError(error, "receive");
+      return null;
     }
-    return encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
   }
 
   /** Detach doc/awareness listeners and stop retransmits. */

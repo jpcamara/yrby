@@ -35,7 +35,10 @@ export interface CableConsumer {
 }
 
 export interface ActionCableProviderOptions
-  extends Pick<YProtocolSessionOptions, "reliable" | "resendInterval" | "maxUnconfirmedResends" | "onFallback"> {
+  extends Pick<
+    YProtocolSessionOptions,
+    "reliable" | "resendInterval" | "maxUnconfirmedResends" | "onFallback" | "onError"
+  > {
   /** Awareness/presence instance. Defaults to a fresh `new Awareness(doc)`. */
   awareness?: Awareness | null;
 }
@@ -54,6 +57,7 @@ export class ActionCableProvider {
   readonly awareness: Awareness;
   readonly session: YProtocolSession;
   private subscription: CableSubscription | null = null;
+  private _onError: (error: unknown, context: string) => void;
 
   constructor(
     doc: Doc,
@@ -67,6 +71,7 @@ export class ActionCableProvider {
     this.channelName = channelName;
     this.channelParams = channelParams;
     this.awareness = opts.awareness ?? new Awareness(doc);
+    this._onError = opts.onError ?? ((error, context) => console.warn(`[yrb-lite] ${context}:`, error));
 
     this.session = new YProtocolSession(doc, {
       awareness: this.awareness,
@@ -74,6 +79,7 @@ export class ActionCableProvider {
       resendInterval: opts.resendInterval,
       maxUnconfirmedResends: opts.maxUnconfirmedResends,
       onFallback: opts.onFallback,
+      onError: this._onError,
       send: (frame, id, sendOpts) => this._send(frame, id, sendOpts),
     });
   }
@@ -102,7 +108,16 @@ export class ActionCableProvider {
           }
           const payload = message && (message.m ?? message.update);
           if (typeof payload !== "string") return;
-          const reply = provider.session.receive(fromBase64(payload));
+          // Guard base64 decode too: a malformed envelope must not throw into
+          // the cable callback (session.receive is itself defensive).
+          let frame: Uint8Array;
+          try {
+            frame = fromBase64(payload);
+          } catch (error) {
+            provider._onError(error, "received");
+            return;
+          }
+          const reply = provider.session.receive(frame);
           if (reply) provider._send(reply, undefined); // e.g. SyncStep2 answering a SyncStep1
         },
         connected() {

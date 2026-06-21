@@ -203,3 +203,39 @@ function writeSyncStep2FromPeer(encoder, peer) {
   encoding.writeVarUint(encoder, 1);
   encoding.writeVarUint8Array(encoder, Y.encodeStateAsUpdate(peer));
 }
+
+test("receive: a malformed frame is dropped, not thrown, and reports via onError", () => {
+  const errors = [];
+  const doc = new Y.Doc();
+  const eng = new YProtocolSession(doc, {
+    ...noTimers,
+    send: () => {},
+    onError: (err, context) => errors.push({ err, context }),
+  });
+
+  // A Sync frame whose body is garbage (claims more bytes than it carries).
+  const bad = Uint8Array.from([MSG.Sync, 0xff, 0xff, 0xff, 0xff]);
+  let reply;
+  assert.doesNotThrow(() => {
+    reply = eng.receive(bad);
+  }, "a malformed frame must not throw into the transport callback");
+  assert.equal(reply, null, "nothing to send back for a dropped frame");
+  assert.equal(errors.length, 1, "onError fired once");
+  assert.equal(errors[0].context, "receive", "context names where it failed");
+
+  // The session is still live: a valid frame afterwards still works.
+  assert.doesNotThrow(() => eng.receive(syncStep1Frame(new Y.Doc())));
+  eng.destroy();
+});
+
+test("receive: an unknown message type is ignored without error", () => {
+  const errors = [];
+  const { eng } = engine({ onError: (err, context) => errors.push({ err, context }) });
+  const e = encoding.createEncoder();
+  encoding.writeVarUint(e, 99); // not a known MessageType
+  encoding.writeVarUint8Array(e, Uint8Array.from([1, 2, 3]));
+  const reply = eng.receive(encoding.toUint8Array(e));
+  assert.equal(reply, null, "unknown type yields no reply");
+  assert.equal(errors.length, 0, "unknown type is not an error, just ignored");
+  eng.destroy();
+});

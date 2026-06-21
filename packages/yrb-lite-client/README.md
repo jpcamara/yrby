@@ -98,6 +98,11 @@ subscription.received = (msg) => {
 Local document edits and awareness changes are picked up automatically from the
 doc's / awareness's `update` events — you never call anything for outbound edits.
 
+Pass `onError(error, context)` (on either `ActionCableProvider` or
+`YProtocolSession`) to observe dropped frames: a malformed or truncated message
+is decoded defensively, dropped, and reported here rather than thrown into your
+transport callback. Defaults to a `console.warn`.
+
 ## ReliableSync (standalone)
 
 ```js
