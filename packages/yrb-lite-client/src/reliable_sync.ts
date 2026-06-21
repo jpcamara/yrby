@@ -70,6 +70,9 @@ export class ReliableSync {
   private _resendsSinceProgress = 0;
   private _connected = false;
   private _timer: TimerHandle | undefined = undefined;
+  // Memoized merge of the unacked tail. The tail only changes on enqueue/ack, so
+  // retransmit ticks reuse this instead of re-merging the whole queue each time.
+  private _tailCache: Uint8Array | undefined = undefined;
 
   constructor(opts: ReliableSyncOptions) {
     const { send, merge, resendInterval, maxUnconfirmedResends, onFallback } = opts ?? ({} as ReliableSyncOptions);
@@ -101,6 +104,7 @@ export class ReliableSync {
       return;
     }
     this.pending.push({ seq: this.nextSeq++, update });
+    this._tailCache = undefined; // tail changed
     this.flush();
   }
 
@@ -111,17 +115,22 @@ export class ReliableSync {
    */
   flush(): void {
     if (!this._connected || this.pending.length === 0) return;
-    const updates = this.pending.map((p) => p.update);
-    const merged = updates.length === 1 ? updates[0] : this._merge(updates);
-    const id = this.pending[this.pending.length - 1].seq;
-    this._send(merged, id);
+    this._send(this._mergedTail(), this.pending[this.pending.length - 1].seq);
   }
 
-  /** Confirm delivery up to `id`: prune every queued update with seq <= id. */
+  /**
+   * Confirm delivery up to `id`: prune every queued update with seq <= id.
+   * Acks arrive over the wire, so validate before pruning -- a malformed value
+   * (NaN/string/negative) or an impossible future id must not silently drop the
+   * queue. Invalid acks are ignored.
+   */
   onAck(id: number): void {
+    if (!Number.isSafeInteger(id) || id < 0) return; // malformed / impossible
+    if (this.pending.length > 0 && id > this.pending[this.pending.length - 1].seq) return; // future ack
     this.everAcked = true;
     this._resendsSinceProgress = 0;
     this.pending = this.pending.filter((p) => p.seq > id);
+    this._tailCache = undefined; // tail changed
   }
 
   /** Transport (re)connected: replay the unacked tail and resume retransmits. */
@@ -146,10 +155,7 @@ export class ReliableSync {
   onTick(): void {
     if (!this._connected || this.pending.length === 0) return;
     if (!this.everAcked && ++this._resendsSinceProgress > this.maxUnconfirmedResends) {
-      this.reliable = false;
-      this.pending = [];
-      this._stopTimer();
-      this._onFallback?.();
+      this._fallback();
       return;
     }
     this.flush();
@@ -159,6 +165,31 @@ export class ReliableSync {
   destroy(): void {
     this._stopTimer();
     this.pending = [];
+    this._tailCache = undefined;
+  }
+
+  /** The unacked tail merged into one delta (memoized between tail changes). */
+  private _mergedTail(): Uint8Array {
+    if (this._tailCache === undefined) {
+      const updates = this.pending.map((p) => p.update);
+      this._tailCache = updates.length === 1 ? updates[0] : this._merge(updates);
+    }
+    return this._tailCache;
+  }
+
+  /**
+   * The server never acked after maxUnconfirmedResends: assume it doesn't support
+   * reliable delivery and switch to fire-and-forget. Deliver the tail one last
+   * time first so an edit isn't lost just because no ack ever came -- THEN drop
+   * retention (idempotent CRDT sync covers anything that still slips).
+   */
+  private _fallback(): void {
+    this.reliable = false;
+    if (this.pending.length > 0) this._send(this._mergedTail(), undefined);
+    this.pending = [];
+    this._tailCache = undefined;
+    this._stopTimer();
+    this._onFallback?.();
   }
 
   private _startTimer(): void {

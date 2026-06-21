@@ -51,11 +51,28 @@ const consumer = createConsumer();
 const provider = new ActionCableProvider(doc, consumer, "DocumentChannel", { id: docId });
 
 provider.connect(); // does not auto-connect — wire your editor binding first
+
+// Observe the connection (one signal, no separate "sync" event):
+provider.on("status", ({ status }) => render(status));
+//   "connecting"  -> subscription created, transport not up yet
+//   "connected"   -> transport up, exchanging sync steps (show "syncing")
+//   "synced"      -> caught up with the server
+//   "disconnected"-> torn down via disconnect()/destroy()
+//                    (a dropped transport ActionCable will retry shows as "connecting")
+
+// provider.status     -> the current status (same union as above)
 // provider.awareness  -> the Awareness instance (a fresh one unless you pass opts.awareness)
 // provider.synced     -> caught up with the server
 // provider.hasPending -> unacked local edits in flight
 // provider.destroy()  -> tear down
 ```
+
+On `disconnect()` / `destroy()` — and on browser `pagehide` — the provider
+broadcasts a presence removal so peers drop your cursor immediately instead of
+waiting for the awareness timeout. `destroy()` is synchronous (the unsubscribe is
+deferred one microtask so that removal flushes first) and tears down the
+`Awareness` only if the provider created it; a `Awareness` you pass in is yours
+to own.
 
 On the server, include `YrbLite::ActionCable::Sync` in a channel named
 `DocumentChannel` (the [`yrb-lite-actioncable`](https://rubygems.org/gems/yrb-lite-actioncable)

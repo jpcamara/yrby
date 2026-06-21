@@ -10,7 +10,13 @@ export type { YProtocolSessionOptions, SendOptions } from "./y_protocol_session.
 // Ready-made ActionCable / AnyCable provider built on YProtocolSession (with awareness
 // whisper support). Bring your own provider instead by composing YProtocolSession.
 export { ActionCableProvider } from "./actioncable_provider.js";
-export type { ActionCableProviderOptions, CableConsumer, CableSubscription } from "./actioncable_provider.js";
+export type {
+  ActionCableProviderOptions,
+  ProviderStatus,
+  StatusEvent,
+  CableConsumer,
+  CableSubscription,
+} from "./actioncable_provider.js";
 
 // Optional base64 helpers for transports that carry frames as strings.
 export { toBase64, fromBase64 } from "./base64.js";

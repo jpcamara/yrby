@@ -239,3 +239,47 @@ test("receive: an unknown message type is ignored without error", () => {
   assert.equal(errors.length, 0, "unknown type is not an error, just ignored");
   eng.destroy();
 });
+
+test("receive: trailing bytes after a complete message are rejected via onError", () => {
+  const errors = [];
+  const doc = new Y.Doc();
+  const eng = new YProtocolSession(doc, { ...noTimers, send: () => {}, onError: (_e, c) => errors.push(c) });
+  const good = syncStep1Frame(new Y.Doc());
+  const padded = new Uint8Array(good.length + 1);
+  padded.set(good, 0);
+  padded[good.length] = 0xff; // one extra garbage byte
+  const reply = eng.receive(padded);
+  assert.equal(reply, null, "a frame with trailing bytes yields no reply");
+  assert.ok(errors.includes("receive"), "trailing bytes reported via onError");
+  eng.destroy();
+});
+
+test("awareness: applying a remote update does NOT echo it back out (origin guard)", () => {
+  // A produces a presence frame.
+  const docA = new Y.Doc();
+  const awA = new Awareness(docA);
+  const engA = new YProtocolSession(docA, { awareness: awA, send: () => {} });
+  awA.setLocalStateField("user", "alice");
+  const e = encoding.createEncoder();
+  encoding.writeVarUint(e, MSG.Awareness);
+  encoding.writeVarUint8Array(e, encodeAwarenessUpdate(awA, [docA.clientID]));
+  const aliceFrame = encoding.toUint8Array(e);
+
+  // B applies it and must NOT re-send anything (no echo).
+  const docB = new Y.Doc();
+  const awB = new Awareness(docB);
+  const sentB = [];
+  const engB = new YProtocolSession(docB, { awareness: awB, send: (f) => sentB.push(f) });
+  engB.receive(aliceFrame);
+  assert.equal(awB.getStates().get(docA.clientID)?.user, "alice", "remote presence applied");
+  assert.equal(
+    sentB.filter((f) => frameType(f) === MSG.Awareness).length,
+    0,
+    "applied remote presence is NOT echoed back out"
+  );
+
+  engA.destroy();
+  engB.destroy();
+  awA.destroy();
+  awB.destroy();
+});

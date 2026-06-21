@@ -130,3 +130,51 @@ test("an ack resets the fallback counter (slow but live link doesn't fall back)"
   for (let i = 0; i < 2; i++) h.tick();
   assert.equal(h.rs.reliable, true, "acks keep the connection out of fallback");
 });
+
+test("fallback delivers the tail one last time before dropping retention", () => {
+  const h = harness({ maxUnconfirmedResends: 2 });
+  h.rs.onConnect();
+  h.rs.enqueue(u(1));
+  h.rs.enqueue(u(2));
+  const before = h.sent.length;
+  for (let i = 0; i < 3; i++) h.tick(); // trip the fallback
+
+  assert.equal(h.rs.reliable, false, "fell back");
+  const afterFallback = h.sent.slice(before);
+  assert.ok(afterFallback.length >= 1, "the tail was flushed during fallback");
+  const last = h.sent.at(-1);
+  assert.equal(last.id, undefined, "the final delivery is fire-and-forget (no id)");
+  assert.equal(h.rs.hasPending, false, "retention dropped after the final flush");
+});
+
+test("onAck ignores malformed, negative, and impossible future acks", () => {
+  const h = harness();
+  h.rs.onConnect();
+  h.rs.enqueue(u(1));
+  h.rs.enqueue(u(2)); // seqs 1,2
+
+  h.rs.onAck(NaN);
+  h.rs.onAck("2"); // not a number at runtime
+  h.rs.onAck(-1);
+  h.rs.onAck(999); // future: beyond the highest pending seq
+  assert.equal(h.rs.hasPending, true, "no invalid ack pruned the queue");
+  assert.equal(h.rs.pending.length, 2);
+
+  h.rs.onAck(1); // valid
+  assert.equal(h.rs.pending.length, 1, "a valid ack prunes seq <= id");
+});
+
+test("the merged tail is memoized across retransmit ticks, invalidated on change", () => {
+  const h = harness();
+  h.rs.onConnect();
+  h.rs.enqueue(u(1));
+  h.rs.enqueue(u(2)); // one merge for this flush
+  const mergesAfterFlush = h.mergeCalls.length;
+
+  h.tick();
+  h.tick();
+  assert.equal(h.mergeCalls.length, mergesAfterFlush, "retransmits reuse the memoized tail");
+
+  h.rs.enqueue(u(3)); // tail changed -> next flush re-merges
+  assert.equal(h.mergeCalls.length, mergesAfterFlush + 1, "enqueue invalidates the cache");
+});

@@ -123,7 +123,12 @@ export class YProtocolSession {
     this.doc.on("update", this._onDocUpdate);
 
     if (this.awareness) {
-      this._onAwarenessUpdate = ({ added, updated, removed }: AwarenessChange) => {
+      this._onAwarenessUpdate = ({ added, updated, removed }: AwarenessChange, origin: unknown) => {
+        // Only broadcast OUR OWN presence changes (origin "local"). Updates we
+        // applied from a peer -- and our own remote-cleanup in onDisconnect --
+        // carry origin === this; re-sending those would echo presence and
+        // broadcast tombstones for other clients' cursors.
+        if (origin === this) return;
         const changed = added.concat(updated, removed);
         this._send(this._frameAwareness(changed), undefined, { awareness: true }); // fire-and-forget
       };
@@ -160,6 +165,18 @@ export class YProtocolSession {
     }
   }
 
+  /**
+   * Broadcast that our local presence is gone (sets local state to null, which
+   * emits a removal awareness frame through `send`). Call this while the
+   * transport is still live so peers drop our cursor immediately instead of
+   * waiting for the awareness timeout. A no-op when there's no local state.
+   */
+  removeLocalAwareness(): void {
+    if (this.awareness && this.awareness.getLocalState() !== null) {
+      this.awareness.setLocalState(null); // fires "update" -> sends the removal frame
+    }
+  }
+
   /** A reliable-delivery `{ ack: id }` envelope arrived. */
   ack(id: number): void {
     this._delivery.onAck(id);
@@ -186,20 +203,28 @@ export class YProtocolSession {
         }
         case MessageType.Awareness:
           if (this.awareness) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
-          return null;
+          break;
         case MessageType.QueryAwareness:
-          if (!this.awareness) return null;
-          encoding.writeVarUint(encoder, MessageType.Awareness);
-          encoding.writeVarUint8Array(
-            encoder,
-            encodeAwarenessUpdate(this.awareness, [...this.awareness.getStates().keys()])
-          );
+          if (this.awareness) {
+            encoding.writeVarUint(encoder, MessageType.Awareness);
+            encoding.writeVarUint8Array(
+              encoder,
+              encodeAwarenessUpdate(this.awareness, [...this.awareness.getStates().keys()])
+            );
+          }
           break;
         case MessageType.Auth:
           readAuthMessage(decoder, this.doc, (_doc, reason) => console.warn(`[yrb-lite] auth denied: ${reason}`));
-          return null;
+          break;
         default:
           return null; // unknown message type: ignore
+      }
+      // This protocol is one message per frame. Anything left after a complete
+      // message is malformed (trailing garbage, or low-level packed messages
+      // whose tail we'd silently drop) -- reject it rather than partially trust.
+      if (decoding.hasContent(decoder)) {
+        this._onError(new Error("frame has trailing bytes after a complete message"), "receive");
+        return null;
       }
       return encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
     } catch (error) {
