@@ -14,7 +14,7 @@ Three layers, use whichever you need:
   round-trip), and falls back to a normal server-relayed send on plain
   ActionCable — nothing to configure. Document updates always go through the
   server (recorded/acked).
-- **`SyncEngine`** — the transport-agnostic core. Binds to a `Y.Doc` (+ optional
+- **`YProtocolSession`** — the transport-agnostic core. Binds to a `Y.Doc` (+ optional
   `Awareness`) and owns the y-protocols **message encode/decode**, the
   **sync-step handshake** (SyncStep1 / SyncStep2 / Update), **awareness**, and
   reliable delivery. Speaks raw `Uint8Array` frames; you wire any socket.
@@ -30,7 +30,7 @@ Three layers, use whichever you need:
 npm install yrb-lite-client
 ```
 
-`ActionCableProvider` and `SyncEngine` need `yjs` and `y-protocols` (peers — your
+`ActionCableProvider` and `YProtocolSession` need `yjs` and `y-protocols` (peers — your
 app already has them), plus an ActionCable/AnyCable consumer. `ReliableSync` has
 **no dependencies**; import it on its own via `yrb-lite-client/reliable` if
 that's all you want.
@@ -60,20 +60,20 @@ provider.connect(); // does not auto-connect — wire your editor binding first
 On the server, include `YrbLite::ActionCable::Sync` in a channel named
 `DocumentChannel` (the [`yrb-lite-actioncable`](https://rubygems.org/gems/yrb-lite-actioncable)
 gem), which enables AnyCable whispering on the stream automatically. Need a
-different transport or framing? Drop down to `SyncEngine` and supply your own
+different transport or framing? Drop down to `YProtocolSession` and supply your own
 `send`.
 
-## SyncEngine
+## YProtocolSession
 
 ```js
-import { SyncEngine, toBase64, fromBase64 } from "yrb-lite-client";
+import { YProtocolSession, toBase64, fromBase64 } from "yrb-lite-client";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 
 const doc = new Y.Doc();
 const awareness = new Awareness(doc);
 
-const engine = new SyncEngine(doc, {
+const session = new YProtocolSession(doc, {
   awareness,
   // transmit one raw frame; `id` is set for reliable doc updates -> tag your envelope
   send: (frame, id) => {
@@ -84,15 +84,15 @@ const engine = new SyncEngine(doc, {
 });
 
 // wire your transport's callbacks:
-subscription.connected    = () => engine.onConnect();      // handshake + replay
-subscription.disconnected = () => engine.onDisconnect();   // pause + clear presence
+subscription.connected    = () => session.onConnect();      // handshake + replay
+subscription.disconnected = () => session.onDisconnect();   // pause + clear presence
 subscription.received = (msg) => {
-  if (msg.ack !== undefined) return engine.ack(msg.ack);   // reliable ack envelope
-  const reply = engine.receive(fromBase64(msg.update || msg.m)); // decode + apply
+  if (msg.ack !== undefined) return session.ack(msg.ack);   // reliable ack envelope
+  const reply = session.receive(fromBase64(msg.update || msg.m)); // decode + apply
   if (reply) subscription.send({ update: toBase64(reply) });     // e.g. answer a SyncStep1
 };
-// engine.synced -> caught up; engine.hasPending -> unacked edits in flight
-// engine.destroy() -> detach listeners + stop retransmits
+// session.synced -> caught up; session.hasPending -> unacked edits in flight
+// session.destroy() -> detach listeners + stop retransmits
 ```
 
 Local document edits and awareness changes are picked up automatically from the

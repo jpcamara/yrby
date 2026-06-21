@@ -1,6 +1,7 @@
-// A batteries-included client core for the yrb-lite y-websocket protocol.
+// A batteries-included, transport-agnostic session for the yrb-lite
+// y-websocket protocol.
 //
-// SyncEngine composes ReliableSync and additionally owns the parts a provider
+// YProtocolSession composes ReliableSync and additionally owns the parts a provider
 // would otherwise re-implement: the y-protocols message framing (encode/decode),
 // the sync-step handshake (SyncStep1 / SyncStep2 / Update), and awareness
 // encode/apply. It binds to a Y.Doc (and optional Awareness) and speaks in raw
@@ -40,7 +41,7 @@ export interface SendOptions {
   awareness?: boolean;
 }
 
-export interface SyncEngineOptions {
+export interface YProtocolSessionOptions {
   /**
    * Transmit one raw protocol frame. `id` is set only for reliable document
    * updates (tag it onto your envelope so the server can ack). `opts.awareness`
@@ -64,18 +65,18 @@ export interface SyncEngineOptions {
 
 type AwarenessChange = { added: number[]; updated: number[]; removed: number[] };
 
-export class SyncEngine {
+export class YProtocolSession {
   readonly doc: Doc;
   readonly awareness: Awareness | null;
   reliable: boolean;
 
-  private _send: SyncEngineOptions["send"];
+  private _send: YProtocolSessionOptions["send"];
   private _synced = false;
   private _delivery: ReliableSync;
   private _onDocUpdate: (update: Uint8Array, origin: unknown) => void;
   private _onAwarenessUpdate?: (change: AwarenessChange, origin: unknown) => void;
 
-  constructor(doc: Doc, opts: SyncEngineOptions) {
+  constructor(doc: Doc, opts: YProtocolSessionOptions) {
     const {
       send,
       awareness = null,
@@ -85,9 +86,9 @@ export class SyncEngine {
       onFallback,
       setInterval: setIntervalFn,
       clearInterval: clearIntervalFn,
-    } = opts ?? ({} as SyncEngineOptions);
-    if (!doc) throw new TypeError("SyncEngine requires a Y.Doc");
-    if (typeof send !== "function") throw new TypeError("SyncEngine requires a send(frame, id) function");
+    } = opts ?? ({} as YProtocolSessionOptions);
+    if (!doc) throw new TypeError("YProtocolSession requires a Y.Doc");
+    if (typeof send !== "function") throw new TypeError("YProtocolSession requires a send(frame, id) function");
 
     this.doc = doc;
     this.awareness = awareness;

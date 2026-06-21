@@ -2,7 +2,7 @@
 // ActionCable / AnyCable. It owns the cable subscription and translates between
 // the cable's JSON envelope (`{ update, id }` / `{ ack }`, base64) and raw
 // protocol frames; everything else (sync steps, encode/decode, awareness,
-// reliable delivery) lives in SyncEngine. So this is just the transport glue.
+// reliable delivery) lives in YProtocolSession. So this is just the transport glue.
 //
 // Awareness/presence frames are sent via AnyCable's `whisper` when the
 // subscription supports it (client-to-client, no server round-trip); on plain
@@ -13,7 +13,7 @@
 // The constructor does NOT auto-connect: wire your editor binding first, then
 // call `connect()`. Same `(doc, consumer, channelName, channelParams, opts)`
 // shape as a typical y-rb/actioncable provider.
-import { SyncEngine, MessageType, type SyncEngineOptions, type SendOptions } from "./sync_engine.js";
+import { YProtocolSession, MessageType, type YProtocolSessionOptions, type SendOptions } from "./y_protocol_session.js";
 import { toBase64, fromBase64 } from "./base64.js";
 import { Awareness } from "y-protocols/awareness";
 import type { Doc } from "yjs";
@@ -35,7 +35,7 @@ export interface CableConsumer {
 }
 
 export interface ActionCableProviderOptions
-  extends Pick<SyncEngineOptions, "reliable" | "resendInterval" | "maxUnconfirmedResends" | "onFallback"> {
+  extends Pick<YProtocolSessionOptions, "reliable" | "resendInterval" | "maxUnconfirmedResends" | "onFallback"> {
   /** Awareness/presence instance. Defaults to a fresh `new Awareness(doc)`. */
   awareness?: Awareness | null;
 }
@@ -52,7 +52,7 @@ export class ActionCableProvider {
   readonly channelName: string;
   readonly channelParams: object;
   readonly awareness: Awareness;
-  readonly engine: SyncEngine;
+  readonly session: YProtocolSession;
   private subscription: CableSubscription | null = null;
 
   constructor(
@@ -68,7 +68,7 @@ export class ActionCableProvider {
     this.channelParams = channelParams;
     this.awareness = opts.awareness ?? new Awareness(doc);
 
-    this.engine = new SyncEngine(doc, {
+    this.session = new YProtocolSession(doc, {
       awareness: this.awareness,
       reliable: opts.reliable,
       resendInterval: opts.resendInterval,
@@ -80,12 +80,12 @@ export class ActionCableProvider {
 
   /** True once the document has caught up with the server (received a SyncStep2). */
   get synced(): boolean {
-    return this.engine.synced;
+    return this.session.synced;
   }
 
   /** True while there are unacknowledged local document updates in flight. */
   get hasPending(): boolean {
-    return this.engine.hasPending;
+    return this.session.hasPending;
   }
 
   connect(): void {
@@ -97,19 +97,19 @@ export class ActionCableProvider {
         received(message: CableMessage) {
           // Reliable-delivery ack: confirm + prune the local queue.
           if (message && message.ack !== undefined) {
-            provider.engine.ack(message.ack);
+            provider.session.ack(message.ack);
             return;
           }
           const payload = message && (message.m ?? message.update);
           if (typeof payload !== "string") return;
-          const reply = provider.engine.receive(fromBase64(payload));
+          const reply = provider.session.receive(fromBase64(payload));
           if (reply) provider._send(reply, undefined); // e.g. SyncStep2 answering a SyncStep1
         },
         connected() {
-          provider.engine.onConnect(); // handshake + replay the unacked tail
+          provider.session.onConnect(); // handshake + replay the unacked tail
         },
         disconnected() {
-          provider.engine.onDisconnect(); // pause retransmits, clear remote presence
+          provider.session.onDisconnect(); // pause retransmits, clear remote presence
         },
       }
     );
@@ -117,21 +117,21 @@ export class ActionCableProvider {
 
   disconnect(): void {
     if (!this.subscription) return;
-    this.engine.onDisconnect();
+    this.session.onDisconnect();
     this.consumer.subscriptions.remove(this.subscription);
     this.subscription = null;
   }
 
   destroy(): void {
     this.disconnect();
-    this.engine.destroy();
+    this.session.destroy();
   }
 
   // Send one raw protocol frame over the cable. Awareness frames are whispered
   // when the subscription supports it (AnyCable), else sent normally; document
   // frames always go through `send`. `id` (reliable doc updates) is tagged onto
   // the envelope so the server can ack. A no-op while disconnected: reliable
-  // frames stay queued in the engine and flush on the next connect().
+  // frames stay queued in the session and flush on the next connect().
   private _send(frame: Uint8Array, id: number | undefined, opts?: SendOptions): void {
     const sub = this.subscription;
     if (!sub) return;

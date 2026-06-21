@@ -25,7 +25,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build",
     "test": "npm run build && node --test"

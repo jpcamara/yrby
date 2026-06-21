@@ -4,7 +4,7 @@ import * as Y from "yjs";
 import * as encoding from "lib0/encoding";
 import { writeSyncStep1, writeUpdate } from "y-protocols/sync";
 import { Awareness, encodeAwarenessUpdate } from "y-protocols/awareness";
-import { SyncEngine, MessageType } from "../dist/sync_engine.js";
+import { YProtocolSession, MessageType } from "../dist/y_protocol_session.js";
 
 const MSG = MessageType;
 
@@ -17,7 +17,7 @@ const noTimers = { setInterval: () => 0, clearInterval: () => {} };
 function engine(opts = {}) {
   const doc = new Y.Doc();
   const sent = []; // [{ frame, id }]
-  const eng = new SyncEngine(doc, { send: (frame, id) => sent.push({ frame, id }), ...noTimers, ...opts });
+  const eng = new YProtocolSession(doc, { send: (frame, id) => sent.push({ frame, id }), ...noTimers, ...opts });
   return { doc, eng, sent };
 }
 
@@ -36,8 +36,8 @@ function updateFrame(update) {
 }
 
 test("requires a doc and a send function", () => {
-  assert.throws(() => new SyncEngine(null, { send: () => {} }), /Y\.Doc/);
-  assert.throws(() => new SyncEngine(new Y.Doc(), {}), /send/);
+  assert.throws(() => new YProtocolSession(null, { send: () => {} }), /Y\.Doc/);
+  assert.throws(() => new YProtocolSession(new Y.Doc(), {}), /send/);
 });
 
 test("onConnect emits a SyncStep1 handshake frame", () => {
@@ -122,14 +122,14 @@ test("two engines converge end-to-end through a relay", () => {
     // reply (e.g. SyncStep2) goes back to the sender's peer as well
     return reply;
   };
-  a = new SyncEngine(docA, {
+  a = new YProtocolSession(docA, {
     reliable: false,
     send: (frame) => {
       const reply = b.receive(frame);
       if (reply) a.receive(reply);
     },
   });
-  b = new SyncEngine(docB, {
+  b = new YProtocolSession(docB, {
     reliable: false,
     send: (frame) => {
       const reply = a.receive(frame);
@@ -152,7 +152,7 @@ test("awareness frames are flagged { awareness: true } on the send callback; doc
   const doc = new Y.Doc();
   const awA = new Awareness(doc);
   const sends = []; // [{ type, awareness }]
-  const eng = new SyncEngine(doc, {
+  const eng = new YProtocolSession(doc, {
     awareness: awA,
     ...noTimers,
     send: (frame, _id, opts) => sends.push({ type: frameType(frame), awareness: !!(opts && opts.awareness) }),
@@ -174,7 +174,7 @@ test("awareness: a local presence change is framed; an incoming one is applied",
   const docA = new Y.Doc();
   const awA = new Awareness(docA);
   const sentA = [];
-  const engA = new SyncEngine(docA, { awareness: awA, send: (frame, id) => sentA.push({ frame, id }) });
+  const engA = new YProtocolSession(docA, { awareness: awA, send: (frame, id) => sentA.push({ frame, id }) });
 
   awA.setLocalStateField("user", "alice");
   const awarenessFrame = sentA.find((s) => frameType(s.frame) === MSG.Awareness);
@@ -184,7 +184,7 @@ test("awareness: a local presence change is framed; an incoming one is applied",
   // Apply alice's presence into a second engine's awareness.
   const docB = new Y.Doc();
   const awB = new Awareness(docB);
-  const engB = new SyncEngine(docB, { awareness: awB, send: () => {} });
+  const engB = new YProtocolSession(docB, { awareness: awB, send: () => {} });
   const e = encoding.createEncoder();
   encoding.writeVarUint(e, MSG.Awareness);
   encoding.writeVarUint8Array(e, encodeAwarenessUpdate(awA, [docA.clientID]));
