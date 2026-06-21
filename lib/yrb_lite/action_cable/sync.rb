@@ -340,6 +340,13 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         next :noop unless update
         next :gap unless awareness.update_ready?(update)
 
+        # Exactly-once durable side effects. A lost-ack retry re-sends an update
+        # we already recorded and applied; it's causally ready but doesn't
+        # advance the doc. Ack it (so the client stops retransmitting) WITHOUT
+        # re-recording, re-applying, or re-broadcasting -- otherwise on_change
+        # (audit rows, counters, webhooks, billing) double-fires on every retry.
+        next :applied unless awareness.update_advances?(update)
+
         sync_record_change(recorder, update) # durable write; raise to reject
         awareness.apply_update(update) # only recorded changes reach the doc
         sync_distribute(encoded) # ...and only then the wire
@@ -508,6 +515,12 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
           sync_transmit(doc.sync_step1)
           return :gap
         end
+
+        # Exactly-once: a lost-ack retry re-sends an update already in the store,
+        # so the freshly-loaded doc already contains it and it doesn't advance.
+        # Ack it without recording/relaying again (see update_advances? and the
+        # authoritative path).
+        return :applied unless doc.update_advances?(update)
 
         # Defense in depth: sync_require_store_recorder! makes this unreachable
         # without a recorder, but never broadcast/ack as :recorded if one is

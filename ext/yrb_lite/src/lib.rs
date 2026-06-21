@@ -1,11 +1,17 @@
-use magnus::{function, method, prelude::*, Error, RString, Ruby, TryConvert, Value};
+use magnus::{
+    function, method, prelude::*, Error, ExceptionClass, RString, Ruby, TryConvert, Value,
+};
 use std::sync::Mutex;
-use yrs::encoding::read::{Cursor, Read};
-use yrs::sync::protocol::MessageReader;
 use yrs::sync::{Awareness, DefaultProtocol, Message, Protocol, SyncMessage};
-use yrs::updates::decoder::{Decode, DecoderV1};
+use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::{Encode, Encoder, EncoderV1};
 use yrs::{ClientID, Doc, ReadTxn, Transact};
+
+mod protocol;
+use protocol::{
+    awareness_client_ids_in, classify_message, doc_has_pending, merged_doc_update,
+    update_advances_doc, update_is_ready,
+};
 
 /// Wrapper around yrs Doc.
 ///
@@ -123,98 +129,37 @@ fn copy_bytes(s: RString) -> Vec<u8> {
     unsafe { s.as_slice() }.to_vec()
 }
 
-fn runtime_error(msg: String) -> Error {
-    Error::new(Ruby::get().unwrap().exception_runtime_error(), msg)
+/// Build a `YrbLite::Error` (the gem's own error class, defined in `init`) so
+/// native decode/apply/validation failures surface as a project-specific error
+/// rather than a generic RuntimeError. Falls back to RuntimeError only if the
+/// class somehow can't be resolved.
+fn yrb_error(msg: String) -> Error {
+    let ruby = Ruby::get().unwrap();
+    let class = ruby
+        .eval::<ExceptionClass>("YrbLite::Error")
+        .unwrap_or_else(|_| ruby.exception_runtime_error());
+    Error::new(class, msg)
 }
 
-// ============================================================================
-// Pure protocol helpers (no Ruby, no GVL); unit-tested in the `tests` module.
-// ============================================================================
+/// Yjs/lib0 client IDs must be JS-safe integers (<= 2^53 - 1). Above that they
+/// round or collide when crossing the JS/Yjs boundary, and a client-id collision
+/// corrupts a CRDT. Explicit (Ruby-supplied) IDs are validated here; the random
+/// default IDs that yrs generates are already in range.
+const MAX_SAFE_CLIENT_ID: u64 = (1 << 53) - 1;
 
-/// Classify a frame: a non-zero code only for exactly one well-formed message
-/// that consumes the whole buffer (see `RbAwareness::message_kind` for codes).
-fn classify_message(bytes: &[u8]) -> u8 {
-    let mut decoder = DecoderV1::new(Cursor::new(bytes));
-    let msg = match Message::decode(&mut decoder) {
-        Ok(msg) => msg,
-        Err(_) => return 0, // empty or malformed
-    };
-    // Any remaining byte means a second message or trailing garbage.
-    if decoder.read_u8().is_ok() {
-        return 0;
-    }
-    match msg {
-        Message::Sync(SyncMessage::SyncStep1(_)) => 1,
-        Message::Sync(SyncMessage::SyncStep2(_)) | Message::Sync(SyncMessage::Update(_)) => 2,
-        Message::Awareness(_) => 3,
-        Message::AwarenessQuery => 4,
-        _ => 0, // Auth / Custom: not part of our model
-    }
+/// Pure predicate (no Ruby), so the boundary is unit-testable without a VM.
+pub(crate) fn is_safe_client_id(id: u64) -> bool {
+    id <= MAX_SAFE_CLIENT_ID
 }
 
-/// Merge the document-update deltas (Update / SyncStep2 payloads) carried by a
-/// frame into one update, or `None` if the frame carries no document change
-/// (a request, an awareness update, or a no-op handshake SyncStep2).
-fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
-    let mut decoder = DecoderV1::new(Cursor::new(bytes));
-    let mut updates: Vec<Vec<u8>> = Vec::new();
-    for msg in MessageReader::new(&mut decoder) {
-        match msg.map_err(|e| e.to_string())? {
-            Message::Sync(SyncMessage::Update(u)) | Message::Sync(SyncMessage::SyncStep2(u)) => {
-                updates.push(u)
-            }
-            _ => {}
-        }
+fn validate_client_id(id: u64) -> Result<u64, Error> {
+    if !is_safe_client_id(id) {
+        return Err(yrb_error(format!(
+            "client_id {id} exceeds the maximum safe integer ({MAX_SAFE_CLIENT_ID} = 2^53 - 1); \
+             Yjs client IDs must be JS-safe integers to avoid collisions"
+        )));
     }
-    let merged = match updates.len() {
-        0 => return Ok(None),
-        1 => updates.pop().unwrap(),
-        _ => yrs::merge_updates_v1(&updates).map_err(|e| e.to_string())?,
-    };
-    let update = yrs::Update::decode_v1(&merged).map_err(|e| e.to_string())?;
-    // A genuine no-op (e.g. the empty SyncStep2 in an opening handshake) carries
-    // no structs, no deletes, and no dependencies. We must NOT treat a causally-
-    // pending update as a no-op: since yrs 0.26 such an update reports an empty
-    // state_vector (its structs can't integrate yet), but it still carries
-    // content and a non-empty lower bound (the deps it's waiting on). Dropping it
-    // here would silently swallow a gappy update instead of rejecting + resyncing.
-    if update.state_vector().is_empty()
-        && update.delete_set().is_empty()
-        && update.state_vector_lower().is_empty()
-    {
-        return Ok(None);
-    }
-    Ok(Some(merged))
-}
-
-/// Collect the awareness client IDs referenced by a frame's awareness messages.
-fn awareness_client_ids_in(bytes: &[u8]) -> Result<Vec<u64>, String> {
-    let mut decoder = DecoderV1::new(Cursor::new(bytes));
-    let mut ids = Vec::new();
-    for msg in MessageReader::new(&mut decoder) {
-        if let Message::Awareness(update) = msg.map_err(|e| e.to_string())? {
-            ids.extend(update.clients.keys().map(|c| c.get()));
-        }
-    }
-    Ok(ids)
-}
-
-/// True if applying `update_bytes` to `doc` would integrate cleanly: every
-/// dependency the update references is already present (the doc's state vector
-/// covers the update's lower bound). A pure read; does not mutate the doc.
-/// When false, applying it would park a pending struct -- the signal that an
-/// earlier, causally-prior update is missing.
-fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
-    let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
-    Ok(doc.transact().state_vector() >= update.state_vector_lower())
-}
-
-/// True if the doc holds pending structs or a pending delete set -- blocks that
-/// couldn't integrate because a dependency is missing. Used as a backstop after
-/// loading from storage: leftover pending means the stored log has a causal gap.
-fn doc_has_pending(doc: &Doc) -> bool {
-    let txn = doc.transact();
-    txn.store().pending_update().is_some() || txn.store().pending_ds().is_some()
+    Ok(id)
 }
 
 // ============================================================================
@@ -227,7 +172,7 @@ impl RbDoc {
         let doc = if args.is_empty() {
             Doc::new()
         } else {
-            let client_id: u64 = TryConvert::try_convert(args[0])?;
+            let client_id = validate_client_id(TryConvert::try_convert(args[0])?)?;
             Doc::with_client_id(client_id)
         };
         Ok(RbDoc(doc))
@@ -270,7 +215,7 @@ impl RbDoc {
             let txn = doc.transact();
             Ok(txn.encode_state_as_update_v1(&sv))
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
 
@@ -283,7 +228,7 @@ impl RbDoc {
             let mut txn = doc.transact_mut();
             txn.apply_update(update).map_err(|e| e.to_string())
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
     }
 
     /// True if applying `update` would integrate cleanly (its dependencies are
@@ -292,7 +237,16 @@ impl RbDoc {
     fn update_ready(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
-        nogvl(move || update_is_ready(doc, &update_bytes)).map_err(runtime_error)
+        nogvl(move || update_is_ready(doc, &update_bytes)).map_err(yrb_error)
+    }
+
+    /// True if applying `update` would change the document (it carries new
+    /// content), false if the doc already contains it (an already-applied
+    /// retry). See `update_advances_doc`. Pure read; does not mutate.
+    fn update_advances(&self, update: RString) -> Result<bool, Error> {
+        let update_bytes = copy_bytes(update);
+        let doc = &self.0;
+        nogvl(move || update_advances_doc(doc, &update_bytes)).map_err(yrb_error)
     }
 
     /// True if the document holds pending (un-integrable) structs waiting on a
@@ -323,7 +277,7 @@ impl RbDoc {
             let update = txn.encode_state_as_update_v1(&sv);
             Ok(Message::Sync(SyncMessage::SyncStep2(update)).encode_v1())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
@@ -369,15 +323,15 @@ impl RbDoc {
                     Message::Custom(tag, _) => Ok((tag, 0, Vec::new())),
                 }
             })
-            .map_err(runtime_error)?;
+            .map_err(yrb_error)?;
 
         Ok(Some((msg_type, sync_type, binary_string(&response))))
     }
 
     /// Encode raw update bytes as a sync Update message
     fn encode_update_message(&self, update: RString) -> RString {
-        let update_bytes = unsafe { update.as_slice() };
-        let msg = Message::Sync(SyncMessage::Update(update_bytes.to_vec()));
+        let update_bytes = copy_bytes(update);
+        let msg = Message::Sync(SyncMessage::Update(update_bytes));
         binary_string(&msg.encode_v1())
     }
 }
@@ -392,7 +346,7 @@ impl RbAwareness {
         let awareness = if args.is_empty() {
             Awareness::new(Doc::new())
         } else {
-            let client_id: u64 = TryConvert::try_convert(args[0])?;
+            let client_id = validate_client_id(TryConvert::try_convert(args[0])?)?;
             Awareness::new(Doc::with_client_id(client_id))
         };
         Ok(RbAwareness(Mutex::new(awareness)))
@@ -437,7 +391,7 @@ impl RbAwareness {
                 .map_err(|e| e.to_string())?;
             Ok(encoder.to_vec())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
@@ -464,14 +418,14 @@ impl RbAwareness {
             }
             Ok(encoder.to_vec())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
     /// Encode an update message for broadcasting changes to peers.
     fn encode_update(&self, update: RString) -> RString {
-        let update_bytes = unsafe { update.as_slice() };
-        let msg = Message::Sync(SyncMessage::Update(update_bytes.to_vec()));
+        let update_bytes = copy_bytes(update);
+        let msg = Message::Sync(SyncMessage::Update(update_bytes));
         binary_string(&msg.encode_v1())
     }
 
@@ -504,14 +458,14 @@ impl RbAwareness {
             let txn = doc.transact();
             Ok(txn.encode_state_as_update_v1(&sv))
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
 
     /// Set local awareness state (JSON string)
     fn set_local_state(&self, json: String) -> Result<(), Error> {
         let value: serde_json::Value =
-            serde_json::from_str(&json).map_err(|e| runtime_error(e.to_string()))?;
+            serde_json::from_str(&json).map_err(|e| yrb_error(e.to_string()))?;
         let awareness = &self.0;
         nogvl(move || -> Result<(), String> {
             awareness
@@ -520,7 +474,7 @@ impl RbAwareness {
                 .set_local_state(value)
                 .map_err(|e| e.to_string())
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
     }
 
     /// Get local awareness state as JSON string (or nil if not set)
@@ -549,7 +503,7 @@ impl RbAwareness {
             let update = awareness.update().map_err(|e| e.to_string())?;
             Ok(Message::Awareness(update).encode_v1())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
@@ -563,7 +517,7 @@ impl RbAwareness {
             let mut txn = doc.transact_mut();
             txn.apply_update(update).map_err(|e| e.to_string())
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
     }
 
     /// True if applying `update` would integrate cleanly (its dependencies are
@@ -576,7 +530,19 @@ impl RbAwareness {
             let doc = awareness.lock().unwrap().doc().clone();
             update_is_ready(&doc, &update_bytes)
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
+    }
+
+    /// True if applying `update` would change the document, false if it's an
+    /// already-applied retry. See `update_advances_doc`. Pure read.
+    fn update_advances(&self, update: RString) -> Result<bool, Error> {
+        let update_bytes = copy_bytes(update);
+        let awareness = &self.0;
+        nogvl(move || {
+            let doc = awareness.lock().unwrap().doc().clone();
+            update_advances_doc(&doc, &update_bytes)
+        })
+        .map_err(yrb_error)
     }
 
     /// True if the document holds pending (un-integrable) structs waiting on a
@@ -596,7 +562,7 @@ impl RbAwareness {
     /// connection closes.
     fn awareness_client_ids(&self, data: RString) -> Result<Vec<u64>, Error> {
         let data_bytes = copy_bytes(data);
-        nogvl(move || awareness_client_ids_in(&data_bytes)).map_err(runtime_error)
+        nogvl(move || awareness_client_ids_in(&data_bytes)).map_err(yrb_error)
     }
 
     /// Classify a frame for safe routing and relay. Returns a code only when
@@ -621,7 +587,7 @@ impl RbAwareness {
     /// path records this exact delta before applying it.
     fn update_from_message(&self, data: RString) -> Result<Option<RString>, Error> {
         let data_bytes = copy_bytes(data);
-        let merged = nogvl(move || merged_doc_update(&data_bytes)).map_err(runtime_error)?;
+        let merged = nogvl(move || merged_doc_update(&data_bytes)).map_err(yrb_error)?;
         Ok(merged.map(|b| binary_string(&b)))
     }
 
@@ -650,7 +616,7 @@ impl RbAwareness {
                 .map_err(|e| e.to_string())?;
             Ok(Message::Awareness(update).encode_v1())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 }
@@ -682,6 +648,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     doc_class.define_method("apply_update", method!(RbDoc::apply_update, 1))?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
+    doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("pending?", method!(RbDoc::pending, 0))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
     doc_class.define_method("sync_step2", method!(RbDoc::sync_step2, 1))?;
@@ -713,6 +680,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     awareness_class.define_method("apply_update", method!(RbAwareness::apply_update, 1))?;
     awareness_class.define_method("update_ready?", method!(RbAwareness::update_ready, 1))?;
+    awareness_class.define_method("update_advances?", method!(RbAwareness::update_advances, 1))?;
     awareness_class.define_method("pending?", method!(RbAwareness::pending, 0))?;
     awareness_class.define_method("set_local_state", method!(RbAwareness::set_local_state, 1))?;
     awareness_class.define_method("local_state", method!(RbAwareness::local_state, 0))?;
@@ -745,162 +713,4 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     module.const_set("MSG_SYNC_UPDATE", 2u8)?;
 
     Ok(())
-}
-
-// ============================================================================
-// Tests for the pure protocol helpers (run with `cargo test`, no Ruby VM)
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use yrs::sync::Awareness;
-    use yrs::Text;
-
-    fn text_update(content: &str) -> Vec<u8> {
-        let doc = Doc::new();
-        let text = doc.get_or_insert_text("content");
-        text.insert(&mut doc.transact_mut(), 0, content);
-        let update = doc
-            .transact()
-            .encode_state_as_update_v1(&yrs::StateVector::default());
-        update
-    }
-
-    fn update_frame(content: &str) -> Vec<u8> {
-        Message::Sync(SyncMessage::Update(text_update(content))).encode_v1()
-    }
-
-    fn step1_frame() -> Vec<u8> {
-        Message::Sync(SyncMessage::SyncStep1(yrs::StateVector::default())).encode_v1()
-    }
-
-    fn awareness_frame(client_id: u64) -> Vec<u8> {
-        let mut awareness = Awareness::new(Doc::with_client_id(client_id));
-        awareness
-            .set_local_state(serde_json::json!({ "user": "alice" }))
-            .unwrap();
-        Message::Awareness(awareness.update().unwrap()).encode_v1()
-    }
-
-    #[test]
-    fn classify_accepts_clean_single_messages() {
-        assert_eq!(classify_message(&step1_frame()), 1);
-        assert_eq!(classify_message(&update_frame("hi")), 2);
-        assert_eq!(classify_message(&awareness_frame(7)), 3);
-        assert_eq!(classify_message(&Message::AwarenessQuery.encode_v1()), 4);
-    }
-
-    #[test]
-    fn classify_rejects_unsafe_frames() {
-        assert_eq!(classify_message(b""), 0, "empty");
-        assert_eq!(classify_message(&[0xff, 0xff, 0xff]), 0, "garbage");
-        assert_eq!(classify_message(&[0x63, 0x63, 0x63]), 0, "unknown type");
-
-        let mut two = update_frame("a");
-        two.extend(awareness_frame(1)); // two messages packed together
-        assert_eq!(classify_message(&two), 0, "multi-message");
-
-        let mut trailing = update_frame("a");
-        trailing.extend_from_slice(&[0xde, 0xad]);
-        assert_eq!(classify_message(&trailing), 0, "trailing garbage");
-
-        let frame = update_frame("hello");
-        assert_eq!(classify_message(&frame[..frame.len() / 2]), 0, "truncated");
-    }
-
-    #[test]
-    fn merged_doc_update_extracts_and_skips_no_ops() {
-        // A document update yields a delta that reconstructs the content.
-        let delta = merged_doc_update(&update_frame("hello"))
-            .unwrap()
-            .expect("a document update");
-        let doc = Doc::new();
-        doc.transact_mut()
-            .apply_update(yrs::Update::decode_v1(&delta).unwrap())
-            .unwrap();
-        // The delta carried real content, so applying it advances the doc.
-        assert!(!doc.transact().state_vector().is_empty());
-
-        // A SyncStep1 request carries no document change.
-        assert!(merged_doc_update(&step1_frame()).unwrap().is_none());
-
-        // An empty SyncStep2 (no new structs) is a no-op.
-        let empty = Message::Sync(SyncMessage::SyncStep2(
-            Doc::new()
-                .transact()
-                .encode_state_as_update_v1(&yrs::StateVector::default()),
-        ))
-        .encode_v1();
-        assert!(merged_doc_update(&empty).unwrap().is_none());
-    }
-
-    #[test]
-    fn merged_doc_update_merges_multiple_updates() {
-        // Two updates from different clients packed in one frame merge into one.
-        let mut frame = update_frame("a");
-        frame.extend(update_frame("b"));
-        let merged = merged_doc_update(&frame).unwrap().expect("merged update");
-
-        // The merged update must decode cleanly as a single update.
-        assert!(yrs::Update::decode_v1(&merged).is_ok());
-    }
-
-    #[test]
-    fn awareness_client_ids_are_collected() {
-        assert_eq!(
-            awareness_client_ids_in(&awareness_frame(111)).unwrap(),
-            vec![111]
-        );
-        // A document frame has no awareness client ids.
-        assert!(awareness_client_ids_in(&update_frame("x"))
-            .unwrap()
-            .is_empty());
-    }
-
-    #[test]
-    fn update_readiness_and_pending_detect_a_causal_gap() {
-        // Three sequential single-char inserts from one client: A, then B, then
-        // C. Each delta depends on the previous, so C can't integrate without B.
-        let src = Doc::new();
-        let txt = src.get_or_insert_text("t");
-        let mut deltas: Vec<Vec<u8>> = Vec::new();
-        let mut prev = yrs::StateVector::default();
-        for (i, ch) in ["A", "B", "C"].into_iter().enumerate() {
-            txt.insert(&mut src.transact_mut(), i as u32, ch);
-            deltas.push(src.transact().encode_state_as_update_v1(&prev));
-            prev = src.transact().state_vector();
-        }
-        let (u1, u2, u3) = (&deltas[0], &deltas[1], &deltas[2]);
-
-        // A doc holding only u1 (u2 was lost in transit / its record failed):
-        let doc = Doc::new();
-        doc.transact_mut()
-            .apply_update(yrs::Update::decode_v1(u1).unwrap())
-            .unwrap();
-        assert!(update_is_ready(&doc, u1).unwrap(), "u1 has no missing deps");
-        assert!(
-            !update_is_ready(&doc, u3).unwrap(),
-            "u3 depends on the missing u2"
-        );
-        assert!(
-            !doc_has_pending(&doc),
-            "nothing pending until u3 is applied"
-        );
-
-        // Applying u3 anyway parks it as a pending struct.
-        doc.transact_mut()
-            .apply_update(yrs::Update::decode_v1(u3).unwrap())
-            .unwrap();
-        assert!(
-            doc_has_pending(&doc),
-            "u3 is pending: its parent u2 is missing"
-        );
-
-        // Once u2 arrives (via resync), u3 integrates and pending clears.
-        doc.transact_mut()
-            .apply_update(yrs::Update::decode_v1(u2).unwrap())
-            .unwrap();
-        assert!(!doc_has_pending(&doc), "u2 arrived; u3 integrated");
-    }
 }
