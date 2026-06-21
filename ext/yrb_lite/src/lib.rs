@@ -1,4 +1,6 @@
-use magnus::{function, method, prelude::*, Error, RString, Ruby, TryConvert, Value};
+use magnus::{
+    function, method, prelude::*, Error, ExceptionClass, RString, Ruby, TryConvert, Value,
+};
 use std::sync::Mutex;
 use yrs::encoding::read::{Cursor, Read};
 use yrs::sync::protocol::MessageReader;
@@ -123,8 +125,37 @@ fn copy_bytes(s: RString) -> Vec<u8> {
     unsafe { s.as_slice() }.to_vec()
 }
 
-fn runtime_error(msg: String) -> Error {
-    Error::new(Ruby::get().unwrap().exception_runtime_error(), msg)
+/// Build a `YrbLite::Error` (the gem's own error class, defined in `init`) so
+/// native decode/apply/validation failures surface as a project-specific error
+/// rather than a generic RuntimeError. Falls back to RuntimeError only if the
+/// class somehow can't be resolved.
+fn yrb_error(msg: String) -> Error {
+    let ruby = Ruby::get().unwrap();
+    let class = ruby
+        .eval::<ExceptionClass>("YrbLite::Error")
+        .unwrap_or_else(|_| ruby.exception_runtime_error());
+    Error::new(class, msg)
+}
+
+/// Yjs/lib0 client IDs must be JS-safe integers (<= 2^53 - 1). Above that they
+/// round or collide when crossing the JS/Yjs boundary, and a client-id collision
+/// corrupts a CRDT. Explicit (Ruby-supplied) IDs are validated here; the random
+/// default IDs that yrs generates are already in range.
+const MAX_SAFE_CLIENT_ID: u64 = (1 << 53) - 1;
+
+/// Pure predicate (no Ruby), so the boundary is unit-testable without a VM.
+fn is_safe_client_id(id: u64) -> bool {
+    id <= MAX_SAFE_CLIENT_ID
+}
+
+fn validate_client_id(id: u64) -> Result<u64, Error> {
+    if !is_safe_client_id(id) {
+        return Err(yrb_error(format!(
+            "client_id {id} exceeds the maximum safe integer ({MAX_SAFE_CLIENT_ID} = 2^53 - 1); \
+             Yjs client IDs must be JS-safe integers to avoid collisions"
+        )));
+    }
+    Ok(id)
 }
 
 // ============================================================================
@@ -227,7 +258,7 @@ impl RbDoc {
         let doc = if args.is_empty() {
             Doc::new()
         } else {
-            let client_id: u64 = TryConvert::try_convert(args[0])?;
+            let client_id = validate_client_id(TryConvert::try_convert(args[0])?)?;
             Doc::with_client_id(client_id)
         };
         Ok(RbDoc(doc))
@@ -270,7 +301,7 @@ impl RbDoc {
             let txn = doc.transact();
             Ok(txn.encode_state_as_update_v1(&sv))
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
 
@@ -283,7 +314,7 @@ impl RbDoc {
             let mut txn = doc.transact_mut();
             txn.apply_update(update).map_err(|e| e.to_string())
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
     }
 
     /// True if applying `update` would integrate cleanly (its dependencies are
@@ -292,7 +323,7 @@ impl RbDoc {
     fn update_ready(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
-        nogvl(move || update_is_ready(doc, &update_bytes)).map_err(runtime_error)
+        nogvl(move || update_is_ready(doc, &update_bytes)).map_err(yrb_error)
     }
 
     /// True if the document holds pending (un-integrable) structs waiting on a
@@ -323,7 +354,7 @@ impl RbDoc {
             let update = txn.encode_state_as_update_v1(&sv);
             Ok(Message::Sync(SyncMessage::SyncStep2(update)).encode_v1())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
@@ -369,15 +400,15 @@ impl RbDoc {
                     Message::Custom(tag, _) => Ok((tag, 0, Vec::new())),
                 }
             })
-            .map_err(runtime_error)?;
+            .map_err(yrb_error)?;
 
         Ok(Some((msg_type, sync_type, binary_string(&response))))
     }
 
     /// Encode raw update bytes as a sync Update message
     fn encode_update_message(&self, update: RString) -> RString {
-        let update_bytes = unsafe { update.as_slice() };
-        let msg = Message::Sync(SyncMessage::Update(update_bytes.to_vec()));
+        let update_bytes = copy_bytes(update);
+        let msg = Message::Sync(SyncMessage::Update(update_bytes));
         binary_string(&msg.encode_v1())
     }
 }
@@ -392,7 +423,7 @@ impl RbAwareness {
         let awareness = if args.is_empty() {
             Awareness::new(Doc::new())
         } else {
-            let client_id: u64 = TryConvert::try_convert(args[0])?;
+            let client_id = validate_client_id(TryConvert::try_convert(args[0])?)?;
             Awareness::new(Doc::with_client_id(client_id))
         };
         Ok(RbAwareness(Mutex::new(awareness)))
@@ -437,7 +468,7 @@ impl RbAwareness {
                 .map_err(|e| e.to_string())?;
             Ok(encoder.to_vec())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
@@ -464,14 +495,14 @@ impl RbAwareness {
             }
             Ok(encoder.to_vec())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
     /// Encode an update message for broadcasting changes to peers.
     fn encode_update(&self, update: RString) -> RString {
-        let update_bytes = unsafe { update.as_slice() };
-        let msg = Message::Sync(SyncMessage::Update(update_bytes.to_vec()));
+        let update_bytes = copy_bytes(update);
+        let msg = Message::Sync(SyncMessage::Update(update_bytes));
         binary_string(&msg.encode_v1())
     }
 
@@ -504,14 +535,14 @@ impl RbAwareness {
             let txn = doc.transact();
             Ok(txn.encode_state_as_update_v1(&sv))
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
 
     /// Set local awareness state (JSON string)
     fn set_local_state(&self, json: String) -> Result<(), Error> {
         let value: serde_json::Value =
-            serde_json::from_str(&json).map_err(|e| runtime_error(e.to_string()))?;
+            serde_json::from_str(&json).map_err(|e| yrb_error(e.to_string()))?;
         let awareness = &self.0;
         nogvl(move || -> Result<(), String> {
             awareness
@@ -520,7 +551,7 @@ impl RbAwareness {
                 .set_local_state(value)
                 .map_err(|e| e.to_string())
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
     }
 
     /// Get local awareness state as JSON string (or nil if not set)
@@ -549,7 +580,7 @@ impl RbAwareness {
             let update = awareness.update().map_err(|e| e.to_string())?;
             Ok(Message::Awareness(update).encode_v1())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 
@@ -563,7 +594,7 @@ impl RbAwareness {
             let mut txn = doc.transact_mut();
             txn.apply_update(update).map_err(|e| e.to_string())
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
     }
 
     /// True if applying `update` would integrate cleanly (its dependencies are
@@ -576,7 +607,7 @@ impl RbAwareness {
             let doc = awareness.lock().unwrap().doc().clone();
             update_is_ready(&doc, &update_bytes)
         })
-        .map_err(runtime_error)
+        .map_err(yrb_error)
     }
 
     /// True if the document holds pending (un-integrable) structs waiting on a
@@ -596,7 +627,7 @@ impl RbAwareness {
     /// connection closes.
     fn awareness_client_ids(&self, data: RString) -> Result<Vec<u64>, Error> {
         let data_bytes = copy_bytes(data);
-        nogvl(move || awareness_client_ids_in(&data_bytes)).map_err(runtime_error)
+        nogvl(move || awareness_client_ids_in(&data_bytes)).map_err(yrb_error)
     }
 
     /// Classify a frame for safe routing and relay. Returns a code only when
@@ -621,7 +652,7 @@ impl RbAwareness {
     /// path records this exact delta before applying it.
     fn update_from_message(&self, data: RString) -> Result<Option<RString>, Error> {
         let data_bytes = copy_bytes(data);
-        let merged = nogvl(move || merged_doc_update(&data_bytes)).map_err(runtime_error)?;
+        let merged = nogvl(move || merged_doc_update(&data_bytes)).map_err(yrb_error)?;
         Ok(merged.map(|b| binary_string(&b)))
     }
 
@@ -650,7 +681,7 @@ impl RbAwareness {
                 .map_err(|e| e.to_string())?;
             Ok(Message::Awareness(update).encode_v1())
         })
-        .map_err(runtime_error)?;
+        .map_err(yrb_error)?;
         Ok(binary_string(&encoded))
     }
 }
@@ -807,6 +838,18 @@ mod tests {
 
         let frame = update_frame("hello");
         assert_eq!(classify_message(&frame[..frame.len() / 2]), 0, "truncated");
+    }
+
+    #[test]
+    fn client_id_safe_integer_boundary() {
+        assert!(is_safe_client_id(0), "zero is fine");
+        assert!(
+            is_safe_client_id((1 << 53) - 1),
+            "2^53 - 1 is the max safe id"
+        );
+        assert!(!is_safe_client_id(1 << 53), "2^53 is unsafe");
+        assert!(!is_safe_client_id(1 << 63), "2^63 is unsafe");
+        assert!(!is_safe_client_id(u64::MAX), "u64::MAX is unsafe");
     }
 
     #[test]

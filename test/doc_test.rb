@@ -23,6 +23,16 @@ class DocTest < Minitest::Test
     assert_predicate doc.client_id, :positive?
   end
 
+  def test_doc_accepts_max_safe_client_id_and_rejects_above
+    max_safe = (2**53) - 1
+
+    assert_equal max_safe, YrbLite::Doc.new(max_safe).client_id
+
+    err = assert_raises(YrbLite::Error) { YrbLite::Doc.new(2**53) }
+    assert_match(/safe integer/, err.message)
+    assert_raises(YrbLite::Error) { YrbLite::Doc.new(2**63) }
+  end
+
   def test_doc_has_guid
     doc = YrbLite::Doc.new
     guid = doc.guid
