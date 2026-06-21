@@ -1,7 +1,7 @@
 {
   "name": "yrb-lite-client",
   "version": "0.1.1",
-  "description": "JavaScript client for the yrb-lite y-websocket protocol: a ready-made ActionCable/AnyCable provider, a transport-agnostic sync engine (sync steps, encode/decode, awareness), and a reliable-delivery core (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Written in TypeScript with bundled types; usable from plain JS.",
+  "description": "JavaScript client for the yrb-lite y-websocket protocol: a ready-made ActionCable/AnyCable provider, a transport-agnostic protocol session (sync steps, encode/decode, awareness), and a reliable-delivery core (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Written in TypeScript with bundled types; usable from plain JS.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
