@@ -11,7 +11,7 @@ use yrs::sync::protocol::{
 };
 use yrs::sync::{Message, SyncMessage};
 use yrs::updates::decoder::{Decode, Decoder, DecoderV1};
-use yrs::{Any, ClientID, Doc, ID, ReadTxn, Transact};
+use yrs::{Any, ClientID, Doc, ReadTxn, Transact, ID};
 
 fn unsafe_client_id_error(id: u64) -> ReadError {
     ReadError::Custom(format!(
@@ -393,7 +393,7 @@ mod tests {
 
         let mut frame = EncoderV1::new();
         frame.write_var(MSG_AWARENESS);
-        frame.write_buf(&payload.to_vec());
+        frame.write_buf(payload.to_vec());
         frame.to_vec()
     }
 
@@ -406,7 +406,7 @@ mod tests {
         let mut frame = EncoderV1::new();
         frame.write_var(MSG_SYNC);
         frame.write_var(MSG_SYNC_STEP_1);
-        frame.write_buf(&sv.to_vec());
+        frame.write_buf(sv.to_vec());
         frame.to_vec()
     }
 
