@@ -18,12 +18,13 @@ end
 ```
 
 On the browser, use the `yrb-lite-client` `ActionCableProvider`. Tiptap,
-ProseMirror, and BlockNote all sync through the shared Y.Doc/Awareness it owns.
+ProseMirror, and BlockNote all sync through the `Y.Doc` you pass in and the
+provider's Awareness instance, unless you supply your own.
 
 ## What you get
 
-- Thread-safe `Doc` and `Awareness`. You can share them across Puma threads,
-  and the GVL is released while yrs does the actual work.
+- Thread-safe Ruby wrappers for `Doc` and `Awareness`. You can share them
+  across Puma threads; native CRDT work runs with the GVL released.
 - The y-websocket protocol (document sync plus awareness/presence) as a
   one-include ActionCable concern.
 - A store-backed mode for AnyCable and multi-process deployments.
@@ -36,11 +37,11 @@ Rails.
 
 ## Testing
 
-Ruby and Rust unit tests cover the core, and an end-to-end suite runs the real
-stack: it fuzzes the protocol, throws garbage and chaos at the server, kills the
-server mid-write to check crash recovery, and drives real browsers under load.
-The benchmark numbers below are from a single laptop. Issues and PRs are
-welcome.
+Ruby and Rust unit tests cover the core. CI also runs the npm client tests and a
+Rails demo smoke slice against the real ActionCable stack. The demo includes
+heavier local suites for hostile input, crash recovery, multi-browser editing,
+AnyCable, and load testing. The benchmark note below is from a single laptop.
+Issues and PRs are welcome.
 
 ## Install
 
@@ -52,9 +53,10 @@ gem "yrb-lite"
 gem "yrb-lite-actioncable"
 ```
 
-Requires Ruby 3.4 or newer. Precompiled gems ship for Linux and macOS on Ruby
-3.4 and 4.0, so installing there needs no Rust. Other platforms (and any other
-Ruby version) build from source, which needs [Rust](https://rustup.rs).
+Requires Ruby 3.4 or newer. The release workflow builds precompiled gems for
+Ruby 3.4 and 4.0 across the supported Ruby platforms, with native smoke tests
+on Linux x86_64 and macOS arm64. Installing from a matching platform gem needs
+no Rust; a source build needs [Rust](https://rustup.rs).
 
 To work on the gem itself:
 
@@ -160,10 +162,11 @@ end
 ```
 
 One `YrbLite::Awareness` is shared per document key. Creating it is
-mutex-serialized; after that everything runs lock-free on the thread-safe
-native types. The concern answers SyncStep1 directly, relays document and
-awareness changes to the other subscribers (not back to the sender), and calls
-`on_save` after any message that changed the document.
+mutex-serialized. After that, native calls run with the GVL released: document
+operations use yrs' internal document lock, and awareness mutations are
+serialized by the wrapper mutex. The concern answers SyncStep1 directly, relays
+document and awareness changes to the other subscribers (not back to the
+sender), and calls `on_save` after any message that changed the document.
 
 `sync_unsubscribed` clears the connection's presence, so a closed tab doesn't
 leave a stale cursor hanging until the client-side timeout. It also unloads the
@@ -363,15 +366,15 @@ That comes from how the underlying types work, not from locking on top:
 - `yrs::Doc` is `Send + Sync`. Every operation takes the document's internal
   RwLock with blocking semantics (`read_blocking`/`write_blocking`), so
   concurrent access serializes instead of erroring or corrupting state.
-- `yrs::sync::Awareness` is built for multi-threaded servers: client states
-  live in a `DashMap` and the whole API is `&self`.
-- The extension adds no interior-mutability tricks. There's no `RefCell`, where
-  a re-entrant borrow would panic and take the Ruby process down with it.
-  Each native method opens and closes its transaction in one call, so no lock
-  or borrow outlives a call and there's nothing to deadlock on.
-- A `Send + Sync` static assertion for both wrapped types lives in `lib.rs`. If
-  a yrs upgrade regressed this, the gem would fail to compile instead of quietly
-  turning thread-unsafe.
+- `yrs::sync::Awareness` is `Send` but not `Sync` in the current yrs version,
+  so the Ruby wrapper stores it in a `Mutex`. The mutex is always acquired
+  inside the no-GVL native section and released before Ruby runs again.
+- The extension uses no `RefCell`-style runtime borrows that could panic under
+  re-entrancy. Each native method opens and closes its transaction or mutex
+  guard inside one call.
+- Static assertions in `lib.rs` prove `Doc` and `Mutex<Awareness>` are
+  `Send + Sync`. If a yrs upgrade regressed either wrapper's thread-safety, the
+  gem would fail to compile instead of quietly turning thread-unsafe.
 
 `test/thread_safety_test.rb` runs shared docs, the full sync handshake, fan-in
 sync, and awareness state across 8 threads at once, and checks the interleaving
@@ -392,11 +395,12 @@ A slow operation also can't stall the VM. A thread applying a large update holds
 the doc's write lock without holding the GVL, so other Ruby threads keep running
 instead of queuing behind it.
 
-Each method has the same shape: copy the Ruby byte string, drop the GVL, do the
-yrs work (taking and releasing the doc lock entirely inside the closure), take
-the GVL back, then build Ruby objects. No Ruby API is touched without the GVL,
-and the doc lock is never held across a GVL boundary, so the lock order can't
-deadlock. Panics in native code are caught and re-raised as Ruby exceptions.
+Each method has the same shape: copy Ruby byte strings first, drop the GVL, do
+the yrs work while taking and releasing native locks entirely inside the
+closure, take the GVL back, then build Ruby objects. No Ruby API is touched
+without the GVL, and no native lock is held while reacquiring it, so the lock
+order can't deadlock. Panics in native code are caught and re-raised as Ruby
+exceptions.
 
 ## Message Type Constants
 

@@ -122,12 +122,14 @@ class SyncTest < Minitest::Test
 
   def test_anycable_whisper_is_scoped_to_awareness_stream
     anycable_streams = subscribed_streams(anycable: true)
+
     assert_includes anycable_streams, ["yrb_lite:doc", {}],
                     "document stream has no whisper option"
     assert_includes anycable_streams, ["yrb_lite:doc:awareness", { whisper: true }],
                     "awareness stream is whisper-enabled"
 
     plain_streams = subscribed_streams(anycable: false)
+
     assert_equal [["yrb_lite:doc", {}]], plain_streams,
                  "plain ActionCable has no whisper stream"
   end
@@ -217,7 +219,8 @@ class SyncTest < Minitest::Test
     msg = YrbLite::Awareness.new.encode_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
 
     helper.send(:sync_on_broadcast,
-                { "update" => Base64.strict_encode64(msg), "origin" => "x", "pid" => YrbLite::ActionCable::Sync.process_id })
+                { "update" => Base64.strict_encode64(msg), "origin" => "x",
+                  "pid" => YrbLite::ActionCable::Sync.process_id })
 
     assert_equal sv_before, YrbLite::ActionCable::Sync.registry[key].encode_state_vector,
                  "a broadcast from this same process is not applied a second time"

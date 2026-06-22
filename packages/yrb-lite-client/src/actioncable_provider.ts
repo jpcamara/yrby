@@ -9,8 +9,7 @@
 // always use `send` so they pass through the server's persistence/ack path.
 //
 // The constructor does NOT auto-connect: wire your editor binding first, then
-// call `connect()`. Same `(doc, consumer, channelName, channelParams, opts)`
-// shape as a typical y-rb/actioncable provider.
+// call `connect()`.
 //
 // Observe the connection with `provider.on("status", ({ status }) => ...)`
 // (`"connecting" | "connected" | "synced" | "disconnected"`) or the `status`

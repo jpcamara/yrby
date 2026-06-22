@@ -40,8 +40,9 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   #   end
   #
   # The shared YrbLite::Awareness instances are safe to use from ActionCable's
-  # worker thread pool: the native types are Send + Sync and every operation
-  # releases the GVL, so concurrent clients sync in parallel.
+  # worker thread pool. Native CRDT work runs with the GVL released; document
+  # operations use yrs' internal lock, while awareness mutations are serialized
+  # by the Ruby wrapper's native mutex.
   module Sync
     # Validated frame kinds from Awareness#message_kind. A frame only gets a
     # non-DROP kind if it is exactly one well-formed message; anything
@@ -476,8 +477,8 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # enabled; when AnyCable is present we separately subscribe an awareness
     # stream with `whisper: true`, so the client-to-client fast path is scoped to
     # ephemeral presence instead of the durable document stream.
-    def sync_stream(name, **opts, &)
-      stream_from(name, **opts, &)
+    def sync_stream(name, **, &)
+      stream_from(name, **, &)
     end
 
     # Stateless per message: no warm replica, no assumptions about which process
@@ -600,7 +601,8 @@ module YrbLite::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # Get or create the shared Awareness for a key. Creation (including
       # the on_load callback) is serialized under a mutex so concurrent
       # subscribers can never observe two documents for one key; all
-      # subsequent operations run lock-free on the thread-safe native types.
+      # subsequent native operations run with the GVL released on the
+      # thread-safe Ruby wrapper.
       def awareness_for(key, loader = nil)
         @registry_mutex.synchronize do
           @registry[key] ||= begin
