@@ -23,14 +23,13 @@ class DocTest < Minitest::Test
     assert_predicate doc.client_id, :positive?
   end
 
-  def test_doc_accepts_max_safe_client_id_and_rejects_above
+  def test_doc_accepts_max_safe_client_id
+    # Client IDs are not validated here -- a JS-safe integer (<= 2^53 - 1) round-
+    # trips intact; keeping ids in range is the caller's responsibility (a larger
+    # value is silently masked by yrs). See protocol.rs for the rationale.
     max_safe = (2**53) - 1
 
     assert_equal max_safe, YrbLite::Doc.new(max_safe).client_id
-
-    err = assert_raises(YrbLite::Error) { YrbLite::Doc.new(2**53) }
-    assert_match(/safe integer/, err.message)
-    assert_raises(YrbLite::Error) { YrbLite::Doc.new(2**63) }
   end
 
   def test_doc_has_guid

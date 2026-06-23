@@ -67,10 +67,7 @@ class AwarenessTest < Minitest::Test
     a1 = YrbLite::Awareness.new(1)
     a2 = YrbLite::Awareness.new(2)
 
-    # a1 sends initial sync messages
     initial = a1.start
-
-    # a2 handles them and returns response
     response = a2.handle(initial)
 
     assert_kind_of String, response
@@ -80,25 +77,15 @@ class AwarenessTest < Minitest::Test
     a1 = YrbLite::Awareness.new(1)
     a2 = YrbLite::Awareness.new(2)
 
-    # a1 initiates sync
     msg1 = a1.start
-
-    # a2 handles and responds
     response1 = a2.handle(msg1)
-
-    # a1 handles response (should complete sync)
     a1.handle(response1)
 
-    # a2 initiates its own sync
     msg2 = a2.start
-
-    # a1 handles and responds
     response3 = a1.handle(msg2)
-
-    # a2 handles response
     a2.handle(response3)
 
-    # Both should now have same state vectors
+    # Both should now have the same state vector.
     assert_equal a1.encode_state_vector, a2.encode_state_vector
   end
 
@@ -114,17 +101,14 @@ class AwarenessTest < Minitest::Test
   def test_local_state
     awareness = YrbLite::Awareness.new
 
-    # Initially nil
     assert_nil awareness.local_state
 
-    # Set state
     awareness.set_local_state('{"user": "test"}')
     state = awareness.local_state
 
     assert_kind_of String, state
     assert_includes state, "user"
 
-    # Clear state
     awareness.clear_local_state
 
     assert_nil awareness.local_state
@@ -138,51 +122,6 @@ class AwarenessTest < Minitest::Test
 
     assert_kind_of String, update
     refute_empty update
-  end
-
-  def test_awareness_client_ids_extracts_ids_from_awareness_message
-    peer = YrbLite::Awareness.new(111)
-    peer.set_local_state('{"user": "alice"}')
-    msg = peer.encode_awareness_update
-
-    server = YrbLite::Awareness.new
-
-    assert_equal [111], server.awareness_client_ids(msg)
-  end
-
-  def test_awareness_client_ids_ignores_sync_messages
-    awareness = YrbLite::Awareness.new
-    sync_msg = awareness.encode_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
-
-    assert_empty awareness.awareness_client_ids(sync_msg)
-  end
-
-  def test_remove_clients_unknown_returns_empty
-    server = YrbLite::Awareness.new
-
-    assert_empty server.remove_clients([999])
-  end
-
-  def test_remove_clients_announces_and_clears_presence
-    peer = YrbLite::Awareness.new(111)
-    peer.set_local_state('{"user": "alice"}')
-    msg = peer.encode_awareness_update
-
-    server = YrbLite::Awareness.new
-    server.handle(msg)
-
-    other = YrbLite::Awareness.new
-    other.handle(msg)
-
-    assert_includes other.awareness_client_ids(other.encode_awareness_update), 111
-
-    removal = server.remove_clients([111])
-
-    refute_empty removal
-
-    other.handle(removal)
-
-    refute_includes other.awareness_client_ids(other.encode_awareness_update), 111
   end
 
   def test_constants

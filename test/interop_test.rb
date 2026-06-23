@@ -30,7 +30,6 @@ class InteropTest < Minitest::Test
     skip "yrs_generator not built; skipping interop tests" unless File.exist?(YRS_GENERATOR)
   end
 
-  # Helper to call Y.js generator
   def yjs(*args)
     stdout, stderr, status = Open3.capture3(BUN_PATH, "run", YJS_GENERATOR, *args.map(&:to_s))
     raise "yjs_generator failed: #{stderr}" unless status.success?
@@ -38,7 +37,6 @@ class InteropTest < Minitest::Test
     JSON.parse(stdout)
   end
 
-  # Helper to call yrs generator
   def yrs(*args)
     stdout, status = Open3.capture2(YRS_GENERATOR, *args.map(&:to_s))
     raise "yrs_generator failed: #{stdout}" unless status.success?
@@ -46,7 +44,6 @@ class InteropTest < Minitest::Test
     JSON.parse(stdout)
   end
 
-  # Helper for base64
   def b64_decode(str)
     str.unpack1("m0")
   end

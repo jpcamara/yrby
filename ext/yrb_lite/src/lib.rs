@@ -5,13 +5,11 @@ use std::sync::Mutex;
 use yrs::sync::{Awareness, DefaultProtocol, Message, Protocol, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::{Encode, Encoder, EncoderV1};
-use yrs::{ClientID, Doc, ReadTxn, Transact};
+use yrs::{Doc, ReadTxn, Transact};
 
 mod protocol;
 use protocol::{
-    awareness_client_ids_in, classify_message, doc_has_pending, merged_doc_update,
-    update_advances_doc, update_is_ready, validate_frame_client_ids,
-    validate_state_vector_client_ids, validate_update_client_ids,
+    classify_message, doc_has_pending, merged_doc_update, update_advances_doc, update_is_ready,
 };
 
 /// Wrapper around yrs Doc.
@@ -131,9 +129,9 @@ fn copy_bytes(s: RString) -> Vec<u8> {
 }
 
 /// Build a `YrbLite::Error` (the gem's own error class, defined in `init`) so
-/// native decode/apply/validation failures surface as a project-specific error
-/// rather than a generic RuntimeError. Falls back to RuntimeError only if the
-/// class somehow can't be resolved.
+/// native decode/apply failures surface as a project-specific error rather than
+/// a generic RuntimeError. Falls back to RuntimeError only if the class somehow
+/// can't be resolved.
 fn yrb_error(msg: String) -> Error {
     let ruby = Ruby::get().unwrap();
     let class = ruby
@@ -142,26 +140,10 @@ fn yrb_error(msg: String) -> Error {
     Error::new(class, msg)
 }
 
-/// Yjs/lib0 client IDs must be JS-safe integers (<= 2^53 - 1). Above that they
-/// round or collide when crossing the JS/Yjs boundary, and a client-id collision
-/// corrupts a CRDT. Explicit (Ruby-supplied) IDs are validated here; the random
-/// default IDs that yrs generates are already in range.
-const MAX_SAFE_CLIENT_ID: u64 = (1 << 53) - 1;
-
-/// Pure predicate (no Ruby), so the boundary is unit-testable without a VM.
-pub(crate) fn is_safe_client_id(id: u64) -> bool {
-    id <= MAX_SAFE_CLIENT_ID
-}
-
-fn validate_client_id(id: u64) -> Result<u64, Error> {
-    if !is_safe_client_id(id) {
-        return Err(yrb_error(format!(
-            "client_id {id} exceeds the maximum safe integer ({MAX_SAFE_CLIENT_ID} = 2^53 - 1); \
-             Yjs client IDs must be JS-safe integers to avoid collisions"
-        )));
-    }
-    Ok(id)
-}
+// CLIENT IDs ARE NOT VALIDATED -- whoever supplies the id (the app via
+// `Doc.new(id)` / `Awareness.new(id)`, or a remote peer over the wire) is
+// responsible for keeping it JS-safe (<= 2^53 - 1). See the protocol.rs header
+// for why (and `ClientID::try_new`, proposed upstream, for strict rejection).
 
 // ============================================================================
 // Doc Implementation
@@ -173,23 +155,20 @@ impl RbDoc {
         let doc = if args.is_empty() {
             Doc::new()
         } else {
-            let client_id = validate_client_id(TryConvert::try_convert(args[0])?)?;
+            let client_id: u64 = TryConvert::try_convert(args[0])?;
             Doc::with_client_id(client_id)
         };
         Ok(RbDoc(doc))
     }
 
-    /// Get the client ID
     fn client_id(&self) -> u64 {
         self.0.client_id().get()
     }
 
-    /// Get the document GUID
     fn guid(&self) -> String {
         self.0.guid().to_string()
     }
 
-    /// Get the current state vector encoded as bytes
     fn encode_state_vector(&self) -> RString {
         let doc = &self.0;
         let sv = nogvl(move || {
@@ -220,12 +199,10 @@ impl RbDoc {
         Ok(binary_string(&update))
     }
 
-    /// Apply a V1 update to the document
     fn apply_update(&self, update: RString) -> Result<(), Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
         nogvl(move || -> Result<(), String> {
-            validate_update_client_ids(&update_bytes)?;
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
             let mut txn = doc.transact_mut();
             txn.apply_update(update).map_err(|e| e.to_string())
@@ -274,7 +251,6 @@ impl RbDoc {
         let sv_data = copy_bytes(sv_bytes);
         let doc = &self.0;
         let encoded = nogvl(move || -> Result<Vec<u8>, String> {
-            validate_state_vector_client_ids(&sv_data)?;
             let sv = yrs::StateVector::decode_v1(&sv_data).map_err(|e| e.to_string())?;
             let txn = doc.transact();
             let update = txn.encode_state_as_update_v1(&sv);
@@ -292,7 +268,6 @@ impl RbDoc {
 
         let (msg_type, sync_type, response) =
             nogvl(move || -> Result<(u8, u8, Vec<u8>), String> {
-                validate_frame_client_ids(&data_bytes)?;
                 let msg = Message::decode_v1(&data_bytes).map_err(|e| e.to_string())?;
 
                 match msg {
@@ -350,19 +325,17 @@ impl RbAwareness {
         let awareness = if args.is_empty() {
             Awareness::new(Doc::new())
         } else {
-            let client_id = validate_client_id(TryConvert::try_convert(args[0])?)?;
+            let client_id: u64 = TryConvert::try_convert(args[0])?;
             Awareness::new(Doc::with_client_id(client_id))
         };
         Ok(RbAwareness(Mutex::new(awareness)))
     }
 
-    /// Get the client ID of the underlying document
     fn client_id(&self) -> u64 {
         let awareness = &self.0;
         nogvl(move || awareness.lock().unwrap().doc().client_id().get())
     }
 
-    /// Get the document GUID
     fn guid(&self) -> String {
         let awareness = &self.0;
         nogvl(move || awareness.lock().unwrap().doc().guid().to_string())
@@ -406,7 +379,6 @@ impl RbAwareness {
         let awareness = &self.0;
 
         let encoded = nogvl(move || -> Result<Vec<u8>, String> {
-            validate_frame_client_ids(&data_bytes)?;
             let mut awareness = awareness.lock().unwrap();
             let protocol = DefaultProtocol;
             let responses = protocol
@@ -428,18 +400,12 @@ impl RbAwareness {
     }
 
     /// Encode an update message for broadcasting changes to peers.
-    fn encode_update(&self, update: RString) -> Result<RString, Error> {
+    fn encode_update(&self, update: RString) -> RString {
         let update_bytes = copy_bytes(update);
-        nogvl({
-            let update_bytes = update_bytes.clone();
-            move || validate_update_client_ids(&update_bytes)
-        })
-        .map_err(yrb_error)?;
         let msg = Message::Sync(SyncMessage::Update(update_bytes));
-        Ok(binary_string(&msg.encode_v1()))
+        binary_string(&msg.encode_v1())
     }
 
-    /// Get the current state vector encoded as bytes
     fn encode_state_vector(&self) -> RString {
         let awareness = &self.0;
         let sv = nogvl(move || {
@@ -517,12 +483,10 @@ impl RbAwareness {
         Ok(binary_string(&encoded))
     }
 
-    /// Apply a raw update to the underlying document
     fn apply_update(&self, update: RString) -> Result<(), Error> {
         let update_bytes = copy_bytes(update);
         let awareness = &self.0;
         nogvl(move || -> Result<(), String> {
-            validate_update_client_ids(&update_bytes)?;
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
             let doc = awareness.lock().unwrap().doc().clone();
             let mut txn = doc.transact_mut();
@@ -566,16 +530,6 @@ impl RbAwareness {
         })
     }
 
-    /// Decode the awareness client IDs referenced by a protocol message
-    /// (which may pack several sub-messages together). Sync sub-messages are
-    /// ignored. The ActionCable layer uses this to learn which presence
-    /// states arrived on a connection, so it can clear them when that
-    /// connection closes.
-    fn awareness_client_ids(&self, data: RString) -> Result<Vec<u64>, Error> {
-        let data_bytes = copy_bytes(data);
-        nogvl(move || awareness_client_ids_in(&data_bytes)).map_err(yrb_error)
-    }
-
     /// Classify a frame for safe routing and relay. Returns a code only when
     /// the frame is exactly one well-formed message that consumes the whole
     /// buffer, so a malformed, truncated, multi-message, or trailing-garbage
@@ -594,46 +548,14 @@ impl RbAwareness {
     /// Extract the document-update delta carried by a protocol message: the
     /// payloads of any Update or SyncStep2 sub-messages, merged into a single
     /// update. Returns nil if the message carries no document change (for
-    /// instance a SyncStep1 request or an awareness update). The strict audit
-    /// path records this exact delta before applying it.
+    /// instance a SyncStep1 request or an awareness update). The store-backed
+    /// path records this exact delta before relaying it.
     fn update_from_message(&self, data: RString) -> Result<Option<RString>, Error> {
         let data_bytes = copy_bytes(data);
         let merged = nogvl(move || merged_doc_update(&data_bytes)).map_err(yrb_error)?;
         Ok(merged.map(|b| binary_string(&b)))
     }
 
-    /// Mark the given clients as disconnected and return an awareness protocol
-    /// message (null-state, bumped clock) announcing their removal to peers.
-    /// Only clients currently known to this Awareness are removed; unknown
-    /// IDs are skipped (so we never broadcast phantom removals). Returns an
-    /// empty string when nothing was removed.
-    fn remove_clients(&self, client_ids: Vec<u64>) -> Result<RString, Error> {
-        let client_ids = client_ids
-            .into_iter()
-            .map(validate_client_id)
-            .collect::<Result<Vec<_>, _>>()?;
-        let awareness = &self.0;
-        let encoded = nogvl(move || -> Result<Vec<u8>, String> {
-            let mut awareness = awareness.lock().unwrap();
-            let mut removed = Vec::new();
-            for id in client_ids {
-                let cid = ClientID::new(id);
-                if awareness.meta(cid).is_some() {
-                    awareness.remove_state(cid);
-                    removed.push(cid);
-                }
-            }
-            if removed.is_empty() {
-                return Ok(Vec::new());
-            }
-            let update = awareness
-                .update_with_clients(removed)
-                .map_err(|e| e.to_string())?;
-            Ok(Message::Awareness(update).encode_v1())
-        })
-        .map_err(yrb_error)?;
-        Ok(binary_string(&encoded))
-    }
 }
 
 // ============================================================================
@@ -707,11 +629,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "encode_awareness_update",
         method!(RbAwareness::encode_awareness_update, 0),
     )?;
-    awareness_class.define_method(
-        "awareness_client_ids",
-        method!(RbAwareness::awareness_client_ids, 1),
-    )?;
-    awareness_class.define_method("remove_clients", method!(RbAwareness::remove_clients, 1))?;
     awareness_class.define_method(
         "update_from_message",
         method!(RbAwareness::update_from_message, 1),

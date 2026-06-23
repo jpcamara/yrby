@@ -37,15 +37,15 @@ most issues.
 ## Layout
 
 ```
-lib/                     # Ruby: YrbLite::Sync (the ActionCable concern)
-ext/yrb_lite/src/        # Rust: lib.rs (magnus bindings) + prosemirror.rs
+lib/                     # Ruby: YrbLite::ActionCable::Sync (the ActionCable concern)
+ext/yrb_lite/src/        # Rust: lib.rs (magnus bindings) + protocol.rs (pure protocol helpers)
 test/                    # Ruby unit tests
 examples/actioncable-demo/   # a separate, deliberately thorough demo app (see below)
 ```
 
 The native code keeps the binding (magnus/`RString`/GVL) separate from pure
-logic (e.g. `classify_message`, `merged_doc_update`, the ProseMirror
-extraction) so the logic is unit-tested directly in Rust.
+logic (e.g. `classify_message`, `merged_doc_update`) so the logic is
+unit-tested directly in Rust.
 
 ## The demo
 

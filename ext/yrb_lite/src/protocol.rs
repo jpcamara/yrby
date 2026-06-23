@@ -1,219 +1,18 @@
-// Pure protocol helpers: no Ruby, no GVL, no `unsafe`. Everything here operates
-// on plain byte slices and `yrs` types, so it's unit-tested directly (see the
-// `tests` module below) without a Ruby VM. The Ruby-facing wrappers in lib.rs
-// copy bytes out of Ruby strings and call into these under `nogvl`.
-use crate::is_safe_client_id;
-use std::sync::Arc;
-use yrs::encoding::read::{Cursor, Error as ReadError, Read};
-use yrs::sync::protocol::{
-    MessageReader, MSG_AUTH, MSG_AWARENESS, MSG_QUERY_AWARENESS, MSG_SYNC, MSG_SYNC_STEP_1,
-    MSG_SYNC_STEP_2, MSG_SYNC_UPDATE, PERMISSION_DENIED,
-};
+// Pure rust protocol helpers (ie, no Ruby interop).
+//
+// CLIENT IDs ARE NOT VALIDATED HERE -- on purpose. We deliberately don't police it -- every
+// legitimate peer (browser Yjs, and yrs's own `ClientID::random`) already emits
+// 53-bit ids, so it's the client's responsibility not to send a bad one, and we
+// don't want to own that logic.
+use yrs::encoding::read::{Cursor, Read};
+use yrs::sync::protocol::MessageReader;
 use yrs::sync::{Message, SyncMessage};
-use yrs::updates::decoder::{Decode, Decoder, DecoderV1};
-use yrs::{Any, ClientID, Doc, ReadTxn, Transact, ID};
-
-fn unsafe_client_id_error(id: u64) -> ReadError {
-    ReadError::Custom(format!(
-        "client_id {id} exceeds the maximum safe integer (2^53 - 1); \
-         Yjs client IDs must be JS-safe integers to avoid collisions"
-    ))
-}
-
-fn checked_client_id(id: u64) -> Result<ClientID, ReadError> {
-    if !is_safe_client_id(id) {
-        return Err(unsafe_client_id_error(id));
-    }
-    Ok(ClientID::new(id))
-}
-
-fn validate_raw_client_id(id: u64) -> Result<(), ReadError> {
-    if !is_safe_client_id(id) {
-        return Err(unsafe_client_id_error(id));
-    }
-    Ok(())
-}
-
-struct CheckedDecoderV1<'a> {
-    cursor: Cursor<'a>,
-}
-
-impl<'a> CheckedDecoderV1<'a> {
-    fn new(cursor: Cursor<'a>) -> Self {
-        CheckedDecoderV1 { cursor }
-    }
-
-    fn read_id(&mut self) -> Result<ID, ReadError> {
-        let client: u64 = self.read_var()?;
-        validate_raw_client_id(client)?;
-        let clock = self.read_var()?;
-        Ok(ID::new(ClientID::new(client), clock))
-    }
-}
-
-impl<'a> Read for CheckedDecoderV1<'a> {
-    #[inline]
-    fn read_u8(&mut self) -> Result<u8, ReadError> {
-        self.cursor.read_u8()
-    }
-
-    #[inline]
-    fn read_exact(&mut self, len: usize) -> Result<&[u8], ReadError> {
-        self.cursor.read_exact(len)
-    }
-}
-
-impl<'a> Decoder for CheckedDecoderV1<'a> {
-    #[inline]
-    fn reset_ds_cur_val(&mut self) {}
-
-    #[inline]
-    fn read_ds_clock(&mut self) -> Result<u32, ReadError> {
-        self.read_var()
-    }
-
-    #[inline]
-    fn read_ds_len(&mut self) -> Result<u32, ReadError> {
-        self.read_var()
-    }
-
-    #[inline]
-    fn read_left_id(&mut self) -> Result<ID, ReadError> {
-        self.read_id()
-    }
-
-    #[inline]
-    fn read_right_id(&mut self) -> Result<ID, ReadError> {
-        self.read_id()
-    }
-
-    #[inline]
-    fn read_client(&mut self) -> Result<ClientID, ReadError> {
-        let client: u64 = self.cursor.read_var()?;
-        checked_client_id(client)
-    }
-
-    #[inline]
-    fn read_info(&mut self) -> Result<u8, ReadError> {
-        self.cursor.read_u8()
-    }
-
-    #[inline]
-    fn read_parent_info(&mut self) -> Result<bool, ReadError> {
-        let info: u32 = self.cursor.read_var()?;
-        Ok(info == 1)
-    }
-
-    #[inline]
-    fn read_type_ref(&mut self) -> Result<u8, ReadError> {
-        self.cursor.read_u8()
-    }
-
-    #[inline]
-    fn read_len(&mut self) -> Result<u32, ReadError> {
-        self.read_var()
-    }
-
-    #[inline]
-    fn read_any(&mut self) -> Result<Any, ReadError> {
-        Any::decode(self)
-    }
-
-    #[inline]
-    fn read_json(&mut self) -> Result<Any, ReadError> {
-        let src = self.read_string()?;
-        Any::from_json(src)
-    }
-
-    #[inline]
-    fn read_key(&mut self) -> Result<Arc<str>, ReadError> {
-        let str: Arc<str> = self.read_string()?.into();
-        Ok(str)
-    }
-
-    #[inline]
-    fn read_to_end(&mut self) -> Result<&[u8], ReadError> {
-        Ok(&self.cursor.buf[self.cursor.next..])
-    }
-}
-
-pub(crate) fn validate_state_vector_client_ids(bytes: &[u8]) -> Result<(), String> {
-    let mut cursor = Cursor::new(bytes);
-    let len: u32 = cursor.read_var().map_err(|e| e.to_string())?;
-    for _ in 0..len {
-        let client: u64 = cursor.read_var().map_err(|e| e.to_string())?;
-        validate_raw_client_id(client).map_err(|e| e.to_string())?;
-        let _: u32 = cursor.read_var().map_err(|e| e.to_string())?;
-    }
-    if cursor.has_content() {
-        return Err("state vector has trailing bytes".to_string());
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_update_client_ids(update_bytes: &[u8]) -> Result<(), String> {
-    let mut decoder = CheckedDecoderV1::new(Cursor::new(update_bytes));
-    yrs::Update::decode(&mut decoder).map_err(|e| e.to_string())?;
-    if decoder.cursor.has_content() {
-        return Err("update has trailing bytes".to_string());
-    }
-    Ok(())
-}
-
-fn validate_awareness_update_client_ids(bytes: &[u8]) -> Result<(), String> {
-    let mut cursor = Cursor::new(bytes);
-    let len: u32 = cursor.read_var().map_err(|e| e.to_string())?;
-    for _ in 0..len {
-        let client: u64 = cursor.read_var().map_err(|e| e.to_string())?;
-        validate_raw_client_id(client).map_err(|e| e.to_string())?;
-        let _: u32 = cursor.read_var().map_err(|e| e.to_string())?;
-        let _ = cursor.read_string().map_err(|e| e.to_string())?;
-    }
-    if cursor.has_content() {
-        return Err("awareness update has trailing bytes".to_string());
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_frame_client_ids(bytes: &[u8]) -> Result<(), String> {
-    let mut cursor = Cursor::new(bytes);
-    while cursor.has_content() {
-        let tag: u8 = cursor.read_var().map_err(|e| e.to_string())?;
-        match tag {
-            MSG_SYNC => {
-                let sync_tag: u8 = cursor.read_var().map_err(|e| e.to_string())?;
-                let payload = cursor.read_buf().map_err(|e| e.to_string())?;
-                match sync_tag {
-                    MSG_SYNC_STEP_1 => validate_state_vector_client_ids(payload)?,
-                    MSG_SYNC_STEP_2 | MSG_SYNC_UPDATE => validate_update_client_ids(payload)?,
-                    _ => return Err("unknown sync message type".to_string()),
-                }
-            }
-            MSG_AWARENESS => {
-                let payload = cursor.read_buf().map_err(|e| e.to_string())?;
-                validate_awareness_update_client_ids(payload)?;
-            }
-            MSG_AUTH => {
-                let permission: u8 = cursor.read_var().map_err(|e| e.to_string())?;
-                if permission == PERMISSION_DENIED {
-                    let _ = cursor.read_string().map_err(|e| e.to_string())?;
-                }
-            }
-            MSG_QUERY_AWARENESS => {}
-            _ => {
-                let _ = cursor.read_buf().map_err(|e| e.to_string())?;
-            }
-        }
-    }
-    Ok(())
-}
+use yrs::updates::decoder::{Decode, DecoderV1};
+use yrs::{Doc, ReadTxn, Transact};
 
 /// Classify a frame: a non-zero code only for exactly one well-formed message
 /// that consumes the whole buffer (see `RbAwareness::message_kind` for codes).
 pub(crate) fn classify_message(bytes: &[u8]) -> u8 {
-    if validate_frame_client_ids(bytes).is_err() {
-        return 0;
-    }
     let mut decoder = DecoderV1::new(Cursor::new(bytes));
     let msg = match Message::decode(&mut decoder) {
         Ok(msg) => msg,
@@ -236,7 +35,6 @@ pub(crate) fn classify_message(bytes: &[u8]) -> u8 {
 /// frame into one update, or `None` if the frame carries no document change
 /// (a request, an awareness update, or a no-op handshake SyncStep2).
 pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
-    validate_frame_client_ids(bytes)?;
     let mut decoder = DecoderV1::new(Cursor::new(bytes));
     let mut updates: Vec<Vec<u8>> = Vec::new();
     for msg in MessageReader::new(&mut decoder) {
@@ -268,26 +66,12 @@ pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String>
     Ok(Some(merged))
 }
 
-/// Collect the awareness client IDs referenced by a frame's awareness messages.
-pub(crate) fn awareness_client_ids_in(bytes: &[u8]) -> Result<Vec<u64>, String> {
-    validate_frame_client_ids(bytes)?;
-    let mut decoder = DecoderV1::new(Cursor::new(bytes));
-    let mut ids = Vec::new();
-    for msg in MessageReader::new(&mut decoder) {
-        if let Message::Awareness(update) = msg.map_err(|e| e.to_string())? {
-            ids.extend(update.clients.keys().map(|c| c.get()));
-        }
-    }
-    Ok(ids)
-}
-
 /// True if applying `update_bytes` to `doc` would integrate cleanly: every
 /// dependency the update references is already present (the doc's state vector
 /// covers the update's lower bound). A pure read; does not mutate the doc.
 /// When false, applying it would park a pending struct -- the signal that an
 /// earlier, causally-prior update is missing.
 pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
-    validate_update_client_ids(update_bytes)?;
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     Ok(doc.transact().state_vector() >= update.state_vector_lower())
 }
@@ -309,7 +93,6 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
 /// double-record a pure-delete retry, but it NEVER drops a real deletion, which
 /// is the safe direction. Assumes the update is already causally ready.
 pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
-    validate_update_client_ids(update_bytes)?;
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     if !update.delete_set().is_empty() {
         return Ok(true); // can't cheaply prove a delete is a duplicate; record it
@@ -342,10 +125,8 @@ pub(crate) fn doc_has_pending(doc: &Doc) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::is_safe_client_id;
-    use yrs::encoding::write::Write;
     use yrs::sync::Awareness;
-    use yrs::updates::encoder::{Encode, Encoder, EncoderV1};
+    use yrs::updates::encoder::Encode;
     use yrs::Text;
 
     fn text_update(content: &str) -> Vec<u8> {
@@ -372,42 +153,6 @@ mod tests {
             .set_local_state(serde_json::json!({ "user": "alice" }))
             .unwrap();
         Message::Awareness(awareness.update().unwrap()).encode_v1()
-    }
-
-    fn unsafe_struct_client_update() -> Vec<u8> {
-        let mut update = EncoderV1::new();
-        update.write_var(1u32); // client count
-        update.write_var(0u32); // block count for this client
-        update.write_var(1u64 << 53); // unsafe client id
-        update.write_var(0u32); // clock
-        update.write_var(0u32); // delete-set client count
-        update.to_vec()
-    }
-
-    fn unsafe_awareness_frame() -> Vec<u8> {
-        let mut payload = EncoderV1::new();
-        payload.write_var(1u32); // client count
-        payload.write_var(1u64 << 53); // unsafe client id
-        payload.write_var(1u32); // clock
-        payload.write_string("{}");
-
-        let mut frame = EncoderV1::new();
-        frame.write_var(MSG_AWARENESS);
-        frame.write_buf(payload.to_vec());
-        frame.to_vec()
-    }
-
-    fn unsafe_step1_frame() -> Vec<u8> {
-        let mut sv = EncoderV1::new();
-        sv.write_var(1u32); // state-vector entry count
-        sv.write_var(1u64 << 53); // unsafe client id
-        sv.write_var(0u32); // clock
-
-        let mut frame = EncoderV1::new();
-        frame.write_var(MSG_SYNC);
-        frame.write_var(MSG_SYNC_STEP_1);
-        frame.write_buf(sv.to_vec());
-        frame.to_vec()
     }
 
     #[test]
@@ -501,51 +246,6 @@ mod tests {
     }
 
     #[test]
-    fn client_id_safe_integer_boundary() {
-        assert!(is_safe_client_id(0), "zero is fine");
-        assert!(
-            is_safe_client_id((1 << 53) - 1),
-            "2^53 - 1 is the max safe id"
-        );
-        assert!(!is_safe_client_id(1 << 53), "2^53 is unsafe");
-        assert!(!is_safe_client_id(1 << 63), "2^63 is unsafe");
-        assert!(!is_safe_client_id(u64::MAX), "u64::MAX is unsafe");
-    }
-
-    #[test]
-    fn wire_client_id_validation_rejects_unsafe_sync_update_clients() {
-        let update = unsafe_struct_client_update();
-        assert!(
-            validate_update_client_ids(&update).is_err(),
-            "raw unsafe update client id is rejected before yrs can mask it"
-        );
-
-        let frame = Message::Sync(SyncMessage::Update(update)).encode_v1();
-        assert_eq!(
-            classify_message(&frame),
-            0,
-            "unsafe sync frame is not relayable"
-        );
-        assert!(merged_doc_update(&frame).is_err());
-    }
-
-    #[test]
-    fn wire_client_id_validation_rejects_unsafe_awareness_and_step1_clients() {
-        assert!(
-            validate_frame_client_ids(&unsafe_awareness_frame()).is_err(),
-            "raw unsafe awareness client id is rejected"
-        );
-        assert_eq!(classify_message(&unsafe_awareness_frame()), 0);
-        assert!(awareness_client_ids_in(&unsafe_awareness_frame()).is_err());
-
-        assert!(
-            validate_frame_client_ids(&unsafe_step1_frame()).is_err(),
-            "raw unsafe state-vector client id is rejected"
-        );
-        assert_eq!(classify_message(&unsafe_step1_frame()), 0);
-    }
-
-    #[test]
     fn merged_doc_update_extracts_and_skips_no_ops() {
         // A document update yields a delta that reconstructs the content.
         let delta = merged_doc_update(&update_frame("hello"))
@@ -580,18 +280,6 @@ mod tests {
 
         // The merged update must decode cleanly as a single update.
         assert!(yrs::Update::decode_v1(&merged).is_ok());
-    }
-
-    #[test]
-    fn awareness_client_ids_are_collected() {
-        assert_eq!(
-            awareness_client_ids_in(&awareness_frame(111)).unwrap(),
-            vec![111]
-        );
-        // A document frame has no awareness client ids.
-        assert!(awareness_client_ids_in(&update_frame("x"))
-            .unwrap()
-            .is_empty());
     }
 
     #[test]

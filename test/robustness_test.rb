@@ -45,9 +45,7 @@ class RobustnessTest < Minitest::Test
       safe { awareness.apply_update(bytes) }
       safe { awareness.encode_update(bytes) }
       safe { awareness.update_from_message(bytes) }
-      safe { awareness.awareness_client_ids(bytes) }
       safe { awareness.set_local_state(bytes) }
-      safe { awareness.remove_clients([rand(1 << 32)]) }
     end
 
     assert_kind_of Integer, YrbLite::Awareness.new.client_id
