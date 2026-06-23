@@ -106,6 +106,43 @@ survived (counted per contributor), including a round where all four type at the
 same position. It's been run single-process and across two Redis-backed
 processes.
 
+`agent_browsers.mjs` is the same idea driven through
+[agent-browser](https://www.npmjs.com/package/agent-browser) instead of
+Playwright — four real Chrome instances in separate sessions typing into one doc
+at once — and additionally asserts the durable store reflects every keystroke.
+This is the one that runs in CI; unlike the headless suites it exercises the
+real Tiptap ↔ provider editor binding, so it catches bundle-level regressions
+(e.g. a duplicate `yjs` copy) the protocol-only tests can't. agent-browser is a
+frontend devDependency, so no extra setup:
+
+```bash
+bin/rails s -p 3777
+cd frontend && PORT=3777 BROWSERS=4 PER=15 node agent_browsers.mjs
+```
+
+### Fiber scheduler (Falcon)
+
+The whole e2e suite is server-agnostic — the harnesses just need the app on
+`$PORT` — so the same scenarios run under either Puma (threaded) or
+[Falcon](https://github.com/socketry/falcon) (fiber scheduler). Running them
+under Falcon proves the native extension behaves correctly inside a fiber
+reactor: it releases the GVL for CRDT work and the concern serializes store
+writes with a Ruby `Mutex`, and both must hold up with no deadlock, no lost
+updates, and an exactly-once store.
+
+`boot_server.sh` boots either server (single-process, so the in-process document
+registry matches the `async` cable adapter); `e2e_suite.sh` runs the shared
+durability/concurrency slice against it:
+
+```bash
+# Falcon (fiber scheduler); use SERVER=puma for the threaded baseline.
+SERVER=falcon PORT=3778 SERVER_PIDFILE=/tmp/falcon.pid frontend/boot_server.sh
+PORT=3778 frontend/e2e_suite.sh
+kill "$(cat /tmp/falcon.pid)"
+```
+
+CI runs the slice under both servers (and the agent-browser test under Puma).
+
 ## Durable store: Postgres or file
 
 The demo always wires yrb-lite's `on_load`/`on_change` to a durable store. Two

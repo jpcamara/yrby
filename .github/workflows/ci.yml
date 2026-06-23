@@ -123,29 +123,33 @@ jobs:
         working-directory: examples/actioncable-demo/frontend
         run: bun install && bun run build
 
-      # Boot the server (Postgres-backed durable store) and run a smoke slice of
-      # the e2e suite against it.
-      - name: Smoke e2e
+      # Run the durability/concurrency suite against a Postgres-backed durable
+      # store under Puma (threaded). Then the concurrent real-browser test, which
+      # the headless suites can't substitute for: they drive yjs directly, so
+      # they can't catch editor-binding regressions (e.g. a duplicate-yjs bundle
+      # that breaks y-prosemirror). It drives four real Chrome instances through
+      # agent-browser — separate sessions typing into one doc at once — and
+      # asserts byte-for-byte convergence with every keystroke accounted for.
+      - name: E2e — Puma (threaded)
         working-directory: examples/actioncable-demo
         run: |
-          bin/rails s -p 3777 -P tmp/pids/ci.pid > /tmp/server.log 2>&1 &
-          for i in $(seq 1 60); do
-            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3777/docs/demo)" = "200" ] && break
-            sleep 1
-          done
-          cd frontend
-          PORT=3777 bun audit_scenarios.mjs
-          PORT=3777 bun audit.mjs
-          PORT=3777 bun reliable.mjs
-          PORT=3777 bun reliable_provider.mjs
-          PORT=3777 bun reliable_stress.mjs
-
-          # Concurrent REAL-browser editing. The headless suites above drive
-          # yjs directly, so they can't catch editor-binding regressions (e.g. a
-          # duplicate-yjs bundle that breaks y-prosemirror). This drives four
-          # real Chrome instances through agent-browser — separate sessions
-          # typing into the same doc at once — and asserts byte-for-byte
-          # convergence with every keystroke accounted for. agent-browser fetches
-          # its native binary on first run; point it at the runner's Chrome.
+          SERVER=puma PORT=3777 SERVER_PIDFILE=/tmp/puma.pid frontend/boot_server.sh
+          PORT=3777 frontend/e2e_suite.sh
+          # agent-browser fetches its native binary on first run; point it at
+          # the runner's preinstalled Chrome.
           export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
-          PORT=3777 BROWSERS=4 PER=15 node agent_browsers.mjs
+          PORT=3777 BROWSERS=4 PER=15 node frontend/agent_browsers.mjs
+          kill "$(cat /tmp/puma.pid)" || true
+
+      # Re-run the same durability/concurrency slice under Falcon's fiber
+      # scheduler (single-process, --count 1). The native extension releases the
+      # GVL for CRDT work and the concern serializes store writes with a Ruby
+      # Mutex; this proves both behave correctly inside a fiber reactor — no
+      # deadlock, no lost updates, store stays exactly-once — not just under
+      # Puma's thread pool. Different port so the Puma teardown can't race it.
+      - name: E2e — Falcon (fiber scheduler)
+        working-directory: examples/actioncable-demo
+        run: |
+          SERVER=falcon PORT=3778 SERVER_PIDFILE=/tmp/falcon.pid frontend/boot_server.sh
+          PORT=3778 frontend/e2e_suite.sh
+          kill "$(cat /tmp/falcon.pid)" || true
