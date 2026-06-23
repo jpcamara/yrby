@@ -130,18 +130,24 @@ reactor: it releases the GVL for CRDT work and the concern serializes store
 writes with a Ruby `Mutex`, and both must hold up with no deadlock, no lost
 updates, and an exactly-once store.
 
-`boot_server.sh` boots either server (single-process, so the in-process document
-registry matches the `async` cable adapter); `e2e_suite.sh` runs the shared
-durability/concurrency slice against it:
+`boot_server.sh` boots either server (default `WORKERS=2`, a real multi-process
+deployment where the durable store -- not process memory -- is authoritative);
+`e2e_suite.sh` runs the shared durability/concurrency slice against it. Multiple
+processes share documents only through the cable adapter, so a multi-process run
+needs `CABLE_ADAPTER=redis` (the in-process `async` adapter can't span
+processes; `boot_server.sh` fails fast without it):
 
 ```bash
 # Falcon (fiber scheduler); use SERVER=puma for the threaded baseline.
+export CABLE_ADAPTER=redis REDIS_URL=redis://localhost:6379/15
 SERVER=falcon PORT=3778 SERVER_PIDFILE=/tmp/falcon.pid frontend/boot_server.sh
 PORT=3778 frontend/e2e_suite.sh
 kill "$(cat /tmp/falcon.pid)"
 ```
 
-CI runs the slice under both servers (and the agent-browser test under Puma).
+CI runs the slice under both a Puma cluster and a Falcon cluster (2 workers
+each, Redis), plus the two-process cross-process test (`multiprocess.mjs`) and
+the agent-browser test on the Puma cluster.
 
 ## Durable store: Postgres or file
 

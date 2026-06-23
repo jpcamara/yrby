@@ -89,10 +89,21 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 10s
           --health-timeout 5s --health-retries 5
+      # The multi-process e2e runs need a shared cable adapter: Puma cluster /
+      # Falcon workers / two server processes only see each other's broadcasts
+      # through Redis (the in-process `async` adapter can't span processes).
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s
+          --health-timeout 5s --health-retries 5
     env:
       PGHOST: localhost
       PGUSER: postgres
       PGPASSWORD: postgres
+      CABLE_ADAPTER: redis
+      REDIS_URL: redis://localhost:6379/15
     steps:
       - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y libpq-dev
@@ -124,16 +135,19 @@ jobs:
         run: bun install && bun run build
 
       # Run the durability/concurrency suite against a Postgres-backed durable
-      # store under Puma (threaded). Then the concurrent real-browser test, which
-      # the headless suites can't substitute for: they drive yjs directly, so
-      # they can't catch editor-binding regressions (e.g. a duplicate-yjs bundle
-      # that breaks y-prosemirror). It drives four real Chrome instances through
-      # agent-browser — separate sessions typing into one doc at once — and
-      # asserts byte-for-byte convergence with every keystroke accounted for.
-      - name: E2e — Puma (threaded)
+      # store under a multi-process Puma cluster (WORKERS=2 + Redis) — a
+      # realistic deployment where workers share documents only through the cable
+      # adapter and the durable store, not process memory. Then the concurrent
+      # real-browser test, which the headless suites can't substitute for: they
+      # drive yjs directly, so they can't catch editor-binding regressions (e.g.
+      # a duplicate-yjs bundle that breaks y-prosemirror). It drives four real
+      # Chrome instances through agent-browser — separate sessions typing into
+      # one doc at once — and asserts byte-for-byte convergence with every
+      # keystroke accounted for.
+      - name: E2e — Puma cluster (2 workers, Redis)
         working-directory: examples/actioncable-demo
         run: |
-          SERVER=puma PORT=3777 SERVER_PIDFILE=/tmp/puma.pid frontend/boot_server.sh
+          SERVER=puma WORKERS=2 PORT=3777 SERVER_PIDFILE=/tmp/puma.pid frontend/boot_server.sh
           PORT=3777 frontend/e2e_suite.sh
           # agent-browser fetches its native binary on first run; point it at
           # the runner's preinstalled Chrome.
@@ -141,15 +155,27 @@ jobs:
           PORT=3777 BROWSERS=4 PER=15 node frontend/agent_browsers.mjs
           kill "$(cat /tmp/puma.pid)" || true
 
-      # Re-run the same durability/concurrency slice under Falcon's fiber
-      # scheduler (single-process, --count 1). The native extension releases the
-      # GVL for CRDT work and the concern serializes store writes with a Ruby
-      # Mutex; this proves both behave correctly inside a fiber reactor — no
-      # deadlock, no lost updates, store stays exactly-once — not just under
-      # Puma's thread pool. Different port so the Puma teardown can't race it.
-      - name: E2e — Falcon (fiber scheduler)
+      # Re-run the same slice under a multi-process Falcon deployment (2 fiber
+      # reactors + Redis). The native extension releases the GVL for CRDT work
+      # and the concern serializes store writes with a Ruby Mutex; this proves
+      # both behave correctly inside fiber reactors across processes — no
+      # deadlock, no lost updates, durable store intact — not just under Puma's
+      # thread pool. Different port so the Puma teardown can't race it.
+      - name: E2e — Falcon cluster (2 fiber reactors, Redis)
         working-directory: examples/actioncable-demo
         run: |
-          SERVER=falcon PORT=3778 SERVER_PIDFILE=/tmp/falcon.pid frontend/boot_server.sh
+          SERVER=falcon WORKERS=2 PORT=3778 SERVER_PIDFILE=/tmp/falcon.pid frontend/boot_server.sh
           PORT=3778 frontend/e2e_suite.sh
           kill "$(cat /tmp/falcon.pid)" || true
+
+      # Two independent server processes (different ports) sharing documents
+      # through Redis + the Postgres store — the cross-process guarantee on plain
+      # ActionCable (no AnyCable): both processes' server-side replicas stay
+      # current and every change is recorded exactly once.
+      - name: E2e — cross-process sharing (two processes, Redis)
+        working-directory: examples/actioncable-demo
+        run: |
+          SERVER=puma WORKERS=1 PORT=3781 SERVER_PIDFILE=/tmp/mp1.pid frontend/boot_server.sh
+          SERVER=puma WORKERS=1 PORT=3782 SERVER_PIDFILE=/tmp/mp2.pid frontend/boot_server.sh
+          PORTS=3781,3782 bun frontend/multiprocess.mjs
+          kill "$(cat /tmp/mp1.pid)" "$(cat /tmp/mp2.pid)" || true

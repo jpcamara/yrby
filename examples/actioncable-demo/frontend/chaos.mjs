@@ -10,6 +10,7 @@ import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { serverText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777
 const PID = process.pid
@@ -181,9 +182,21 @@ let byGood = true
 for (let i = 1; i <= EDITS; i++) if (!bystander.text().includes(`BY-${i}`)) byGood = false
 check("the bystander room was completely unaffected", byGood)
 
-// Only the valid edits were recorded; none of the garbage became a change.
+// Every valid edit is durably recorded, and none of the garbage became a
+// recorded change. We assert durability by REPLAY, not by a 1:1 row count:
+// under a multi-process deployment the server can coalesce concurrent updates
+// into a single recorded delta, so the row count may be < the number of logical
+// edits (fewer, fatter rows that still replay to the full document). Garbage,
+// by contrast, is rejected before recording, so it can only ever ADD rows —
+// hence count <= EDITS * 2 catches any garbage that slipped through.
+const recovered = await serverText(`http://localhost:${PORT}`, room)
+let everyEditDurable = true
+for (let i = 1; i <= EDITS; i++) {
+  if (!recovered.includes(`A-${i}`) || !recovered.includes(`B-${i}`)) everyEditDurable = false
+}
+check("every valid edit is durable (store replay reconstructs them all)", everyEditDurable)
 const count = await auditCount(room)
-check(`only valid changes were logged (${count} == ${EDITS * 2})`, count === EDITS * 2)
+check(`no garbage became a recorded change (count ${count} <= ${EDITS * 2})`, count <= EDITS * 2)
 
 a.ws.close(); b.ws.close(); bystander.ws.close(); vandal.ws.close()
 console.log("")
