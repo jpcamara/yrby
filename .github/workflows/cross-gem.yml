@@ -91,15 +91,25 @@ jobs:
           # and fail the check, so we don't need to scrub the Rust toolchain.
           ruby -e '
             require "yrb_lite"
+            require "base64"
             lib = $LOADED_FEATURES.grep(/yrb_lite\.(bundle|so)/).first
             abi = RUBY_VERSION[/\d+\.\d+/]
             raise "no native library loaded" unless lib
             raise "expected the precompiled #{abi} subdir, got #{lib}" unless lib.include?("/#{abi}/")
-            # Exercise the actual native surface, including the recent gap-check API.
-            a = YrbLite::Awareness.new
-            a.set_local_state(%q({"u":"ci"}))
-            raise "awareness broken" unless a.local_state.include?("ci")
-            raise "missing update_ready? (stale binary?)" unless YrbLite::Doc.new.respond_to?(:update_ready?)
+            # Exercise the actual golden-path native surface end to end: apply a
+            # known-good Yjs update, export it, frame it through the stateless
+            # codec module functions, and converge a second doc from the result.
+            content = Base64.strict_decode64("AQEBAAQBB2NvbnRlbnQLaGVsbG8gd29ybGQA")
+            d1 = YrbLite::Doc.new
+            d1.apply_update(content)
+            msg = YrbLite.wrap_update(d1.encode_state_as_update)
+            raise "unexpected message kind" unless YrbLite.message_kind(msg) == YrbLite::MSG_SYNC_UPDATE
+            back = YrbLite.update_from_message(msg)
+            raise "codec dropped the update" if back.nil?
+            d2 = YrbLite::Doc.new
+            d2.apply_update(back)
+            raise "round-trip did not converge" unless d2.encode_state_vector == d1.encode_state_vector
+            raise "missing update_ready? (stale binary?)" unless d2.respond_to?(:update_ready?)
             puts "ok: yrb-lite #{YrbLite::VERSION} loaded from #{lib} with no Rust"
           '
 
