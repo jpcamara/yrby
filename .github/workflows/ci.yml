@@ -161,6 +161,10 @@ jobs:
           # the runner's preinstalled Chrome.
           export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
           PORT=3777 BROWSERS=4 PER=15 node frontend/agent_browsers.mjs
+          # The harder multi-user cases: concurrent rich-text merges (marks/block
+          # types) + cursor/selection fidelity (named remote carets, selection
+          # highlights, caret surviving concurrent edits, presence reaping).
+          PORT=3777 node frontend/agent_collab.mjs
           kill "$(cat /tmp/puma.pid)" || true
 
       # Re-run the same slice under a multi-process Falcon deployment (2 fiber
