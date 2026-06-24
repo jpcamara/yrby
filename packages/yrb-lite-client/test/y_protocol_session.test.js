@@ -69,6 +69,27 @@ test("an ack drains the pending queue", () => {
   assert.equal(eng.hasPending, false);
 });
 
+test("applyRemoteUpdate seeds the doc without re-sending it as a local edit", () => {
+  const { doc, eng, sent } = engine();
+
+  // A bootstrap payload (e.g. initial state loaded over HTTP) applied BEFORE connect.
+  const source = new Y.Doc();
+  source.getText("t").insert(0, "bootstrapped");
+  eng.applyRemoteUpdate(Y.encodeStateAsUpdate(source));
+
+  assert.equal(doc.getText("t").toString(), "bootstrapped", "the bootstrap state is applied locally");
+  assert.equal(eng.hasPending, false, "bootstrap state is NOT queued for reliable delivery");
+  assert.equal(sent.length, 0, "nothing is sent before connect");
+
+  // On connect, only the SyncStep1 handshake goes out -- never a reliable
+  // { update, id } frame echoing the bootstrap state back to the server.
+  eng.onConnect();
+  assert.equal(sent.length, 1, "only the handshake was sent");
+  assert.equal(frameType(sent[0].frame), MSG.Sync, "and it's the SyncStep1 handshake");
+  assert.equal(sent[0].id, undefined, "the handshake carries no reliable id");
+  assert.equal(sent.filter((s) => s.id !== undefined).length, 0, "no reliable document frame for bootstrap state");
+});
+
 test("receive(SyncStep1) replies with a SyncStep2; receive(Update) applies to the doc", () => {
   const { doc, eng } = engine();
   // A peer that already has content sends us its SyncStep1...

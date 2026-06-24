@@ -15,7 +15,7 @@
 //   const reply = receive(frame)  -> a binary protocol frame arrived; send `reply` if non-null
 // Local document edits and awareness changes are picked up automatically via the
 // doc's / awareness's "update" events.
-import { Doc, mergeUpdates } from "yjs";
+import { Doc, mergeUpdates, applyUpdate } from "yjs";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 import { readSyncMessage, writeSyncStep1, writeUpdate, messageYjsSyncStep2 } from "y-protocols/sync";
@@ -156,6 +156,26 @@ export class YProtocolSession {
   /** A reliable-delivery `{ ack: id }` envelope arrived. */
   ack(id: number): void {
     this.#delivery.onAck(id);
+  }
+
+  /**
+   * Apply an update to the document WITHOUT treating it as a local edit -- i.e.
+   * without queueing it for reliable re-delivery to the server. Use this for
+   * bootstrap/restore flows where the bytes are already-durable document state
+   * the server already has: initial state loaded over HTTP, a server snapshot, an
+   * import or restore.
+   *
+   * The session re-sends every doc update whose origin isn't itself (that's how a
+   * local keystroke becomes an outbound reliable frame). Applying bootstrap bytes
+   * with a bare `Y.applyUpdate(doc, update)` therefore looks exactly like a local
+   * edit and gets re-sent on the next connect -- echoing the whole initial state
+   * back as a "pending" change. Routing them through here applies them under the
+   * session's own origin, which the outbound filter skips. Safe to call before
+   * `onConnect()`: the bootstrapped state is folded into the SyncStep1 handshake
+   * (the server sees we already have it) instead of being re-sent.
+   */
+  applyRemoteUpdate(update: Uint8Array): void {
+    applyUpdate(this.doc, update, this);
   }
 
   /**

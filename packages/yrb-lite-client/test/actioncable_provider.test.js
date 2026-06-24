@@ -125,6 +125,29 @@ test("reliable doc updates carry an id; an ack drains the queue", (t) => {
   assert.equal(p.hasPending, false, "the ack drained the pending queue");
 });
 
+test("applyRemoteUpdate seeds the doc without queuing a reliable frame on connect", (t) => {
+  const doc = new Y.Doc();
+  const c = fakeConsumer();
+  const p = makeProvider(t, doc, c, { id: "boot1" });
+
+  // Seed initial state the way an app would from an HTTP-loaded snapshot, BEFORE
+  // connecting. A bare Y.applyUpdate here would be re-broadcast as a pending edit.
+  const source = new Y.Doc();
+  source.getText("t").insert(0, "from HTTP");
+  p.applyRemoteUpdate(Y.encodeStateAsUpdate(source));
+
+  assert.equal(doc.getText("t").toString(), "from HTTP", "bootstrap state applied");
+  assert.equal(p.hasPending, false, "bootstrap state is not pending delivery");
+
+  p.connect();
+  c.deliverConnected();
+
+  const reliable = c.calls.send.filter((m) => m.id !== undefined);
+  assert.equal(reliable.length, 0, "no reliable { update, id } frame echoing the bootstrap state");
+  const syncSends = c.calls.send.filter((m) => frameTypeOf(m.update) === MessageType.Sync);
+  assert.ok(syncSends.length >= 1, "the SyncStep1 handshake still went out");
+});
+
 test("status walks connecting -> connected -> synced -> disconnected", (t) => {
   const doc = new Y.Doc();
   const c = fakeConsumer();

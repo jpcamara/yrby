@@ -106,6 +106,23 @@ export class ActionCableProvider {
     return this.session.hasPending;
   }
 
+  /**
+   * Apply a bootstrap/restore update -- initial HTTP state, a server snapshot, an
+   * import -- without re-sending it to the server as a local edit. Call it for
+   * each chunk of already-durable state when seeding the doc, e.g. before
+   * `connect()`:
+   *
+   *   provider.applyRemoteUpdate(fromBase64(initialState));
+   *   priorUpdates.forEach((u) => provider.applyRemoteUpdate(fromBase64(u)));
+   *   provider.connect();
+   *
+   * See {@link YProtocolSession.applyRemoteUpdate} for why a bare
+   * `Y.applyUpdate` would instead be re-broadcast as a pending change.
+   */
+  applyRemoteUpdate(update: Uint8Array): void {
+    this.session.applyRemoteUpdate(update);
+  }
+
   /** Current connection status. See {@link ProviderStatus}. */
   get status(): ProviderStatus {
     return this.#status;
