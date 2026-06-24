@@ -108,9 +108,11 @@ await js(BOB.session, `window.__yrb.editor.chain().focus("end").insertContent(" 
 await sleep(800)
 check("Alice's caret still present in Bob's view after Bob edits", (await labels(BOB.session)).includes("Alice"))
 
-// 5) PRESENCE REAPING: Alice disconnects (only her session); her caret must
-//    disappear for the rest.
-await ab(ALICE.session, "close")
+// 5) PRESENCE REAPING: Alice disconnects; her caret must disappear for the rest.
+//    Tear the provider down explicitly (unsubscribes -> the server reaps her
+//    presence) rather than relying on a browser-close `unload` firing, which
+//    headless CI Chrome doesn't do reliably.
+await js(ALICE.session, `window.__yrb.provider.disconnect(); "disconnected"`)
 // The user-visible signal is the caret disappearing, which happens well under
 // the client-side timeout. (The awareness *entry* itself can linger in the local
 // Map until y-protocols' 30s outdated-timeout — standard plumbing, not a
