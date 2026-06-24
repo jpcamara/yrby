@@ -14,7 +14,7 @@ import * as awarenessProtocol from "y-protocols/awareness"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
-import { serverText as serverTextRead } from "./server_read.mjs"
+import { serverText as serverTextRead, serverDoc } from "./server_read.mjs"
 
 const PORTS = (process.env.PORTS || "3777,3778").split(",").map(Number)
 const ROOM = `mp-${process.pid}`
@@ -106,8 +106,9 @@ class Client {
 }
 
 const serverText = (port, room = ROOM) => serverTextRead(`http://localhost:${port}`, room)
-const auditCount = async (port) =>
-  (await (await fetch(`http://localhost:${port}/docs/${ROOM}/audit`)).json()).count
+const auditLog = async (port) =>
+  (await fetch(`http://localhost:${port}/docs/${ROOM}/audit`)).json()
+const sameBytes = (a, b) => a.length === b.length && a.every((x, i) => x === b[i])
 
 // --- Scenario ---------------------------------------------------------------
 
@@ -169,11 +170,25 @@ await sleep(600)
 check("presence crosses processes (B sees A's cursor)", b1.presenceNames().includes("ALICE-A"))
 check("presence crosses processes (A sees B's cursor)", a2.presenceNames().includes("BOB-B"))
 
-// 5. One shared audit log: every change recorded exactly once (not per process).
-const countA = await auditCount(portA)
-const countB = await auditCount(portB)
-check(`shared audit log has every change once (${countA} == ${EDITS * 4})`, countA === EDITS * 4)
-check("both processes see the same shared audit log", countA === countB)
+// 5. One shared audit log, complete on its own. Delivery is at-least-once and a
+// resync can coalesce a client's un-acked tail into one record, so entry count
+// isn't 1:1 with edits. What must hold: both processes see the same shared log,
+// and replaying it alone reconstructs the converged document byte-for-byte.
+const auditA = await auditLog(portA)
+const auditB = await auditLog(portB)
+check(
+  "both processes see the same shared audit log",
+  auditA.updates.length === auditB.updates.length &&
+    auditA.updates.every((u, i) => u === auditB.updates[i])
+)
+
+const replay = new Y.Doc()
+for (const entry of auditA.updates) Y.applyUpdate(replay, fromB64(entry))
+const { doc: live } = await serverDoc(`http://localhost:${portA}`, ROOM)
+check(
+  "the shared audit log alone replays to the converged document",
+  sameBytes(Y.encodeStateAsUpdate(replay), Y.encodeStateAsUpdate(live))
+)
 
 clients.forEach((c) => c.ws.close())
 late.ws.close()

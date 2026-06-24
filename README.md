@@ -173,13 +173,15 @@ servers:
   causal dependencies are already in the store (checked against `on_load`); a
   causally-incomplete update triggers a resync instead, so the log always
   rebuilds cleanly.
-- **`on_change` is at-least-once.** Every change is recorded durably before it's
-  acked or broadcast (record-before-distribute). A best-effort check skips the
-  common lost-ack retry, but it is **not** cross-process exactly-once: a retry
-  that lands on another process before the first one commits can record the same
-  update twice. **Make `on_change` idempotent** if duplicate side effects would
-  matter (a webhook, a counter) — a raw append-only delta log is naturally fine,
-  since duplicate entries replay idempotently.
+- **`on_change` is at-least-once, and the durable guarantee is that replaying the
+  log reconstructs the document.** Every change is recorded before it's acked or
+  broadcast (record-before-distribute). Entry count is not 1:1 with edits: a
+  best-effort check skips most lost-ack retries but isn't cross-process exact (a
+  retry on another process can record the same update twice), and a resync can
+  coalesce a client's un-acked tail into a single record. So **make `on_change`
+  idempotent** if duplicate side effects would matter (a webhook, a counter) — a
+  raw append-only delta log is naturally fine, since it replays to the same
+  document either way.
 
 There is deliberately no in-gem cross-process lock. One that only spanned a
 single process would give exactly-once at small scale and silently degrade as
