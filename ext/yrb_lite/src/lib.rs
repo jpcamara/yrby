@@ -330,8 +330,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // Define message type constants
     module.const_set("MSG_SYNC", 0u8)?;
     module.const_set("MSG_AWARENESS", 1u8)?;
-    module.const_set("MSG_AUTH", 2u8)?;
-    module.const_set("MSG_QUERY_AWARENESS", 3u8)?;
     module.const_set("MSG_SYNC_STEP1", 0u8)?;
     module.const_set("MSG_SYNC_STEP2", 1u8)?;
     module.const_set("MSG_SYNC_UPDATE", 2u8)?;

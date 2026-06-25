@@ -391,8 +391,6 @@ exceptions.
 ```ruby
 YrbLite::MSG_SYNC            # 0 - Document sync messages
 YrbLite::MSG_AWARENESS       # 1 - User presence data
-YrbLite::MSG_AUTH            # 2 - Authentication
-YrbLite::MSG_QUERY_AWARENESS # 3 - Request awareness state
 
 YrbLite::MSG_SYNC_STEP1      # 0 - State vector request
 YrbLite::MSG_SYNC_STEP2      # 1 - Update response

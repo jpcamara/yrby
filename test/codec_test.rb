@@ -30,8 +30,6 @@ class CodecTest < Minitest::Test
   def test_constants
     assert_equal 0, YrbLite::MSG_SYNC
     assert_equal 1, YrbLite::MSG_AWARENESS
-    assert_equal 2, YrbLite::MSG_AUTH
-    assert_equal 3, YrbLite::MSG_QUERY_AWARENESS
     assert_equal 0, YrbLite::MSG_SYNC_STEP1
     assert_equal 1, YrbLite::MSG_SYNC_STEP2
     assert_equal 2, YrbLite::MSG_SYNC_UPDATE
