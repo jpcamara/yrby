@@ -6,16 +6,16 @@ require "json"
 
 # Thread-safety regression tests.
 #
-# The native types are safe to share across threads: yrs::Doc is Send + Sync,
-# with an internal blocking RwLock around every transaction, and yrs Awareness
-# uses a concurrent map. The extension adds no RefCell or other interior
-# mutability, and a compile-time assertion in lib.rs checks Send + Sync for both
-# types.
+# yrs::Doc is Send + Sync, with an internal blocking RwLock around every
+# transaction, and the extension adds no RefCell or other interior mutability.
+# A compile-time assertion in lib.rs checks Doc is Send + Sync.
 #
-# These tests hammer shared instances from many Ruby threads. Under MRI the
-# GVL serializes native calls, so they primarily guard against regressions
-# (e.g. reintroducing a RefCell whose re-entrant borrow would panic and kill
-# the process) and verify CRDT convergence is unaffected by interleaving.
+# These tests hammer a shared Doc from many Ruby threads. The extension releases
+# the GVL for the native CRDT work, so threads genuinely run concurrently inside
+# apply/encode; it's yrs's RwLock, not the GVL, that serializes mutations on the
+# same doc. They guard against regressions (e.g. reintroducing a RefCell whose
+# re-entrant borrow would panic and kill the process) and verify CRDT
+# convergence is unaffected by interleaving.
 class ThreadSafetyTest < Minitest::Test
   THREADS = 8
   ITERATIONS = 50
