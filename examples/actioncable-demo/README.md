@@ -83,9 +83,28 @@ the AnyCable run at the containerized services.
 
 ### AnyCable
 
-The Go gateway is an opt-in profile (`docker compose --profile anycable up`); it
-needs the web service in AnyCable RPC mode. See the [AnyCable](#anycable) section
-for the moving parts.
+Run the same demo over [AnyCable](https://anycable.io) — the Go WebSocket gateway
+with channel logic in a separate Ruby RPC process — by applying the AnyCable
+overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.anycable.yml up --build
+# open http://localhost:3100/docs/demo/lexxy in two windows
+```
+
+This adds two services to the base pg/redis/web stack:
+
+| Service        | Role                                              | Host port |
+|----------------|---------------------------------------------------|-----------|
+| `anycable-rpc` | Ruby gRPC server — the `DocumentChannel` logic    | —         |
+| `anycable-go`  | Go gateway — terminates browser WebSockets        | **8080**  |
+
+`web` runs in `any_cable` mode (broadcasts via AnyCable instead of serving
+WebSockets itself) and emits `CABLE_URL=ws://localhost:8080/cable` into the page
+via `action_cable_meta_tag`, so the browser's `createConsumer()` connects to the
+gateway automatically. The gateway calls the RPC server, which records to the
+same Postgres store — so documents converge across the AnyCable path exactly as
+on plain ActionCable.
 
 ## How it works
 

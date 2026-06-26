@@ -1,0 +1,61 @@
+# AnyCable overlay for the demo. Apply ON TOP of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.anycable.yml up --build
+#
+# It reuses the base postgres / redis / web and adds the two AnyCable processes:
+#
+#   anycable-rpc  Ruby gRPC server -- the channel logic (DocumentChannel)
+#   anycable-go   Go WebSocket gateway -- terminates browser sockets, calls RPC,
+#                 broadcasts via Redis (host port 8080)
+#
+# The browser still loads pages from web (http://localhost:3100) but connects its
+# WebSocket to anycable-go (ws://localhost:8080/cable) -- web runs in any_cable
+# mode and `CABLE_URL` is emitted into the page via `action_cable_meta_tag`, so
+# `createConsumer()` targets the gateway automatically.
+
+name: yrb-lite-demo
+
+services:
+  web:
+    environment:
+      # Broadcast through AnyCable instead of serving WebSockets from Rails, and
+      # point the browser's cable connection at the Go gateway.
+      CABLE_ADAPTER: any_cable
+      CABLE_URL: ws://localhost:8080/cable
+
+  anycable-rpc:
+    build:
+      context: ../..
+      dockerfile: examples/actioncable-demo/Dockerfile
+    command: ["bundle", "exec", "anycable", "--rpc-host=0.0.0.0:50051"]
+    environment:
+      RAILS_ENV: development
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      REDIS_URL: redis://redis:6379/15
+      CABLE_ADAPTER: any_cable
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # web owns the schema migration (db:prepare); wait for it so the RPC
+      # server's first on_load/on_change hits a ready database.
+      web:
+        condition: service_healthy
+
+  anycable-go:
+    image: anycable/anycable-go:1.6
+    environment:
+      ANYCABLE_HOST: "0.0.0.0"
+      ANYCABLE_PORT: "8080"
+      ANYCABLE_RPC_HOST: "anycable-rpc:50051"
+      ANYCABLE_REDIS_URL: redis://redis:6379/15
+      # Not set => allow all origins. Fine for a local demo; restrict in prod.
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy

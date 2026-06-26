@@ -68,25 +68,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/up || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
 
-  # Opt-in AnyCable WebSocket gateway (Go). Start with:
-  #   docker compose --profile anycable up --build
-  # It terminates WebSockets and talks to the Rails AnyCable RPC server. Running
-  # the demo pages against it also needs the web service in RPC mode -- see the
+  # The AnyCable variant (Ruby RPC server + Go gateway) is an opt-in OVERLAY:
+  #   docker compose -f docker-compose.yml -f docker-compose.anycable.yml up --build
+  # It reuses postgres/redis/web here and adds the gateway + RPC server. See the
   # README "AnyCable" section.
-  anycable-go:
-    image: anycable/anycable-go:1.5
-    profiles: ["anycable"]
-    environment:
-      ANYCABLE_HOST: "0.0.0.0"
-      ANYCABLE_PORT: "8080"
-      ANYCABLE_REDIS_URL: redis://redis:6379/15
-      ANYCABLE_RPC_HOST: "web:50051"
-    ports:
-      - "8080:8080"
-    depends_on:
-      redis:
-        condition: service_healthy
 
 volumes:
   pgdata:
