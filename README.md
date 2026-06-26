@@ -24,15 +24,24 @@ On the browser, use the `ActionCableProvider` from the
 Integrates with any editor that includes Y.js support, such as Tiptap, ProseMirror
 and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
 
+## Usage
+
+Install the gem and npm package:
+
+```
+gem install yrb-lite-actioncable # depends on yrb-lite
+npm install yrb-lite-client
+```
+
 ## What you get
 
 - A thread-safe Ruby `Doc` you can share across Ruby threads/fibers, and native CRDT work
   runs with the GVL released.
 - The y-websocket protocol (document sync plus awareness/presence) as a
   one-include ActionCable concern.
-- Store-backed ActionCable/AnyCable delivery for multi-process deployments.
 - Authoritative record-before-distribute semantics: each document change can be
   recorded durably before it goes out to anyone.
+- 
 
 ## Why "lite"
 
