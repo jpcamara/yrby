@@ -11,44 +11,70 @@ documents.
 class DocumentChannel < ApplicationCable::Channel
   include YrbLite::ActionCable::Sync
 
-  def subscribed   = sync_subscribed(params[:id])
-  def receive(data) = sync_receive(data)
+  on_load   { |key|         MyStore.load(key) }
+  on_change { |key, update| MyStore.append(key, update) }
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
 end
 ```
 
-On the browser, use the `yrb-lite-client` `ActionCableProvider`. Tiptap,
-ProseMirror, and BlockNote all sync through the `Y.Doc` you pass in and the
-provider's Awareness instance.
+On the browser, use the `ActionCableProvider` from the 
+[`yrb-lite-client`](https://www.npmjs.com/package/yrb-lite-client) npm package.
+Integrates with any editor that includes Y.js support, such as TipTap, ProseMirror 
+and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
 
 ## What you get
 
-- A thread-safe Ruby `Doc` you can share across Puma threads; native CRDT work
+- A thread-safe Ruby `Doc` you can share across Ruby threads/fibers, and native CRDT work
   runs with the GVL released.
 - The y-websocket protocol (document sync plus awareness/presence) as a
   one-include ActionCable concern.
 - Store-backed ActionCable/AnyCable delivery for multi-process deployments.
-- Authoritative record-before-distribute semantics: each document change is
+- Authoritative record-before-distribute semantics: each document change can be
   recorded durably before it goes out to anyone.
-
-What it doesn't do: auth, read-only connections, rate limiting, webhooks,
-metrics. Hocuspocus ships extensions for those; here you'd build them with
-Rails.
 
 ## Why "lite"
 
-The "lite" is the size of the surface. yrb-lite binds just the part of y-crdt you
-need to *sync and persist* collaborative documents — a `Doc`, awareness, and the
+The "lite" is the size of the surface. `yrb-lite` binds just the part of `y-crdt` you
+need to *sync and persist* collaborative documents - a `Doc`, awareness, and the
 y-websocket protocol primitives. The Ruby side treats a document as opaque CRDT
 state: it applies updates, answers sync handshakes, and records deltas, but never
 reaches in to read or edit the contents. The browser editor owns the document's
-shape; Rails owns durability and delivery.
+shape.
 
-A full y-crdt Ruby binding like `y-rb` gives you the whole type system — shared
-text, arrays, maps, XML — to build and query documents in Ruby. yrb-lite leaves
-that out on purpose. What's left is a sync engine plus a one-include ActionCable
-concern, with the server concerns it skips (auth, rate limiting, metrics — see
-above) built from the Rails you already run, and no Node process hosting the
-documents.
+## What isn't "lite"
+
+The surface area may be "lite", but a core focus is on on durability, resiliency, delivery
+guarantees, correctness, and thread safety.
+
+Towards that goal, `yrb-lite` adds capabilities that may even stand out in the Yjs ecosystem:
+
+- Built-in update acknowledgement: the `ActionCableProvider` in `yrb-lite-client` will continue to
+  send updates until an ack is received from the server. [`yrb-lite-actioncable`](https://rubygems.org/gems/yrb-lite-actioncable)
+  only sends an ack when applying an update is successful. The goal is at-least-once delivery,
+  and because CRDTs are idempotent a duplicate update is effectively a no-op.
+- Gap detection in document updates: before applying an update and sending an ack to the client,
+  `yrb-lite` checks whether the update results in any causal gap. Ie, an update comes through
+  which depends on a previous update that is not yet present in the document. This can result in
+  a document stuck with "pending" updates, which will _never_ apply if the missing update is note sent.
+  To avoid this, `yrb-lite` does not apply the update, and starts a new y-protocol sync with the client.
+  That will cause the client to synchronize its document with the server, sending through any updates
+  that may have been missed
+
+## What about [yrb](https://github.com/y-crdt/yrb)?
+
+`yrb` has a much larger interface that gives you most of the Yjs type system - 
+shared text, arrays, maps, XML - to build and query documents in Ruby. It was a great
+inspiration for my use of Yjs in Ruby/Rails, and I originally considered building
+on top of it. There are a few reasons I went with `yrb-lite` instead:
+
+- `yrb` is largely unmaintained. It was built as an expirement for Gitlab, and the original
+  author mostly moved onto other projects
+- [It isn't thread-safe](https://github.com/y-crdt/yrb/issues/72). It segfaults in a threaded
+  environment (such as ActionCable...)
+- It's a much larger set of features to maintain, which most people don't need. The vast
+  majority of people manipulate Y.js documents in the browser, not from a server-side language.
 
 ## Testing
 
