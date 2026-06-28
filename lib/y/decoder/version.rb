@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Y
-  module Ruby
-    VERSION = "0.2.0"
+  module Decoder
+    VERSION = "0.1.0.alpha1"
   end
 end

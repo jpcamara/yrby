@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
-require_relative "lib/y/ruby/action_cable/version"
+require_relative "lib/y/action_cable/version"
 
 Gem::Specification.new do |spec|
   spec.name = "y-ruby-actioncable"
-  spec.version = Y::Ruby::ActionCable::VERSION
+  spec.version = Y::ActionCable::VERSION
   spec.authors = ["JP Camara"]
   spec.email = ["johnpcamara@gmail.com"]
 
   spec.summary = "ActionCable integration for y-ruby: the y-websocket sync protocol and awareness over ActionCable/AnyCable"
-  spec.description = "y-ruby-actioncable adds a Rails ActionCable channel concern (Y::Ruby::ActionCable::Sync) on " \
+  spec.description = "y-ruby-actioncable adds a Rails ActionCable channel concern (Y::ActionCable::Sync) on " \
                      "top of the y-ruby y-crdt bindings: the full y-websocket sync protocol, awareness/presence, " \
                      "record-before-distribute auditing, and memory/store backends (AnyCable-ready), so a Rails app " \
                      "can be the collaboration server for Y.js editors with no Node sidecar."
@@ -19,8 +19,8 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     "lib/y-ruby-actioncable.rb",
-    "lib/y/ruby/action_cable.rb",
-    "lib/y/ruby/action_cable/**/*.rb",
+    "lib/y/action_cable.rb",
+    "lib/y/action_cable/**/*.rb",
     "LICENSE",
     "README.md",
     "CHANGELOG-actioncable.md"

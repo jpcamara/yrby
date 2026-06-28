@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require "y/ruby"
-require "y/ruby/decoder/version"
+require "y"
+require "y/decoder/version"
 
-module Y::Ruby
+module Y
   # Plain-text reconstruction of a stored Yjs document, in pure Ruby — for search
   # indexing and previews. The core `y-ruby` gem moves and stores opaque CRDT
   # updates without reading them; this reads the text out of the shared type the
@@ -12,21 +12,21 @@ module Y::Ruby
   # Node, no subprocess, no binary.
   #
   #   state = doc.encode_state_as_update        # opaque CRDT bytes from the store
-  #   Y::Ruby::Decoder.text(state)              # => "hello world"
-  #   Y::Ruby::Decoder.preview(state, 280)      # => "hello world…"
+  #   Y::Decoder.text(state)              # => "hello world"
+  #   Y::Decoder.preview(state, 280)      # => "hello world…"
   #
   # Full-fidelity reconstruction (the exact Lexical EditorState / HTML, which
   # needs @lexical/yjs) is a separate, opt-in concern — see the `y-ruby-decode`
   # package's Bun binary. This gem stays pure Ruby on purpose.
   module Decoder
-    class Error < Y::Ruby::Error; end
+    class Error < Y::Error; end
 
     module_function
 
     # Plain text of the document. `field` pins the root key (Lexical: the editor
     # id; ProseMirror: "default"); omit it to use the document's sole root.
     def text(state, field: nil)
-      field ||= Y::Ruby::Doc.new.tap { |d| d.apply_update(state) }.root_names.first
+      field ||= Y::Doc.new.tap { |d| d.apply_update(state) }.root_names.first
       return "" unless field
 
       # A plain `Y.Text` root (a simple shared-text editor) reads straight out.
@@ -49,7 +49,7 @@ module Y::Ruby
     end
 
     def load(state)
-      Y::Ruby::Doc.new.tap { |doc| doc.apply_update(state) }
+      Y::Doc.new.tap { |doc| doc.apply_update(state) }
     end
 
     def strip_tags(markup)

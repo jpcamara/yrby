@@ -44,7 +44,7 @@ class FiberSchedulerTest < Minitest::Test
   end
 
   def test_concurrent_writes_and_reads_on_shared_doc
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     updates = [
       YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
       YjsFixtures::TwoDocsMerged::DOC2_UPDATE
@@ -64,7 +64,7 @@ class FiberSchedulerTest < Minitest::Test
 
     # Convergence: interleaved/repeated application must equal sequential
     # application of the same updates.
-    sequential = Y::Ruby::Doc.new
+    sequential = Y::Doc.new
     updates.each { |u| sequential.apply_update(u) }
 
     assert_equal sequential.encode_state_vector, doc.encode_state_vector
@@ -73,10 +73,10 @@ class FiberSchedulerTest < Minitest::Test
 
   def test_sync_handshake_between_fiber_pairs
     pairs = FIBERS.times.map do
-      source = Y::Ruby::Doc.new
+      source = Y::Doc.new
       source.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
       source.apply_update(YjsFixtures::TwoDocsMerged::DOC2_UPDATE)
-      [source, Y::Ruby::Doc.new]
+      [source, Y::Doc.new]
     end
 
     errors = run_fibers do |i, _j|
@@ -96,19 +96,19 @@ class FiberSchedulerTest < Minitest::Test
 
   def test_fan_in_sync_to_shared_doc
     # Many fibers sync different sources into ONE shared doc concurrently.
-    shared = Y::Ruby::Doc.new
+    shared = Y::Doc.new
     sources = [
       YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
       YjsFixtures::TwoDocsMerged::DOC2_UPDATE
     ]
 
     errors = run_fibers do |i, _j|
-      message = Y::Ruby.wrap_update(sources[i % sources.length])
+      message = Y.wrap_update(sources[i % sources.length])
       shared.handle_sync_message(message)
     end
 
     assert_empty errors
-    sequential = Y::Ruby::Doc.new
+    sequential = Y::Doc.new
     sources.each { |u| sequential.apply_update(u) }
 
     assert_equal sequential.encode_state_vector, shared.encode_state_vector

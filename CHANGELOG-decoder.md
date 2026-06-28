@@ -5,7 +5,7 @@ All notable changes to the `y-ruby-decoder` gem.
 ## [Unreleased]
 
 ### Added
-- Initial scaffold. `Y::Ruby::Decoder` reconstructs plain text from a stored Yjs
+- Initial scaffold. `Y::Decoder` reconstructs plain text from a stored Yjs
   CRDT state **in pure Ruby**, in-process, on the core gem's native extension —
   no Node, no subprocess, no binary:
   - `text` — plain text (Lexical `Y.XmlText`, plain `Y.Text`, ProseMirror

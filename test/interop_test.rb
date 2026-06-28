@@ -59,7 +59,7 @@ class InteropTest < Minitest::Test
   def test_yjs_update_applied_to_y_ruby
     result = yjs("create-doc", 1, "content", "hello from yjs")
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(result["update"]))
 
     # State vectors should be semantically equivalent
@@ -70,7 +70,7 @@ class InteropTest < Minitest::Test
   def test_yjs_empty_doc_matches_y_ruby
     result = yjs("empty-doc", 1)
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     assert_equal b64_decode(result["state_vector"]), doc.encode_state_vector
   end
@@ -82,7 +82,7 @@ class InteropTest < Minitest::Test
     merged = yjs("merge-updates", doc1["update"], doc2["update"])
 
     # y-ruby should be able to apply the merged update
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(merged["merged_update"]))
 
     # Verify it has content from both (state vector size > empty)
@@ -100,7 +100,7 @@ class InteropTest < Minitest::Test
     yjs_doc = yjs("create-doc", 1, "content", "test content")
 
     # Load into y-ruby
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(yjs_doc["update"]))
 
     # Export from y-ruby
@@ -118,7 +118,7 @@ class InteropTest < Minitest::Test
   end
 
   def test_y_ruby_empty_doc_matches_yjs
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     update = b64_encode(doc.encode_state_as_update)
 
     result = yjs("apply-update", update)
@@ -133,7 +133,7 @@ class InteropTest < Minitest::Test
   def test_yrs_update_applied_to_y_ruby
     result = yrs("create-doc", 1, "content", "hello from yrs")
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(result["update"]))
 
     # State vectors should match exactly (same implementation)
@@ -143,7 +143,7 @@ class InteropTest < Minitest::Test
   def test_yrs_empty_doc_matches_y_ruby
     result = yrs("empty-doc", 1)
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     assert_equal b64_decode(result["state_vector"]), doc.encode_state_vector
   end
@@ -154,7 +154,7 @@ class InteropTest < Minitest::Test
 
     merged = yrs("merge-updates", doc1["update"], doc2["update"])
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(merged["merged_update"]))
 
     # State vectors should match exactly
@@ -168,7 +168,7 @@ class InteropTest < Minitest::Test
   def test_y_ruby_update_applied_to_yrs
     yrs_doc = yrs("create-doc", 1, "content", "test content")
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(yrs_doc["update"]))
 
     update = b64_encode(doc.encode_state_as_update)
@@ -191,7 +191,7 @@ class InteropTest < Minitest::Test
     yjs_doc = yjs("create-doc", 1, "content", "cross-platform test")
 
     # Load into y-ruby
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(yjs_doc["update"]))
 
     # Export and load into yrs
@@ -206,7 +206,7 @@ class InteropTest < Minitest::Test
     yrs_doc = yrs("create-doc", 1, "content", "rust to js test")
 
     # Load into y-ruby
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(yrs_doc["update"]))
 
     # Export and load into Y.js
@@ -225,7 +225,7 @@ class InteropTest < Minitest::Test
     yjs_doc = yjs("create-doc", 1, "content", "sync test")
 
     # y-ruby is empty
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     # y-ruby sends sync step 1 (its state vector)
     sv = b64_encode(doc.encode_state_vector)
@@ -248,7 +248,7 @@ class InteropTest < Minitest::Test
     yrs_doc = yrs("create-doc", 1, "content", "yrs sync test")
 
     # y-ruby is empty
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     # y-ruby sends its state vector
     sv = b64_encode(doc.encode_state_vector)
@@ -267,7 +267,7 @@ class InteropTest < Minitest::Test
     # Both have different content
     yjs_doc = yjs("create-doc", 1, "doc1", "yjs content")
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(b64_decode(yjs("create-doc", 2, "doc2", "yrb content")["update"]))
 
     # Exchange state vectors and updates

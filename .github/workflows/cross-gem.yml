@@ -90,7 +90,7 @@ jobs:
           # binary was loaded: a source fallback would install to the flat path
           # and fail the check, so we don't need to scrub the Rust toolchain.
           ruby -e '
-            require "y/ruby"
+            require "y"
             require "base64"
             lib = $LOADED_FEATURES.grep(/y_ruby\.(bundle|so)/).first
             abi = RUBY_VERSION[/\d+\.\d+/]
@@ -100,17 +100,17 @@ jobs:
             # known-good Yjs update, export it, frame it through the stateless
             # codec module functions, and converge a second doc from the result.
             content = Base64.strict_decode64("AQEBAAQBB2NvbnRlbnQLaGVsbG8gd29ybGQA")
-            d1 = Y::Ruby::Doc.new
+            d1 = Y::Doc.new
             d1.apply_update(content)
-            msg = Y::Ruby.wrap_update(d1.encode_state_as_update)
-            raise "unexpected message kind" unless Y::Ruby.message_kind(msg) == Y::Ruby::MSG_SYNC_UPDATE
-            back = Y::Ruby.update_from_message(msg)
+            msg = Y.wrap_update(d1.encode_state_as_update)
+            raise "unexpected message kind" unless Y.message_kind(msg) == Y::MSG_SYNC_UPDATE
+            back = Y.update_from_message(msg)
             raise "codec dropped the update" if back.nil?
-            d2 = Y::Ruby::Doc.new
+            d2 = Y::Doc.new
             d2.apply_update(back)
             raise "round-trip did not converge" unless d2.encode_state_vector == d1.encode_state_vector
             raise "missing update_ready? (stale binary?)" unless d2.respond_to?(:update_ready?)
-            puts "ok: y-ruby #{Y::Ruby::VERSION} loaded from #{lib} with no Rust"
+            puts "ok: y-ruby #{Y::VERSION} loaded from #{lib} with no Rust"
           '
 
   # After this workflow (and once smoke-test is green), download the artifacts

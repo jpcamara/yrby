@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
-require "y/ruby/decoder"
+require "y/decoder"
 require "base64"
 require "json"
 
@@ -31,59 +31,59 @@ class DecoderTest < Minitest::Test
   # --- Lexical / Lexxy -------------------------------------------------------
 
   def test_lexical_blocks_are_separated_by_newlines
-    assert_equal "Hello from Lexical\nsecond bold", Y::Ruby::Decoder.text(decode(LEXICAL))
+    assert_equal "Hello from Lexical\nsecond bold", Y::Decoder.text(decode(LEXICAL))
   end
 
   def test_lexical_paragraphs_do_not_merge_into_one_run
     # Regression: Lexical's blocks are sibling Y.XmlText nodes with no element
     # tags, so a flat read glued them ("...Lexicalsecond...") and broke word
     # boundaries for search. read_xml now joins top-level blocks with newlines.
-    refute_includes Y::Ruby::Decoder.text(decode(LEXICAL)), "Lexicalsecond"
+    refute_includes Y::Decoder.text(decode(LEXICAL)), "Lexicalsecond"
   end
 
   # --- ProseMirror / TipTap --------------------------------------------------
 
   def test_prosemirror_strips_tags_and_separates_blocks
-    assert_equal "A TipTap Heading\nPlain and bold", Y::Ruby::Decoder.text(decode(PROSEMIRROR))
+    assert_equal "A TipTap Heading\nPlain and bold", Y::Decoder.text(decode(PROSEMIRROR))
   end
 
   # --- plain Y.Text ----------------------------------------------------------
 
   def test_plain_text
-    assert_equal "just plain text", Y::Ruby::Decoder.text(decode(PLAINTEXT))
+    assert_equal "just plain text", Y::Decoder.text(decode(PLAINTEXT))
   end
 
   # --- preview / field / edges ----------------------------------------------
 
   def test_preview_collapses_to_one_line_and_truncates
-    assert_equal "Hello from Lexical second bold", Y::Ruby::Decoder.preview(decode(LEXICAL))
-    assert_equal "A Ti…", Y::Ruby::Decoder.preview(decode(PROSEMIRROR), limit: 4)
+    assert_equal "Hello from Lexical second bold", Y::Decoder.preview(decode(LEXICAL))
+    assert_equal "A Ti…", Y::Decoder.preview(decode(PROSEMIRROR), limit: 4)
   end
 
   def test_field_pins_the_root
-    assert_equal "just plain text", Y::Ruby::Decoder.text(decode(PLAINTEXT), field: "content")
-    assert_equal "", Y::Ruby::Decoder.text(decode(PLAINTEXT), field: "no-such-root")
+    assert_equal "just plain text", Y::Decoder.text(decode(PLAINTEXT), field: "content")
+    assert_equal "", Y::Decoder.text(decode(PLAINTEXT), field: "no-such-root")
   end
 
   def test_empty_document_is_blank
-    assert_equal "", Y::Ruby::Decoder.text(Y::Ruby::Doc.new.encode_state_as_update)
+    assert_equal "", Y::Decoder.text(Y::Doc.new.encode_state_as_update)
   end
 
   # --- native Doc readers underneath ----------------------------------------
 
   def test_doc_readers_cover_each_shape
-    assert_equal ["root"], Y::Ruby::Decoder.load(decode(LEXICAL)).root_names
+    assert_equal ["root"], Y::Decoder.load(decode(LEXICAL)).root_names
     # Lexical/ProseMirror roots aren't plain text, so read_text is empty there;
     # read_xml carries the block-separated content.
-    assert_equal "", Y::Ruby::Decoder.load(decode(LEXICAL)).read_text("root").to_s.strip
-    assert_includes Y::Ruby::Decoder.load(decode(LEXICAL)).read_xml("root"), "\n"
-    assert_equal "just plain text", Y::Ruby::Decoder.load(decode(PLAINTEXT)).read_text("content")
+    assert_equal "", Y::Decoder.load(decode(LEXICAL)).read_text("root").to_s.strip
+    assert_includes Y::Decoder.load(decode(LEXICAL)).read_xml("root"), "\n"
+    assert_equal "just plain text", Y::Decoder.load(decode(PLAINTEXT)).read_text("content")
   end
 
   # --- read_map (structured state) ------------------------------------------
 
   def test_read_map_returns_state_as_json
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(decode(MAP))
 
     assert_equal(
@@ -93,7 +93,7 @@ class DecoderTest < Minitest::Test
   end
 
   def test_read_map_missing_root_is_nil
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(decode(MAP))
 
     assert_nil doc.read_map("nope")

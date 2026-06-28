@@ -40,7 +40,7 @@ COPY . /src/y-ruby
 
 # Compile the native extension for the image's platform. A `path:` gem is NOT
 # auto-compiled by the consumer's `bundle install` (only published gems are), so
-# build it explicitly into lib/y/ruby/y_ruby.so -- otherwise the loader's
+# build it explicitly into lib/y/y_ruby.so -- otherwise the loader's
 # require fails at runtime. (The Linux platforms are added because the committed
 # lockfiles were resolved on macOS.)
 RUN cd /src/y-ruby \

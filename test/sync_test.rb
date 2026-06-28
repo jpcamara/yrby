@@ -2,12 +2,12 @@
 
 require "test_helper"
 require_relative "fixtures/yjs_fixtures"
-require "y/ruby/action_cable"
+require "y/action_cable"
 require "logger"
 
 class SyncTest < Minitest::Test
   def update_message(update_bytes, id: nil)
-    frame = Y::Ruby.wrap_update(update_bytes)
+    frame = Y.wrap_update(update_bytes)
     { "update" => Base64.strict_encode64(frame) }.tap do |payload|
       payload["id"] = id unless id.nil?
     end
@@ -16,7 +16,7 @@ class SyncTest < Minitest::Test
   def doc_state(updates)
     return nil if updates.empty?
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     updates.each { |u| doc.apply_update(u) }
     doc.encode_state_as_update
   end
@@ -26,7 +26,7 @@ class SyncTest < Minitest::Test
     recorder ||= ->(_key, update) { store << update }
     loader = ->(_key) { test.doc_state(store) }
     klass = Class.new do
-      include Y::Ruby::ActionCable::Sync
+      include Y::ActionCable::Sync
 
       attr_accessor :transmits, :broadcasts, :streams, :logger
 
@@ -54,23 +54,23 @@ class SyncTest < Minitest::Test
 
   def test_sync_requires_loader_and_recorder
     no_loader = Class.new do
-      include Y::Ruby::ActionCable::Sync
+      include Y::ActionCable::Sync
 
       on_change { |_key, _update| nil }
     end
     no_recorder = Class.new do
-      include Y::Ruby::ActionCable::Sync
+      include Y::ActionCable::Sync
 
       on_load { |_key| nil }
     end
 
-    assert_match(/on_load/, assert_raises(Y::Ruby::Error) { no_loader.new.sync_subscribed("doc") }.message)
-    assert_match(/on_change/, assert_raises(Y::Ruby::Error) { no_recorder.new.sync_subscribed("doc") }.message)
+    assert_match(/on_load/, assert_raises(Y::Error) { no_loader.new.sync_subscribed("doc") }.message)
+    assert_match(/on_change/, assert_raises(Y::Error) { no_recorder.new.sync_subscribed("doc") }.message)
   end
 
   def test_config_is_inherited_by_subclasses
     base = Class.new do
-      include Y::Ruby::ActionCable::Sync
+      include Y::ActionCable::Sync
 
       on_load { |_key| nil }
       on_change { |_key, _update| nil }
@@ -82,9 +82,9 @@ class SyncTest < Minitest::Test
   end
 
   def test_max_frame_bytes_default_override_and_disable
-    klass = Class.new { include Y::Ruby::ActionCable::Sync }
+    klass = Class.new { include Y::ActionCable::Sync }
 
-    assert_equal Y::Ruby::ActionCable::Sync::DEFAULT_MAX_FRAME_BYTES, klass.max_frame_bytes
+    assert_equal Y::ActionCable::Sync::DEFAULT_MAX_FRAME_BYTES, klass.max_frame_bytes
     klass.max_frame_bytes 1024
 
     assert_equal 1024, klass.max_frame_bytes
@@ -103,8 +103,8 @@ class SyncTest < Minitest::Test
 
     response = Base64.strict_decode64(helper.transmits.first["update"])
 
-    assert_equal Y::Ruby::ActionCable::Sync::MSG_KIND_SYNC_STEP1,
-                 Y::Ruby.message_kind(response)
+    assert_equal Y::ActionCable::Sync::MSG_KIND_SYNC_STEP1,
+                 Y.message_kind(response)
   end
 
   def test_anycable_whisper_is_scoped_to_awareness_stream
@@ -119,17 +119,17 @@ class SyncTest < Minitest::Test
   end
 
   def test_answers_sync_step1_from_the_store
-    source = Y::Ruby::Doc.new
+    source = Y::Doc.new
     source.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
     transmits = []
     helper = helper_for(store: [YjsFixtures::TwoDocsMerged::DOC1_UPDATE], transmits: transmits)
 
-    helper.sync_receive({ "update" => Base64.strict_encode64(Y::Ruby::Doc.new.sync_step1) }, "doc-key")
+    helper.sync_receive({ "update" => Base64.strict_encode64(Y::Doc.new.sync_step1) }, "doc-key")
 
     assert_equal 1, transmits.length
     response = Base64.strict_decode64(transmits.first["update"])
-    delta = Y::Ruby.update_from_message(response)
-    rebuilt = Y::Ruby::Doc.new
+    delta = Y.update_from_message(response)
+    rebuilt = Y::Doc.new
     rebuilt.apply_update(delta)
 
     assert_equal source.encode_state_vector, rebuilt.encode_state_vector
@@ -201,16 +201,16 @@ class SyncTest < Minitest::Test
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U1), "doc-key")
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key")
 
-    client = Y::Ruby::Doc.new
+    client = Y::Doc.new
     [YjsFixtures::CausalChain::U1, YjsFixtures::CausalChain::U2,
      YjsFixtures::CausalChain::U3].each { |u| client.apply_update(u) }
-    server = Y::Ruby::Doc.new
+    server = Y::Doc.new
     store.each { |u| server.apply_update(u) }
     resync = client.encode_state_as_update(server.encode_state_vector)
 
     helper.sync_receive(update_message(resync), "doc-key")
 
-    replay = Y::Ruby::Doc.new
+    replay = Y::Doc.new
     store.each { |u| replay.apply_update(u) }
 
     # Full-state equality proves the replay integrated everything: a leftover
@@ -233,7 +233,7 @@ class SyncTest < Minitest::Test
   def test_block_recorder_runs_in_channel_instance_context
     seen = nil
     klass = Class.new do
-      include Y::Ruby::ActionCable::Sync
+      include Y::ActionCable::Sync
 
       on_load { |_key| nil }
       on_change { |_key, _update| seen = current_author }
@@ -256,7 +256,7 @@ class SyncTest < Minitest::Test
   def test_loader_runs_in_channel_instance_context
     seen = nil
     klass = Class.new do
-      include Y::Ruby::ActionCable::Sync
+      include Y::ActionCable::Sync
 
       on_load do |_key|
         seen = current_author
@@ -402,9 +402,9 @@ class SyncTest < Minitest::Test
 
     refute_empty store, "at-least-once: the update is recorded"
 
-    rebuilt = Y::Ruby::Doc.new
+    rebuilt = Y::Doc.new
     store.each { |u| rebuilt.apply_update(u) }
-    expected = Y::Ruby::Doc.new
+    expected = Y::Doc.new
     expected.apply_update(YjsFixtures::ConcurrentClients::FIVE.first)
 
     assert_equal expected.encode_state_vector, rebuilt.encode_state_vector,
@@ -423,9 +423,9 @@ class SyncTest < Minitest::Test
       Thread.new { helper_for(store: store, recorder: recorder).sync_receive(msg, key) }
     end.each(&:join)
 
-    rebuilt = Y::Ruby::Doc.new
+    rebuilt = Y::Doc.new
     store.each { |u| rebuilt.apply_update(u) }
-    expected = Y::Ruby::Doc.new
+    expected = Y::Doc.new
     five.each { |u| expected.apply_update(u) }
 
     assert_equal expected.encode_state_vector, rebuilt.encode_state_vector,

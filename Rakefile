@@ -18,20 +18,20 @@ end
 
 desc "Build the y-ruby-actioncable gem into pkg/"
 task "actioncable:build" do
-  require_relative "lib/y/ruby/action_cable/version"
+  require_relative "lib/y/action_cable/version"
   mkdir_p "pkg"
   sh "gem build y-ruby-actioncable.gemspec --output " \
-     "pkg/y-ruby-actioncable-#{Y::Ruby::ActionCable::VERSION}.gem"
+     "pkg/y-ruby-actioncable-#{Y::ActionCable::VERSION}.gem"
 end
 
 namespace :release do
   desc "Print the release sequence for all packages (2 gems + 1 npm package)"
   task :steps do
     require "json"
-    require_relative "lib/y/ruby/version"
-    require_relative "lib/y/ruby/action_cable/version"
-    core = Y::Ruby::VERSION
-    cable = Y::Ruby::ActionCable::VERSION
+    require_relative "lib/y/version"
+    require_relative "lib/y/action_cable/version"
+    core = Y::VERSION
+    cable = Y::ActionCable::VERSION
     npm = JSON.parse(File.read("packages/client/package.json"))["version"]
     puts <<~STEPS
       This repo ships THREE publishable packages, versioned independently. Release the
@@ -39,14 +39,14 @@ namespace :release do
       (RubyGems MFA, npm auth, and the default-branch guard).
 
       1) y-ruby #{core}  — core gem, native extension; precompiled platform gems via CI
-         a. bump lib/y/ruby/version.rb + CHANGELOG.md, then commit
+         a. bump lib/y/version.rb + CHANGELOG.md, then commit
          b. git tag v#{core} && git push origin main "v#{core}"
          c. the "Precompiled gems" workflow builds 8 platform gems + the source gem
          d. gh run download <run-id> --dir tmp/ ; cp tmp/**/*.gem pkg/
          e. gem push pkg/y-ruby-#{core}*.gem        # 9 gems: source + 8 platforms
 
       2) y-ruby-actioncable #{cable}  — gem, pure Ruby; one gem, no precompilation
-         a. bump lib/y/ruby/action_cable/version.rb + CHANGELOG-actioncable.md, commit
+         a. bump lib/y/action_cable/version.rb + CHANGELOG-actioncable.md, commit
          b. rake actioncable:build
          c. gem push pkg/y-ruby-actioncable-#{cable}.gem
 
@@ -65,7 +65,7 @@ end
 GEMSPEC = Gem::Specification.load("y-ruby.gemspec")
 
 RbSys::ExtensionTask.new("y_ruby", GEMSPEC) do |ext|
-  ext.lib_dir = "lib/y/ruby"
+  ext.lib_dir = "lib/y"
 end
 
 task default: %i[compile test]
@@ -74,6 +74,6 @@ desc "Clean build artifacts"
 task :clean do
   sh "cargo clean" if File.exist?("Cargo.toml")
   rm_rf "tmp"
-  rm_rf "lib/y/ruby/y_ruby.bundle"
-  rm_rf "lib/y/ruby/y_ruby.so"
+  rm_rf "lib/y/y_ruby.bundle"
+  rm_rf "lib/y/y_ruby.so"
 end

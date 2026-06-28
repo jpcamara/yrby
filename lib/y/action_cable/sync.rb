@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require "y/ruby"
+require "y"
 require "base64"
 
-module Y::Ruby::ActionCable # rubocop:disable Style/ClassAndModuleChildren
+module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # y-websocket protocol over ActionCable.
   #
   # Include this module in an ActionCable channel to sync Y.js documents
@@ -16,7 +16,7 @@ module Y::Ruby::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   #
   # Example:
   #   class DocumentChannel < ApplicationCable::Channel
-  #     include Y::Ruby::ActionCable::Sync
+  #     include Y::ActionCable::Sync
   #
   #     on_load { |key| Document.find_by(key: key)&.content }
   #     # on_change runs in the channel instance's context, so instance methods
@@ -39,7 +39,7 @@ module Y::Ruby::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # validated against `on_load`, recorded through `on_change`, then broadcast.
   # No authoritative document state is kept in ActionCable process memory.
   module Sync
-    # Frame kinds we act on, from Y::Ruby.message_kind. Its other codes (0 for a
+    # Frame kinds we act on, from Y.message_kind. Its other codes (0 for a
     # drop: malformed/truncated/multi-message/unknown, and 4 for an awareness
     # query) fall through to a no-op in the dispatch below.
     MSG_KIND_SYNC_STEP1 = 1
@@ -234,8 +234,8 @@ module Y::Ruby::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       missing << :on_change unless self.class.on_change
       return if missing.empty?
 
-      raise Y::Ruby::Error,
-            "Y::Ruby::ActionCable::Sync requires #{missing.join(" and ")}. Updates are acked as " \
+      raise Y::Error,
+            "Y::ActionCable::Sync requires #{missing.join(" and ")}. Updates are acked as " \
             "durably recorded; without a loader and recorder, an ack would claim a persistence " \
             "that never happened, and a cold load would lose the edit."
     end
@@ -251,13 +251,13 @@ module Y::Ruby::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     def sync_handle_frame(encoded, bytes)
       sync_validate_required_hooks!
 
-      case Y::Ruby.message_kind(bytes)
+      case Y.message_kind(bytes)
       when MSG_KIND_SYNC_STEP1
         result = sync_load_doc.handle_sync_message(bytes)
         sync_transmit(result[2])
         :noop
       when MSG_KIND_UPDATE
-        update = Y::Ruby.update_from_message(bytes)
+        update = Y.update_from_message(bytes)
         return :noop unless update
 
         # Rebuild from the store (O(history) per update; snapshot in on_load if
@@ -289,7 +289,7 @@ module Y::Ruby::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # Build a fresh document from the durable store (on_load). Callers validate
     # the hooks first, so on_load is present; a nil state means a fresh document.
     def sync_load_doc
-      doc = Y::Ruby::Doc.new
+      doc = Y::Doc.new
       state = instance_exec(@sync_key, &self.class.on_load)
       doc.apply_update(state) if state
       doc

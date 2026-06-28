@@ -17,7 +17,7 @@ use protocol::{classify_message, merged_doc_update, update_advances_doc, update_
 /// multiple Ruby threads serializes safely instead of panicking. There's no
 /// interior-mutability wrapper (RefCell and friends): every method opens and
 /// closes its transaction within a single call.
-#[magnus::wrap(class = "Y::Ruby::Doc", free_immediately, size)]
+#[magnus::wrap(class = "Y::Doc", free_immediately, size)]
 struct RbDoc(Doc);
 
 /// Compile-time proof that the wrapped Doc is thread-safe. If a future yrs
@@ -105,14 +105,14 @@ fn copy_bytes(s: RString) -> Vec<u8> {
     unsafe { s.as_slice() }.to_vec()
 }
 
-/// Build a `Y::Ruby::Error` (the gem's own error class, defined in `init`) so
+/// Build a `Y::Error` (the gem's own error class, defined in `init`) so
 /// native decode/apply failures surface as a project-specific error rather than
 /// a generic RuntimeError. Falls back to RuntimeError only if the class somehow
 /// can't be resolved.
 fn yrb_error(msg: String) -> Error {
     let ruby = Ruby::get().unwrap();
     let class = ruby
-        .eval::<ExceptionClass>("Y::Ruby::Error")
+        .eval::<ExceptionClass>("Y::Error")
         .unwrap_or_else(|_| ruby.exception_runtime_error());
     Error::new(class, msg)
 }
@@ -299,7 +299,7 @@ impl RbDoc {
 }
 
 // ============================================================================
-// Protocol codec (stateless), exposed as `Y::Ruby` module functions
+// Protocol codec (stateless), exposed as `Y` module functions
 // ============================================================================
 //
 // The server never holds presence or document state to classify a frame; these
@@ -344,7 +344,7 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
-    let module = ruby.define_module("Y")?.define_module("Ruby")?;
+    let module = ruby.define_module("Y")?;
 
     // Define error class
     let standard_error: magnus::RClass = ruby.eval("StandardError")?;
@@ -373,7 +373,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "handle_sync_message",
         method!(RbDoc::handle_sync_message, 1),
     )?;
-    // Stateless protocol codec, as Y::Ruby module functions.
+    // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;
     module.define_module_function("message_kind", function!(message_kind, 1))?;
     module.define_module_function("update_from_message", function!(update_from_message, 1))?;

@@ -31,7 +31,7 @@ module PgStore
     updates = DocumentChange.where(doc_key: key).order(:id).pluck(:delta)
     return nil if updates.empty?
 
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     updates.each do |u|
       doc.apply_update(binary(u))
     rescue StandardError

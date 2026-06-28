@@ -5,7 +5,7 @@ server. The Y.js sync protocol and awareness (shared cursors and presence) run
 natively in Ruby through [y-ruby](../..).
 
 ```
-Browser (Tiptap + Yjs + @y-ruby/client) ⇄ ActionCable ⇄ DocumentChannel (Y::Ruby::ActionCable::Sync)
+Browser (Tiptap + Yjs + @y-ruby/client) ⇄ ActionCable ⇄ DocumentChannel (Y::ActionCable::Sync)
 ```
 
 The server can read the document too. `GET /docs/:id/content` returns the
@@ -132,7 +132,7 @@ is the whole integration:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include Y::Ruby::ActionCable::Sync
+  include Y::ActionCable::Sync
 
   on_load  { |key| Store.current.replay(key) }
   on_change { |key, update| Store.current.record(key, update) }

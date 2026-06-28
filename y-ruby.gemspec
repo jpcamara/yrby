@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "lib/y/ruby/version"
+require_relative "lib/y/version"
 
 Gem::Specification.new do |spec|
   spec.name = "y-ruby"
-  spec.version = Y::Ruby::VERSION
+  spec.version = Y::VERSION
   spec.authors = ["JP Camara"]
   spec.email = ["johnpcamara@gmail.com"]
 
@@ -17,7 +17,7 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
 
-  # The ActionCable layer (lib/y/ruby/action_cable*) ships in the separate
+  # The ActionCable layer (lib/y/action_cable*) ships in the separate
   # y-ruby-actioncable gem, so it's excluded from the core gem here.
   spec.files = Dir[
     "lib/**/*.rb",
@@ -26,7 +26,7 @@ Gem::Specification.new do |spec|
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
-  ] - Dir["lib/y-ruby-actioncable.rb", "lib/y/ruby/action_cable.rb", "lib/y/ruby/action_cable/**/*"]
+  ] - Dir["lib/y-ruby-actioncable.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*"]
 
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/y_ruby/extconf.rb"]

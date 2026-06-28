@@ -19,8 +19,8 @@ mkmf.log
 /ext/y_ruby/*.o
 /ext/y_ruby/*.so
 /ext/y_ruby/*.bundle
-/lib/y/ruby/*.bundle
-/lib/y/ruby/*.so
+/lib/y/*.bundle
+/lib/y/*.so
 
 # Gem packages
 *.gem

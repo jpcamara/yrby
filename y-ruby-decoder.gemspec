@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "lib/y/ruby/decoder/version"
+require_relative "lib/y/decoder/version"
 
 Gem::Specification.new do |spec|
   spec.name = "y-ruby-decoder"
-  spec.version = Y::Ruby::Decoder::VERSION
+  spec.version = Y::Decoder::VERSION
   spec.authors = ["JP Camara"]
   spec.email = ["johnpcamara@gmail.com"]
 
@@ -20,8 +20,8 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     "lib/y-ruby-decoder.rb",
-    "lib/y/ruby/decoder.rb",
-    "lib/y/ruby/decoder/**/*.rb",
+    "lib/y/decoder.rb",
+    "lib/y/decoder/**/*.rb",
     "LICENSE",
     "README.md",
     "CHANGELOG-decoder.md"

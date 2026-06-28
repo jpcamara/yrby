@@ -28,26 +28,26 @@ class RobustnessTest < Minitest::Test
 
   def test_doc_methods_survive_garbage
     garbage_corpus.each do |bytes|
-      doc = Y::Ruby::Doc.new
+      doc = Y::Doc.new
       safe { doc.apply_update(bytes) }
       safe { doc.handle_sync_message(bytes) }
     end
     # Reaching here means nothing crashed the process; the runtime still works.
-    assert_kind_of String, Y::Ruby::Doc.new.encode_state_vector
+    assert_kind_of String, Y::Doc.new.encode_state_vector
   end
 
   def test_codec_functions_survive_garbage
     garbage_corpus.each do |bytes|
-      safe { Y::Ruby.wrap_update(bytes) }
-      safe { Y::Ruby.update_from_message(bytes) }
-      safe { Y::Ruby.message_kind(bytes) }
+      safe { Y.wrap_update(bytes) }
+      safe { Y.update_from_message(bytes) }
+      safe { Y.message_kind(bytes) }
     end
 
-    assert_equal 0, Y::Ruby.message_kind(""), "the codec still works after a garbage barrage"
+    assert_equal 0, Y.message_kind(""), "the codec still works after a garbage barrage"
   end
 
   def test_garbage_does_not_corrupt_a_good_document
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     doc.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
     good_state = doc.encode_state_as_update
     good_sv = doc.encode_state_vector
@@ -60,12 +60,12 @@ class RobustnessTest < Minitest::Test
   end
 
   def test_document_still_usable_after_garbage
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     garbage_corpus.each { |bytes| safe { doc.apply_update(bytes) } }
 
     # A valid update after all that garbage must still apply cleanly.
     doc.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
-    other = Y::Ruby::Doc.new
+    other = Y::Doc.new
     other.apply_update(doc.encode_state_as_update)
 
     assert_equal doc.encode_state_vector, other.encode_state_vector
@@ -73,21 +73,21 @@ class RobustnessTest < Minitest::Test
 
   def test_message_kind_accepts_clean_messages_and_rejects_unsafe_frames
     # Valid, single, well-formed messages get a real kind.
-    assert_equal 1, Y::Ruby.message_kind(Y::Ruby::Doc.new.sync_step1), "sync step1"
-    update = Y::Ruby.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+    assert_equal 1, Y.message_kind(Y::Doc.new.sync_step1), "sync step1"
+    update = Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
 
-    assert_equal 2, Y::Ruby.message_kind(update), "document update"
+    assert_equal 2, Y.message_kind(update), "document update"
     awareness_msg = YjsFixtures::Presence::FRAME
 
-    assert_equal 3, Y::Ruby.message_kind(awareness_msg), "awareness"
+    assert_equal 3, Y.message_kind(awareness_msg), "awareness"
 
     # Anything an attacker could relay through must be dropped (0).
-    assert_equal 0, Y::Ruby.message_kind(""), "empty"
-    assert_equal 0, Y::Ruby.message_kind("\xff\xff\xff".b), "garbage"
-    assert_equal 0, Y::Ruby.message_kind("\x63\x63\x63".b), "unknown type"
-    assert_equal 0, Y::Ruby.message_kind(update + awareness_msg), "two messages packed together"
-    assert_equal 0, Y::Ruby.message_kind(update + "\xde\xad".b), "trailing garbage"
-    assert_equal 0, Y::Ruby.message_kind(update[0...(update.length / 2)]), "truncated message"
+    assert_equal 0, Y.message_kind(""), "empty"
+    assert_equal 0, Y.message_kind("\xff\xff\xff".b), "garbage"
+    assert_equal 0, Y.message_kind("\x63\x63\x63".b), "unknown type"
+    assert_equal 0, Y.message_kind(update + awareness_msg), "two messages packed together"
+    assert_equal 0, Y.message_kind(update + "\xde\xad".b), "trailing garbage"
+    assert_equal 0, Y.message_kind(update[0...(update.length / 2)]), "truncated message"
   end
 
   private

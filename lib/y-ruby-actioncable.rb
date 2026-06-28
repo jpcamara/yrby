@@ -1,4 +1,4 @@
 # frozen_string_literal: true
 
 # Entry point matching the gem name, so `Bundler.require` loads it automatically.
-require "y/ruby/action_cable"
+require "y/action_cable"

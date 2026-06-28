@@ -37,7 +37,7 @@ auto-fix most issues.
 ## Layout
 
 ```
-lib/                     # Ruby: Y::Ruby::ActionCable::Sync (the ActionCable concern)
+lib/                     # Ruby: Y::ActionCable::Sync (the ActionCable concern)
 ext/y_ruby/src/        # Rust: lib.rs (magnus bindings) + protocol.rs (pure protocol helpers)
 test/                    # Ruby unit tests
 examples/actioncable-demo/   # a separate, deliberately thorough demo app (see below)

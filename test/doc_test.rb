@@ -5,35 +5,35 @@ require_relative "fixtures/yjs_fixtures"
 
 class DocTest < Minitest::Test
   def test_doc_creation
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
-    assert_instance_of Y::Ruby::Doc, doc
+    assert_instance_of Y::Doc, doc
   end
 
   def test_doc_accepts_a_client_id_without_validation
     # A client_id can be supplied for CRDT identity, but it is not validated and
     # not readable back, keeping it JS-safe is the caller's job (an out-of-range
     # value is silently masked by yrs, not rejected). See protocol.rs.
-    assert_instance_of Y::Ruby::Doc, Y::Ruby::Doc.new((2**53) - 1)
+    assert_instance_of Y::Doc, Y::Doc.new((2**53) - 1)
   end
 
   def test_encode_state_vector
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     sv = doc.encode_state_vector
 
     assert_kind_of String, sv
   end
 
   def test_encode_state_as_update_without_state_vector
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     update = doc.encode_state_as_update
 
     assert_kind_of String, update
   end
 
   def test_encode_state_as_update_with_state_vector
-    d1 = Y::Ruby::Doc.new(1)
-    d2 = Y::Ruby::Doc.new(2)
+    d1 = Y::Doc.new(1)
+    d2 = Y::Doc.new(2)
 
     sv = d2.encode_state_vector
     update = d1.encode_state_as_update(sv)
@@ -42,7 +42,7 @@ class DocTest < Minitest::Test
   end
 
   def test_sync_step1
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
     step1 = doc.sync_step1
 
     assert_kind_of String, step1
@@ -50,8 +50,8 @@ class DocTest < Minitest::Test
   end
 
   def test_handle_sync_message_step1
-    d1 = Y::Ruby::Doc.new(1)
-    d2 = Y::Ruby::Doc.new(2)
+    d1 = Y::Doc.new(1)
+    d2 = Y::Doc.new(2)
 
     step1 = d1.sync_step1
 
@@ -60,14 +60,14 @@ class DocTest < Minitest::Test
     assert_kind_of Array, result
     msg_type, sync_type, response = result
 
-    assert_equal Y::Ruby::MSG_SYNC, msg_type
-    assert_equal Y::Ruby::MSG_SYNC_STEP1, sync_type
+    assert_equal Y::MSG_SYNC, msg_type
+    assert_equal Y::MSG_SYNC_STEP1, sync_type
     refute_empty response
   end
 
   def test_full_sync_exchange
-    d1 = Y::Ruby::Doc.new(1)
-    d2 = Y::Ruby::Doc.new(2)
+    d1 = Y::Doc.new(1)
+    d2 = Y::Doc.new(2)
 
     # d1 initiates sync (sends SyncStep1)
     step1 = d1.sync_step1
@@ -98,7 +98,7 @@ class DocTest < Minitest::Test
   # ============================================================================
 
   def test_apply_yjs_update
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     # Apply update generated from Y.js containing "hello world"
     doc.apply_update(YjsFixtures::TextHelloWorld::UPDATE)
@@ -108,21 +108,21 @@ class DocTest < Minitest::Test
   end
 
   def test_apply_yjs_empty_doc
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     # Empty doc should have matching state vector
     assert_equal YjsFixtures::EmptyDoc::STATE_VECTOR, doc.encode_state_vector
   end
 
   def test_merge_two_yjs_docs
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     # Apply updates from two different Y.js docs
     doc.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
     doc.apply_update(YjsFixtures::TwoDocsMerged::DOC2_UPDATE)
 
     # Verify both updates were applied by checking we can sync with a fresh doc
-    doc2 = Y::Ruby::Doc.new
+    doc2 = Y::Doc.new
     doc2.apply_update(doc.encode_state_as_update)
 
     # Both should have same state now
@@ -133,7 +133,7 @@ class DocTest < Minitest::Test
   end
 
   def test_sync_protocol_with_yjs_update
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     # Verify empty doc matches Y.js empty state vector
     assert_equal YjsFixtures::SyncProtocol::INITIAL_SV_DOC2, doc.encode_state_vector
@@ -146,7 +146,7 @@ class DocTest < Minitest::Test
   end
 
   def test_encode_state_as_update_matches_yjs
-    doc = Y::Ruby::Doc.new
+    doc = Y::Doc.new
 
     # Apply Y.js update
     doc.apply_update(YjsFixtures::TextHelloWorld::UPDATE)
@@ -155,7 +155,7 @@ class DocTest < Minitest::Test
     update = doc.encode_state_as_update(YjsFixtures::EmptyDoc::STATE_VECTOR)
 
     # Apply to a fresh doc
-    doc2 = Y::Ruby::Doc.new
+    doc2 = Y::Doc.new
     doc2.apply_update(update)
 
     # Both should have same state
@@ -165,11 +165,11 @@ class DocTest < Minitest::Test
 
   def test_sync_protocol_messages_with_yjs_content
     # doc1 has Y.js content
-    doc1 = Y::Ruby::Doc.new
+    doc1 = Y::Doc.new
     doc1.apply_update(YjsFixtures::TextHelloWorld::UPDATE)
 
     # doc2 is empty
-    doc2 = Y::Ruby::Doc.new
+    doc2 = Y::Doc.new
 
     # doc2 initiates sync
     step1 = doc2.sync_step1

@@ -58,7 +58,7 @@ class AuditLog
       path = path_for(key)
       return nil unless File.exist?(path)
 
-      doc = Y::Ruby::Doc.new
+      doc = Y::Doc.new
       applied = 0
       File.foreach(path) do |line|
         line = line.strip

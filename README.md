@@ -9,7 +9,7 @@ documents.
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include Y::Ruby::ActionCable::Sync
+  include Y::ActionCable::Sync
 
   on_load   { |key|         MyStore.load(key) }
   on_change { |key, update| MyStore.append(key, update) }
@@ -99,7 +99,7 @@ Issues and PRs are welcome.
 # Core CRDT + protocol primitives:
 gem "y-ruby"
 
-# For the Rails/ActionCable server concern (Y::Ruby::ActionCable::Sync):
+# For the Rails/ActionCable server concern (Y::ActionCable::Sync):
 gem "y-ruby-actioncable"
 ```
 
@@ -132,11 +132,11 @@ The rest of the dev setup, plus the demo, is in [CONTRIBUTING.md](CONTRIBUTING.m
 ### Doc (Low-Level Document Sync)
 
 ```ruby
-require "y/ruby"
+require "y"
 
 # Create docs
-doc = Y::Ruby::Doc.new        # random client ID
-doc = Y::Ruby::Doc.new(12345) # specific client ID (used for CRDT identity)
+doc = Y::Doc.new        # random client ID
+doc = Y::Doc.new(12345) # specific client ID (used for CRDT identity)
 
 # Encoding
 doc.encode_state_vector           # => current state vector
@@ -155,26 +155,26 @@ doc.handle_sync_message(data)     # => [msg_type, sync_type, response]; answers 
 ### Protocol codec (module functions)
 
 Classifying and unwrapping wire frames is stateless, so it's exposed as
-`Y::Ruby` module functions rather than a class. The server never holds presence
+`Y` module functions rather than a class. The server never holds presence
 or document state to route a frame — presence lives in the browser clients, and
 the server only relays awareness frames opaquely.
 
 ```ruby
-Y::Ruby.message_kind(frame)         # => 0 drop / 1 step1 / 2 update / 3 awareness / 4 query
-Y::Ruby.update_from_message(frame)  # => the document delta carried by a frame, or nil
-Y::Ruby.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
+Y.message_kind(frame)         # => 0 drop / 1 step1 / 2 update / 3 awareness / 4 query
+Y.update_from_message(frame)  # => the document delta carried by a frame, or nil
+Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
 ```
 
 ### ActionCable Integration
 
-`Y::Ruby::ActionCable::Sync` (from the `y-ruby-actioncable` gem) is a channel
+`Y::ActionCable::Sync` (from the `y-ruby-actioncable` gem) is a channel
 concern that implements the full y-websocket protocol (document sync +
 awareness/presence) over ActionCable:
 
 ```ruby
 # app/channels/document_channel.rb
 class DocumentChannel < ApplicationCable::Channel
-  include Y::Ruby::ActionCable::Sync
+  include Y::ActionCable::Sync
 
   on_load { |key| MyStore.load(key) }                 # source of truth
   on_change { |key, update| MyStore.append(key, update) } # durable record
@@ -281,7 +281,7 @@ It is up to you to durably record it:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include Y::Ruby::ActionCable::Sync
+  include Y::ActionCable::Sync
 
   # ...
 
@@ -361,12 +361,12 @@ exceptions.
 ## Message Type Constants
 
 ```ruby
-Y::Ruby::MSG_SYNC            # 0 - Document sync messages
-Y::Ruby::MSG_AWARENESS       # 1 - User presence data
+Y::MSG_SYNC            # 0 - Document sync messages
+Y::MSG_AWARENESS       # 1 - User presence data
 
-Y::Ruby::MSG_SYNC_STEP1      # 0 - State vector request
-Y::Ruby::MSG_SYNC_STEP2      # 1 - Update response
-Y::Ruby::MSG_SYNC_UPDATE     # 2 - Incremental update
+Y::MSG_SYNC_STEP1      # 0 - State vector request
+Y::MSG_SYNC_STEP2      # 1 - Update response
+Y::MSG_SYNC_UPDATE     # 2 - Incremental update
 ```
 
 ## Sync Flow
