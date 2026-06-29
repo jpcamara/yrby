@@ -24,7 +24,7 @@
     "lexical": "^0.44",
     "lexxy-realtime": "file:../../../../lexxy-realtime",
     "lib0": "^0.2.97",
-    "@yrby/client": "file:../../../packages/client",
+    "yrby-client": "file:../../../packages/client",
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.20"
   },

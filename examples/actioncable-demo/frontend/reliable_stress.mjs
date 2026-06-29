@@ -25,7 +25,7 @@
 // drain, fresh clean clients join to prove the durable store can resync the
 // complete acknowledged document.
 import * as Y from "yjs"
-import { ActionCableProvider } from "@yrby/client"
+import { ActionCableProvider } from "yrby-client"
 import { serverText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777

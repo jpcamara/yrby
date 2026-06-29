@@ -1,4 +1,4 @@
-// Drives @yrby/client's ActionCableProvider against the yrby server,
+// Drives yrby-client's ActionCableProvider against the yrby server,
 // headless. Two checks:
 //
 //   1. Two providers sync documents + presence through the canonical yrby
@@ -15,7 +15,7 @@
 // down the socket, a lost-in-transit network, not a disconnect, so the
 // provider keeps retransmitting on its timer.
 import * as Y from "yjs"
-import { ActionCableProvider } from "@yrby/client"
+import { ActionCableProvider } from "yrby-client"
 
 const PORT = process.env.PORT || 3777
 const ROOM = `relprov-${process.pid}`

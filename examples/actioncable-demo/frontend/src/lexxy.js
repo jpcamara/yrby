@@ -4,7 +4,7 @@
 // y-websocket protocol — so this is a drop-in second front end.
 //
 // lexxy-realtime ships the `<lexxy-collaboration>` custom element and a
-// `YrbLiteProvider` (the @yrby/client ActionCableProvider). The collaboration
+// `YrbLiteProvider` (the yrby-client ActionCableProvider). The collaboration
 // element owns the editor binding, the empty-doc bootstrap, and remote cursors;
 // we just create the doc/provider, mount it inside a `<lexxy-editor>`, and
 // connect.

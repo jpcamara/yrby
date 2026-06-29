@@ -1,7 +1,7 @@
 // Multiple REAL Chrome browsers, driven by agent-browser across separate
 // sessions, typing into the SAME document at the same time. Each browser types
 // its own digit so every keystroke is accountable. Proves the full stack under
-// concurrent real-browser editing: Tiptap -> @yrby/client provider ->
+// concurrent real-browser editing: Tiptap -> yrby-client provider ->
 // ActionCable/yrby-actioncable -> store, converging byte-for-byte with no
 // lost keystrokes.
 //

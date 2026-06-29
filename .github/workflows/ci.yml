@@ -56,7 +56,7 @@ jobs:
       - run: bunx eslint .
 
   client:
-    name: @yrby/client (Node ${{ matrix.node }})
+    name: yrby-client (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -135,7 +135,7 @@ jobs:
         run: |
           bundle install
           bin/rails db:prepare
-      - name: Build @yrby/client package
+      - name: Build yrby-client package
         working-directory: packages/client
         run: npm ci && npm run build
       - name: Build frontend bundle

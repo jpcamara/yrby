@@ -1,7 +1,7 @@
 # Containerized yrby actioncable demo.
 #
 # Build context is the yrby repo ROOT (see docker-compose.yml), because the
-# demo depends on the gem via `path: "../.."` and on @yrby/client via
+# demo depends on the gem via `path: "../.."` and on yrby-client via
 # `file:../../../packages/client`. The Lexxy editor page additionally
 # depends on lexxy-realtime, a SIBLING repo (`file:../../../../lexxy-realtime`),
 # which we clone so the relative path resolves. We mirror the host layout exactly
@@ -48,7 +48,7 @@ RUN cd /src/yrby \
  && bundle install \
  && bundle exec rake compile
 
-# @yrby/client (a file: dep of the front end) ships from a `dist/` that is NOT
+# yrby-client (a file: dep of the front end) ships from a `dist/` that is NOT
 # committed and has no install-time build hook, so build it explicitly first --
 # the demo's `bun install` then copies the fresh dist.
 RUN cd /src/yrby/packages/client && bun install && bun run build

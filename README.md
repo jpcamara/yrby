@@ -20,7 +20,7 @@ end
 ```
 
 On the browser, use the `ActionCableProvider` from the 
-[`@yrby/client`](https://www.npmjs.com/package/@yrby/client) npm package.
+[`yrby-client`](https://www.npmjs.com/package/yrby-client) npm package.
 Integrates with any editor that includes Y.js support, such as Tiptap, ProseMirror
 and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
 
@@ -30,7 +30,7 @@ Install the gem and npm package:
 
 ```
 gem install yrby-actioncable # depends on yrby
-npm install @yrby/client
+npm install yrby-client
 ```
 
 ## What you get
@@ -59,7 +59,7 @@ guarantees, correctness, and thread safety.
 
 Towards that goal, `yrby` adds capabilities that may even stand out in the Yjs ecosystem:
 
-- Built-in update acknowledgement: the `ActionCableProvider` in `@yrby/client` will continue to
+- Built-in update acknowledgement: the `ActionCableProvider` in `yrby-client` will continue to
   send updates until an ack is received from the server. [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
   only sends an ack when applying an update is successful. The goal is at-least-once delivery,
   and because CRDTs are idempotent a duplicate update is effectively a no-op.
@@ -197,7 +197,7 @@ for the same document as long as they share the same store and cable adapter.
 
 `on_load` and `on_change` are required. If either is missing, the channel fails 
 before it can acknowledge or broadcast edits. Presence is ephemeral:
-awareness frames are relayed, and `@yrby/client` sends a best-effort
+awareness frames are relayed, and `yrby-client` sends a best-effort
 presence-removal frame on disconnect/pagehide, with the client-side awareness
 timeout as the fallback for abrupt disconnects.
 
@@ -315,7 +315,7 @@ client -> server   { "update": "<base64 update>", "id": 42 }
 server -> client   { "ack": 42 }     # update accepted; safe to forget
 ```
 
-`@yrby/client`'s `ActionCableProvider` handles this automatically. It keeps
+`yrby-client`'s `ActionCableProvider` handles this automatically. It keeps
 the unacknowledged local document tail in a queue and sends the merged tail as a
 single causally-complete delta. The id is the highest sequence in the batch, so
 one `{ ack: id }` cumulatively confirms everything up to it. Because CRDT apply
@@ -324,7 +324,7 @@ re-acks. Awareness stays ephemeral and is not acked.
 
 Presence (cursors, selections) is owned by the browser clients — the server
 never sets or holds presence state, it only relays awareness frames opaquely.
-See `@yrby/client` for the client-side awareness API.
+See `yrby-client` for the client-side awareness API.
 
 ## Thread Safety
 

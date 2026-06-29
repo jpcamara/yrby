@@ -16,7 +16,6 @@
         "@tiptap/extension-collaboration-cursor": "^2.11.0",
         "@tiptap/pm": "^2.11.0",
         "@tiptap/starter-kit": "^2.11.0",
-        "@yrby/client": "file:../../../packages/client",
         "codemirror": "^6.0.1",
         "lexical": "^0.44",
         "lexxy-realtime": "file:../../../../lexxy-realtime",
@@ -24,6 +23,7 @@
         "y-codemirror.next": "^0.3.5",
         "y-protocols": "^1.0.6",
         "yjs": "^13.6.20",
+        "yrby-client": "file:../../../packages/client",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -252,8 +252,6 @@
 
     "@types/trusted-types": ["@types/trusted-types@2.0.7", "", {}, "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw=="],
 
-    "@yrby/client": ["@yrby/client@file:../../../packages/client", { "dependencies": { "lib0": "^0.2.117" }, "devDependencies": { "typescript": "^5.6.0", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }],
-
     "acorn": ["acorn@8.17.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg=="],
 
     "acorn-jsx": ["acorn-jsx@5.3.2", "", { "peerDependencies": { "acorn": "^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ=="],
@@ -475,6 +473,8 @@
     "yocto-queue": ["yocto-queue@0.1.0", "", {}, "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="],
 
     "yrb-lite-client": ["yrb-lite-client@0.4.0", "", { "dependencies": { "lib0": "^0.2.117" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }, "sha512-bUAUKFbVVNsjbc+gfuH1COJyQ4JtksryHK0NdJOnp9CTL4uiQpNmwh4afa3hPl5CIk2jHGHUUFQDydWqCZ9plw=="],
+
+    "yrby-client": ["yrby-client@file:../../../packages/client", { "dependencies": { "lib0": "^0.2.117" }, "devDependencies": { "typescript": "^5.6.0", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }],
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 

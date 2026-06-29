@@ -5,7 +5,7 @@ server. The Y.js sync protocol and awareness (shared cursors and presence) run
 natively in Ruby through [yrby](../..).
 
 ```
-Browser (Tiptap + Yjs + @yrby/client) ⇄ ActionCable ⇄ DocumentChannel (Y::ActionCable::Sync)
+Browser (Tiptap + Yjs + yrby-client) ⇄ ActionCable ⇄ DocumentChannel (Y::ActionCable::Sync)
 ```
 
 The server can read the document too. `GET /docs/:id/content` returns the
@@ -146,14 +146,14 @@ The channel is store-backed. `on_load` rebuilds state from the durable store;
 `on_change` records each document delta before the server broadcasts or acks it.
 No authoritative document state lives in ActionCable process memory.
 
-The browser side uses `@yrby/client`'s `ActionCableProvider`. Tiptap's
+The browser side uses `yrby-client`'s `ActionCableProvider`. Tiptap's
 Collaboration and CollaborationCursor extensions plug into the provider's shared
 `Y.Doc` and `Awareness` directly. Document frames use the canonical
 `{ update, id }` envelope and are ack-tracked; awareness frames are ephemeral.
 
 ```js
 import { createConsumer } from "@rails/actioncable"
-import { ActionCableProvider } from "@yrby/client"
+import { ActionCableProvider } from "yrby-client"
 
 const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChannel", { id: documentId })
 provider.connect()

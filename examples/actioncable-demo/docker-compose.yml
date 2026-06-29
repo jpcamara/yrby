@@ -47,7 +47,7 @@ services:
 
   web:
     build:
-      # The gem (path: "../..") and @yrby/client (file: packages/...) live in
+      # The gem (path: "../..") and yrby-client (file: packages/...) live in
       # the repo root, so that is the build context.
       context: ../..
       dockerfile: examples/actioncable-demo/Dockerfile
