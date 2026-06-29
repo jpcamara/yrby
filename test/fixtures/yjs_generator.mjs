@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Y.js Fixture Generator for y-ruby interop testing
+// Y.js Fixture Generator for yrby interop testing
 // Run with: bun run test/fixtures/yjs_generator.mjs [command] [args...]
 
 // Suppress Y.js warnings by redirecting console.log/warn to stderr

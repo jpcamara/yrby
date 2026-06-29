@@ -1,4 +1,4 @@
-// Transport-agnostic reliable-delivery core for the y-ruby y-websocket
+// Transport-agnostic reliable-delivery core for the yrby y-websocket
 // protocol: an ack-tracked queue of unacknowledged local updates,
 // sync-since-last-ack (the unacked tail goes out as one merged, causally-complete
 // delta so the server never sees an internal gap), cumulative acks, periodic

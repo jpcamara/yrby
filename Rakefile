@@ -5,10 +5,10 @@ require "rake/testtask"
 require "rake/extensiontask"
 require "rb_sys/extensiontask"
 
-# This repo ships two gems (core `y-ruby` + `y-ruby-actioncable`), so the
+# This repo ships two gems (core `yrby` + `yrby-actioncable`), so the
 # default bundler/gem_tasks can't auto-pick a gemspec. Scope build/release/install
 # to the core gem; the pure-Ruby actioncable gem builds via `rake actioncable:build`.
-Bundler::GemHelper.install_tasks(name: "y-ruby")
+Bundler::GemHelper.install_tasks(name: "yrby")
 
 Rake::TestTask.new(:test) do |t|
   t.libs << "test"
@@ -16,12 +16,12 @@ Rake::TestTask.new(:test) do |t|
   t.test_files = FileList["test/**/*_test.rb"]
 end
 
-desc "Build the y-ruby-actioncable gem into pkg/"
+desc "Build the yrby-actioncable gem into pkg/"
 task "actioncable:build" do
   require_relative "lib/y/action_cable/version"
   mkdir_p "pkg"
-  sh "gem build y-ruby-actioncable.gemspec --output " \
-     "pkg/y-ruby-actioncable-#{Y::ActionCable::VERSION}.gem"
+  sh "gem build yrby-actioncable.gemspec --output " \
+     "pkg/yrby-actioncable-#{Y::ActionCable::VERSION}.gem"
 end
 
 namespace :release do
@@ -38,23 +38,23 @@ namespace :release do
       two gems together when the shared core API changes. JP runs the push steps
       (RubyGems MFA, npm auth, and the default-branch guard).
 
-      1) y-ruby #{core}  — core gem, native extension; precompiled platform gems via CI
+      1) yrby #{core}  — core gem, native extension; precompiled platform gems via CI
          a. bump lib/y/version.rb + CHANGELOG.md, then commit
          b. git tag v#{core} && git push origin main "v#{core}"
          c. the "Precompiled gems" workflow builds 8 platform gems + the source gem
          d. gh run download <run-id> --dir tmp/ ; cp tmp/**/*.gem pkg/
-         e. for g in pkg/y-ruby-#{core}*.gem; do gem push "$g" || break; done   # 9 gems (gem push takes ONE at a time)
+         e. for g in pkg/yrby-#{core}*.gem; do gem push "$g" || break; done   # 9 gems (gem push takes ONE at a time)
 
-      2) y-ruby-actioncable #{cable}  — gem, pure Ruby; one gem, no precompilation
+      2) yrby-actioncable #{cable}  — gem, pure Ruby; one gem, no precompilation
          a. bump lib/y/action_cable/version.rb + CHANGELOG-actioncable.md, commit
          b. rake actioncable:build
-         c. gem push pkg/y-ruby-actioncable-#{cable}.gem
+         c. gem push pkg/yrby-actioncable-#{cable}.gem
 
-      3) y-ruby-client #{npm}  — npm package (client SDK: provider + sync engine + reliable delivery)
+      3) yrby-client #{npm}  — npm package (client SDK: provider + sync engine + reliable delivery)
          a. bump packages/client/package.json version, commit
          b. cd packages/client && npm publish
 
-      The actioncable gem pins a minimum `y-ruby` (a floor, so it tolerates
+      The actioncable gem pins a minimum `yrby` (a floor, so it tolerates
       newer core releases); only raise it when it needs a newer core API.
     STEPS
   end
@@ -62,7 +62,7 @@ end
 
 # Passing the gemspec registers the cross-compilation tasks
 # (`native:<platform> gem`) that the precompiled-gem build relies on.
-GEMSPEC = Gem::Specification.load("y-ruby.gemspec")
+GEMSPEC = Gem::Specification.load("yrby.gemspec")
 
 RbSys::ExtensionTask.new("y_ruby", GEMSPEC) do |ext|
   ext.lib_dir = "lib/y"

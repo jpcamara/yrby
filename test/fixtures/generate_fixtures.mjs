@@ -95,7 +95,7 @@ const presence = (() => {
 
 const fixtures = `# frozen_string_literal: true
 
-# Y.js Test Fixtures for y-ruby, static bytes captured from the real Y.js
+# Y.js Test Fixtures for yrby, static bytes captured from the real Y.js
 # library so the Ruby/Rust port can be tested for byte-level interop.
 # Regenerate with: bun run test/fixtures/generate_fixtures.mjs > test/fixtures/yjs_fixtures.rb
 

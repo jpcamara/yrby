@@ -3,8 +3,8 @@
 # already-booted server (see boot_server.sh). One list, so the Puma and Falcon
 # runs exercise exactly the same scenarios — no drift between modes.
 #
-# These drive the y-ruby native extension through the full ActionCable /
-# y-ruby-actioncable / store path: record-before-distribute, exactly-once
+# These drive the yrby native extension through the full ActionCable /
+# yrby-actioncable / store path: record-before-distribute, exactly-once
 # under contention, reliable retransmit, and a fuzz barrage. Running the same
 # slice under Falcon proves the extension holds up inside the fiber scheduler.
 #

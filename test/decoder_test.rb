@@ -11,7 +11,7 @@ require "json"
 #   - PROSEMIRROR: the y-prosemirror / TipTap shape (Y.XmlFragment of block
 #                  Y.XmlElements) -- an <h1> then a paragraph "Plain and **bold**".
 #   - PLAINTEXT:   a plain Y.Text "content".
-# (Regenerate via packages/y-ruby-decode, which carries the encoder deps.)
+# (Regenerate via packages/yrby-decode, which carries the encoder deps.)
 class DecoderTest < Minitest::Test
   # rubocop:disable Layout/LineLength -- opaque base64 CRDT fixtures, can't wrap
   LEXICAL = "ASXk3uf5CgAHAQRyb290BigA5N7n+QoABl9fdHlwZQF3CXBhcmFncmFwaCgA5N7n+QoACF9fZm9ybWF0AX0AKADk3uf5CgAHX19zdHlsZQF3ACgA5N7n+QoACF9faW5kZW50AX0AKADk3uf5CgAFX19kaXIBfigA5N7n+QoADF9fdGV4dEZvcm1hdAF9ACgA5N7n+QoAC19fdGV4dFN0eWxlAXcABwDk3uf5CgABKADk3uf5CggGX190eXBlAXcEdGV4dCgA5N7n+QoICF9fZm9ybWF0AX0AKADk3uf5CggHX19zdHlsZQF3ACgA5N7n+QoIBl9fbW9kZQF9ACgA5N7n+QoICF9fZGV0YWlsAX0AhOTe5/kKCBJIZWxsbyBmcm9tIExleGljYWyH5N7n+QoABigA5N7n+QogBl9fdHlwZQF3CXBhcmFncmFwaCgA5N7n+QogCF9fZm9ybWF0AX0AKADk3uf5CiAHX19zdHlsZQF3ACgA5N7n+QogCF9faW5kZW50AX0AKADk3uf5CiAFX19kaXIBfigA5N7n+QogDF9fdGV4dEZvcm1hdAF9ACgA5N7n+QogC19fdGV4dFN0eWxlAXcABwDk3uf5CiABKADk3uf5CigGX190eXBlAXcEdGV4dCgA5N7n+QooCF9fZm9ybWF0AX0AKADk3uf5CigHX19zdHlsZQF3ACgA5N7n+QooBl9fbW9kZQF9ACgA5N7n+QooCF9fZGV0YWlsAX0AhOTe5/kKKAdzZWNvbmQgh+Te5/kKNAEoAOTe5/kKNQZfX3R5cGUBdwR0ZXh0KADk3uf5CjUIX19mb3JtYXQBfQEoAOTe5/kKNQdfX3N0eWxlAXcAKADk3uf5CjUGX19tb2RlAX0AKADk3uf5CjUIX19kZXRhaWwBfQCE5N7n+Qo1BGJvbGQA"

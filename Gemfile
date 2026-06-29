@@ -2,9 +2,9 @@
 
 source "https://rubygems.org"
 
-gemspec name: "y-ruby"
-gemspec name: "y-ruby-actioncable"
-gemspec name: "y-ruby-decoder"
+gemspec name: "yrby"
+gemspec name: "yrby-actioncable"
+gemspec name: "yrby-decoder"
 
 gem "rake-compiler"
 gem "rb_sys"

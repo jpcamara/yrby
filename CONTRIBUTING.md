@@ -1,4 +1,4 @@
-# Contributing to y-ruby
+# Contributing to yrby
 
 Issues, bug reports, and PRs are all welcome.
 

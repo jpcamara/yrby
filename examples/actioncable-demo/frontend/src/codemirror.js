@@ -1,11 +1,11 @@
 // Opaque-state demo: a collaborative code editor.
 // The shared state is a Y.Text; the official y-codemirror.next binding (yCollab)
 // maps it to CodeMirror 6 and renders remote cursors/selections from awareness.
-// Same DocumentChannel as every other editor here — y-ruby has no idea it's
+// Same DocumentChannel as every other editor here — yrby has no idea it's
 // "code", it just syncs the Y.Text.
 import * as Y from "yjs"
 import { createConsumer } from "@rails/actioncable"
-import { ActionCableProvider } from "@y-ruby/client"
+import { ActionCableProvider } from "@yrby/client"
 import { EditorState } from "@codemirror/state"
 import { EditorView, basicSetup } from "codemirror"
 import { javascript } from "@codemirror/lang-javascript"

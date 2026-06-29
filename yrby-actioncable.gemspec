@@ -3,22 +3,22 @@
 require_relative "lib/y/action_cable/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "y-ruby-actioncable"
+  spec.name = "yrby-actioncable"
   spec.version = Y::ActionCable::VERSION
   spec.authors = ["JP Camara"]
   spec.email = ["johnpcamara@gmail.com"]
 
-  spec.summary = "ActionCable integration for y-ruby: the y-websocket sync protocol and awareness over ActionCable/AnyCable"
-  spec.description = "y-ruby-actioncable adds a Rails ActionCable channel concern (Y::ActionCable::Sync) on " \
-                     "top of the y-ruby y-crdt bindings: the full y-websocket sync protocol, awareness/presence, " \
+  spec.summary = "ActionCable integration for yrby: the y-websocket sync protocol and awareness over ActionCable/AnyCable"
+  spec.description = "yrby-actioncable adds a Rails ActionCable channel concern (Y::ActionCable::Sync) on " \
+                     "top of the yrby y-crdt bindings: the full y-websocket sync protocol, awareness/presence, " \
                      "record-before-distribute auditing, and memory/store backends (AnyCable-ready), so a Rails app " \
                      "can be the collaboration server for Y.js editors with no Node sidecar."
-  spec.homepage = "https://github.com/jpcamara/y-ruby"
+  spec.homepage = "https://github.com/jpcamara/yrby"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
 
   spec.files = Dir[
-    "lib/y-ruby-actioncable.rb",
+    "lib/yrby-actioncable.rb",
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
     "LICENSE",
@@ -34,7 +34,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "base64", "~> 0.2"
   # Floor raised for update_advances? + wire client-id frame validation.
-  spec.add_dependency "y-ruby", ">= 0.2.0"
+  spec.add_dependency "yrby", ">= 0.2.0"
   # The concern references ActionCable (channels, streaming, broadcasting) and
   # ActiveSupport (Concern, JSON coder) constants directly. Rails apps already
   # bundle these, but declaring them makes use outside a full Rails bundle fail

@@ -56,7 +56,7 @@ jobs:
       - run: bunx eslint .
 
   client:
-    name: @y-ruby/client (Node ${{ matrix.node }})
+    name: @yrby/client (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -135,7 +135,7 @@ jobs:
         run: |
           bundle install
           bin/rails db:prepare
-      - name: Build @y-ruby/client package
+      - name: Build @yrby/client package
         working-directory: packages/client
         run: npm ci && npm run build
       - name: Build frontend bundle
@@ -195,7 +195,7 @@ jobs:
       # The same stack under AnyCable: WebSockets terminate in anycable-go (Go),
       # channel logic runs in a separate Ruby RPC server, and Puma serves pages
       # + /content + broadcasts — three processes sharing documents through the
-      # durable store and Redis. Proves y-ruby's concern works the same on
+      # durable store and Redis. Proves yrby's concern works the same on
       # AnyCable as on plain ActionCable: concurrent convergence with a complete
       # store, record-before-distribute under slow/failing stores, and reliable
       # retransmit through the Go gateway.

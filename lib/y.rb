@@ -15,5 +15,5 @@ end
 module Y
   # Doc, Error, and the protocol module functions are defined in the Rust
   # extension. The ActionCable integration (Y::ActionCable::Sync) lives in the
-  # separate `y-ruby-actioncable` gem; require "y/action_cable".
+  # separate `yrby-actioncable` gem; require "y/action_cable".
 end

@@ -16,7 +16,7 @@
 # ports (postgres:5432, redis:6379) -- the non-standard numbers are host-side
 # only. The AnyCable gateway is opt-in (profile: anycable); see README.
 
-name: y-ruby-demo
+name: yrby-demo
 
 services:
   postgres:
@@ -47,7 +47,7 @@ services:
 
   web:
     build:
-      # The gem (path: "../..") and @y-ruby/client (file: packages/...) live in
+      # The gem (path: "../..") and @yrby/client (file: packages/...) live in
       # the repo root, so that is the build context.
       context: ../..
       dockerfile: examples/actioncable-demo/Dockerfile

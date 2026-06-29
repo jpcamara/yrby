@@ -8,12 +8,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.0] - 2026-06-28
 
-First release under the **`y-ruby`** name (the project was previously developed
+First release under the **`yrby`** name (the project was previously developed
 as `yrb-lite`). The public Ruby interface is the top-level module **`Y`** —
 mirroring the `y-rb` gem's `Y::Doc` interface.
 
 ### Changed
-- **Renamed `yrb-lite` → `y-ruby`.** Module `YrbLite` → top-level `Y`
+- **Renamed `yrb-lite` → `yrby`.** Module `YrbLite` → top-level `Y`
   (`Y::Doc`, `Y::Error`, `Y::VERSION`). Require path `require "yrb_lite"` →
   `require "y"`. Native extension crate `yrb_lite` → `y_ruby`, loaded from
   `lib/y/y_ruby.bundle`.
@@ -27,4 +27,4 @@ mirroring the `y-rb` gem's `Y::Doc` interface.
 - y-crdt wrapper over Rust `yrs` 0.27.2 (magnus/rb-sys), with the full
   y-websocket sync protocol + Awareness, thread-safe (`Send`/`Sync`,
   GVL released around CRDT work). Precompiled platform gems are published
-  alongside the source gem so `gem install y-ruby` needs no Rust toolchain.
+  alongside the source gem so `gem install yrby` needs no Rust toolchain.

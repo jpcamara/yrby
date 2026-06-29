@@ -63,6 +63,6 @@ Gemspec/DevelopmentDependencies:
 # Intentional dasherized shim so Bundler can auto-require the gem by its name.
 Naming/FileName:
   Exclude:
-    - "lib/y-ruby.rb"
-    - "lib/y-ruby-actioncable.rb"
-    - "lib/y-ruby-decoder.rb"
+    - "lib/yrby.rb"
+    - "lib/yrby-actioncable.rb"
+    - "lib/yrby-decoder.rb"

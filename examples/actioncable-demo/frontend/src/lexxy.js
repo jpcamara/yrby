@@ -1,10 +1,10 @@
 // Alternative editor for the demo: a real Lexxy (Lexical) collaborative editor
 // driven by `lexxy-realtime`, against the SAME DocumentChannel the Tiptap page
-// uses. Nothing on the server changes — both editors speak the y-ruby
+// uses. Nothing on the server changes — both editors speak the yrby
 // y-websocket protocol — so this is a drop-in second front end.
 //
 // lexxy-realtime ships the `<lexxy-collaboration>` custom element and a
-// `YrbLiteProvider` (the @y-ruby/client ActionCableProvider). The collaboration
+// `YrbLiteProvider` (the @yrby/client ActionCableProvider). The collaboration
 // element owns the editor binding, the empty-doc bootstrap, and remote cursors;
 // we just create the doc/provider, mount it inside a `<lexxy-editor>`, and
 // connect.

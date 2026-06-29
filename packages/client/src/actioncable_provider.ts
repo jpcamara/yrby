@@ -1,4 +1,4 @@
-// Yjs provider for the y-ruby y-websocket protocol over ActionCable / AnyCable.
+// Yjs provider for the yrby y-websocket protocol over ActionCable / AnyCable.
 // It owns the cable subscription and translates between the cable's JSON envelope
 // (`{ update, id }` / `{ ack }`, base64) and raw protocol frames. Everything else
 // (sync steps, encode/decode, awareness, reliable delivery) lives in
@@ -82,7 +82,7 @@ export class ActionCableProvider {
     this.channelName = channelName;
     this.channelParams = channelParams;
     this.awareness = new Awareness(doc);
-    this.#onError = opts.onError ?? ((error, context) => console.warn(`[y-ruby] ${context}:`, error));
+    this.#onError = opts.onError ?? ((error, context) => console.warn(`[yrby] ${context}:`, error));
 
     this.session = new YProtocolSession(doc, {
       awareness: this.awareness,

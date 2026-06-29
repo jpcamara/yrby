@@ -1,7 +1,7 @@
 {
-  "name": "@y-ruby/client",
+  "name": "@yrby/client",
   "version": "0.2.0",
-  "description": "JavaScript client for the y-ruby y-websocket protocol: a ready-made ActionCable/AnyCable provider, a transport-agnostic protocol session (sync steps, encode/decode, awareness), and a reliable-delivery core (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Written in TypeScript with bundled types; usable from plain JS.",
+  "description": "JavaScript client for the yrby y-websocket protocol: a ready-made ActionCable/AnyCable provider, a transport-agnostic protocol session (sync steps, encode/decode, awareness), and a reliable-delivery core (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Written in TypeScript with bundled types; usable from plain JS.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -33,19 +33,19 @@
   },
   "license": "MIT",
   "author": "JP Camara <jp@jpcamara.com>",
-  "homepage": "https://github.com/jpcamara/y-ruby/tree/main/packages/@y-ruby/client#readme",
+  "homepage": "https://github.com/jpcamara/yrby/tree/main/packages/client#readme",
   "bugs": {
-    "url": "https://github.com/jpcamara/y-ruby/issues"
+    "url": "https://github.com/jpcamara/yrby/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jpcamara/y-ruby.git",
-    "directory": "packages/@y-ruby/client"
+    "url": "git+https://github.com/jpcamara/yrby.git",
+    "directory": "packages/client"
   },
   "keywords": [
     "yjs",
     "crdt",
-    "y-ruby",
+    "yrby",
     "reliable-delivery",
     "actioncable",
     "y-websocket",

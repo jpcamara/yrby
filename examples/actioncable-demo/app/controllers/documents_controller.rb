@@ -11,13 +11,13 @@ class DocumentsController < ApplicationController
 
   # The same document, edited through a Lexxy (Lexical) editor via
   # lexxy-realtime. Same DocumentChannel, same durable store — just a different
-  # front end, to show the y-ruby protocol is editor-agnostic.
+  # front end, to show the yrby protocol is editor-agnostic.
   def lexxy
     @document_id = params[:id]
   end
 
   # "Opaque state" demos. Each renders a different kind of collaborative app over
-  # the SAME DocumentChannel, to show y-ruby syncs any Yjs shape (the views use
+  # the SAME DocumentChannel, to show yrby syncs any Yjs shape (the views use
   # a per-demo suffix on the document id so the shapes don't collide).
   def codemirror = (@document_id = params[:id]) # Y.Text  (code, with cursors)
   def whiteboard = (@document_id = params[:id]) # Y.Map   (draggable shapes)

@@ -219,7 +219,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
           "log-context-error=#{e.class}"
         end
         parts << context if context
-        "[y-ruby] dropped frame (#{parts.join(" ")}): #{reason}"
+        "[yrby] dropped frame (#{parts.join(" ")}): #{reason}"
       end
     end
 

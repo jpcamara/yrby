@@ -1,6 +1,6 @@
 import * as Y from "yjs"
 import { createConsumer } from "@rails/actioncable"
-import { ActionCableProvider } from "@y-ruby/client"
+import { ActionCableProvider } from "@yrby/client"
 import { Editor } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
 import Collaboration from "@tiptap/extension-collaboration"

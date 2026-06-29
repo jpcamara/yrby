@@ -1,7 +1,7 @@
 name: Precompiled gems
 
 # Builds native precompiled gems for every supported platform/Ruby so users
-# can `gem install y-ruby` with NO Rust toolchain. Runs on a version tag (or
+# can `gem install yrby` with NO Rust toolchain. Runs on a version tag (or
 # manually). Publishing to RubyGems is a deliberate manual step (see below).
 
 on:
@@ -110,7 +110,7 @@ jobs:
             d2.apply_update(back)
             raise "round-trip did not converge" unless d2.encode_state_vector == d1.encode_state_vector
             raise "missing update_ready? (stale binary?)" unless d2.respond_to?(:update_ready?)
-            puts "ok: y-ruby #{Y::VERSION} loaded from #{lib} with no Rust"
+            puts "ok: yrby #{Y::VERSION} loaded from #{lib} with no Rust"
           '
 
   # After this workflow (and once smoke-test is green), download the artifacts

@@ -1,6 +1,6 @@
-# y-ruby
+# yrby
 
-[![CI](https://github.com/jpcamara/y-ruby/actions/workflows/ci.yml/badge.svg)](https://github.com/jpcamara/y-ruby/actions/workflows/ci.yml)
+[![CI](https://github.com/jpcamara/yrby/actions/workflows/ci.yml/badge.svg)](https://github.com/jpcamara/yrby/actions/workflows/ci.yml)
 
 Collaborative editing for Rails, backed by [y-crdt](https://github.com/y-crdt/y-crdt)
 (the Rust library behind Y.js). Your Rails server speaks the y-websocket sync
@@ -20,7 +20,7 @@ end
 ```
 
 On the browser, use the `ActionCableProvider` from the 
-[`@y-ruby/client`](https://www.npmjs.com/package/@y-ruby/client) npm package.
+[`@yrby/client`](https://www.npmjs.com/package/@yrby/client) npm package.
 Integrates with any editor that includes Y.js support, such as Tiptap, ProseMirror
 and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
 
@@ -29,8 +29,8 @@ and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
 Install the gem and npm package:
 
 ```
-gem install y-ruby-actioncable # depends on y-ruby
-npm install @y-ruby/client
+gem install yrby-actioncable # depends on yrby
+npm install @yrby/client
 ```
 
 ## What you get
@@ -45,7 +45,7 @@ npm install @y-ruby/client
 
 ## Why "lite"
 
-The "lite" is the size of the surface. `y-ruby` binds just the part of `y-crdt` you
+The "lite" is the size of the surface. `yrby` binds just the part of `y-crdt` you
 need to *sync and persist* collaborative documents - a `Doc`, awareness, and the
 y-websocket protocol primitives. The Ruby side treats a document as opaque CRDT
 state: it applies updates, answers sync handshakes, and records deltas, but never
@@ -57,17 +57,17 @@ shape.
 The surface area may be "lite", but a core focus is on durability, resiliency, delivery
 guarantees, correctness, and thread safety.
 
-Towards that goal, `y-ruby` adds capabilities that may even stand out in the Yjs ecosystem:
+Towards that goal, `yrby` adds capabilities that may even stand out in the Yjs ecosystem:
 
-- Built-in update acknowledgement: the `ActionCableProvider` in `@y-ruby/client` will continue to
-  send updates until an ack is received from the server. [`y-ruby-actioncable`](https://rubygems.org/gems/y-ruby-actioncable)
+- Built-in update acknowledgement: the `ActionCableProvider` in `@yrby/client` will continue to
+  send updates until an ack is received from the server. [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
   only sends an ack when applying an update is successful. The goal is at-least-once delivery,
   and because CRDTs are idempotent a duplicate update is effectively a no-op.
 - Gap detection in document updates: before applying an update and sending an ack to the client,
-  `y-ruby` checks whether the update results in any causal gap. Ie, an update comes through
+  `yrby` checks whether the update results in any causal gap. Ie, an update comes through
   which depends on a previous update that is not yet present in the document. This can result in
   a document stuck with "pending" updates, which will _never_ apply if the missing update is not sent.
-  To avoid this, `y-ruby` does not apply the update, and starts a new y-protocol sync with the client.
+  To avoid this, `yrby` does not apply the update, and starts a new y-protocol sync with the client.
   That will cause the client to synchronize its document with the server, sending through any updates
   that may have been missed
 
@@ -76,7 +76,7 @@ Towards that goal, `y-ruby` adds capabilities that may even stand out in the Yjs
 `yrb` has a much larger interface that gives you most of the Yjs type system - 
 shared text, arrays, maps, XML - to build and query documents in Ruby. It was a great
 inspiration for my use of Yjs in Ruby/Rails, and I originally considered building
-on top of it. There are a few reasons I went with `y-ruby` instead:
+on top of it. There are a few reasons I went with `yrby` instead:
 
 - `yrb` is largely unmaintained. It was built as an experiment for GitLab, and the original
   author mostly moved onto other projects.
@@ -97,10 +97,10 @@ Issues and PRs are welcome.
 
 ```ruby
 # Core CRDT + protocol primitives:
-gem "y-ruby"
+gem "yrby"
 
 # For the Rails/ActionCable server concern (Y::ActionCable::Sync):
-gem "y-ruby-actioncable"
+gem "yrby-actioncable"
 ```
 
 Requires Ruby 3.4 or newer. The release workflow builds precompiled gems for
@@ -111,8 +111,8 @@ no Rust; a source build needs [Rust](https://rustup.rs).
 To work on the gem itself:
 
 ```bash
-git clone https://github.com/jpcamara/y-ruby
-cd y-ruby
+git clone https://github.com/jpcamara/yrby
+cd yrby
 bundle install
 bundle exec rake compile test
 ```
@@ -167,7 +167,7 @@ Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
 
 ### ActionCable Integration
 
-`Y::ActionCable::Sync` (from the `y-ruby-actioncable` gem) is a channel
+`Y::ActionCable::Sync` (from the `yrby-actioncable` gem) is a channel
 concern that implements the full y-websocket protocol (document sync +
 awareness/presence) over ActionCable:
 
@@ -197,7 +197,7 @@ for the same document as long as they share the same store and cable adapter.
 
 `on_load` and `on_change` are required. If either is missing, the channel fails 
 before it can acknowledge or broadcast edits. Presence is ephemeral:
-awareness frames are relayed, and `@y-ruby/client` sends a best-effort
+awareness frames are relayed, and `@yrby/client` sends a best-effort
 presence-removal frame on disconnect/pagehide, with the client-side awareness
 timeout as the fallback for abrupt disconnects.
 
@@ -263,16 +263,16 @@ convergence, fresh reads on both, presence across processes, and one shared log.
 
 ##### AnyCable
 
-`y-ruby` fully supports AnyCable.
+`yrby` fully supports AnyCable.
 
 The demo checks this against a real anycable-go + RPC server
 (`frontend/anycable_probe.mjs`, `anycable_concurrent.mjs`): liveness, the
-y-ruby client provider, cross-process reads, and concurrent convergence.
+yrby client provider, cross-process reads, and concurrent convergence.
 
 ##### Demo
 
 [`examples/actioncable-demo`](examples/actioncable-demo) is a full Rails + Tiptap
-app using the y-ruby provider, with end-to-end tests.
+app using the yrby provider, with end-to-end tests.
 
 #### Record Before Distribute
 
@@ -305,7 +305,7 @@ end to end that the log alone rebuilds the document.
 
 #### Reliable delivery (acks)
 
-y-ruby document delivery is ack-tracked. Browser document updates carry an
+yrby document delivery is ack-tracked. Browser document updates carry an
 `"id"`, and the server replies `{ "ack": <id> }` once `on_change` has succesfully fired.
 A causally-gapped update is not acked; the server sends a resync request, and
 the client keeps the update queued until it lands.
@@ -315,7 +315,7 @@ client -> server   { "update": "<base64 update>", "id": 42 }
 server -> client   { "ack": 42 }     # update accepted; safe to forget
 ```
 
-`@y-ruby/client`'s `ActionCableProvider` handles this automatically. It keeps
+`@yrby/client`'s `ActionCableProvider` handles this automatically. It keeps
 the unacknowledged local document tail in a queue and sends the merged tail as a
 single causally-complete delta. The id is the highest sequence in the batch, so
 one `{ ack: id }` cumulatively confirms everything up to it. Because CRDT apply
@@ -324,7 +324,7 @@ re-acks. Awareness stays ephemeral and is not acked.
 
 Presence (cursors, selections) is owned by the browser clients — the server
 never sets or holds presence state, it only relays awareness frames opaquely.
-See `@y-ruby/client` for the client-side awareness API.
+See `@yrby/client` for the client-side awareness API.
 
 ## Thread Safety
 

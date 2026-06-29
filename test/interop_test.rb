@@ -4,7 +4,7 @@ require "test_helper"
 require "json"
 require "open3"
 
-# Interop tests between y-ruby, Y.js, and yrs
+# Interop tests between yrby, Y.js, and yrs
 # These tests verify that all three implementations can communicate properly
 class InteropTest < Minitest::Test
   # Resolve bun from the standard install location or PATH.
@@ -53,7 +53,7 @@ class InteropTest < Minitest::Test
   end
 
   # ============================================================================
-  # Y.js -> y-ruby tests
+  # Y.js -> yrby tests
   # ============================================================================
 
   def test_yjs_update_applied_to_y_ruby
@@ -81,7 +81,7 @@ class InteropTest < Minitest::Test
 
     merged = yjs("merge-updates", doc1["update"], doc2["update"])
 
-    # y-ruby should be able to apply the merged update
+    # yrby should be able to apply the merged update
     doc = Y::Doc.new
     doc.apply_update(b64_decode(merged["merged_update"]))
 
@@ -92,18 +92,18 @@ class InteropTest < Minitest::Test
   end
 
   # ============================================================================
-  # y-ruby -> Y.js tests
+  # yrby -> Y.js tests
   # ============================================================================
 
   def test_y_ruby_update_applied_to_yjs
-    # Create a doc in y-ruby with Y.js update, then export and verify Y.js can read it
+    # Create a doc in yrby with Y.js update, then export and verify Y.js can read it
     yjs_doc = yjs("create-doc", 1, "content", "test content")
 
-    # Load into y-ruby
+    # Load into yrby
     doc = Y::Doc.new
     doc.apply_update(b64_decode(yjs_doc["update"]))
 
-    # Export from y-ruby
+    # Export from yrby
     update = b64_encode(doc.encode_state_as_update)
 
     # Y.js should be able to apply it
@@ -127,7 +127,7 @@ class InteropTest < Minitest::Test
   end
 
   # ============================================================================
-  # yrs -> y-ruby tests
+  # yrs -> yrby tests
   # ============================================================================
 
   def test_yrs_update_applied_to_y_ruby
@@ -162,7 +162,7 @@ class InteropTest < Minitest::Test
   end
 
   # ============================================================================
-  # y-ruby -> yrs tests
+  # yrby -> yrs tests
   # ============================================================================
 
   def test_y_ruby_update_applied_to_yrs
@@ -183,14 +183,14 @@ class InteropTest < Minitest::Test
   end
 
   # ============================================================================
-  # Y.js <-> yrs cross-tests (via y-ruby)
+  # Y.js <-> yrs cross-tests (via yrby)
   # ============================================================================
 
   def test_yjs_to_yrs_via_y_ruby
     # Create doc in Y.js
     yjs_doc = yjs("create-doc", 1, "content", "cross-platform test")
 
-    # Load into y-ruby
+    # Load into yrby
     doc = Y::Doc.new
     doc.apply_update(b64_decode(yjs_doc["update"]))
 
@@ -205,7 +205,7 @@ class InteropTest < Minitest::Test
     # Create doc in yrs
     yrs_doc = yrs("create-doc", 1, "content", "rust to js test")
 
-    # Load into y-ruby
+    # Load into yrby
     doc = Y::Doc.new
     doc.apply_update(b64_decode(yrs_doc["update"]))
 
@@ -224,19 +224,19 @@ class InteropTest < Minitest::Test
     # Y.js has content
     yjs_doc = yjs("create-doc", 1, "content", "sync test")
 
-    # y-ruby is empty
+    # yrby is empty
     doc = Y::Doc.new
 
-    # y-ruby sends sync step 1 (its state vector)
+    # yrby sends sync step 1 (its state vector)
     sv = b64_encode(doc.encode_state_vector)
 
     # Y.js computes diff
     diff = yjs("diff-update", yjs_doc["update"], sv)
 
-    # y-ruby applies the diff
+    # yrby applies the diff
     doc.apply_update(b64_decode(diff["diff_update"]))
 
-    # Verify y-ruby now has the content
+    # Verify yrby now has the content
     update = b64_encode(doc.encode_state_as_update)
     text = yjs("get-text", update, "content")
 
@@ -247,16 +247,16 @@ class InteropTest < Minitest::Test
     # yrs has content
     yrs_doc = yrs("create-doc", 1, "content", "yrs sync test")
 
-    # y-ruby is empty
+    # yrby is empty
     doc = Y::Doc.new
 
-    # y-ruby sends its state vector
+    # yrby sends its state vector
     sv = b64_encode(doc.encode_state_vector)
 
     # yrs computes diff
     diff = yrs("diff-update", yrs_doc["update"], sv)
 
-    # y-ruby applies the diff
+    # yrby applies the diff
     doc.apply_update(b64_decode(diff["diff_update"]))
 
     # State vectors should now match
@@ -274,10 +274,10 @@ class InteropTest < Minitest::Test
     yrb_sv = b64_encode(doc.encode_state_vector)
     yjs_sv = yjs_doc["state_vector"]
 
-    # Y.js sends update for what y-ruby is missing
+    # Y.js sends update for what yrby is missing
     yjs_to_yrb = yjs("diff-update", yjs_doc["update"], yrb_sv)
 
-    # y-ruby sends update for what Y.js is missing
+    # yrby sends update for what Y.js is missing
     yrb_update = b64_encode(doc.encode_state_as_update(b64_decode(yjs_sv)))
 
     # Apply updates
@@ -287,12 +287,12 @@ class InteropTest < Minitest::Test
     # Now verify both have both contents
     yrb_final_update = b64_encode(doc.encode_state_as_update)
 
-    # Check y-ruby has Y.js content
+    # Check yrby has Y.js content
     doc1_text = yjs("get-text", yrb_final_update, "doc1")
 
     assert_equal "yjs content", doc1_text["content"]
 
-    # Check Y.js has y-ruby content
+    # Check Y.js has yrby content
     doc2_text = yjs("get-text", yjs_merged["update"], "doc2")
 
     assert_equal "yrb content", doc2_text["content"]

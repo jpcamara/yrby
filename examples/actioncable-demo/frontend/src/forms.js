@@ -6,7 +6,7 @@
 // like the CodeMirror demo. Same DocumentChannel either way.
 import * as Y from "yjs"
 import { createConsumer } from "@rails/actioncable"
-import { ActionCableProvider } from "@y-ruby/client"
+import { ActionCableProvider } from "@yrby/client"
 
 const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia", "Alan"]
 const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8", "#e879f9", "#f472b6"]

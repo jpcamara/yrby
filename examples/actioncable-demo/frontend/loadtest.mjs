@@ -1,4 +1,4 @@
-// Load test for y-ruby. Spawns many WebSocket clients (raw ActionCable
+// Load test for yrby. Spawns many WebSocket clients (raw ActionCable
 // protocol, far lighter than browsers) across rooms, drives a sustained edit
 // rate, and measures sustained throughput (edits recorded/sec), propagation
 // latency under load (edit to visible on another client), saturation (sent vs

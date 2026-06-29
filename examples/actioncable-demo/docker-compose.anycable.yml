@@ -13,7 +13,7 @@
 # mode and `CABLE_URL` is emitted into the page via `action_cable_meta_tag`, so
 # `createConsumer()` targets the gateway automatically.
 
-name: y-ruby-demo
+name: yrby-demo
 
 services:
   web:

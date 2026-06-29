@@ -14,7 +14,7 @@ module PgStore
   INSERT_SQL = "INSERT INTO document_changes (doc_key, delta) VALUES ($1, $2)"
 
   # Synchronously persist a change. Returns only after the row is committed
-  # (synchronous_commit=on). Raising rejects the change, and y-ruby won't
+  # (synchronous_commit=on). Raising rejects the change, and yrby won't
   # apply or relay it. This uses a raw parameterized INSERT with a binary bytea
   # bind to skip the per-change cost of an AR model; concurrent commits from the
   # RPC worker threads group-commit in Postgres.

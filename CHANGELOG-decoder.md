@@ -1,6 +1,6 @@
-# Changelog — y-ruby-decoder
+# Changelog — yrby-decoder
 
-All notable changes to the `y-ruby-decoder` gem.
+All notable changes to the `yrby-decoder` gem.
 
 ## [Unreleased]
 
@@ -21,5 +21,5 @@ All notable changes to the `y-ruby-decoder` gem.
   recursive values) — for reading structured shared state server-side.
 
 Full-fidelity Lexical reconstruction (EditorState JSON / HTML) is intentionally
-**not** in this gem; it's the separate, opt-in `y-ruby-decode` Bun binary (see
-`packages/y-ruby-decode`).
+**not** in this gem; it's the separate, opt-in `yrby-decode` Bun binary (see
+`packages/yrby-decode`).

@@ -116,7 +116,7 @@ await js(ALICE.session, `window.__yrb.provider.disconnect(); "disconnected"`)
 // The user-visible signal is the caret disappearing, which happens well under
 // the client-side timeout. (The awareness *entry* itself can linger in the local
 // Map until y-protocols' 30s outdated-timeout — standard plumbing, not a
-// y-ruby behavior — so we don't assert on Map size here.)
+// yrby behavior — so we don't assert on Map size here.)
 const reaped = await waitFor("Alice's caret removed from Bob after she leaves", async () =>
   !(await labels(BOB.session)).includes("Alice"))
 check("Alice's caret reaped from Bob on disconnect", reaped)

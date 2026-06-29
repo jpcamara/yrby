@@ -1,7 +1,7 @@
-// Drives @y-ruby/client's ActionCableProvider against the y-ruby server,
+// Drives @yrby/client's ActionCableProvider against the yrby server,
 // headless. Two checks:
 //
-//   1. Two providers sync documents + presence through the canonical y-ruby
+//   1. Two providers sync documents + presence through the canonical yrby
 //      envelopes.
 //   2. Reliability: a silently-lost client->server batch is recovered by the
 //      provider's own retransmit, no reconnect, no follow-up edit, and the
@@ -15,7 +15,7 @@
 // down the socket, a lost-in-transit network, not a disconnect, so the
 // provider keeps retransmitting on its timer.
 import * as Y from "yjs"
-import { ActionCableProvider } from "@y-ruby/client"
+import { ActionCableProvider } from "@yrby/client"
 
 const PORT = process.env.PORT || 3777
 const ROOM = `relprov-${process.pid}`

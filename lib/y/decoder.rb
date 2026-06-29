@@ -5,7 +5,7 @@ require "y/decoder/version"
 
 module Y
   # Plain-text reconstruction of a stored Yjs document, in pure Ruby — for search
-  # indexing and previews. The core `y-ruby` gem moves and stores opaque CRDT
+  # indexing and previews. The core `yrby` gem moves and stores opaque CRDT
   # updates without reading them; this reads the text out of the shared type the
   # editor uses (Lexical's `Y.XmlText`, plain `Y.Text`, or ProseMirror's
   # `Y.XmlFragment`), in-process, on the native extension core already ships — no
@@ -16,7 +16,7 @@ module Y
   #   Y::Decoder.preview(state, 280)      # => "hello world…"
   #
   # Full-fidelity reconstruction (the exact Lexical EditorState / HTML, which
-  # needs @lexical/yjs) is a separate, opt-in concern — see the `y-ruby-decode`
+  # needs @lexical/yjs) is a separate, opt-in concern — see the `yrby-decode`
   # package's Bun binary. This gem stays pure Ruby on purpose.
   module Decoder
     class Error < Y::Error; end

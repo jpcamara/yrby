@@ -1,4 +1,4 @@
-// Transport-agnostic session for the y-ruby y-websocket protocol. Handles the
+// Transport-agnostic session for the yrby y-websocket protocol. Handles the
 // y-protocols framing, the sync handshake (SyncStep1/Step2/Update), and awareness
 // encode/apply on top of ReliableSync. Bind it to a Y.Doc (and an optional
 // Awareness); it works in raw Uint8Array frames and leaves the transport to the
@@ -20,7 +20,7 @@ import {
 } from "y-protocols/awareness";
 import { ReliableSync, type TimerHandle } from "./reliable_sync.js";
 
-// The y-protocols frame types y-ruby speaks, as the leading byte of a frame.
+// The y-protocols frame types yrby speaks, as the leading byte of a frame.
 // Other y-protocols types (auth = 2, query-awareness = 3) are not handled.
 export const MessageType = { Sync: 0, Awareness: 1 } as const;
 
@@ -76,7 +76,7 @@ export class YProtocolSession {
     this.doc = doc;
     this.awareness = awareness;
     this.#send = send;
-    this.#onError = onError ?? ((error, context) => console.warn(`[y-ruby] ${context}:`, error));
+    this.#onError = onError ?? ((error, context) => console.warn(`[yrby] ${context}:`, error));
 
     this.#delivery = new ReliableSync({
       merge: mergeUpdates,
@@ -195,7 +195,7 @@ export class YProtocolSession {
           if (this.awareness) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
           break;
         default:
-          return null; // a y-protocols type y-ruby doesn't speak (auth, query-awareness): ignore
+          return null; // a y-protocols type yrby doesn't speak (auth, query-awareness): ignore
       }
       return encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
     } catch (error) {
@@ -251,7 +251,7 @@ export class YProtocolSession {
         decoding.readVarUint8Array(decoder);
         break;
       default:
-        return null; // a y-protocols type y-ruby doesn't speak: ignore
+        return null; // a y-protocols type yrby doesn't speak: ignore
     }
     // This protocol is one message per frame. Anything left after a complete
     // message is malformed (trailing garbage, or low-level packed messages whose

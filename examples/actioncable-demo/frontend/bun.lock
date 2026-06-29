@@ -16,7 +16,7 @@
         "@tiptap/extension-collaboration-cursor": "^2.11.0",
         "@tiptap/pm": "^2.11.0",
         "@tiptap/starter-kit": "^2.11.0",
-        "@y-ruby/client": "file:../../../packages/client",
+        "@yrby/client": "file:../../../packages/client",
         "codemirror": "^6.0.1",
         "lexical": "^0.44",
         "lexxy-realtime": "file:../../../../lexxy-realtime",
@@ -252,7 +252,7 @@
 
     "@types/trusted-types": ["@types/trusted-types@2.0.7", "", {}, "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw=="],
 
-    "@y-ruby/client": ["@y-ruby/client@file:../../../packages/client", { "dependencies": { "lib0": "^0.2.117" }, "devDependencies": { "typescript": "^5.6.0", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }],
+    "@yrby/client": ["@yrby/client@file:../../../packages/client", { "dependencies": { "lib0": "^0.2.117" }, "devDependencies": { "typescript": "^5.6.0", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }],
 
     "acorn": ["acorn@8.17.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg=="],
 
