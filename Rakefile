@@ -43,7 +43,7 @@ namespace :release do
          b. git tag v#{core} && git push origin main "v#{core}"
          c. the "Precompiled gems" workflow builds 8 platform gems + the source gem
          d. gh run download <run-id> --dir tmp/ ; cp tmp/**/*.gem pkg/
-         e. gem push pkg/y-ruby-#{core}*.gem        # 9 gems: source + 8 platforms
+         e. for g in pkg/y-ruby-#{core}*.gem; do gem push "$g" || break; done   # 9 gems (gem push takes ONE at a time)
 
       2) y-ruby-actioncable #{cable}  — gem, pure Ruby; one gem, no precompilation
          a. bump lib/y/action_cable/version.rb + CHANGELOG-actioncable.md, commit
