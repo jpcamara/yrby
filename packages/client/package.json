@@ -1,6 +1,6 @@
 {
   "name": "yrby-client",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "JavaScript client for the yrby y-websocket protocol: a ready-made ActionCable/AnyCable provider, a transport-agnostic protocol session (sync steps, encode/decode, awareness), and a reliable-delivery core (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Written in TypeScript with bundled types; ESM + CommonJS, usable from plain JS.",
   "type": "module",
   "main": "./dist/cjs/index.js",

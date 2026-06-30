@@ -37,14 +37,23 @@ export interface CableSubscription {
   send(data: unknown): unknown;
   /** AnyCable client-to-client broadcast; absent on plain ActionCable. */
   whisper?(data: unknown): unknown;
+  /** Teardown. Present on both @rails/actioncable and @anycable/web. */
   unsubscribe?(): void;
 }
 
-/** The minimal slice of an ActionCable/AnyCable consumer this provider uses. */
+/**
+ * The minimal slice of an ActionCable/AnyCable consumer this provider uses.
+ *
+ * Deliberately loose so the consumers from both `@rails/actioncable` and
+ * `@anycable/web` are directly assignable -- no adapter or casts. `create` is
+ * widened to the channel/params shapes both libs accept, with an optional mixin
+ * (the handlers object). There's no `subscriptions.remove`: the provider tears
+ * down via `subscription.unsubscribe()` (universal), and @anycable has no such
+ * method anyway.
+ */
 export interface CableConsumer {
   subscriptions: {
-    create(params: object, mixin: object): CableSubscription;
-    remove(subscription: CableSubscription): void;
+    create(channel: string | object, mixin?: object): CableSubscription;
   };
 }
 
@@ -188,7 +197,11 @@ export class ActionCableProvider {
     this.#connected = false;
     this.#subscription = null;
     this.#removeUnloadHandler();
-    queueMicrotask(() => this.consumer.subscriptions.remove(sub));
+    // Universal teardown: both @rails/actioncable and @anycable/web subscriptions
+    // expose unsubscribe() (Rails' just calls consumer.subscriptions.remove(this)
+    // internally). @anycable has NO consumer.subscriptions.remove, so calling that
+    // would throw there.
+    queueMicrotask(() => sub.unsubscribe?.());
     this.#refreshStatus(); // -> "disconnected"
   }
 

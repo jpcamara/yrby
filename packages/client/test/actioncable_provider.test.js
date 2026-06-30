@@ -16,19 +16,20 @@ function fakeConsumer({ withWhisper } = { withWhisper: false }) {
     deliverConnected: () => sub.connected(),
     deliverDisconnected: () => sub.disconnected(),
     deliverReceived: (msg) => sub.received(msg),
+    // No `subscriptions.remove` -- mirrors @anycable/web (which has none). Teardown
+    // goes through the subscription's own unsubscribe(), the universal path.
     subscriptions: {
       create(params, mixin) {
         sub = {
           identifier: JSON.stringify(params),
           send: (data) => calls.send.push(data),
-          unsubscribe: () => {},
+          unsubscribe: () => {
+            calls.removed += 1;
+          },
           ...mixin,
         };
         if (withWhisper) sub.whisper = (data) => calls.whisper.push(data);
         return sub;
-      },
-      remove: () => {
-        calls.removed += 1;
       },
     },
   };
