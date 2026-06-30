@@ -50,7 +50,7 @@ provider.onStatusChange(({ status }) => {
 // on it directly (rather than creating its own).
 function mount() {
   const collab = document.createElement("lexxy-collaboration")
-  collab.setAttribute("id", documentId)
+  collab.setAttribute("doc-id", documentId)
   collab.setAttribute("name", user.name)
   collab.setAttribute("color", user.color)
   collab.setAttribute("channel-name", "DocumentChannel")

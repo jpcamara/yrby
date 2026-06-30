@@ -22,7 +22,7 @@
     "@tiptap/pm": "^2.11.0",
     "@tiptap/starter-kit": "^2.11.0",
     "lexical": "^0.44",
-    "lexxy-realtime": "^0.1.2",
+    "lexxy-realtime": "^0.2.0",
     "lib0": "^0.2.97",
     "yrby-client": "file:../../../packages/client",
     "y-protocols": "^1.0.6",

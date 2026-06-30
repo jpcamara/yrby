@@ -18,7 +18,7 @@
         "@tiptap/starter-kit": "^2.11.0",
         "codemirror": "^6.0.1",
         "lexical": "^0.44",
-        "lexxy-realtime": "^0.1.2",
+        "lexxy-realtime": "^0.2.0",
         "lib0": "^0.2.97",
         "y-codemirror.next": "^0.3.5",
         "y-protocols": "^1.0.6",
@@ -280,7 +280,7 @@
 
     "lexical": ["lexical@0.44.0", "", {}, "sha512-ReDUjRlFgkGoPWzvdjr7s16PUVpHATN+2NH2NiZs+PLlISTaIFFgKil2P467oP3Vg+XgmpDsUgmWZsFJTztYjg=="],
 
-    "lexxy-realtime": ["lexxy-realtime@0.1.2", "", { "peerDependencies": { "@37signals/lexxy": "^0.9", "@anycable/web": "*", "@lexical/yjs": "^0.44", "lexical": "^0.44", "y-protocols": "^1.0", "yjs": "^13.6" }, "optionalPeers": ["@anycable/web"] }, "sha512-xFRBtFk6Xa+xJjk/pw+fzuJk1+CocxQ/LpSMqvjNyVjKzLyy3unKbccqACIhTthMcWb+BzS1m1L62zu3XVhzCA=="],
+    "lexxy-realtime": ["lexxy-realtime@0.2.0", "", { "peerDependencies": { "@37signals/lexxy": "^0.9", "@anycable/web": "*", "@lexical/yjs": "^0.44", "lexical": "^0.44", "y-protocols": "^1.0", "yjs": "^13.6" }, "optionalPeers": ["@anycable/web"] }, "sha512-RqLxWt+1HlB+aWAPX7ZKBaLpwtUeJ3dnDRAEt30IzubdPHky/XZsuwuZi6lD6x96MbnFlaZ3XPHYh+C/25NRwQ=="],
 
     "lib0": ["lib0@0.2.117", "", { "dependencies": { "isomorphic.js": "^0.2.4" }, "bin": { "0serve": "bin/0serve.js", "0gentesthtml": "bin/gentesthtml.js", "0ecdsa-generate-keypair": "bin/0ecdsa-generate-keypair.js" } }, "sha512-DeXj9X5xDCjgKLU/7RR+/HQEVzuuEUiwldwOGsHK/sfAfELGWEyTcf0x+uOvCvK3O2zPmZePXWL85vtia6GyZw=="],
 
