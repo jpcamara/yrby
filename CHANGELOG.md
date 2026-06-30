@@ -6,6 +6,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-30
+
+### Fixed
+
+- `Doc#read_xml` now recovers text from **nested** Lexical/Lexxy blocks. Lexical
+  embeds child blocks (list items, table cells, nested lists) as `Y.XmlText`
+  embeds that `get_string` silently drops, so lists and tables previously came
+  back empty. `read_xml` now walks the embeds: text runs build a line, inline
+  children (links) join it, and nested block children flush and recurse — so a
+  document with headings, formatted text, links, bullet/numbered/check/nested
+  lists, blockquotes, code blocks and tables extracts every piece of text.
+  Lexical decorator elements (horizontal rule, image) are skipped instead of
+  emitting their `<UNDEFINED …>` serialization. ProseMirror handling is
+  unchanged.
+
 ## [0.2.1] - 2026-06-29
 
 ### Changed

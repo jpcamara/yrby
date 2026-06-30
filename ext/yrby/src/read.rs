@@ -4,29 +4,99 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use yrs::{Any, Array, GetString, Map, MapRef, Out, ReadTxn, XmlFragment, XmlFragmentRef, XmlOut};
+use yrs::types::text::YChange;
+use yrs::{
+    Any, Array, GetString, Map, MapRef, Out, ReadTxn, Text, Xml, XmlFragment, XmlFragmentRef,
+    XmlOut, XmlTextRef,
+};
 
 /// Read an XML-shaped root as text, one top-level block per line.
 ///
-/// ProseMirror stores blocks as `Y.XmlElement` children (`<paragraph>…`);
-/// Lexical stores each block as a sibling `Y.XmlText` (its node metadata is an
-/// embed, which yrs omits from the string). We serialize each top-level child and
-/// join with "\n", so adjacent blocks don't merge into one run of words. Without
-/// the separator, Lexical — whose blocks carry no element tags — would glue
-/// paragraphs together (e.g. "first paragraphsecond paragraph"), breaking word
-/// boundaries for search/preview. Element tags are kept (the caller strips them);
-/// deeper nesting is flattened, but its inner tags still separate words after
-/// stripping.
+/// Two editors store their documents differently, and both are handled:
+///
+/// - **ProseMirror** (Tiptap) stores blocks as `Y.XmlElement` children
+///   (`<paragraph>…`). `get_string` already recurses these (tags included; the
+///   caller strips them), so we keep that path.
+/// - **Lexical** (Lexxy) stores every node as a `Y.XmlText`, and nests child
+///   blocks (list items, table cells, nested lists) as *embedded* `Y.XmlText`s —
+///   which `get_string` silently omits, dropping all that content. So for a
+///   Lexical block we walk its content (`Text::diff`) instead: text runs build a
+///   line, inline children (links) join it, and nested block children flush the
+///   line and recurse. Each leaf block becomes one line, so words never glue
+///   across blocks and lists/tables come through intact.
 pub fn xml_blocks_text<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> String {
-    fragment
-        .children(txn)
-        .map(|node| match node {
-            XmlOut::Element(e) => e.get_string(txn),
-            XmlOut::Text(t) => t.get_string(txn),
-            XmlOut::Fragment(f) => f.get_string(txn),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut out: Vec<String> = Vec::new();
+    for node in fragment.children(txn) {
+        match node {
+            XmlOut::Text(t) => walk_lexical_block(txn, &t, &mut out),
+            XmlOut::Element(e) => {
+                // ProseMirror blocks have a tag but no `__type`; get_string recurses
+                // them (tags kept, caller strips). A Lexical decorator (horizontal
+                // rule, image) is an XmlElement *with* a `__type` and no extractable
+                // text -- skip it rather than emit its `<UNDEFINED …>` serialization.
+                if e.get_attribute(txn, "__type").is_none() {
+                    out.push(e.get_string(txn));
+                }
+            }
+            XmlOut::Fragment(f) => out.push(f.get_string(txn)),
+        }
+    }
+    out.join("\n")
+}
+
+/// Lexical node `__type`s whose text belongs on the surrounding line rather than
+/// a new block (e.g. a link inside a paragraph). Everything else with embedded
+/// child `Y.XmlText`s is treated as a block and recursed.
+fn is_inline_lexical_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "text" | "link" | "autolink" | "linebreak" | "tab" | "hashtag" | "mark" | "overflow"
+    )
+}
+
+/// A Lexical node's `__type` (stored as an XML attribute on its `Y.XmlText`).
+fn lexical_type<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
+    match t.get_attribute(txn, "__type") {
+        Some(Out::Any(Any::String(s))) => s.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Gather the text of an inline Lexical element (its text runs and any nested
+/// inline elements) without introducing block breaks.
+fn inline_lexical_text<T: ReadTxn>(txn: &T, t: &XmlTextRef, buf: &mut String) {
+    for d in t.diff(txn, YChange::identity) {
+        match d.insert {
+            Out::Any(Any::String(s)) => buf.push_str(&s),
+            Out::YXmlText(child) => inline_lexical_text(txn, &child, buf),
+            _ => {} // per-text-node metadata map, decorator embeds: no text
+        }
+    }
+}
+
+/// Walk a Lexical block (`Y.XmlText`), pushing one line per leaf block. Text runs
+/// accumulate; inline children join the line; block children flush it and recurse.
+fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>) {
+    let mut line = String::new();
+    for d in t.diff(txn, YChange::identity) {
+        match d.insert {
+            Out::Any(Any::String(s)) => line.push_str(&s),
+            Out::YXmlText(child) => {
+                if is_inline_lexical_type(&lexical_type(txn, &child)) {
+                    inline_lexical_text(txn, &child, &mut line);
+                } else {
+                    if !line.is_empty() {
+                        out.push(std::mem::take(&mut line));
+                    }
+                    walk_lexical_block(txn, &child, out);
+                }
+            }
+            _ => {} // per-text-node metadata map; embeds we don't read for text
+        }
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
 }
 
 /// Read a `Y.Map` root as a JSON object string (keys sorted for stable output).
@@ -184,5 +254,50 @@ mod tests {
         let map = doc.get_or_insert_map("state");
         let txn = doc.transact();
         assert_eq!(map_json(&txn, &map), "{}");
+    }
+
+    #[test]
+    fn lexical_complex_doc_extracts_all_nested_text() {
+        // A real Lexxy/Lexical doc with every block type: headings, formatted
+        // text, an inline link, bullet + NESTED bullet + numbered + check lists,
+        // a quote, a code block, a horizontal rule, and a table. Every piece of
+        // text -- including list items, the nested sub-list, and table cells --
+        // must come through (get_string alone dropped all the nested ones).
+        use yrs::updates::decoder::Decode;
+        use yrs::{Transact, Update};
+        let bytes = include_bytes!("fixtures/lexical_rich.bin");
+        let doc = Doc::new();
+        {
+            let mut txn = doc.transact_mut();
+            txn.apply_update(Update::decode_v1(bytes).unwrap()).unwrap();
+        }
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let text = xml_blocks_text(&txn, &frag);
+        for expected in [
+            "Heading One",
+            "Heading Two",
+            "Plain, bold, italic, strike, underline, and code.",
+            "Visit the website for more.", // link text stays inline
+            "First bullet",
+            "Second bullet",
+            "Nested A", // nested sub-list
+            "Nested B",
+            "Step one",
+            "Step two",
+            "Done item",
+            "Todo item",
+            "A blockquote about CRDTs.",
+            "const x = 1;", // code block (keeps its internal newline)
+            "console.log(x);",
+            "Name", // table header cells
+            "Role",
+            "Ada", // table body cells
+            "Engineer",
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
+        }
+        // The inline link must NOT have been split onto its own line.
+        assert!(text.contains("Visit the website for more."));
     }
 }
