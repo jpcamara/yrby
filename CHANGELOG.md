@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Live `Y::Map` handles.** `Doc#get_map(name)` returns a `Y::Map` you can both
+  read and *write*: `map[key]`, `map[key] = value`, `delete`, `clear`, `keys`,
+  `size`, `key?`, `to_h`, and `each`. Writes mutate the CRDT, so they sync to
+  every peer. Values round-trip primitives, arrays, and nested hashes; a nested
+  hash becomes a real nested `Y.Map`, and `map.get_map(key)` returns a live handle
+  to it (mutating the child mutates the document). This is the first actual yrs
+  shared type exposed for building/editing state in Ruby, complementing the
+  read-only `read_text`/`read_xml`/`read_map` snapshots.
+
+  Handles carry the same thread-safety guarantees as `Doc`: every operation opens
+  its own transaction inside `nogvl` (GVL released) and holds no lock across the
+  boundary. A handle is addressed by root name plus a path of keys and re-resolves
+  per operation — it never caches a raw yrs branch pointer that could dangle when
+  the tree is mutated (possibly on another thread), so a nested handle keeps
+  working even as sibling keys change around it. `Y::Map` is asserted `Send + Sync`
+  at compile time alongside `Doc`.
+
 ## [0.6.1] - 2026-08-04
 
 ### Fixed
