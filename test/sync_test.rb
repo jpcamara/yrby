@@ -380,6 +380,27 @@ class SyncTest < Minitest::Test
     assert_equal [5, 5], acks_in(transmits)
   end
 
+  def test_lost_ack_delete_retry_acks_without_double_recording
+    # A pure-delete retry the server already integrated must be acked but not
+    # recorded or re-broadcast. Insert content, delete a char, then replay the
+    # deletion: the second delivery is a no-op the guard must catch.
+    content = YjsFixtures::DeleteRetry::CONTENT
+    deletion = YjsFixtures::DeleteRetry::DELETION
+
+    store = []
+    broadcasts = []
+    transmits = []
+    helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts)
+
+    helper.sync_receive(update_message(content, id: 1), "doc-key")
+    helper.sync_receive(update_message(deletion, id: 2), "doc-key")
+    helper.sync_receive(update_message(deletion, id: 3), "doc-key") # lost-ack retry
+
+    assert_equal 2, store.length, "the deletion records once; its retry does not"
+    assert_equal 2, broadcasts.length, "the retry is not re-broadcast"
+    assert_equal [1, 2, 3], acks_in(transmits), "every frame is still acked"
+  end
+
   # -- Store-backed concurrency -------------------------------------------
   #
   # Real MRI threads contend on one document key. Delivery is at-least-once, so a

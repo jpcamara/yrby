@@ -6,6 +6,29 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-01
+
+### Fixed
+
+- `Doc#update_advances?` is now exact for **delete-bearing** updates, so an
+  already-applied pure-delete retry no longer reports as advancing. Previously any
+  update carrying a delete set returned `true` (record it) because deletes don't
+  move the state vector, so the cheap state-vector probe couldn't prove a
+  duplicate. A lost-ack retry of a deletion the server had already integrated was
+  therefore re-recorded and re-broadcast every time. For delete-bearing updates we
+  now compare the full encoded document state (which includes the delete set)
+  before vs. after a trial apply on an isolated probe: a genuinely new deletion
+  changes it (`true`); an already-applied retry re-encodes identically (`false`).
+  Insert/format-only updates keep the cheaper state-vector path, so only
+  delete-bearing frames — a minority — pay for the exact comparison. The exactly-
+  once guarantee is unchanged in the safe direction: a real deletion is never
+  dropped.
+
+  This lets `yrby-actioncable` (and any caller gating `on_change` on
+  `update_advances?`) settle a duplicate pure-delete frame as `:applied` — acked,
+  but not stored or relayed — so apps no longer need an app-level
+  encode-and-compare guard around their durable writes.
+
 ## [0.2.2] - 2026-06-30
 
 ### Fixed

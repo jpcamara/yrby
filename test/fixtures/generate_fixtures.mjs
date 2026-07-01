@@ -72,6 +72,22 @@ const concurrentClients = (() => {
   })
 })()
 
+// Fixture 8: a deletion delivered as its own delta. Insert "hello" (client 1),
+// snapshot that state, then delete the first char and capture the incremental
+// update. The deletion diff carries only a delete set (no new structs), so
+// re-applying it is a no-op -- the shape a lost-ack retry takes.
+const deleteRetry = (() => {
+  const doc = new Y.Doc()
+  doc.clientID = 1
+  const t = doc.getText("content")
+  t.insert(0, "hello")
+  const content = Y.encodeStateAsUpdate(doc)
+  const sv = Y.encodeStateVector(doc)
+  t.delete(0, 1) // delete "h"
+  const deletion = Y.encodeStateAsUpdate(doc, sv) // just the deletion, as a diff
+  return { content: b64(content), deletion: b64(deletion) }
+})()
+
 // Fixture 7: a real awareness (presence) message frame, client 42 with a user
 // and cursor, exactly as a browser client emits it: MSG_AWARENESS (1) wrapping
 // an encoded awareness update.
@@ -165,6 +181,16 @@ module YjsFixtures
   # frame instead of generating one server-side.
   module Presence
     FRAME = YjsFixtures.b64("${presence}")
+  end
+
+  # Fixture 8: a deletion delivered as its own delta. CONTENT inserts "hello"
+  # (client 1); DELETION is the incremental update that deletes the first char.
+  # DELETION carries only a delete set (no new structs), so re-applying it is a
+  # no-op -- the exactly-once guard records/broadcasts it once, then treats the
+  # lost-ack retry as already-applied (acked, not re-recorded).
+  module DeleteRetry
+    CONTENT = YjsFixtures.b64("${deleteRetry.content}")
+    DELETION = YjsFixtures.b64("${deleteRetry.deletion}")
   end
 end
 `

@@ -77,26 +77,38 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
 }
 
 /// True if applying `update_bytes` would actually change `doc`, i.e. it carries
-/// content the doc doesn't already have. This lets the server make durable side
-/// effects exactly-once: a lost-ack retry re-sends an update the server already
-/// applied; that retry is causally ready (so `update_is_ready` is true) but must
-/// not re-run `on_change`.
+/// content (an insert, a format, or a deletion) the doc doesn't already have.
+/// This lets the server make durable side effects exactly-once: a lost-ack retry
+/// re-sends an update the server already applied; that retry is causally ready
+/// (so `update_is_ready` is true) but must not re-run `on_change`.
 ///
 /// We can't read the update's own state vector to decide this: yrs reports an
 /// empty state_vector() for a causally-pending diff (e.g. a resync delta whose
 /// structs depend on updates the doc has but the standalone update doesn't),
-/// which would look identical to a no-op. So measure the real effect: seed an
-/// independent probe with the doc's current state, apply the update there, and
-/// see whether the state vector grew. Deletes don't move the state vector, so we
-/// can't cheaply prove a delete-bearing update is a duplicate; we conservatively
-/// report it as advancing (record it). That can still double-record a pure-delete
-/// retry, but it never drops a real deletion, which is the safe direction.
-/// Assumes the update is already causally ready.
+/// which would look identical to a no-op. So measure the real effect on an
+/// independent probe seeded with the doc's current state (never mutating the real
+/// doc), then compare the probe before and after applying the update:
+///
+/// - **Insert/format-only updates** grow the probe's state vector, so comparing
+///   the state vector is enough — and cheaper than a full re-encode.
+/// - **Delete-bearing updates** don't move the state vector (a deletion tombstones
+///   an existing struct rather than adding one), so we compare the full encoded
+///   state, which carries the delete set. An already-applied pure-delete retry
+///   re-encodes byte-identically → false; a genuinely new deletion changes the
+///   delete set → true. This is exact but pays for two full encodes, so only
+///   delete-bearing frames — a minority — take that path.
+///
+/// Earlier this branch was conservative: any delete-bearing update returned true
+/// (record it), which double-recorded and re-broadcast pure-delete retries the
+/// server had already integrated. The exact comparison removes that duplication
+/// while still never dropping a real deletion. Assumes the update is already
+/// causally ready.
 pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
-    if !update.delete_set().is_empty() {
-        return Ok(true); // can't cheaply prove a delete is a duplicate; record it
-    }
+    let has_deletes = !update.delete_set().is_empty();
+
+    // Seed an independent probe with the doc's current state so we can measure the
+    // update's effect without mutating the real doc.
     let probe = Doc::new();
     let current = doc
         .transact()
@@ -105,13 +117,30 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
         .transact_mut()
         .apply_update(yrs::Update::decode_v1(&current).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    let before = probe.transact().state_vector();
-    probe
-        .transact_mut()
-        .apply_update(update)
-        .map_err(|e| e.to_string())?;
-    let after = probe.transact().state_vector();
-    Ok(after != before)
+
+    if has_deletes {
+        // Deletes don't move the state vector; compare the full encoded state
+        // (which includes the delete set), before vs. after, on the same probe.
+        let before = probe
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+        probe
+            .transact_mut()
+            .apply_update(update)
+            .map_err(|e| e.to_string())?;
+        let after = probe
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+        Ok(before != after)
+    } else {
+        let before = probe.transact().state_vector();
+        probe
+            .transact_mut()
+            .apply_update(update)
+            .map_err(|e| e.to_string())?;
+        let after = probe.transact().state_vector();
+        Ok(before != after)
+    }
 }
 
 /// True if the doc holds pending structs or a pending delete set: blocks that
@@ -243,6 +272,87 @@ mod tests {
         assert!(
             !update_advances_doc(&server, &diff).unwrap(),
             "the byte-identical retry of that diff does not advance"
+        );
+    }
+
+    #[test]
+    fn update_advances_is_exact_for_pure_delete_retries() {
+        // Build "hello", snapshot the pre-delete content, then delete a char and
+        // capture just that deletion as a diff (only a delete set, no new structs).
+        let doc = Doc::new();
+        let text = doc.get_or_insert_text("content");
+        text.insert(&mut doc.transact_mut(), 0, "hello");
+        let content_state = doc
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+        let sv_before = doc.transact().state_vector();
+        text.remove_range(&mut doc.transact_mut(), 0, 1); // delete "h"
+        let delete = doc.transact().encode_state_as_update_v1(&sv_before);
+
+        assert!(
+            !yrs::Update::decode_v1(&delete)
+                .unwrap()
+                .delete_set()
+                .is_empty(),
+            "the diff carries a delete set"
+        );
+
+        // A server holding the pre-delete content, but not the deletion yet.
+        let server = Doc::new();
+        server
+            .transact_mut()
+            .apply_update(yrs::Update::decode_v1(&content_state).unwrap())
+            .unwrap();
+
+        // The deletion is new: it advances (must be recorded).
+        assert!(
+            update_advances_doc(&server, &delete).unwrap(),
+            "a not-yet-applied deletion advances the doc"
+        );
+
+        // Apply it; now the byte-identical pure-delete retry must NOT advance.
+        // (This is the behavior change: it used to conservatively return true.)
+        server
+            .transact_mut()
+            .apply_update(yrs::Update::decode_v1(&delete).unwrap())
+            .unwrap();
+        assert!(
+            !update_advances_doc(&server, &delete).unwrap(),
+            "an already-applied pure-delete retry does not advance"
+        );
+    }
+
+    #[test]
+    fn update_advances_for_a_delete_bundled_with_new_content() {
+        // A delete-bearing update that ALSO carries a new struct still advances,
+        // even after the pure-delete part would be a no-op on its own.
+        let doc = Doc::new();
+        let text = doc.get_or_insert_text("content");
+        text.insert(&mut doc.transact_mut(), 0, "hello");
+        let content_state = doc
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+        let sv_before = doc.transact().state_vector();
+        text.remove_range(&mut doc.transact_mut(), 0, 1); // delete "h"
+        text.insert(&mut doc.transact_mut(), 4, "!"); // and add "!"
+        let mixed = doc.transact().encode_state_as_update_v1(&sv_before);
+
+        let server = Doc::new();
+        server
+            .transact_mut()
+            .apply_update(yrs::Update::decode_v1(&content_state).unwrap())
+            .unwrap();
+        assert!(
+            update_advances_doc(&server, &mixed).unwrap(),
+            "an insert+delete update advances"
+        );
+        server
+            .transact_mut()
+            .apply_update(yrs::Update::decode_v1(&mixed).unwrap())
+            .unwrap();
+        assert!(
+            !update_advances_doc(&server, &mixed).unwrap(),
+            "its byte-identical retry does not advance"
         );
     }
 

@@ -71,4 +71,14 @@ module YjsFixtures
   module Presence
     FRAME = YjsFixtures.b64("AS0BKgEpeyJjdXJzb3IiOnsieCI6MTAsInkiOjIwfSwidXNlciI6ImFsaWNlIn0=")
   end
+
+  # Fixture 8: a deletion delivered as its own delta. CONTENT inserts "hello"
+  # (client 1); DELETION is the incremental update that deletes the first char.
+  # DELETION carries only a delete set (no new structs), so re-applying it is a
+  # no-op -- the exactly-once guard records/broadcasts it once, then treats the
+  # lost-ack retry as already-applied (acked, not re-recorded).
+  module DeleteRetry
+    CONTENT = YjsFixtures.b64("AQEBAAQBB2NvbnRlbnQFaGVsbG8A")
+    DELETION = YjsFixtures.b64("AAEBAQAB")
+  end
 end
