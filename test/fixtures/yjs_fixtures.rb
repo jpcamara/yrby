@@ -100,4 +100,14 @@ module YjsFixtures
   module PendingDelete
     UPDATE = YjsFixtures.b64("AAEDAQAB")
   end
+
+  # Fixture 11: a cross-client-origin gap. CONTENT is client 3's "abc"; DELTA is
+  # client 1's insert BETWEEN client 3's characters, so its origins reference
+  # client 3's blocks. On a doc lacking CONTENT, DELTA's per-client clock lower
+  # bound passes but integration parks -- the readiness case a clock-only check
+  # misses (update_ready? must say false).
+  module CrossClientOrigin
+    CONTENT = YjsFixtures.b64("AQEDAAQBAXQDYWJjAA==")
+    DELTA = YjsFixtures.b64("AQEBAMQDAAMBAVgA")
+  end
 end

@@ -240,6 +240,21 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
             "that never happened, and a cold load would lose the edit."
     end
 
+    # Fail closed on a missing document key. Without this, a transport that
+    # doesn't keep the channel instance alive across actions (AnyCable) and an
+    # app that forgot to pass `key` to sync_receive would silently record
+    # updates under a nil key, broadcast them to a stream no one subscribes to,
+    # and still ack them — the client marks the edit delivered while it reached
+    # zero peers and was filed under the wrong identity.
+    def sync_validate_key!
+      return unless @sync_key.nil? || @sync_key.empty?
+
+      raise Y::Error,
+            "Y::ActionCable::Sync has no document key. Call sync_subscribed(key) in " \
+            "subscribed, and pass the key to sync_receive(data, key) when the transport " \
+            "doesn't keep the channel instance alive across actions (e.g. AnyCable)."
+    end
+
     # Stateless per message: any process can handle any document. A client's
     # SyncStep1 is answered from the store, document changes are recorded durably
     # before relay and then broadcast, and awareness is relayed best-effort.
@@ -250,6 +265,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # rejected for a resync, :noop for everything else.
     def sync_handle_frame(encoded, bytes)
       sync_validate_required_hooks!
+      sync_validate_key!
 
       case Y.message_kind(bytes)
       when MSG_KIND_SYNC_STEP1
@@ -271,9 +287,16 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
           return :gap
         end
 
-        # Skip a lost-ack retry the store already has. Best-effort, not
-        # cross-process exactly-once (see "Delivery guarantees" in the README).
-        return :applied unless doc.update_advances?(update)
+        # A lost-ack retry the store already has: don't re-record it, but DO
+        # re-broadcast. If the original attempt recorded and then crashed (or the
+        # pub/sub broadcast failed) before distributing, this retry is the only
+        # mechanism that can still reach the live subscribers — skipping it would
+        # leave them stale until their next full resync. Re-broadcast is safe:
+        # CRDT apply is idempotent for every receiver.
+        unless doc.update_advances?(update)
+          sync_distribute(encoded)
+          return :applied
+        end
 
         sync_record_change(update) # record before relay
         sync_distribute(encoded)

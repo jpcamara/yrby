@@ -113,6 +113,26 @@ const pendingDelete = (() => {
   return b64(Y.encodeStateAsUpdate(doc, sv)) // deletion only
 })()
 
+// Fixture 11: a cross-client-origin gap. Client 3 creates "abc"; client 1
+// applies it and types between client 3's characters, so client 1's delta
+// references client 3's blocks as origins. On a doc that lacks CONTENT, the
+// per-client clock lower bound of DELTA passes (client 1 starts at clock 0) but
+// integration parks -- the readiness case a clock-only check misses.
+const crossClientOrigin = (() => {
+  const c = new Y.Doc()
+  c.clientID = 3
+  c.getText("t").insert(0, "abc")
+  const content = Y.encodeStateAsUpdate(c)
+
+  const a = new Y.Doc()
+  a.clientID = 1
+  Y.applyUpdate(a, content)
+  const sv = Y.encodeStateVector(a)
+  a.getText("t").insert(1, "X") // between client 3's chars
+  const delta = Y.encodeStateAsUpdate(a, sv) // only client 1's block
+  return { content: b64(content), delta: b64(delta) }
+})()
+
 // Fixture 8: a deletion delivered as its own delta. Insert "hello" (client 1),
 // snapshot that state, then delete the first char and capture the incremental
 // update. The deletion diff carries only a delete set (no new structs), so
@@ -251,6 +271,16 @@ module YjsFixtures
   # to a pending struct). See DeleteRetry for a fully-integrated deletion.
   module PendingDelete
     UPDATE = YjsFixtures.b64("${pendingDelete}")
+  end
+
+  # Fixture 11: a cross-client-origin gap. CONTENT is client 3's "abc"; DELTA is
+  # client 1's insert BETWEEN client 3's characters, so its origins reference
+  # client 3's blocks. On a doc lacking CONTENT, DELTA's per-client clock lower
+  # bound passes but integration parks -- the readiness case a clock-only check
+  # misses (update_ready? must say false).
+  module CrossClientOrigin
+    CONTENT = YjsFixtures.b64("${crossClientOrigin.content}")
+    DELTA = YjsFixtures.b64("${crossClientOrigin.delta}")
   end
 end
 `

@@ -75,6 +75,33 @@ class ThreadSafetyTest < Minitest::Test
     end
   end
 
+  def test_concurrent_read_text_with_writers_does_not_deadlock
+    # Regression: read_text used to open a second read transaction while still
+    # holding the first (a chained temporary). yrs's lock is write-preferring, so
+    # a writer arriving between the two acquisitions deadlocked reader-vs-writer
+    # inside nogvl — uninterruptibly. With the fix this completes; without it,
+    # this test hangs (CI timeout catches it).
+    doc = Y::Doc.new
+    doc.apply_update(YjsFixtures::TextHelloWorld::UPDATE)
+    updates = [
+      YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
+      YjsFixtures::TwoDocsMerged::DOC2_UPDATE
+    ]
+
+    errors = run_threads do |i|
+      ITERATIONS.times do
+        if i.even?
+          doc.read_text("content")
+        else
+          doc.apply_update(updates[(i / 2) % updates.length])
+        end
+      end
+    end
+
+    assert_empty errors
+    refute_nil doc.read_text("content")
+  end
+
   def test_concurrent_fan_in_sync_to_shared_doc
     # Many threads sync different sources into ONE shared doc concurrently.
     shared = Y::Doc.new

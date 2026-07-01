@@ -335,3 +335,66 @@ test("awareness: applying a remote update does NOT echo it back out (origin guar
   awA.destroy();
   awB.destroy();
 });
+
+test("receive: a partially-malformed awareness payload mutates nothing (no half-applied entries)", () => {
+  const doc = new Y.Doc();
+  const awareness = new Awareness(doc);
+  const errors = [];
+  const session = new YProtocolSession(doc, {
+    awareness,
+    send: () => {},
+    onError: (err) => errors.push(err),
+  });
+
+  // Craft an awareness payload with TWO entries: entry 0 valid, entry 1 carrying
+  // invalid JSON. Without content validation, applyAwarenessUpdate would apply
+  // entry 0, then throw on entry 1 with no event ever fired -- state mutated,
+  // listeners never told.
+  const inner = encoding.createEncoder();
+  encoding.writeVarUint(inner, 2); // two entries
+  encoding.writeVarUint(inner, 4242); // clientID
+  encoding.writeVarUint(inner, 1); // clock
+  encoding.writeVarString(inner, JSON.stringify({ user: "alice" })); // valid
+  encoding.writeVarUint(inner, 4343);
+  encoding.writeVarUint(inner, 1);
+  encoding.writeVarString(inner, "{"); // invalid JSON
+  const frame = encoding.createEncoder();
+  encoding.writeVarUint(frame, MessageType.Awareness);
+  encoding.writeVarUint8Array(frame, encoding.toUint8Array(inner));
+
+  const reply = session.receive(encoding.toUint8Array(frame));
+
+  assert.equal(reply, null);
+  assert.equal(errors.length, 1, "the malformed payload is reported");
+  assert.equal(awareness.getStates().has(4242), false, "the valid entry was NOT half-applied");
+  session.destroy();
+  awareness.destroy();
+});
+
+test("receive: an awareness payload with trailing bytes inside the blob is rejected", () => {
+  const doc = new Y.Doc();
+  const awareness = new Awareness(doc);
+  const errors = [];
+  const session = new YProtocolSession(doc, {
+    awareness,
+    send: () => {},
+    onError: (err) => errors.push(err),
+  });
+
+  const inner = encoding.createEncoder();
+  encoding.writeVarUint(inner, 1);
+  encoding.writeVarUint(inner, 777);
+  encoding.writeVarUint(inner, 1);
+  encoding.writeVarString(inner, JSON.stringify({ user: "eve" }));
+  const padded = new Uint8Array([...encoding.toUint8Array(inner), 0xde, 0xad]); // garbage inside the blob
+  const frame = encoding.createEncoder();
+  encoding.writeVarUint(frame, MessageType.Awareness);
+  encoding.writeVarUint8Array(frame, padded);
+
+  session.receive(encoding.toUint8Array(frame));
+
+  assert.equal(errors.length, 1, "trailing bytes inside the awareness blob are rejected");
+  assert.equal(awareness.getStates().has(777), false, "nothing was applied");
+  session.destroy();
+  awareness.destroy();
+});

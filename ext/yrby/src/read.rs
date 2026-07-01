@@ -82,13 +82,20 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
         match d.insert {
             Out::Any(Any::String(s)) => line.push_str(&s),
             Out::YXmlText(child) => {
-                if is_inline_lexical_type(&lexical_type(txn, &child)) {
-                    inline_lexical_text(txn, &child, &mut line);
-                } else {
-                    if !line.is_empty() {
-                        out.push(std::mem::take(&mut line));
+                let ty = lexical_type(txn, &child);
+                // Soft line break / tab nodes carry no text of their own; emit
+                // the character they represent so "foo⏎bar" doesn't become
+                // "foobar".
+                match ty.as_str() {
+                    "linebreak" => line.push('\n'),
+                    "tab" => line.push('\t'),
+                    _ if is_inline_lexical_type(&ty) => inline_lexical_text(txn, &child, &mut line),
+                    _ => {
+                        if !line.is_empty() {
+                            out.push(std::mem::take(&mut line));
+                        }
+                        walk_lexical_block(txn, &child, out);
                     }
-                    walk_lexical_block(txn, &child, out);
                 }
             }
             _ => {} // per-text-node metadata map; embeds we don't read for text
@@ -254,6 +261,29 @@ mod tests {
         let map = doc.get_or_insert_map("state");
         let txn = doc.transact();
         assert_eq!(map_json(&txn, &map), "{}");
+    }
+
+    #[test]
+    fn lexical_soft_line_break_and_tab_emit_their_characters() {
+        // A paragraph "foo⏎bar" (shift-enter) stores the break as an embedded
+        // XmlText child with __type=linebreak and no text of its own; it must
+        // come through as '\n', not vanish and glue the words. Same for tab.
+        use yrs::{Text, XmlTextPrelim};
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("lex");
+        {
+            let mut txn = doc.transact_mut();
+            let block = frag.push_back(&mut txn, XmlTextPrelim::new(""));
+            block.push(&mut txn, "foo");
+            let br = block.insert_embed(&mut txn, 3, XmlTextPrelim::new(""));
+            br.insert_attribute(&mut txn, "__type", "linebreak");
+            block.push(&mut txn, "bar");
+            let tab = block.insert_embed(&mut txn, 8, XmlTextPrelim::new(""));
+            tab.insert_attribute(&mut txn, "__type", "tab");
+            block.push(&mut txn, "baz");
+        }
+        let txn = doc.transact();
+        assert_eq!(xml_blocks_text(&txn, &frag), "foo\nbar\tbaz");
     }
 
     #[test]
