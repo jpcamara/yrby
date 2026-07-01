@@ -6,6 +6,18 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-01
+
+### Changed
+- Raised the `yrby` floor to `>= 0.3.0`. That release makes
+  `Doc#handle_sync_message` answer `SyncStep1` with integrated-only (gap-free)
+  state — it no longer serves un-integrable pending structs, which previously
+  poisoned peers and drove endless resync traffic. The sync channel serves its
+  SyncStep2 response through that method, so with an older core a poisoned server
+  store would still hand the gap to clients. No code change here — pinning the
+  floor makes gap-free serving self-enforcing instead of dependent on the app
+  updating the core gem.
+
 ## [0.2.2] - 2026-07-01
 
 ### Changed
