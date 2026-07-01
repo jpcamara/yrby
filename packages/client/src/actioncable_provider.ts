@@ -63,6 +63,8 @@ interface CableMessage {
   update?: string;
   awareness?: string;
   ack?: number;
+  /** Set by the server when the acked update was DROPPED (unhealable gap), not recorded. */
+  dropped?: boolean;
 }
 
 export class ActionCableProvider {
@@ -147,9 +149,11 @@ export class ActionCableProvider {
       { channel: this.channelName, ...this.channelParams },
       {
         received(message: CableMessage) {
-          // Reliable-delivery ack: confirm + prune the local queue.
+          // Reliable-delivery ack: confirm + prune the local queue. `dropped`
+          // marks a settle-without-record (unhealable gap) — the session prunes
+          // either way but surfaces the drop via onError("ack-dropped").
           if (message && message.ack !== undefined) {
-            provider.session.ack(message.ack);
+            provider.session.ack(message.ack, message.dropped === true);
             return;
           }
           const awarenessPayload = message && message.awareness;
