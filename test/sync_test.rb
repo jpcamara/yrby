@@ -4,6 +4,7 @@ require "test_helper"
 require_relative "fixtures/yjs_fixtures"
 require "y/action_cable"
 require "logger"
+require "json"
 
 class SyncTest < Minitest::Test
   def update_message(update_bytes, id: nil)
@@ -233,6 +234,216 @@ class SyncTest < Minitest::Test
     # Full-state equality proves the replay integrated everything: a leftover
     # pending struct would be absent from encode_state_as_update and diverge.
     assert_equal client.encode_state_as_update, replay.encode_state_as_update
+  end
+
+  def test_repeated_gap_is_dropped_and_acked_after_strike_limit
+    # An unhealable gap (its missing dep never arrives) must stop being resynced
+    # forever: after gap_strike_limit strikes it's settled (acked) and dropped.
+    store = []
+    broadcasts = []
+    transmits = []
+    helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts) # default limit 3
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1, id: 1), "doc-key")
+
+    # U3 needs the missing U2 — gappy every time.
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 2), "doc-key") # strike 1 -> resync
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 3), "doc-key") # strike 2 -> resync
+    resyncs_before = transmits.count { |t| t.is_a?(Hash) && t.key?("update") }
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 4), "doc-key") # strike 3 -> drop + ack
+
+    assert_includes acks_in(transmits), 4, "the unhealable retry is settled with an ack"
+    refute_includes acks_in(transmits), 2, "the earlier gaps were resynced, not acked"
+    assert_equal [YjsFixtures::CausalChain::U1], store, "the gappy update is never recorded"
+    assert_equal 1, broadcasts.length, "the gappy update is never broadcast"
+    resyncs_after = transmits.count { |t| t.is_a?(Hash) && t.key?("update") }
+
+    assert_equal resyncs_before, resyncs_after, "the dropped update triggers no further resync"
+  end
+
+  def test_gap_strike_limit_nil_always_resyncs
+    transmits = []
+    helper = helper_for(store: [YjsFixtures::CausalChain::U1], transmits: transmits)
+    helper.class.gap_strike_limit(nil) # disable the drop
+
+    5.times { |i| helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: i), "doc-key") }
+
+    assert_empty acks_in(transmits), "with the drop disabled, a gap is never acked"
+    resyncs = transmits.count { |t| t.is_a?(Hash) && t.key?("update") }
+
+    assert_equal 5, resyncs, "every gapped frame still triggers a resync"
+  end
+
+  def test_distinct_gaps_track_strikes_separately
+    # One update reaching the drop limit must not drop an unrelated concurrent gap.
+    transmits = []
+    helper = helper_for(store: [], transmits: transmits) # empty store: both are gappy
+    a = YjsFixtures::CausalChain::U3      # needs U1+U2
+    b = YjsFixtures::Gap::DEPENDENT       # needs Gap::FIRST (a different root)
+
+    helper.sync_receive(update_message(a, id: 1), "doc-key") # a: strike 1 -> resync
+    helper.sync_receive(update_message(a, id: 2), "doc-key") # a: strike 2 -> resync
+    helper.sync_receive(update_message(b, id: 3), "doc-key") # b: strike 1 -> resync
+    helper.sync_receive(update_message(a, id: 4), "doc-key") # a: strike 3 -> drop + ack
+
+    assert_includes acks_in(transmits), 4, "update a hit its own limit and was settled"
+    refute_includes acks_in(transmits), 3, "update b, on strike 1, is still resynced (not dropped)"
+  end
+
+  def test_dropped_ack_carries_the_dropped_flag_but_a_recorded_ack_does_not
+    # The client must be able to tell "durably recorded" from "abandoned" —
+    # otherwise it prunes the batch and reports synced over silently-lost data.
+    transmits = []
+    helper = helper_for(store: [YjsFixtures::CausalChain::U1], transmits: transmits)
+
+    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC2_UPDATE, id: 1), "doc-key")
+    3.times { |i| helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 10 + i), "doc-key") }
+
+    recorded_ack = transmits.find { |t| t.is_a?(Hash) && t["ack"] == 1 }
+    dropped_ack  = transmits.find { |t| t.is_a?(Hash) && t["ack"] == 12 }
+
+    refute recorded_ack.key?("dropped"), "a durable ack carries no dropped flag"
+    assert dropped_ack["dropped"], "a settle-without-record is marked dropped"
+  end
+
+  def test_strike_table_eviction_does_not_reset_tracked_strikes
+    # A client cycling many DISTINCT gaps must not be able to wipe the table
+    # and reset a hot key's count (that would restore resync-forever).
+    transmits = []
+    helper = helper_for(store: [], transmits: transmits)
+    hot = YjsFixtures::CausalChain::U3
+
+    helper.sync_receive(update_message(hot, id: 1), "doc-key") # hot: strike 1
+    helper.sync_receive(update_message(hot, id: 2), "doc-key") # hot: strike 2
+
+    # Flood with distinct gappy updates (distinct client ids -> distinct bytes),
+    # more than GAP_STRIKE_MAX_KEYS, all at 1 strike each.
+    YjsFixtures::GapFlood::UPDATES.each_with_index do |u, i|
+      helper.sync_receive(update_message(u, id: 100 + i), "doc-key")
+    end
+
+    # The hot key must still be at 2 strikes: its next rejection drops it.
+    helper.sync_receive(update_message(hot, id: 3), "doc-key")
+
+    assert_includes acks_in(transmits), 3, "the flood did not reset the hot key's strikes"
+  end
+
+  def test_healed_gap_frees_its_strike_slot
+    helper = helper_for(store: [])
+    delta = YjsFixtures::CrossClientOrigin::DELTA
+
+    helper.sync_receive(update_message(delta, id: 1), "doc-key") # strike 1
+    helper.sync_receive(update_message(delta, id: 2), "doc-key") # strike 2
+    key = Digest::SHA256.hexdigest(delta)
+
+    assert_equal 2, helper.send(:sync_read_gap_strikes)[key]
+
+    # The missing dependency arrives (as a resync would deliver); the delta
+    # records and its strike slot is freed.
+    helper.sync_receive(update_message(YjsFixtures::CrossClientOrigin::CONTENT, id: 3), "doc-key")
+    helper.sync_receive(update_message(delta, id: 4), "doc-key")
+
+    assert_includes acks_in(helper.transmits), 4, "the healed delta records"
+    refute helper.send(:sync_read_gap_strikes).key?(key), "healing freed the strike slot"
+  end
+
+  def test_gap_strike_limit_below_two_is_rejected
+    klass = Class.new { include Y::ActionCable::Sync }
+
+    assert_raises(ArgumentError) { klass.gap_strike_limit(1) }
+    assert_raises(ArgumentError) { klass.gap_strike_limit(0) }
+    klass.gap_strike_limit(2) # the floor is allowed
+
+    assert_equal 2, klass.gap_strike_limit
+  end
+
+  # -- AnyCable: strike state survives fresh channel instances via istate ----
+  #
+  # Under AnyCable every RPC command builds a NEW channel instance; only the
+  # subscription's istate (a string=>string hash round-tripped through
+  # anycable-go) survives. Mimic anycable-rails' state_attr_accessor faithfully:
+  # a class-level macro defining accessors that JSON-round-trip through a shared
+  # istate hash — declared BEFORE the concern is included, as in a real app.
+  module FakeAnyCableState
+    def state_attr_accessor(*names)
+      names.each do |name|
+        define_method(name) do
+          raw = __istate__[name.to_s]
+          raw && JSON.parse(raw)
+        end
+        define_method("#{name}=") do |val|
+          __istate__[name.to_s] = JSON.generate(val)
+        end
+      end
+    end
+  end
+
+  def anycable_helper_for(istate, store: [], transmits: [])
+    test = self
+    recorder = ->(_key, update) { store << update }
+    loader = ->(_key) { test.doc_state(store) }
+    klass = Class.new do
+      extend FakeAnyCableState # anycable-rails present before include, as in a real app
+      include Y::ActionCable::Sync
+
+      attr_accessor :transmits, :broadcasts, :streams, :logger, :__istate__
+
+      def transmit(data) = transmits << data
+
+      def stream_from(name, **opts, &)
+        streams << [name, opts, !block_given?]
+      end
+
+      define_method(:sync_distribute) { |encoded| broadcasts << encoded }
+    end
+    klass.on_load(&loader)
+    klass.on_change(&recorder)
+    helper = klass.new
+    helper.transmits = transmits
+    helper.broadcasts = []
+    helper.streams = []
+    helper.logger = Logger.new(File::NULL)
+    helper.__istate__ = istate
+    helper
+  end
+
+  def test_anycable_strikes_survive_fresh_instances_via_istate
+    # Each message is handled by a FRESH instance sharing only istate — the drop
+    # must still trip on the third rejection of the same update.
+    istate = {}
+    store = []
+    transmits = []
+    gap = YjsFixtures::CausalChain::U3
+
+    3.times do |i|
+      # A brand-new channel instance per message, exactly like AnyCable RPC.
+      anycable_helper_for(istate, store: store, transmits: transmits)
+        .sync_receive(update_message(gap, id: i + 1), "doc-key")
+    end
+
+    assert_includes acks_in(transmits), 3, "strike state survived instance turnover via istate"
+    dropped = transmits.find { |t| t.is_a?(Hash) && t["ack"] == 3 }
+
+    assert dropped["dropped"], "the settle is marked dropped over AnyCable too"
+    assert_empty store, "the unhealable update was never recorded"
+  end
+
+  def test_anycable_healed_gap_clears_istate_strikes
+    istate = {}
+    store = []
+    transmits = []
+    delta = YjsFixtures::CrossClientOrigin::DELTA
+
+    anycable_helper_for(istate, store: store, transmits: transmits)
+      .sync_receive(update_message(delta, id: 1), "doc-key") # strike 1 (fresh instance)
+    anycable_helper_for(istate, store: store, transmits: transmits)
+      .sync_receive(update_message(YjsFixtures::CrossClientOrigin::CONTENT, id: 2), "doc-key")
+    anycable_helper_for(istate, store: store, transmits: transmits)
+      .sync_receive(update_message(delta, id: 3), "doc-key") # heals + records
+
+    assert_includes acks_in(transmits), 3, "the healed delta records"
+    strikes = JSON.parse(istate["yrby_gap_strikes"] || "{}")
+
+    refute strikes.key?(Digest::SHA256.hexdigest(delta)), "istate strike slot freed on heal"
   end
 
   def test_record_failure_rejects_change
