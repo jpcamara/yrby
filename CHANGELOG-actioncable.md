@@ -6,6 +6,61 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-01
+
+### Added
+- **Unhealable-gap defense — on plain ActionCable AND AnyCable.** When the same
+  update is rejected as a causal gap repeatedly on one connection, the channel
+  now stops resyncing it forever and instead settles it and drops it. A gap that
+  survives repeated resyncs is unhealable — its missing dependency is gone for
+  good (a permanently-orphaned pending struct) — and resyncing it endlessly just
+  feeds the client's retransmit loop (the "id-less frames several times a
+  second" failure mode). A *healable* gap heals within a resync or two, well
+  under the limit, so this only trips on genuinely-dead updates.
+
+  - The settle ack carries `"dropped" => true` so an aware client can tell
+    "durably recorded" from "abandoned" and surface the loss instead of
+    silently reporting synced (`yrby-client` raises it via
+    `onError(..., "ack-dropped")`; older clients ignore the extra key).
+  - Configurable via `gap_strike_limit` (default `3`; `nil` disables — always
+    resync). Limits below `2` raise `ArgumentError`: strike 1 must send a
+    resync before any drop can be justified.
+  - Strikes are tracked per update (SHA-256) per connection, guarded by a
+    mutex (ActionCable dispatches a connection's messages to a worker pool).
+    The table is bounded; at capacity a single lowest-count entry is evicted,
+    and only when inserting a new key — a client cycling distinct gaps can't
+    reset a tracked key's count. A gap that finally records frees its slot.
+  - Under AnyCable — where every RPC command gets a fresh channel instance —
+    the table is persisted via anycable-rails' `state_attr_accessor` (istate,
+    round-tripped through anycable-go), declared automatically when
+    anycable-rails is loaded. Verified end-to-end on both stacks
+    (`frontend/gap_strike.mjs` in the demo).
+
+## [0.2.4] - 2026-07-01
+
+Fixes from a full source review.
+
+### Fixed
+
+- **A lost-ack retry now re-broadcasts.** If the original attempt recorded the
+  update and then crashed (or the pub/sub broadcast failed) before
+  distributing, the retry was previously settled as `:applied` without
+  re-broadcasting — live subscribers stayed stale until their next full resync,
+  and nothing else could reach them. The retry now re-broadcasts before acking;
+  idempotent CRDT apply makes the duplicate free for every receiver.
+- **A missing document key now fails closed.** Under a transport that doesn't
+  keep the channel instance alive across actions (AnyCable), an app that forgot
+  to pass `key` to `sync_receive` silently recorded updates under a nil key,
+  broadcast them to a stream no one subscribes to, and still acked them. The
+  frame now raises `Y::Error` instead.
+
+### Changed
+
+- Raised the `yrby` floor to `>= 0.3.1`, whose `update_ready?` is exact
+  (trial-integration, not just per-client clocks). With an older core, a
+  cross-client-origin gap passed the ready check and the `update_advances?`
+  probe then acked-and-dropped real content.
+
 ## [0.2.3] - 2026-07-01
 
 ### Changed

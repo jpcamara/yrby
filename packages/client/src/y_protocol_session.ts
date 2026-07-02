@@ -147,9 +147,22 @@ export class YProtocolSession {
     }
   }
 
-  /** A reliable-delivery `{ ack: id }` envelope arrived. */
-  ack(id: number): void {
+  /**
+   * A reliable-delivery `{ ack: id }` envelope arrived. `dropped` is set when
+   * the server settled the update WITHOUT recording it (rejected as an
+   * unhealable causal gap after repeated resyncs). The queue is pruned either
+   * way — retransmitting an unhealable update would loop forever — but a
+   * dropped settle is surfaced via onError ("ack-dropped") so the app can warn
+   * or reload instead of silently reporting synced over lost data.
+   */
+  ack(id: number, dropped = false): void {
     this.#delivery.onAck(id);
+    if (dropped) {
+      this.#onError(
+        new Error(`server dropped update ${id} as an unhealable causal gap; it was settled but NOT recorded`),
+        "ack-dropped"
+      );
+    }
   }
 
   /**
@@ -248,7 +261,26 @@ export class YProtocolSession {
         break;
       }
       case MessageType.Awareness:
-        decoding.readVarUint8Array(decoder);
+        // Dry-run the inner payload, not just the envelope: applyAwarenessUpdate
+        // mutates awareness state one entry at a time inside its decode loop and
+        // only notifies listeners at the end, so a payload whose entry k is
+        // malformed would leave entries 0..k-1 applied with no event fired.
+        // Walking the entries here (count, then per-entry clientID/clock/JSON
+        // state) makes the real apply infallible — and catches trailing garbage
+        // *inside* the blob, which applyAwarenessUpdate would silently ignore.
+        {
+          const payload = decoding.readVarUint8Array(decoder);
+          const inner = decoding.createDecoder(payload);
+          const count = decoding.readVarUint(inner);
+          for (let i = 0; i < count; i++) {
+            decoding.readVarUint(inner); // clientID
+            decoding.readVarUint(inner); // clock
+            JSON.parse(decoding.readVarString(inner)); // state (null on removal)
+          }
+          if (decoding.hasContent(inner)) {
+            throw new Error("awareness payload has trailing bytes");
+          }
+        }
         break;
       default:
         return null; // a y-protocols type yrby doesn't speak: ignore

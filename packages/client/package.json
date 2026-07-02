@@ -1,6 +1,6 @@
 {
   "name": "yrby-client",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "JavaScript client for the yrby y-websocket protocol: a ready-made ActionCable/AnyCable provider, a transport-agnostic protocol session (sync steps, encode/decode, awareness), and a reliable-delivery core (ack-tracked queue, sync-since-last-ack, retransmit + reconnect replay). Written in TypeScript with bundled types; ESM + CommonJS, usable from plain JS.",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -8,19 +8,34 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/cjs/index.js"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
     },
     "./reliable": {
-      "types": "./dist/reliable_sync.d.ts",
-      "import": "./dist/reliable_sync.js",
-      "require": "./dist/cjs/reliable_sync.js"
+      "import": {
+        "types": "./dist/reliable_sync.d.ts",
+        "default": "./dist/reliable_sync.js"
+      },
+      "require": {
+        "types": "./dist/cjs/reliable_sync.d.ts",
+        "default": "./dist/cjs/reliable_sync.js"
+      }
     },
     "./base64": {
-      "types": "./dist/base64.d.ts",
-      "import": "./dist/base64.js",
-      "require": "./dist/cjs/base64.js"
+      "import": {
+        "types": "./dist/base64.d.ts",
+        "default": "./dist/base64.js"
+      },
+      "require": {
+        "types": "./dist/cjs/base64.d.ts",
+        "default": "./dist/cjs/base64.js"
+      }
     }
   },
   "files": [

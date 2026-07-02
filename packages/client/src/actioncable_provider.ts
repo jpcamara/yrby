@@ -63,6 +63,8 @@ interface CableMessage {
   update?: string;
   awareness?: string;
   ack?: number;
+  /** Set by the server when the acked update was DROPPED (unhealable gap), not recorded. */
+  dropped?: boolean;
 }
 
 export class ActionCableProvider {
@@ -78,6 +80,8 @@ export class ActionCableProvider {
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #onUnload: (() => void) | null = null;
+  #onRestore: ((event: PageTransitionEvent) => void) | null = null;
+  #stashedPresence: Record<string, unknown> | null = null;
 
   constructor(
     doc: Doc,
@@ -145,9 +149,11 @@ export class ActionCableProvider {
       { channel: this.channelName, ...this.channelParams },
       {
         received(message: CableMessage) {
-          // Reliable-delivery ack: confirm + prune the local queue.
+          // Reliable-delivery ack: confirm + prune the local queue. `dropped`
+          // marks a settle-without-record (unhealable gap) — the session prunes
+          // either way but surfaces the drop via onError("ack-dropped").
           if (message && message.ack !== undefined) {
-            provider.session.ack(message.ack);
+            provider.session.ack(message.ack, message.dropped === true);
             return;
           }
           const awarenessPayload = message && message.awareness;
@@ -179,6 +185,14 @@ export class ActionCableProvider {
           provider.#connected = false;
           provider.session.onDisconnect(); // pause retransmits, clear remote presence
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
+        },
+        rejected() {
+          // The channel refused the subscription (authorization, missing doc).
+          // Without this handler the provider would sit at "connecting" forever,
+          // silently queueing local edits. Surface it and tear down: the app
+          // decides whether to re-auth and reconnect.
+          provider.#onError(new Error("subscription rejected by the server"), "rejected");
+          provider.disconnect();
         },
       }
     );
@@ -229,16 +243,40 @@ export class ActionCableProvider {
   // bfcache). `pagehide` fires while the socket is still live and is bfcache-safe
   // (unlike `beforeunload`, which can block it). Sends are not guaranteed to
   // flush on unload, so the server-side awareness timeout remains the backstop.
+  //
+  // bfcache restore: `pagehide` nulls the local awareness state, so a page
+  // brought back from the cache would rejoin as a ghost (edits flow, but no
+  // cursor/presence — editor bindings only set awareness once at setup). Stash
+  // the state on the way out and restore it on `pageshow` with `persisted`;
+  // setting it re-fires the awareness update, and onConnect re-broadcasts it
+  // once the socket is back.
   #installUnloadHandler(): void {
     if (typeof window === "undefined" || this.#onUnload) return;
-    this.#onUnload = () => this.session.removeLocalAwareness();
+    this.#onUnload = () => {
+      this.#stashedPresence = this.awareness.getLocalState();
+      this.session.removeLocalAwareness();
+    };
+    this.#onRestore = (event: PageTransitionEvent) => {
+      if (!event.persisted || !this.#stashedPresence) return;
+      if (this.awareness.getLocalState() === null) {
+        this.awareness.setLocalState(this.#stashedPresence);
+      }
+      this.#stashedPresence = null;
+    };
     window.addEventListener("pagehide", this.#onUnload);
+    window.addEventListener("pageshow", this.#onRestore);
   }
 
   #removeUnloadHandler(): void {
-    if (typeof window === "undefined" || !this.#onUnload) return;
-    window.removeEventListener("pagehide", this.#onUnload);
-    this.#onUnload = null;
+    if (typeof window === "undefined") return;
+    if (this.#onUnload) {
+      window.removeEventListener("pagehide", this.#onUnload);
+      this.#onUnload = null;
+    }
+    if (this.#onRestore) {
+      window.removeEventListener("pageshow", this.#onRestore);
+      this.#onRestore = null;
+    }
   }
 
   // Send one raw protocol frame over the cable. Awareness frames are whispered
@@ -251,11 +289,28 @@ export class ActionCableProvider {
     if (!sub) return;
     const update = toBase64(frame);
     const isAwareness = frame[0] === MessageType.Awareness;
-    if (isAwareness && typeof sub.whisper === "function") {
-      sub.whisper({ awareness: update });
-      return;
+    // Guard the transport: @anycable/web's send/whisper return promises whose
+    // rejections would otherwise go unobserved, and a synchronously-throwing
+    // transport must not unwind into doc/awareness update handlers. A failed
+    // send is safe to swallow for reliable frames (they stay queued until
+    // acked) and best-effort anyway for awareness.
+    try {
+      if (isAwareness && typeof sub.whisper === "function") {
+        this.#observe(sub.whisper({ awareness: update }));
+        return;
+      }
+      const payload = id === undefined ? { update } : { update, id };
+      this.#observe(sub.send(payload));
+    } catch (error) {
+      this.#onError(error, "send");
     }
-    const payload = id === undefined ? { update } : { update, id };
-    sub.send(payload);
+  }
+
+  // Attach a rejection handler when a transport returns a promise, so failures
+  // surface via onError instead of as unhandled rejections.
+  #observe(result: unknown): void {
+    if (result instanceof Promise) {
+      result.catch((error) => this.#onError(error, "send"));
+    }
   }
 }

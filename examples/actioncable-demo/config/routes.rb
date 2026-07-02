@@ -10,7 +10,13 @@ Rails.application.routes.draw do
   get "docs/:id/forms", to: "documents#forms", as: :document_forms
   get "docs/:id/content", to: "documents#content", as: :document_content
   get "docs/:id/audit", to: "documents#audit", as: :document_audit
-  post "docs/:id/audit/control", to: "documents#audit_control", as: :document_audit_control
+  # DEMO/TEST ONLY — never mount in production. One anonymous POST can wipe a
+  # document's durable history (reset=1) or inject a per-write sleep (delay_ms)
+  # that starves the worker pool. The e2e suites depend on it, so it's gated by
+  # environment rather than removed.
+  unless Rails.env.production?
+    post "docs/:id/audit/control", to: "documents#audit_control", as: :document_audit_control
+  end
 
   root to: redirect("/docs/demo")
 end
