@@ -33,12 +33,14 @@ Gem::Specification.new do |spec|
   spec.metadata["rubygems_mfa_required"] = "true"
 
   spec.add_dependency "base64", "~> 0.2"
-  # Floor raised to 0.3.0, whose handle_sync_message answers SyncStep1 with
-  # integrated-only (gap-free) state. The channel serves the sync response through
-  # that method, so the floor makes gap-free serving self-enforcing rather than
-  # dependent on the app updating the core gem. (0.2.3 similarly made
-  # update_advances? exact for delete-bearing updates.)
-  spec.add_dependency "yrby", ">= 0.3.0"
+  # Floor raised to 0.3.1, whose update_ready? is exact (trial-integration, not
+  # just per-client clocks). The channel gates recording AND the retry-vs-gap
+  # decision on it; with an older core a cross-client-origin gap passed the ready
+  # check and the advances? probe then acked-and-dropped real content. The floor
+  # makes the fix self-enforcing rather than dependent on the app updating the
+  # core gem. (Earlier floors: 0.3.0 gap-free SyncStep1; 0.2.3 exact
+  # delete-bearing update_advances?.)
+  spec.add_dependency "yrby", ">= 0.3.1"
   # The concern references ActionCable (channels, streaming, broadcasting) and
   # ActiveSupport (Concern, JSON coder) constants directly. Rails apps already
   # bundle these, but declaring them makes use outside a full Rails bundle fail

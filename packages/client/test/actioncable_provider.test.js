@@ -15,6 +15,7 @@ function fakeConsumer({ withWhisper } = { withWhisper: false }) {
     calls,
     deliverConnected: () => sub.connected(),
     deliverDisconnected: () => sub.disconnected(),
+    deliverRejected: () => sub.rejected(),
     deliverReceived: (msg) => sub.received(msg),
     // No `subscriptions.remove` -- mirrors @anycable/web (which has none). Teardown
     // goes through the subscription's own unsubscribe(), the universal path.
@@ -279,4 +280,113 @@ test("received awareness envelope rejects non-awareness frames", (t) => {
   assert.equal(errors.length, 1, "bad awareness envelope was reported");
   assert.equal(errors[0].context, "received");
   assert.match(String(errors[0].err?.message ?? errors[0].err), /non-awareness/);
+});
+
+test("a rejected subscription surfaces via onError and tears down (no infinite 'connecting')", (t) => {
+  const c = fakeConsumer();
+  const errors = [];
+  const p = makeProvider(t, new Y.Doc(), c, { id: "rej" }, { onError: (err, context) => errors.push({ err, context }) });
+  const statuses = [];
+  p.onStatusChange(({ status }) => statuses.push(status));
+
+  p.connect();
+  c.deliverRejected();
+
+  assert.equal(errors.length, 1, "rejection is reported");
+  assert.equal(errors[0].context, "rejected");
+  assert.equal(p.status, "disconnected", "provider tears down instead of hanging at 'connecting'");
+  assert.deepEqual(statuses, ["connecting", "disconnected"]);
+});
+
+test("a throwing transport send is reported, not thrown into update handlers", (t) => {
+  const c = fakeConsumer();
+  const errors = [];
+  const doc = new Y.Doc();
+  const p = makeProvider(t, doc, c, { id: "boom" }, { onError: (err, context) => errors.push({ err, context }) });
+  p.connect();
+  c.deliverConnected();
+  // Sabotage the transport AFTER connect so the handshake went out normally.
+  const sub = c.subscriptions.create; // (fakeConsumer keeps `sub` internal; sabotage via calls)
+  c.calls.send.length = 0;
+  const brokenSend = new Error("socket gone");
+  // Replace send on the live subscription through a received-side effect: easiest
+  // is to monkey-patch through the consumer's stored sub via deliver* closure.
+  // fakeConsumer exposes no direct handle, so patch through the provider's edit path:
+  // make every push throw by redefining the calls array's push.
+  c.calls.send.push = () => {
+    throw brokenSend;
+  };
+
+  doc.getText("t").insert(0, "x"); // triggers a reliable send through the broken transport
+
+  assert.ok(errors.some((e) => e.context === "send" && e.err === brokenSend), "send failure surfaced via onError");
+  assert.ok(p.hasPending, "the edit stays queued for retransmit despite the failed send");
+});
+
+test("a promise-rejecting transport send surfaces via onError (no unhandled rejection)", async (t) => {
+  const c = fakeConsumer();
+  const errors = [];
+  const doc = new Y.Doc();
+  const p = makeProvider(t, doc, c, { id: "rejp" }, { onError: (err, context) => errors.push({ err, context }) });
+  p.connect();
+  c.deliverConnected();
+  c.calls.send.length = 0;
+  const rejection = new Error("async transport failure");
+  c.calls.send.push = () => Promise.reject(rejection);
+  // #send observes the transport's return value; fake it by returning from push
+  // (the fake sub's send returns calls.send.push(...)'s result).
+
+  doc.getText("t").insert(0, "y");
+  await new Promise((resolve) => setTimeout(resolve, 0)); // let the rejection propagate
+
+  assert.ok(errors.some((e) => e.context === "send" && e.err === rejection), "promise rejection observed via onError");
+});
+
+test("bfcache: presence is stashed on pagehide and restored on pageshow(persisted)", (t) => {
+  // Shim a window so the unload/restore handlers install in node.
+  const listeners = new Map();
+  globalThis.window = {
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    removeEventListener: (name) => listeners.delete(name),
+  };
+  t.after(() => {
+    delete globalThis.window;
+  });
+
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "bf" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalStateField("user", "alice");
+  assert.deepEqual(p.awareness.getLocalState(), { user: "alice" });
+
+  // The page goes into the bfcache: presence is removed (peers drop our cursor).
+  listeners.get("pagehide")();
+  assert.equal(p.awareness.getLocalState(), null, "pagehide removed local presence");
+
+  // Restored from the bfcache: presence must come back, or the returning user
+  // rejoins as a ghost (editor bindings only set awareness once at setup).
+  listeners.get("pageshow")({ persisted: true });
+  assert.deepEqual(p.awareness.getLocalState(), { user: "alice" }, "pageshow(persisted) restored presence");
+});
+
+test("bfcache: a non-persisted pageshow (normal load) does not resurrect stale presence", (t) => {
+  const listeners = new Map();
+  globalThis.window = {
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    removeEventListener: (name) => listeners.delete(name),
+  };
+  t.after(() => {
+    delete globalThis.window;
+  });
+
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "bf2" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalStateField("user", "bob");
+  listeners.get("pagehide")();
+  listeners.get("pageshow")({ persisted: false }); // a fresh navigation, not a restore
+
+  assert.equal(p.awareness.getLocalState(), null, "no restore on a normal load");
 });
