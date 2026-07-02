@@ -17,12 +17,10 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
 
-  # The ActionCable layer (lib/y/action_cable*) and the decoder (lib/y/decoder*)
-  # ship in the separate yrby-actioncable / yrby-decoder gems, so both are
-  # excluded from the core gem here — otherwise the core's frozen snapshot of
-  # those files would shadow (or be shadowed by) the standalone gems on the load
-  # path, drifting silently between releases. Cargo.lock IS shipped so source
-  # builds compile the exact crate graph CI tested, not a fresh resolution.
+  # The actioncable and decoder files ship in their own gems (yrby-actioncable,
+  # yrby-decoder) — exclude them here so the core gem can't shadow those gems
+  # on the load path. Cargo.lock IS shipped so source builds compile the exact
+  # crate graph CI tested.
   spec.files = Dir[
     "lib/**/*.rb",
     "ext/**/*.{rb,rs,toml}",

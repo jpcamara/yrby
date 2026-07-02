@@ -62,11 +62,10 @@ fn lexical_type<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
     }
 }
 
-/// The `__type` of an embedded Lexical `Y.Map`. Lexical embeds two kinds of
-/// maps in a block's `Y.XmlText`: per-text-node metadata (`__type: "text"`,
-/// carrying format/style/mode) and *node* maps — a `LineBreakNode` is stored as
-/// `{ __type: "linebreak" }` (verified against bytes captured from a live
-/// Lexxy editor after a Shift+Enter).
+/// The `__type` of an embedded Lexical `Y.Map`. Two kinds appear inside a
+/// block: text-node metadata (`"text"`) and node maps like the LineBreakNode
+/// (`"linebreak"`). Structure confirmed from live-editor bytes (see the
+/// captured-fixture test).
 fn lexical_map_type<T: ReadTxn>(txn: &T, m: &MapRef) -> String {
     match m.get(txn, "__type") {
         Some(Out::Any(Any::String(s))) => s.to_string(),
@@ -98,10 +97,9 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
     for d in t.diff(txn, YChange::identity) {
         match d.insert {
             Out::Any(Any::String(s)) => line.push_str(&s),
-            // A LineBreakNode (Shift+Enter) is an embedded Y.Map with
-            // `__type: "linebreak"` — emit the character it represents so
-            // "foo⏎bar" doesn't extract as "foobar". Every other map embed is
-            // per-text-node metadata (`__type: "text"`) with no text of its own.
+            // Node maps: linebreak/tab carry no text, so emit the character
+            // they represent ("foo⏎bar" must not become "foobar"). Metadata
+            // maps ("text") stay silent.
             Out::YMap(m) => match lexical_map_type(txn, &m).as_str() {
                 "linebreak" => line.push('\n'),
                 "tab" => line.push('\t'),
@@ -110,8 +108,7 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
             Out::YXmlText(child) => {
                 let ty = lexical_type(txn, &child);
                 match ty.as_str() {
-                    // Defensive: linebreak/tab as XmlText children (not observed
-                    // in real Lexical docs, which use Y.Map embeds — see above).
+                    // Defensive only: real Lexical stores these as Y.Map embeds.
                     "linebreak" => line.push('\n'),
                     "tab" => line.push('\t'),
                     _ if is_inline_lexical_type(&ty) => inline_lexical_text(txn, &child, &mut line),

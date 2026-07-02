@@ -183,10 +183,9 @@ export class ActionCableProvider {
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
         },
         rejected() {
-          // The channel refused the subscription (authorization, missing doc).
-          // Without this handler the provider would sit at "connecting" forever,
-          // silently queueing local edits. Surface it and tear down: the app
-          // decides whether to re-auth and reconnect.
+          // The channel refused the subscription (auth, missing doc). Surface
+          // it and tear down — otherwise the provider sits at "connecting"
+          // forever, silently queueing edits. The app decides what's next.
           provider.#onError(new Error("subscription rejected by the server"), "rejected");
           provider.disconnect();
         },
@@ -235,17 +234,12 @@ export class ActionCableProvider {
     for (const listener of this.#statusListeners) listener({ status: next });
   }
 
-  // Best-effort presence removal when the tab/page goes away (close, navigation,
-  // bfcache). `pagehide` fires while the socket is still live and is bfcache-safe
-  // (unlike `beforeunload`, which can block it). Sends are not guaranteed to
-  // flush on unload, so the server-side awareness timeout remains the backstop.
-  //
-  // bfcache restore: `pagehide` nulls the local awareness state, so a page
-  // brought back from the cache would rejoin as a ghost (edits flow, but no
-  // cursor/presence — editor bindings only set awareness once at setup). Stash
-  // the state on the way out and restore it on `pageshow` with `persisted`;
-  // setting it re-fires the awareness update, and onConnect re-broadcasts it
-  // once the socket is back.
+  // Presence teardown/restore around page lifecycle:
+  // - `pagehide`: remove local presence while the socket is still live so peers
+  //   drop our cursor now (bfcache-safe; the awareness timeout is the backstop).
+  // - `pageshow` with `persisted`: the user came BACK (bfcache restore), so put
+  //   their presence back — editors set awareness once at setup, so without
+  //   this they'd rejoin as a ghost with no cursor.
   #installUnloadHandler(): void {
     if (typeof window === "undefined" || this.#onUnload) return;
     this.#onUnload = () => {
@@ -285,11 +279,10 @@ export class ActionCableProvider {
     if (!sub) return;
     const update = toBase64(frame);
     const isAwareness = frame[0] === MessageType.Awareness;
-    // Guard the transport: @anycable/web's send/whisper return promises whose
-    // rejections would otherwise go unobserved, and a synchronously-throwing
-    // transport must not unwind into doc/awareness update handlers. A failed
-    // send is safe to swallow for reliable frames (they stay queued until
-    // acked) and best-effort anyway for awareness.
+    // Route transport failures (sync throws, or @anycable/web's rejected
+    // promises) to onError instead of letting them escape into update
+    // handlers. A failed send is recoverable: reliable frames stay queued
+    // until acked, and awareness is best-effort anyway.
     try {
       if (isAwareness && typeof sub.whisper === "function") {
         this.#observe(sub.whisper({ awareness: update }));

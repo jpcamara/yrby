@@ -160,11 +160,9 @@ impl RbDoc {
     fn read_text(&self, name: String) -> Option<String> {
         let doc = &self.0;
         nogvl(move || {
-            // One transaction, bound to a local. The previous chained form
-            // (`doc.transact().get_text(..).map(|t| t.get_string(&doc.transact()))`)
-            // held the first read guard while acquiring a second; yrs's lock is
-            // write-preferring, so a writer arriving between the two acquisitions
-            // deadlocked reader-vs-writer — inside nogvl, uninterruptibly.
+            // Exactly ONE transaction per call. Opening a second while the
+            // first is still held deadlocks against a waiting writer — and
+            // inside nogvl that hang can't be interrupted.
             let txn = doc.transact();
             txn.get_text(name.as_str()).map(|t| t.get_string(&txn))
         })
