@@ -133,6 +133,24 @@ const crossClientOrigin = (() => {
   return { content: b64(content), delta: b64(delta) }
 })()
 
+// Fixture 12: a flood of DISTINCT gappy updates (72 > GAP_STRIKE_MAX_KEYS=64).
+// Each client 1000+i inserts twice and only the second delta is kept, so every
+// update is gappy on a store that never saw the first -- and every one has
+// unique bytes. Used to prove strike-table eviction can't be abused to reset a
+// tracked key's count.
+const gapFlood = (() => {
+  return Array.from({ length: 72 }, (_, i) => {
+    const updates = []
+    const doc = new Y.Doc()
+    doc.clientID = 1000 + i
+    doc.on("update", (u) => updates.push(u))
+    const t = doc.getText("flood")
+    t.insert(0, "a")
+    t.insert(1, "b")
+    return b64(updates[1]) // depends on the (never-delivered) first delta
+  })
+})()
+
 // Fixture 8: a deletion delivered as its own delta. Insert "hello" (client 1),
 // snapshot that state, then delete the first char and capture the incremental
 // update. The deletion diff carries only a delete set (no new structs), so
@@ -281,6 +299,16 @@ module YjsFixtures
   module CrossClientOrigin
     CONTENT = YjsFixtures.b64("${crossClientOrigin.content}")
     DELTA = YjsFixtures.b64("${crossClientOrigin.delta}")
+  end
+
+  # Fixture 12: 72 DISTINCT gappy updates (one per client 1000+i, each the second
+  # delta of a two-insert doc whose first delta never ships). More than the
+  # strike table's GAP_STRIKE_MAX_KEYS, all gappy on an empty store, all unique
+  # bytes -- for proving eviction can't reset a tracked key's strikes.
+  module GapFlood
+    UPDATES = [
+${gapFlood.map((u) => `      YjsFixtures.b64("${u}")`).join(",\n")}
+    ].freeze
   end
 end
 `

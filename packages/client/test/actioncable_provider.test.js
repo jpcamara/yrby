@@ -450,3 +450,39 @@ test("bfcache: a non-persisted pageshow (normal load) does not resurrect stale p
 
   assert.equal(p.awareness.getLocalState(), null, "no restore on a normal load");
 });
+
+test("a dropped ack prunes the queue AND surfaces via onError (never silent)", (t) => {
+  const doc = new Y.Doc();
+  const c = fakeConsumer();
+  const errors = [];
+  const p = makeProvider(t, doc, c, { id: "drop" }, { onError: (err, context) => errors.push({ err, context }) });
+  p.connect();
+  c.deliverConnected();
+  doc.getText("t").insert(0, "doomed");
+  const msg = c.calls.send.find((m) => m.id !== undefined);
+  assert.equal(p.hasPending, true);
+
+  // The server settles the update WITHOUT recording it (unhealable gap).
+  c.deliverReceived({ ack: msg.id, dropped: true });
+
+  assert.equal(p.hasPending, false, "the queue is pruned (retransmitting would loop forever)");
+  assert.equal(errors.length, 1, "the drop is surfaced, not silent");
+  assert.equal(errors[0].context, "ack-dropped");
+  assert.match(String(errors[0].err.message), /not recorded|unhealable/i);
+});
+
+test("a normal ack does not trigger the dropped path", (t) => {
+  const doc = new Y.Doc();
+  const c = fakeConsumer();
+  const errors = [];
+  const p = makeProvider(t, doc, c, { id: "nodrop" }, { onError: (err, context) => errors.push({ err, context }) });
+  p.connect();
+  c.deliverConnected();
+  doc.getText("t").insert(0, "fine");
+  const msg = c.calls.send.find((m) => m.id !== undefined);
+
+  c.deliverReceived({ ack: msg.id });
+
+  assert.equal(p.hasPending, false);
+  assert.equal(errors.length, 0, "a durable ack raises nothing");
+});
