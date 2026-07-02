@@ -36,11 +36,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
     anycable-rails is loaded. Verified end-to-end on both stacks
     (`frontend/gap_strike.mjs` in the demo).
 
-## [0.2.4] - 2026-07-01
-
-Fixes from a full source review.
-
 ### Fixed
+
+Fixes from a full source review (a 0.2.4 was prepared but never published; its
+changes ship here):
 
 - **A lost-ack retry now re-broadcasts.** If the original attempt recorded the
   update and then crashed (or the pub/sub broadcast failed) before
