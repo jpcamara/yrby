@@ -86,6 +86,13 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
     if !lower_covered {
         return Ok(false);
     }
+    // Seed the probe with the doc's INTEGRATED state (gap-free), for two
+    // reasons. A lossless seed would replant the doc's own pre-existing
+    // pending in the probe, making has_pending true for EVERY update — the
+    // verdict must be about this update, not the doc's baggage. And an update
+    // whose dependency exists only in that pending buffer is genuinely not
+    // ready: recording it would put a gap in the durable log; a resync heals
+    // both it and the pending it leans on as one complete delta.
     let seed = integrated_update(doc, &StateVector::default())?;
     let probe = Doc::new();
     {
@@ -578,6 +585,64 @@ mod tests {
         assert!(
             !update_is_ready(&server, &merged).unwrap(),
             "the post-Skip blocks depend on the missing u2"
+        );
+    }
+
+    #[test]
+    fn a_doc_with_legacy_pending_still_accepts_healthy_updates() {
+        // Why update_is_ready seeds its probe with the INTEGRATED state: with a
+        // lossless seed, the doc's own pre-existing pending would park in the
+        // probe and every verdict would come back "not ready" — a server with
+        // one legacy gap would reject every healthy keystroke forever.
+        let (_first, dependent) = gap_pair();
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(yrs::Update::decode_v1(&dependent).unwrap())
+            .unwrap();
+        assert!(has_pending(&doc), "the doc carries a legacy parked gap");
+
+        // A healthy, self-contained update from an unrelated client.
+        let healthy = {
+            let d = Doc::new();
+            let t = d.get_or_insert_text("other");
+            t.insert(&mut d.transact_mut(), 0, "hello");
+            let txn = d.transact();
+            txn.encode_state_as_update_v1(&yrs::StateVector::default())
+        };
+
+        assert!(
+            update_is_ready(&doc, &healthy).unwrap(),
+            "legacy pending must not veto unrelated healthy updates"
+        );
+        assert!(update_advances_doc(&doc, &healthy).unwrap());
+    }
+
+    #[test]
+    fn an_update_depending_only_on_pending_content_is_not_ready() {
+        // The other half of the integrated-only seed: a dependency that exists
+        // solely in the doc's pending buffer doesn't count — recording such an
+        // update would put a gap in the durable log. Not ready; resync heals
+        // both as one complete delta.
+        let src = Doc::new();
+        let txt = src.get_or_insert_text("t");
+        let mut deltas: Vec<Vec<u8>> = Vec::new();
+        let mut prev = yrs::StateVector::default();
+        for (i, ch) in ["A", "B", "C"].into_iter().enumerate() {
+            txt.insert(&mut src.transact_mut(), i as u32, ch);
+            deltas.push(src.transact().encode_state_as_update_v1(&prev));
+            prev = src.transact().state_vector();
+        }
+
+        // The doc holds u2 only as PENDING (u1 never arrived); u3 depends on u2.
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(yrs::Update::decode_v1(&deltas[1]).unwrap())
+            .unwrap();
+        assert!(has_pending(&doc), "u2 parked without u1");
+
+        assert!(
+            !update_is_ready(&doc, &deltas[2]).unwrap(),
+            "a dependency satisfied only by pending content is not ready"
         );
     }
 
