@@ -184,10 +184,14 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
         if before != after {
             return Ok(true);
         }
-        // An unchanged state vector can also mean the update PARKED as pending.
-        // Parked is not a duplicate — report it as advancing so no caller
-        // mistakes it for an already-applied retry and drops it. (The sync path
-        // never reaches this case; `update_is_ready` rejects gaps first.)
+        // An unchanged state vector is ambiguous. Usually it means the doc
+        // already had everything in this update (a retry — return false, don't
+        // re-record). But it can ALSO mean the update failed to integrate and
+        // was stashed as pending, which doesn't move the state vector either.
+        // That case is missing content, not a duplicate — returning false would
+        // let a caller ack it and drop it. Distinguish the two by whether the
+        // probe gained pending. (The sync flow screens gaps out with
+        // update_is_ready before calling this; the check guards direct callers.)
         let pending_after = probe.transact().store().pending_update().is_some()
             || probe.transact().store().pending_ds().is_some();
         Ok(pending_after != pending_before)
