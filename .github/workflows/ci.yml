@@ -157,6 +157,9 @@ jobs:
         run: |
           SERVER=puma WORKERS=2 PORT=3777 SERVER_PIDFILE=/tmp/puma.pid frontend/boot_server.sh
           PORT=3777 frontend/e2e_suite.sh
+          # Unhealable-gap strike defense: resync twice, then settle+drop with
+          # { ack, dropped: true }; healable gaps still record.
+          (cd frontend && WS_PORT=3777 HTTP_PORT=3777 bun gap_strike.mjs)
           # agent-browser fetches its native binary on first run; point it at
           # the runner's preinstalled Chrome.
           export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
@@ -207,4 +210,7 @@ jobs:
           WS_PORT=8080 HTTP_PORT=3797 CLIENTS=6 bun anycable_concurrent.mjs
           WS_PORT=8080 HTTP_PORT=3797 bun anycable_guarantee.mjs
           PORT=8080 bun reliable_provider.mjs
+          # Strike defense under AnyCable: strikes must survive the fresh
+          # channel instance per RPC command (persisted via istate).
+          WS_PORT=8080 HTTP_PORT=3797 bun gap_strike.mjs
           kill $(cat /tmp/anycable.pid) || true
