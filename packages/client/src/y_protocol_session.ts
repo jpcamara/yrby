@@ -248,13 +248,12 @@ export class YProtocolSession {
         break;
       }
       case MessageType.Awareness:
-        // Dry-run the inner payload, not just the envelope: applyAwarenessUpdate
-        // mutates awareness state one entry at a time inside its decode loop and
-        // only notifies listeners at the end, so a payload whose entry k is
-        // malformed would leave entries 0..k-1 applied with no event fired.
-        // Walking the entries here (count, then per-entry clientID/clock/JSON
-        // state) makes the real apply infallible — and catches trailing garbage
-        // *inside* the blob, which applyAwarenessUpdate would silently ignore.
+        // Validate the payload's CONTENTS, not just the envelope.
+        // applyAwarenessUpdate mutates state entry by entry and only notifies
+        // listeners at the end — a bad entry mid-payload would leave earlier
+        // entries applied with no event fired. Dry-running every entry here
+        // makes the real apply infallible (and catches trailing garbage
+        // inside the blob).
         {
           const payload = decoding.readVarUint8Array(decoder);
           const inner = decoding.createDecoder(payload);

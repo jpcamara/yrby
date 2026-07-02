@@ -240,12 +240,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
             "that never happened, and a cold load would lose the edit."
     end
 
-    # Fail closed on a missing document key. Without this, a transport that
-    # doesn't keep the channel instance alive across actions (AnyCable) and an
-    # app that forgot to pass `key` to sync_receive would silently record
-    # updates under a nil key, broadcast them to a stream no one subscribes to,
-    # and still ack them — the client marks the edit delivered while it reached
-    # zero peers and was filed under the wrong identity.
+    # Fail closed when no document key is set (typically: AnyCable rebuilt the
+    # channel instance and the app forgot to pass `key` to sync_receive).
+    # Proceeding would record under nil, broadcast to a stream nobody
+    # subscribes to, and still ack — the client believes the edit was
+    # delivered when it reached no one.
     def sync_validate_key!
       return unless @sync_key.nil? || @sync_key.empty?
 
@@ -287,12 +286,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
           return :gap
         end
 
-        # A lost-ack retry the store already has: don't re-record it, but DO
-        # re-broadcast. If the original attempt recorded and then crashed (or the
-        # pub/sub broadcast failed) before distributing, this retry is the only
-        # mechanism that can still reach the live subscribers — skipping it would
-        # leave them stale until their next full resync. Re-broadcast is safe:
-        # CRDT apply is idempotent for every receiver.
+        # A lost-ack retry: already recorded, so skip on_change — but DO
+        # re-broadcast. If the first attempt died between record and broadcast,
+        # this retry is the only path left to the live subscribers. Duplicate
+        # broadcasts are free (CRDT apply is idempotent).
         unless doc.update_advances?(update)
           sync_distribute(encoded)
           return :applied

@@ -66,31 +66,25 @@ pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String>
     Ok(Some(merged))
 }
 
-/// True if applying `update_bytes` to `doc` would integrate cleanly: every
-/// dependency the update references is already present. A pure read; does not
-/// mutate the doc. When false, applying it would park a pending struct/delete
-/// set, the signal that an earlier, causally-prior update is missing.
+/// True if applying `update_bytes` to `doc` would integrate cleanly; false if
+/// it would park as pending (a causally-prior update is missing). A pure read.
 ///
-/// The per-client clock lower bound (`state_vector_lower`) is only a cheap
-/// pre-filter: yrs's real integration gate also requires every block referenced
-/// by an item's origin / right-origin / parent — which routinely belong to
-/// *other* clients — and post-Skip blocks in a merged update have their own,
-/// higher, entry clocks the lower bound doesn't see. An update can pass the
-/// clock check and still park as pending. Miss that here and the downstream
-/// `update_advances?` probe misreads the parked update as an already-applied
-/// retry (pending doesn't move a state vector) — acking and dropping real
-/// content. So after the pre-filter we do the exact check: trial-integrate on a
-/// throwaway probe seeded with the doc's *integrated* state, and call the update
-/// ready only if nothing parks. (Integrated-only seed: if the update depends on
-/// content that is itself still pending in `doc`, it can't cleanly integrate
-/// yet, and a resync delivers the whole thing as one complete delta.)
+/// This must be EXACT: the sync layer records on "ready" and resyncs on "not
+/// ready", and a parked update that slipped through would look like an
+/// already-applied retry downstream — acked and dropped, losing real content.
+///
+/// Clocks alone can't decide it. An update can satisfy every per-client clock
+/// and still fail to integrate: its items may reference other clients' blocks
+/// (origins/parents), and merged updates hide internal gaps behind Skip blocks.
+/// So the clock lower bound serves only as a cheap definitive REJECT; "ready"
+/// is decided by trial-integrating on a throwaway probe seeded with the doc's
+/// integrated state — ready iff nothing parks.
 pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
-    // State vectors are partially ordered; "covered" (>=) is false for both
-    // strictly-behind AND incomparable vectors — either way, not ready.
+    // Partial order: "not covered" includes incomparable — not ready either way.
     let lower_covered = doc.transact().state_vector() >= update.state_vector_lower();
     if !lower_covered {
-        return Ok(false); // a same-client clock gap: cheap, definitive reject
+        return Ok(false);
     }
     let seed = integrated_update(doc, &StateVector::default())?;
     let probe = Doc::new();
@@ -134,14 +128,10 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     let has_deletes = !update.delete_set().is_empty();
 
-    // Cheap pre-filter: any block beyond the doc's state vector is content the
-    // doc lacks, so the update advances — no probe needed. This skips the full
-    // rebuild for the common case (a novel update). Only covered updates —
-    // retries and ambiguous diffs (a causally-pending diff reports an empty
-    // state vector, which is trivially covered) — pay for the probe below.
+    // Fast path: blocks beyond the doc's state vector are content the doc
+    // lacks — the update advances, no probe needed. The common case (a novel
+    // edit) exits here; only retries and ambiguous diffs pay for the probe.
     if !has_deletes {
-        // Partial order: not-covered includes incomparable, and both mean the
-        // update carries blocks the doc lacks.
         let covered = doc.transact().state_vector() >= update.state_vector();
         if !covered {
             return Ok(true);
@@ -187,12 +177,10 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
         if before != after {
             return Ok(true);
         }
-        // Defense in depth: an unchanged state vector can also mean the update
-        // PARKED as pending (a gap `update_is_ready` should have caught — its
-        // exact probe makes this unreachable from the sync path, but a caller
-        // using this function alone must not misread a parked update as an
-        // already-applied retry and drop it). Parking changes the doc, so it
-        // advances; the ready gate, not this one, decides recordability.
+        // An unchanged state vector can also mean the update PARKED as pending.
+        // Parked is not a duplicate — report it as advancing so no caller
+        // mistakes it for an already-applied retry and drops it. (The sync path
+        // never reaches this case; `update_is_ready` rejects gaps first.)
         let pending_after = probe.transact().store().pending_update().is_some()
             || probe.transact().store().pending_ds().is_some();
         Ok(pending_after != pending_before)
@@ -220,15 +208,13 @@ pub(crate) fn has_pending(doc: &Doc) -> bool {
 /// Non-destructive: the prune happens only on the throwaway copy; `doc` keeps its
 /// pending, so a genuine gap still heals if its missing dependency later arrives.
 pub(crate) fn integrated_update(doc: &Doc, sv: &StateVector) -> Result<Vec<u8>, String> {
-    // The pending check and the encode must share ONE transaction: with separate
-    // transactions, a concurrent gappy apply_update between them could park
-    // pending that the second transaction's encode then merges back in — serving
-    // exactly the poison this function exists to exclude (TOCTOU).
+    // Pending check and encode share ONE transaction — with two, a concurrent
+    // gappy apply_update could slip between them and the encode would serve
+    // the very pending this function exists to exclude.
     let full = {
         let txn = doc.transact();
         let store = txn.store();
-        // Fast path: with nothing pending the direct encode is already gap-free,
-        // so the clean common case keeps the zero-copy behavior.
+        // Nothing pending: the direct encode is already gap-free.
         if store.pending_update().is_none() && store.pending_ds().is_none() {
             return Ok(txn.encode_state_as_update_v1(sv));
         }
@@ -773,17 +759,15 @@ mod tests {
 
     #[test]
     fn integrated_update_never_serves_pending_under_concurrent_gappy_applies() {
-        // Concurrency net for the gap-free invariant: race a writer that parks
-        // and heals a gappy update against a reader encoding, and assert every
-        // single encode is pending-free for a fresh peer.
+        // Invariant under contention: while a writer parks and heals a gappy
+        // update in a loop, every integrated_update encode must be pending-free
+        // for a fresh peer.
         //
-        // Honest scope: the original TOCTOU (pending check and encode in
-        // separate transactions) has a nanoseconds-wide window and did NOT
-        // reproduce here even at 20k iterations — that fix's guarantee is
-        // structural (one transaction is atomic under the doc's lock), verified
-        // by construction, not by this test. What this test DOES catch is any
-        // grosser regression: encoding without the lock, a fast path that skips
-        // the pending check entirely, or prune logic that leaks under contention.
+        // Scope: this can't hit the original check-vs-encode race (its window
+        // is nanoseconds; never reproduced even at 20k iterations) — that fix
+        // is guaranteed by using a single transaction. What this catches is
+        // coarser: encoding outside the lock, or a fast path skipping the
+        // pending check.
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc as StdArc;
 
