@@ -550,6 +550,73 @@ mod tests {
         assert_eq!(render(&txn, &frag).unwrap(), expected.trim_end());
     }
 
+    /// A second live-Lexxy ground-truth pair, built to abuse nesting: blocks
+    /// inside table cells (list, quote, code block, mention), header states
+    /// 2 and 3 (header column / corner — Lexxy renders all non-zero states
+    /// as <th>), five levels of mixed bullet/number/check lists with links,
+    /// inline code and mentions at depth, a titled link inside a heading
+    /// wrapping formatted runs, adjacent single-character format runs
+    /// (including the full bold|italic|strike|underline|code stack), sub/sup
+    /// combined with strike/underline, tabs and blank lines and emoji inside
+    /// a code block, adjacent dividers, a full and an all-null upload
+    /// attachment (Lexical normalizes null alt/caption to empty strings),
+    /// CJK/RTL/emoji text, a pre-escaped-looking "&amp;" trap, and
+    /// whitespace-only paragraphs. Note Lexxy's own sanitized export DROPS
+    /// colSpan/rowSpan — matching it byte-for-byte means we correctly don't
+    /// emit them either.
+    #[test]
+    fn renders_the_captured_torture_document_byte_for_byte() {
+        let bytes = include_bytes!("fixtures/lexxy_torture.bin");
+        let expected = include_str!("fixtures/lexxy_torture.html");
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(bytes).unwrap())
+            .unwrap();
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let html = render(&txn, &frag).unwrap();
+        assert_eq!(html, expected.trim_end());
+
+        // Byte-for-byte already proves these; name the load-bearing ones so
+        // a regression fails with the nested structure it broke.
+        for (what, probe) in [
+            ("list nested in a table cell", "<td><ul><li"),
+            ("quote in a table cell", "<td><blockquote>"),
+            (
+                "code block in a table cell",
+                "<td><pre data-language=\"javascript\">cell();</pre></td>",
+            ),
+            ("mention inside a header cell", "sgid=\"SGID_M_TABLE\""),
+            (
+                "five-level mixed list nesting",
+                "<ol><li value=\"1\"><s><i><strong>Level five</strong></i></s></li></ol>",
+            ),
+            (
+                "the full format stack on one run",
+                "<u><s><i><code><strong>g</strong></code></i></s></u>",
+            ),
+            (
+                "a titled link in a heading wrapping formatted runs",
+                "<a href=\"https://spec.example.com\" title=\"The Spec\">v<i><strong>2</strong></i><code>.final</code></a>",
+            ),
+            (
+                "already-escaped-looking text escapes again",
+                "<strong>a &amp;&amp; b &lt; c &gt; d \"q\" '&amp;amp;'</strong>",
+            ),
+            ("emoji, CJK and RTL text", "🚀🎉 你好世界 العربية café"),
+            (
+                "an all-null upload keeps its normalized empty attrs",
+                "sgid=\"SGID_UP_MIN\" url=\"http://localhost:4111/files/min.bin\" alt=\"\" caption=\"\"",
+            ),
+            (
+                "whitespace-only paragraphs",
+                "<p><span>\t</span></p><p><br></p><p><br></p>",
+            ),
+        ] {
+            assert!(html.contains(probe), "{what}: missing {probe}");
+        }
+    }
+
     #[test]
     fn format_runs_match_lexxys_export_algorithm() {
         // Singles take their semantic tag; the span for plain text unwraps.

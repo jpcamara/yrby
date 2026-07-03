@@ -69,6 +69,30 @@ class HtmlTest < Minitest::Test
     end
   end
 
+  def test_to_html_matches_lexxy_on_the_torture_document
+    # Second ground-truth pair (see lexical_html.rs for the full inventory):
+    # blocks nested inside table cells, header-column/corner cells, five-level
+    # mixed lists, formatted links in headings, the full format stack,
+    # unicode, escape traps, whitespace-only paragraphs. Captured live from
+    # Lexxy; byte-for-byte here proves the whole pipeline (bytes -> native
+    # render -> Ruby string) reproduces Lexxy's own sanitized export.
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_torture.bin")))
+    expected = File.read(File.join(FIXTURES, "lexxy_torture.html")).chomp
+
+    assert_equal expected, Y::Lexical.new(doc).to_html
+  end
+
+  def test_read_text_extraction_survives_the_torture_document
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_torture.bin")))
+    text = doc.read_xml("root")
+
+    assert_includes text, "Level five", "deepest list level extracted"
+    assert_includes text, "你好世界", "multibyte text extracted"
+    assert_includes text, "@Dave", "mention inside a table cell extracted"
+  end
+
   def test_read_text_extraction_includes_attachments
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_full.bin")))
