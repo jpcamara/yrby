@@ -21,6 +21,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   editor's column-width styling. A root that isn't ProseMirror (a Lexical
   document, say) returns `nil`.
 
+### Fixed
+
+- **`Doc#update_advances?` no longer misreads a gappy merged update carrying
+  novel content as a no-op.** A crafted frame can hide an internal gap behind
+  a Skip block while its post-gap blocks still integrate (yrs plants a Skip
+  hole in the store). That moves neither the doc's public state vector nor
+  pending, so the probe comparison reported genuinely novel content as
+  "doesn't advance" — `update_ready?` accepted the frame and the doc applied
+  it, but it was never recorded to the durable log or broadcast. Any
+  insertion past the update's own (Skip-capped) `state_vector()` now
+  conservatively reports as advancing. Not reachable through standard Yjs
+  providers — a client's own updates and diffs are gap-free — so this closes
+  a hostile-input hole, not a real-world regression.
+
 ## [0.3.1] - 2026-07-01
 
 Fixes from a full source review.
