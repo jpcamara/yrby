@@ -31,11 +31,15 @@ pub fn xml_blocks_text<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> String
             XmlOut::Text(t) => walk_lexical_block(txn, &t, &mut out),
             XmlOut::Element(e) => {
                 // ProseMirror blocks have a tag but no `__type`; get_string recurses
-                // them (tags kept, caller strips). A Lexical decorator (horizontal
-                // rule, image) is an XmlElement *with* a `__type` and no extractable
-                // text -- skip it rather than emit its `<UNDEFINED …>` serialization.
+                // them (tags kept, caller strips). A Lexical decorator is an
+                // XmlElement *with* a `__type`: attachments carry readable text
+                // (a mention's plain text, an upload's caption); the rest
+                // (horizontal rule) have none — skip rather than emit their
+                // `<UNDEFINED …>` serialization.
                 if e.get_attribute(txn, "__type").is_none() {
                     out.push(e.get_string(txn));
+                } else if let Some(text) = lexical_decorator_text(txn, &e) {
+                    out.push(text);
                 }
             }
             XmlOut::Fragment(f) => out.push(f.get_string(txn)),
@@ -59,6 +63,26 @@ fn lexical_type<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
     match t.get_attribute(txn, "__type") {
         Some(Out::Any(Any::String(s))) => s.to_string(),
         _ => String::new(),
+    }
+}
+
+/// The readable text of a Lexical decorator element, if it has any: a mention
+/// or embed attachment contributes its plain text; an upload attachment its
+/// caption, alt text, or filename. Dividers and unknown decorators yield None.
+fn lexical_decorator_text<T: ReadTxn>(txn: &T, e: &yrs::XmlElementRef) -> Option<String> {
+    let attr = |name: &str| match e.get_attribute(txn, name) {
+        Some(Out::Any(Any::String(s))) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    };
+    match e.get_attribute(txn, "__type") {
+        Some(Out::Any(Any::String(ty))) => match ty.as_ref() {
+            "custom_action_text_attachment" => attr("plainText"),
+            "action_text_attachment" => attr("caption")
+                .or_else(|| attr("altText"))
+                .or_else(|| attr("fileName")),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -120,7 +144,13 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
                     }
                 }
             }
-            _ => {} // decorator embeds we don't read for text
+            // An inline decorator (a mention attachment) joins the line.
+            Out::YXmlElement(e) => {
+                if let Some(text) = lexical_decorator_text(txn, &e) {
+                    line.push_str(&text);
+                }
+            }
+            _ => {} // other embeds carry no text
         }
     }
     if !line.is_empty() {
@@ -330,6 +360,43 @@ mod tests {
         let txn = doc.transact();
         let frag = txn.get_xml_fragment("root").unwrap();
         assert_eq!(xml_blocks_text(&txn, &frag), "foo\nbarbaz");
+    }
+
+    #[test]
+    fn lexxy_full_schema_doc_extracts_attachment_text_too() {
+        // The full-schema capture (see html.rs): attachments must now
+        // contribute readable text — a mention's plain text inline, an
+        // upload's caption as its own line — while the divider stays silent.
+        use yrs::updates::decoder::Decode;
+        use yrs::{Transact, Update};
+        let bytes = include_bytes!("fixtures/lexxy_full.bin");
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(bytes).unwrap())
+            .unwrap();
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let text = xml_blocks_text(&txn, &frag);
+
+        assert!(
+            text.contains("Mention: @Alice done."),
+            "inline mention joins its line:\n{text}"
+        );
+        assert!(
+            text.contains("The team, 2026"),
+            "upload caption becomes a line"
+        );
+        assert!(
+            !text.contains("UNDEFINED"),
+            "no decorator serialization leaks"
+        );
+        assert!(
+            !text.contains('\u{2504}'),
+            "the divider glyph is not emitted"
+        );
+        for expected in ["Heading H6", "Done item", "def hello", "after-empty"] {
+            assert!(text.contains(expected), "missing {expected:?}");
+        }
     }
 
     #[test]

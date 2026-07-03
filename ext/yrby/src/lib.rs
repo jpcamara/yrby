@@ -6,6 +6,7 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
 
+mod lexical_html;
 mod protocol;
 mod read;
 use protocol::{
@@ -330,6 +331,48 @@ impl RbDoc {
 }
 
 // ============================================================================
+// Y::Lexical — schema-pinned rendering of Lexical/Lexxy documents
+// ============================================================================
+
+/// A Lexical/Lexxy view over a `Y::Doc`. The schema knowledge (Lexxy 0.9.x
+/// node set, Lexxy's own serializer semantics) lives here, named for what it
+/// is — not on the schema-agnostic `Doc`. Holds a cheap clone of the doc
+/// (yrs `Doc` is an Arc handle), so it reads live state.
+///
+/// Thread safety matches `Y::Doc`: every method opens its own transaction
+/// inside `nogvl` and holds no lock across the GVL boundary.
+#[magnus::wrap(class = "Y::Lexical", free_immediately, size)]
+struct RbLexical(Doc);
+
+impl RbLexical {
+    /// `Y::Lexical.new(doc)`
+    fn new(doc: &RbDoc) -> Self {
+        RbLexical(doc.0.clone())
+    }
+
+    /// Render the document's XML root (default `"root"`, Lexical's standard
+    /// collab root name) to HTML, natively — no Node process or headless
+    /// editor. Output matches Lexxy's own serializer (the HTML a lexxy-editor
+    /// submits to Rails) byte-for-byte on the reference fixture; see
+    /// `lexical_html.rs` for the schema coverage and caveats. Returns nil when
+    /// the root is missing or not Lexical-shaped (e.g. a ProseMirror document)
+    /// — never a lossy rendering of an unknown schema.
+    fn to_html(&self, args: &[Value]) -> Result<Option<String>, Error> {
+        let name: String = if args.is_empty() {
+            "root".to_string()
+        } else {
+            TryConvert::try_convert(args[0])?
+        };
+        let doc = &self.0;
+        Ok(nogvl(move || {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(name.as_str())?;
+            lexical_html::render(&txn, &fragment)
+        }))
+    }
+}
+
+// ============================================================================
 // Protocol codec (stateless), exposed as `Y` module functions
 // ============================================================================
 //
@@ -409,6 +452,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "handle_sync_message",
         method!(RbDoc::handle_sync_message, 1),
     )?;
+    // Y::Lexical: schema-pinned Lexical/Lexxy rendering over a Doc.
+    let lexical_class = module.define_class("Lexical", ruby.class_object())?;
+    lexical_class.define_singleton_method("new", function!(RbLexical::new, 1))?;
+    lexical_class.define_method("to_html", method!(RbLexical::to_html, -1))?;
+
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;
     module.define_module_function("message_kind", function!(message_kind, 1))?;

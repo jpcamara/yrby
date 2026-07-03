@@ -6,6 +6,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`Y::Lexical` — native Lexical/Lexxy HTML rendering.**
+  `Y::Lexical.new(doc).to_html` renders a Lexxy (Lexical) document to HTML
+  directly from the CRDT bytes — no Node process, headless editor, or JSDOM.
+  The schema knowledge lives in a class named for it; the `Doc` stays
+  schema-agnostic, and a non-Lexical root (e.g. ProseMirror) returns `nil`
+  rather than a lossy rendering. Output is byte-for-byte what a `lexxy-editor`
+  submits to Rails (verified against a reference document captured from a live
+  editor). Covers the full Lexxy 0.9.x node set: headings h1-h6, every text
+  format bit and combination, links, bullet/numbered/check/nested lists,
+  quotes, code blocks with language, tabs/soft breaks, horizontal rules,
+  tables with header cells, and ActionText attachments (uploads and
+  mentions/embeds emit canonical `<action-text-attachment>` elements).
+  Unknown block types degrade to readable paragraphs. Same schema-pinned
+  approach as `ueberdosis/tiptap-php`, one level deeper.
+- Text extraction (`read_xml`) now includes attachment text: a mention's
+  plain text joins its line; an upload contributes its caption, alt text, or
+  filename. Previously attachments vanished from extracted text.
+
 ## [0.3.1] - 2026-07-01
 
 Fixes from a full source review.

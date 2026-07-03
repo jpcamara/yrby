@@ -157,6 +157,50 @@ doc.handle_sync_message(data)     # => [msg_type, sync_type, response]; answers 
                                   #    SyncStep2 (never serves pending structs)
 ```
 
+### Reading document contents
+
+Reconstruct a document server-side — search, exports, emails, SSR — with no
+Node process:
+
+```ruby
+doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
+doc.read_xml("root")          # => text of an XML root, one block per line
+doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
+```
+
+#### `Y::Lexical`: native Lexical/Lexxy HTML
+
+The `Doc` is schema-agnostic; schema knowledge lives in a class named for it.
+`Y::Lexical` wraps a doc and renders a [Lexxy](https://github.com/basecamp/lexxy)
+(Lexical) document to HTML **natively** — no Node process, no headless editor,
+no JSDOM:
+
+```ruby
+lexical = Y::Lexical.new(doc)
+lexical.to_html            # the "root" fragment (Lexical's standard root name)
+lexical.to_html("notepad") # or any other XML root
+```
+
+The output is byte-for-byte what a `lexxy-editor` itself submits to Rails (its
+`value`), verified against a reference document captured from a live editor —
+so you can render, index, or email the collaborative document straight from
+the CRDT bytes. A root that isn't Lexical-shaped (e.g. a ProseMirror document)
+returns `nil` rather than a lossy rendering.
+
+Covered: paragraphs, headings h1–h6, every text format (bold / italic / strike
+/ underline / code / sub / sup / highlight, and their combinations), links,
+bullet / numbered / check / nested lists, blockquotes, code blocks with
+language, tabs and soft line breaks, horizontal rules, tables with header
+cells, and ActionText attachments — uploads and mentions/embeds both emit
+canonical `<action-text-attachment>` elements that ActionText can re-render.
+
+This is the schema-pinned approach `ueberdosis/tiptap-php` takes for
+ProseMirror JSON, applied one level deeper (directly on the collab structure).
+The pin: Lexxy 0.9.x's node set and serializer. An unknown block type degrades
+to a readable paragraph rather than disappearing. ProseMirror-shaped documents
+return `nil` and should keep using `read_xml`/`read_text` — a `Y::ProseMirror`
+counterpart is future work.
+
 ### Pending structs and gap-free state
 
 If a doc applies an update whose causally-prior update is missing (a "gappy"
