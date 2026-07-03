@@ -102,6 +102,38 @@ class ThreadSafetyTest < Minitest::Test
     refute_nil doc.read_text("content")
   end
 
+  def test_concurrent_lexical_to_html_with_writers_does_not_deadlock
+    # Y::Lexical holds an Arc handle to the same doc, so its renders contend
+    # with writers on the doc's RwLock. Same guarantees as every other native
+    # op: one transaction per call, opened inside nogvl — this hammer both
+    # proves it under contention and would hang (CI timeout) if a future edit
+    # reintroduced a nested transaction in the render path.
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.expand_path("../ext/yrby/src/fixtures/lexxy_full.bin", __dir__)))
+    lexical = Y::Lexical.new(doc)
+    updates = [
+      YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
+      YjsFixtures::TwoDocsMerged::DOC2_UPDATE
+    ]
+
+    errors = run_threads do |i|
+      ITERATIONS.times do
+        if i.even?
+          html = lexical.to_html
+
+          raise "render lost content under contention" unless html&.include?("<h1>Heading One</h1>")
+        else
+          # Writers hit a different root of the SAME doc: full write-lock
+          # contention against the renders without perturbing the Lexical root.
+          doc.apply_update(updates[(i / 2) % updates.length])
+        end
+      end
+    end
+
+    assert_empty errors
+    assert_includes lexical.to_html, "</action-text-attachment>"
+  end
+
   def test_concurrent_fan_in_sync_to_shared_doc
     # Many threads sync different sources into ONE shared doc concurrently.
     shared = Y::Doc.new

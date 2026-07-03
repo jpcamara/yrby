@@ -31,6 +31,7 @@ struct RbDoc(Doc);
 fn assert_thread_safe() {
     fn is_send_sync<T: Send + Sync>() {}
     is_send_sync::<Doc>();
+    is_send_sync::<RbLexical>();
 }
 
 /// Run `f` with the GVL (Global VM Lock) released, so other Ruby threads,
