@@ -46,6 +46,27 @@ const FMT_SUBSCRIPT: u32 = 1 << 5;
 const FMT_SUPERSCRIPT: u32 = 1 << 6;
 const FMT_HIGHLIGHT: u32 = 1 << 7;
 
+// Nesting caps. The block tree is walked on an explicit heap stack (no native
+// recursion), so these are not there to prevent a stack overflow — they bound
+// the work a single pathological or hostile document can demand. A real Lexxy
+// document nests a handful of levels deep (the torture fixture peaks at ~8);
+// 1024 is orders of magnitude beyond anything a human authors, and a subtree
+// deeper than that degrades (its content below the cap is dropped, its
+// enclosing tags still close) rather than being rendered. Inline links are
+// still walked recursively — they can only contain inline content, never
+// blocks — so their cap keeps that recursion shallow too.
+const MAX_BLOCK_DEPTH: usize = 1024;
+const MAX_INLINE_DEPTH: usize = 1024;
+
+/// A unit of pending block work on the explicit traversal stack. `Open` renders
+/// a block node (pushing its own children as more work); `Close` emits a
+/// literal end tag once a container's children have all been processed. Every
+/// container's closing tag is a fixed string, so `Close` can borrow `'static`.
+enum Work {
+    Open(XmlTextRef, usize),
+    Close(&'static str),
+}
+
 /// Render a Lexical/Lexxy-shaped XML root to HTML, or `None` when the root
 /// isn't Lexical-shaped. Lexical marks every node with a `__type` attribute;
 /// a root whose children carry none (a ProseMirror document, whose blocks are
@@ -62,7 +83,7 @@ pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> 
     let mut out = String::new();
     for node in fragment.children(txn) {
         match node {
-            XmlOut::Text(t) => render_block(txn, &t, &mut out),
+            XmlOut::Text(t) => render_block_tree(txn, &t, &mut out),
             XmlOut::Element(e) => render_decorator(txn, &e, &mut out),
             XmlOut::Fragment(f) => out.push_str(&escape_text(&f.get_string(txn))),
         }
@@ -104,13 +125,37 @@ fn str_attr<T: ReadTxn>(txn: &T, t: &XmlTextRef, name: &str) -> Option<String> {
     }
 }
 
-fn render_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
+/// Walk a top-level block and everything under it on an explicit heap stack,
+/// appending HTML to `out`. Container blocks (lists, tables, cells, list
+/// items) push their children back as more work plus a `Close` for their end
+/// tag; leaf blocks (paragraphs, headings, quotes, code) render in full on the
+/// spot. Doing this on the heap rather than the native call stack means a
+/// document nested arbitrarily deep costs memory, not a stack overflow.
+fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlTextRef, out: &mut String) {
+    let mut stack: Vec<Work> = vec![Work::Open(root.clone(), 0)];
+    while let Some(work) = stack.pop() {
+        match work {
+            Work::Close(tag) => out.push_str(tag),
+            Work::Open(node, depth) => open_block(txn, &node, depth, out, &mut stack),
+        }
+    }
+}
+
+/// Render one block. A container emits its opening tag now and defers its
+/// children (and matching `Close`) to the stack; a leaf renders completely.
+fn open_block<T: ReadTxn>(
+    txn: &T,
+    t: &XmlTextRef,
+    depth: usize,
+    out: &mut String,
+    stack: &mut Vec<Work>,
+) {
     let ty = node_type(txn, t);
     match ty.as_str() {
         "paragraph" | "provisonal_paragraph" => {
             // (sic: "provisonal" is Lexxy's spelling.) A provisional paragraph
             // is a cursor-placement placeholder; empty ones export to nothing.
-            let inline = render_inline(txn, t);
+            let inline = render_inline(txn, t, 0);
             if inline.is_empty() {
                 if ty == "paragraph" {
                     out.push_str("<p><br></p>");
@@ -129,14 +174,14 @@ fn render_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
             out.push('<');
             out.push_str(&tag);
             out.push('>');
-            out.push_str(&render_inline(txn, t));
+            out.push_str(&render_inline(txn, t, 0));
             out.push_str("</");
             out.push_str(&tag);
             out.push('>');
         }
         "quote" => {
             out.push_str("<blockquote>");
-            out.push_str(&render_inline(txn, t));
+            out.push_str(&render_inline(txn, t, 0));
             out.push_str("</blockquote>");
         }
         "code" | "early_escape_code" => {
@@ -150,7 +195,7 @@ fn render_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
                 out.push('"');
             }
             out.push('>');
-            out.push_str(&render_inline(txn, t));
+            out.push_str(&render_inline(txn, t, 0));
             out.push_str("</pre>");
         }
         "list" => {
@@ -161,27 +206,17 @@ fn render_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
             out.push('<');
             out.push_str(tag);
             out.push('>');
-            for child in block_children(txn, t) {
-                render_block(txn, &child, out);
-            }
-            out.push_str("</");
-            out.push_str(tag);
-            out.push('>');
+            let close = if tag == "ol" { "</ol>" } else { "</ul>" };
+            push_block_children(txn, t, depth, close, false, stack);
         }
-        "listitem" => render_listitem(txn, t, out),
+        "listitem" => open_listitem(txn, t, depth, out, stack),
         "table" | "wrapped_table_node" => {
             out.push_str("<figure class=\"lexxy-content__table-wrapper\"><table><tbody>");
-            for row in block_children(txn, t) {
-                render_block(txn, &row, out);
-            }
-            out.push_str("</tbody></table></figure>");
+            push_block_children(txn, t, depth, "</tbody></table></figure>", false, stack);
         }
         "tablerow" => {
             out.push_str("<tr>");
-            for cell in block_children(txn, t) {
-                render_block(txn, &cell, out);
-            }
-            out.push_str("</tr>");
+            push_block_children(txn, t, depth, "</tr>", false, stack);
         }
         "tablecell" => {
             let header = matches!(
@@ -191,24 +226,23 @@ fn render_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
                 t.get_attribute(txn, "__headerState"),
                 Some(Out::Any(Any::BigInt(n))) if n > 0
             );
-            if header {
+            let close = if header {
                 // Class + background match Lexxy's own header-cell export.
                 out.push_str(
                     "<th class=\"lexxy-content__table-cell--header\" \
                      style=\"background-color: rgb(242, 243, 245);\">",
                 );
+                "</th>"
             } else {
                 out.push_str("<td>");
-            }
-            for block in block_children(txn, t) {
-                render_block(txn, &block, out);
-            }
-            out.push_str(if header { "</th>" } else { "</td>" });
+                "</td>"
+            };
+            push_block_children(txn, t, depth, close, false, stack);
         }
         // A block type this renderer doesn't know: degrade to a readable
         // paragraph instead of dropping content.
         _ => {
-            let inline = render_inline(txn, t);
+            let inline = render_inline(txn, t, 0);
             if !inline.is_empty() {
                 out.push_str("<p>");
                 out.push_str(&inline);
@@ -218,10 +252,44 @@ fn render_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
     }
 }
 
+/// Defer a container's block children onto the stack, followed (below them) by
+/// its closing tag, so the children render in order and the tag closes after.
+/// Past `MAX_BLOCK_DEPTH` the children are dropped — the container still closes,
+/// keeping the output well formed — so a pathologically deep tree can't demand
+/// unbounded work. `only_lists` renders just nested-list children (list items,
+/// whose inline content the caller has already emitted).
+fn push_block_children<T: ReadTxn>(
+    txn: &T,
+    t: &XmlTextRef,
+    depth: usize,
+    close: &'static str,
+    only_lists: bool,
+    stack: &mut Vec<Work>,
+) {
+    stack.push(Work::Close(close));
+    if depth >= MAX_BLOCK_DEPTH {
+        return;
+    }
+    // Reversed: the stack is LIFO, so the last pushed child is rendered first.
+    for child in block_children(txn, t).into_iter().rev() {
+        if only_lists && node_type(txn, &child) != "list" {
+            continue;
+        }
+        stack.push(Work::Open(child, depth + 1));
+    }
+}
+
 /// `<li>`: attribute order matches Lexxy's export exactly — checked items put
 /// `aria-checked` before `value`; items holding a nested list append the
-/// `lexxy-nested-listitem` class after `value`.
-fn render_listitem<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
+/// `lexxy-nested-listitem` class after `value`. Inline content renders now;
+/// the nested list (if any) is deferred to the stack.
+fn open_listitem<T: ReadTxn>(
+    txn: &T,
+    t: &XmlTextRef,
+    depth: usize,
+    out: &mut String,
+    stack: &mut Vec<Work>,
+) {
     let value = match t.get_attribute(txn, "__value") {
         Some(Out::Any(Any::Number(n))) => n as i64,
         Some(Out::Any(Any::BigInt(n))) => n,
@@ -232,8 +300,8 @@ fn render_listitem<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
         _ => None,
     };
     let has_nested_list = block_children(txn, t)
-        .into_iter()
-        .any(|c| node_type(txn, &c) == "list");
+        .iter()
+        .any(|c| node_type(txn, c) == "list");
 
     out.push_str("<li");
     if let Some(c) = checked {
@@ -250,13 +318,8 @@ fn render_listitem<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
     out.push('>');
     // Inline content first, then any nested list blocks (Lexical stores the
     // nested list as a child of the item).
-    out.push_str(&render_inline(txn, t));
-    for child in block_children(txn, t) {
-        if node_type(txn, &child) == "list" {
-            render_block(txn, &child, out);
-        }
-    }
-    out.push_str("</li>");
+    out.push_str(&render_inline(txn, t, 0));
+    push_block_children(txn, t, depth, "</li>", true, stack);
 }
 
 /// The `Y.XmlText` children of a block that are themselves blocks (list items,
@@ -280,8 +343,10 @@ fn is_inline_type(ty: &str) -> bool {
 /// Render a block's inline content: formatted text runs, linebreaks, tabs,
 /// links, and inline decorators. Nested block children are NOT rendered here
 /// (the block renderers handle them), so a list item's text doesn't duplicate
-/// its nested list.
-fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
+/// its nested list. `depth` counts inline-link nesting only (a link's body is
+/// itself inline content); past `MAX_INLINE_DEPTH` a link renders as flat text
+/// so this shallow recursion can't overflow on a crafted link chain.
+fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
     let mut out = String::new();
     // Per-run metadata from the preceding Y.Map embed.
     let mut format: u32 = 0;
@@ -323,7 +388,7 @@ fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
             Out::YXmlText(child) => {
                 let ty = node_type(txn, &child);
                 if is_inline_type(&ty) {
-                    render_link(txn, &child, &mut out);
+                    render_link(txn, &child, depth, &mut out);
                 }
                 // Nested blocks are rendered by their parent block's renderer.
             }
@@ -376,7 +441,7 @@ fn format_wrap(inner: String, tag: &str) -> String {
 
 /// `link` / `autolink`: Lexxy's sanitize keeps only `href` and `title`
 /// (`target`/`rel` are stored in the doc but stripped from exported HTML).
-fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
+fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize, out: &mut String) {
     out.push_str("<a");
     if let Some(url) = str_attr(txn, t, "__url") {
         out.push_str(" href=\"");
@@ -389,7 +454,13 @@ fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
         out.push('"');
     }
     out.push('>');
-    out.push_str(&render_inline(txn, t));
+    if depth < MAX_INLINE_DEPTH {
+        out.push_str(&render_inline(txn, t, depth + 1));
+    } else {
+        // A link chain nested past the cap (only crafted input reaches here):
+        // keep its text, drop any further link structure.
+        out.push_str(&escape_text(&t.get_string(txn)));
+    }
     out.push_str("</a>");
 }
 
@@ -666,6 +737,93 @@ mod tests {
 
         // An empty root is fine: an empty document, not a foreign schema.
         assert_eq!(render(&txn, &empty).as_deref(), Some(""));
+    }
+
+    /// Build a chain of `depth` nested lists: list > listitem > list > … each
+    /// list holding one item whose only child is the next list down. Mirrors
+    /// the real storage model (block children are XmlText embedded in XmlText).
+    fn nested_list_doc(depth: usize) -> Doc {
+        use yrs::{XmlFragment, XmlTextPrelim};
+        let doc = Doc::new();
+        let root = doc.get_or_insert_xml_fragment("root");
+        let mut txn = doc.transact_mut();
+        let top = root.push_back(&mut txn, XmlTextPrelim::new(""));
+        top.insert_attribute(&mut txn, "__type", "list");
+        top.insert_attribute(&mut txn, "__tag", "ul");
+        let mut cursor = top;
+        for _ in 0..depth {
+            let li = cursor.insert_embed(&mut txn, 0, XmlTextPrelim::new(""));
+            li.insert_attribute(&mut txn, "__type", "listitem");
+            let inner = li.insert_embed(&mut txn, 0, XmlTextPrelim::new(""));
+            inner.insert_attribute(&mut txn, "__type", "list");
+            inner.insert_attribute(&mut txn, "__tag", "ul");
+            cursor = inner;
+        }
+        drop(txn);
+        doc
+    }
+
+    #[test]
+    fn deeply_nested_blocks_do_not_overflow_the_stack() {
+        // The block tree is walked on the heap, so a depth that would blow the
+        // native call stack (tens of thousands of frames on a small worker
+        // thread) renders fine — this is the regression guard for the crash.
+        // Runs on a 512 KiB thread to prove it doesn't rely on a large stack.
+        let handle = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let doc = nested_list_doc(20_000);
+                let txn = doc.transact();
+                let frag = txn.get_xml_fragment("root").unwrap();
+                let html = render(&txn, &frag).expect("lexical-shaped");
+                // Well formed: every opened list/item is closed.
+                assert_eq!(html.matches("<ul>").count(), html.matches("</ul>").count());
+                assert_eq!(html.matches("<li ").count(), html.matches("</li>").count());
+                html.len()
+            })
+            .unwrap();
+        assert!(handle.join().unwrap() > 0);
+    }
+
+    #[test]
+    fn nesting_past_the_cap_truncates_but_stays_well_formed() {
+        // Past MAX_BLOCK_DEPTH the deepest content is dropped, but every
+        // enclosing tag still closes, so the output remains balanced HTML.
+        let doc = nested_list_doc(MAX_BLOCK_DEPTH + 50);
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let html = render(&txn, &frag).unwrap();
+
+        assert_eq!(html.matches("<ul>").count(), html.matches("</ul>").count());
+        assert_eq!(html.matches("<li ").count(), html.matches("</li>").count());
+        // Capped, not fully rendered: fewer levels than were authored.
+        assert!(html.matches("<ul>").count() <= MAX_BLOCK_DEPTH + 1);
+    }
+
+    #[test]
+    fn deeply_nested_links_do_not_overflow_the_stack() {
+        // Links recurse (their body is inline content), so they carry their own
+        // depth cap. A crafted link-in-link chain renders as flat nested <a>s
+        // up to the cap, then bare text — never a crash.
+        use yrs::{XmlFragment, XmlTextPrelim};
+        let doc = Doc::new();
+        let root = doc.get_or_insert_xml_fragment("root");
+        {
+            let mut txn = doc.transact_mut();
+            let p = root.push_back(&mut txn, XmlTextPrelim::new(""));
+            p.insert_attribute(&mut txn, "__type", "paragraph");
+            let mut cursor = p;
+            for _ in 0..(MAX_INLINE_DEPTH + 20) {
+                let link = cursor.insert_embed(&mut txn, 0, XmlTextPrelim::new(""));
+                link.insert_attribute(&mut txn, "__type", "link");
+                link.insert_attribute(&mut txn, "__url", "https://x.example");
+                cursor = link;
+            }
+        }
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let html = render(&txn, &frag).unwrap();
+        assert_eq!(html.matches("<a").count(), html.matches("</a>").count());
     }
 
     #[test]
