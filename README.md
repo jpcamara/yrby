@@ -168,38 +168,35 @@ doc.read_xml("root")          # => text of an XML root, one block per line
 doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
 ```
 
-#### `Y::Lexical`: native Lexical/Lexxy HTML
+#### `Y::Lexical`: Lexical/Lexxy documents to HTML
 
-The `Doc` is schema-agnostic; schema knowledge lives in a class named for it.
-`Y::Lexical` wraps a doc and renders a [Lexxy](https://github.com/basecamp/lexxy)
-(Lexical) document to HTML **natively** — no Node process, no headless editor,
-no JSDOM:
+`Y::Lexical` renders a [Lexxy](https://github.com/basecamp/lexxy) (Lexical)
+document to HTML on the server, with no Node process or headless editor:
 
 ```ruby
 lexical = Y::Lexical.new(doc)
-lexical.to_html            # the "root" fragment (Lexical's standard root name)
-lexical.to_html("notepad") # or any other XML root
+lexical.to_html            # the "root" fragment (Lexical's default root name)
+lexical.to_html("notepad") # or another XML root
 ```
 
-The output is byte-for-byte what a `lexxy-editor` itself submits to Rails (its
-`value`), verified against a reference document captured from a live editor —
-so you can render, index, or email the collaborative document straight from
-the CRDT bytes. A root that isn't Lexical-shaped (e.g. a ProseMirror document)
-returns `nil` rather than a lossy rendering.
+The HTML is identical to what a `lexxy-editor` submits to Rails (its `value`).
+The tests check this byte-for-byte against a document captured from a real
+editor. So you can render, search, or email a collaborative document without
+running a browser.
 
-Covered: paragraphs, headings h1–h6, every text format (bold / italic / strike
-/ underline / code / sub / sup / highlight, and their combinations), links,
-bullet / numbered / check / nested lists, blockquotes, code blocks with
-language, tabs and soft line breaks, horizontal rules, tables with header
-cells, and ActionText attachments — uploads and mentions/embeds both emit
-canonical `<action-text-attachment>` elements that ActionText can re-render.
+It handles the whole Lexxy 0.9.x node set: paragraphs, headings, every text
+format and their combinations (bold, italic, strike, underline, code, sub,
+sup, highlight), links, the four list types and nesting, blockquotes, code
+blocks, tabs and soft breaks, horizontal rules, tables with header cells, and
+ActionText attachments (uploads and mentions both emit `<action-text-attachment>`
+elements that ActionText can re-render).
 
-This is the schema-pinned approach `ueberdosis/tiptap-php` takes for
-ProseMirror JSON, working directly on the collab structure instead of JSON.
-The pin: Lexxy 0.9.x's node set and serializer. An unknown block type degrades
-to a readable paragraph rather than disappearing. ProseMirror-shaped documents
-return `nil` and should keep using `read_xml`/`read_text` — a `Y::ProseMirror`
-counterpart is future work.
+An unknown block type falls back to a plain paragraph. A root that isn't
+Lexical — a ProseMirror document, say — returns `nil`; use `read_xml` or
+`read_text` for those. A `Y::ProseMirror` renderer is future work.
+
+`tiptap-php` does the same thing for ProseMirror JSON; this works on the Yjs
+structure directly.
 
 ### Pending structs and gap-free state
 

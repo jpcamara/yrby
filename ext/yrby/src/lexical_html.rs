@@ -1,12 +1,11 @@
 //! Native HTML rendering of Lexical/Lexxy documents from the yrs collab
 //! structure — no Node process, no headless editor.
 //!
-//! Schema-pinned to Lexxy (37signals' Rails editor, 0.9.x): the output matches
-//! what `lexxy-editor`'s own `value` getter produces — i.e. Lexical's
-//! `$generateHtmlFromNodes` with Lexxy's custom text export and DOMPurify
-//! sanitize applied — byte for byte on the captured fixture. That is the HTML a
-//! Lexxy form submits to Rails, so rendering it server-side from the CRDT gives
-//! the same canonical document ActionText would store.
+//! Pinned to Lexxy (37signals' Rails editor, 0.9.x). The output matches what
+//! `lexxy-editor` produces as its `value`: Lexical's `$generateHtmlFromNodes`,
+//! run through Lexxy's text export and DOMPurify. The tests check it byte for
+//! byte against a captured fixture. That's the HTML a Lexxy form submits to
+//! Rails, so you can store it as ActionText content straight from the CRDT.
 //!
 //! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in pure
 //! PHP — a schema-pinned renderer outside the JS runtime. This works from the

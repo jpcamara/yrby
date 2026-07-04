@@ -8,24 +8,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`Y::Lexical` — native Lexical/Lexxy HTML rendering.**
-  `Y::Lexical.new(doc).to_html` renders a Lexxy (Lexical) document to HTML
-  directly from the CRDT bytes — no Node process, headless editor, or JSDOM.
-  The schema knowledge lives in a class named for it; the `Doc` stays
-  schema-agnostic, and a non-Lexical root (e.g. ProseMirror) returns `nil`
-  rather than a lossy rendering. Output is byte-for-byte what a `lexxy-editor`
-  submits to Rails (verified against a reference document captured from a live
-  editor). Covers the full Lexxy 0.9.x node set: headings h1-h6, every text
-  format bit and combination, links, bullet/numbered/check/nested lists,
-  quotes, code blocks with language, tabs/soft breaks, horizontal rules,
-  tables with header cells, and ActionText attachments (uploads and
-  mentions/embeds emit canonical `<action-text-attachment>` elements).
-  Unknown block types degrade to readable paragraphs. Same schema-pinned
-  approach as `ueberdosis/tiptap-php`, working from the collab structure
-  rather than JSON.
-- Text extraction (`read_xml`) now includes attachment text: a mention's
-  plain text joins its line; an upload contributes its caption, alt text, or
-  filename. Previously attachments vanished from extracted text.
+- **`Y::Lexical` — render Lexical/Lexxy documents to HTML.**
+  `Y::Lexical.new(doc).to_html` turns a Lexxy document into HTML on the server,
+  with no Node process or headless editor. The output is identical to the HTML
+  a `lexxy-editor` submits to Rails; the tests check it byte-for-byte against a
+  document captured from a real editor. It covers the whole Lexxy 0.9.x node
+  set: headings, every text format, links, bullet/numbered/check/nested lists,
+  quotes, code blocks, horizontal rules, tables with header cells, and
+  ActionText attachments. Unknown nodes fall back to a plain paragraph, and a
+  root that isn't Lexical (a ProseMirror document, say) returns `nil`. This is
+  what `tiptap-php` does for ProseMirror JSON, applied to the Yjs structure.
+- `read_xml` now pulls text out of attachments too: a mention's text goes
+  inline, and an upload adds its caption, alt text, or filename. Before, both
+  were dropped.
 
 ## [0.3.1] - 2026-07-01
 
