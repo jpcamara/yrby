@@ -21,7 +21,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tables with header cells, and ActionText attachments (uploads and
   mentions/embeds emit canonical `<action-text-attachment>` elements).
   Unknown block types degrade to readable paragraphs. Same schema-pinned
-  approach as `ueberdosis/tiptap-php`, one level deeper.
+  approach as `ueberdosis/tiptap-php`, working from the collab structure
+  rather than JSON.
 - Text extraction (`read_xml`) now includes attachment text: a mention's
   plain text joins its line; an upload contributes its caption, alt text, or
   filename. Previously attachments vanished from extracted text.

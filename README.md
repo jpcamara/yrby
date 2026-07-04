@@ -195,7 +195,7 @@ cells, and ActionText attachments — uploads and mentions/embeds both emit
 canonical `<action-text-attachment>` elements that ActionText can re-render.
 
 This is the schema-pinned approach `ueberdosis/tiptap-php` takes for
-ProseMirror JSON, applied one level deeper (directly on the collab structure).
+ProseMirror JSON, working directly on the collab structure instead of JSON.
 The pin: Lexxy 0.9.x's node set and serializer. An unknown block type degrades
 to a readable paragraph rather than disappearing. ProseMirror-shaped documents
 return `nil` and should keep using `read_xml`/`read_text` — a `Y::ProseMirror`

@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn lexxy_full_schema_doc_extracts_attachment_text_too() {
-        // The full-schema capture (see html.rs): attachments must now
+        // The full-schema capture (see lexical_html.rs): attachments must now
         // contribute readable text — a mention's plain text inline, an
         // upload's caption as its own line — while the divider stays silent.
         use yrs::updates::decoder::Decode;

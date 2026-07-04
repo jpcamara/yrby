@@ -9,8 +9,8 @@
 //! the same canonical document ActionText would store.
 //!
 //! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in pure
-//! PHP the same way — a schema-pinned renderer outside the JS runtime. This
-//! module does that one level deeper, from the collab (Yjs) structure itself.
+//! PHP — a schema-pinned renderer outside the JS runtime. This works from the
+//! collab (Yjs) structure rather than JSON.
 //!
 //! Storage model (verified against bytes captured from a live Lexxy editor):
 //! - Blocks are `Y.XmlText` with a `__type` attribute (`paragraph`, `heading`
@@ -47,14 +47,12 @@ const FMT_SUPERSCRIPT: u32 = 1 << 6;
 const FMT_HIGHLIGHT: u32 = 1 << 7;
 
 // Nesting caps. The block tree is walked on an explicit heap stack (no native
-// recursion), so these are not there to prevent a stack overflow — they bound
-// the work a single pathological or hostile document can demand. A real Lexxy
-// document nests a handful of levels deep (the torture fixture peaks at ~8);
-// 1024 is orders of magnitude beyond anything a human authors, and a subtree
-// deeper than that degrades (its content below the cap is dropped, its
-// enclosing tags still close) rather than being rendered. Inline links are
-// still walked recursively — they can only contain inline content, never
-// blocks — so their cap keeps that recursion shallow too.
+// recursion), so these don't prevent a stack overflow — they bound the work a
+// pathological or hostile document can demand. Real docs nest a handful of
+// levels deep (the torture fixture peaks at ~8); past 1024 a subtree is
+// dropped, but its enclosing tags still close. Inline links are still walked
+// recursively (their body is inline content, never blocks), so they carry the
+// same cap to keep that recursion shallow.
 const MAX_BLOCK_DEPTH: usize = 1024;
 const MAX_INLINE_DEPTH: usize = 1024;
 
@@ -348,7 +346,10 @@ fn is_inline_type(ty: &str) -> bool {
 /// so this shallow recursion can't overflow on a crafted link chain.
 fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
     let mut out = String::new();
-    // Per-run metadata from the preceding Y.Map embed.
+    // Format carries from the metadata Map that precedes each run. Lexxy always
+    // emits one Map immediately before its run, so this is exact; a run with no
+    // preceding Map would inherit the previous run's format (wrong, but only
+    // reachable from a doc Lexxy didn't produce).
     let mut format: u32 = 0;
     let mut is_tab = false;
     for d in t.diff(txn, YChange::identity) {
@@ -499,7 +500,10 @@ fn elem_str<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<String
 }
 
 /// A numeric attribute rendered the way JavaScript would print it (integers
-/// without a trailing `.0`).
+/// without a trailing `.0`). Assumes normal-magnitude, finite values — the
+/// only numbers here are file sizes and pixel dimensions. A value past i64 or
+/// a non-finite one would format differently from `String(n)` (e.g. `1e21`,
+/// `Infinity`), but no real attachment carries one.
 fn elem_num<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<String> {
     match e.get_attribute(txn, name) {
         Some(Out::Any(Any::Number(n))) => {
@@ -599,15 +603,11 @@ mod tests {
     use yrs::updates::decoder::Decode;
     use yrs::{Doc, Transact, Update};
 
-    /// The whole point: rendering the captured full-schema document must match
-    /// Lexxy's own serializer output byte for byte. The fixture pair was
-    /// captured together from one live editor session: `lexxy_full.bin` is the
-    /// synced Yjs state; `lexxy_full.html` is `lexxy-editor.value` for the same
-    /// document (headings h1-h6, every text format bit and the bold+italic
-    /// combination, escaping, links with/without title, bullet/numbered/check/
-    /// nested lists, quote, highlighted + plain code blocks with tabs, hr,
-    /// tables with header cells, mention and upload attachments, tab/linebreak,
-    /// and empty paragraphs).
+    /// Rendering the captured full-schema document must match Lexxy's own
+    /// serializer byte for byte. The pair was captured together from one live
+    /// editor session: `lexxy_full.bin` is the synced Yjs state, `lexxy_full.html`
+    /// is `lexxy-editor.value` for the same document. It covers every block and
+    /// format the schema map handles.
     #[test]
     fn renders_the_captured_lexxy_document_byte_for_byte() {
         let bytes = include_bytes!("fixtures/lexxy_full.bin");
@@ -621,20 +621,13 @@ mod tests {
         assert_eq!(render(&txn, &frag).unwrap(), expected.trim_end());
     }
 
-    /// A second live-Lexxy ground-truth pair, built to abuse nesting: blocks
-    /// inside table cells (list, quote, code block, mention), header states
-    /// 2 and 3 (header column / corner — Lexxy renders all non-zero states
-    /// as <th>), five levels of mixed bullet/number/check lists with links,
-    /// inline code and mentions at depth, a titled link inside a heading
-    /// wrapping formatted runs, adjacent single-character format runs
-    /// (including the full bold|italic|strike|underline|code stack), sub/sup
-    /// combined with strike/underline, tabs and blank lines and emoji inside
-    /// a code block, adjacent dividers, a full and an all-null upload
-    /// attachment (Lexical normalizes null alt/caption to empty strings),
-    /// CJK/RTL/emoji text, a pre-escaped-looking "&amp;" trap, and
-    /// whitespace-only paragraphs. Note Lexxy's own sanitized export DROPS
-    /// colSpan/rowSpan — matching it byte-for-byte means we correctly don't
-    /// emit them either.
+    /// A second live-Lexxy pair that stresses nesting: blocks inside table
+    /// cells, five-level mixed lists, formatted links in headings, the full
+    /// format stack, unicode and escaping edge cases, whitespace-only
+    /// paragraphs. The load-bearing structures are probed by name below.
+    /// One non-obvious parity fact worth stating: Lexxy's sanitized export
+    /// drops colSpan/rowSpan, so matching it byte-for-byte means not emitting
+    /// them either.
     #[test]
     fn renders_the_captured_torture_document_byte_for_byte() {
         let bytes = include_bytes!("fixtures/lexxy_torture.bin");

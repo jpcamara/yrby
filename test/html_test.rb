@@ -29,6 +29,11 @@ class HtmlTest < Minitest::Test
     assert_nil Y::Lexical.new(Y::Doc.new).to_html("nope")
   end
 
+  def test_to_html_rejects_extra_arguments
+    error = assert_raises(ArgumentError) { Y::Lexical.new(Y::Doc.new).to_html("root", "extra") }
+    assert_match(/given 2, expected 0\.\.1/, error.message)
+  end
+
   def test_to_html_reads_live_state
     doc = Y::Doc.new
     lexical = Y::Lexical.new(doc)

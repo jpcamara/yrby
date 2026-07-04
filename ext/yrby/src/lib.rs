@@ -359,10 +359,19 @@ impl RbLexical {
     /// the root is missing or not Lexical-shaped (e.g. a ProseMirror document)
     /// — never a lossy rendering of an unknown schema.
     fn to_html(&self, args: &[Value]) -> Result<Option<String>, Error> {
-        let name: String = if args.is_empty() {
-            "root".to_string()
-        } else {
-            TryConvert::try_convert(args[0])?
+        if args.len() > 1 {
+            let ruby = Ruby::get().unwrap();
+            return Err(Error::new(
+                ruby.exception_arg_error(),
+                format!(
+                    "wrong number of arguments (given {}, expected 0..1)",
+                    args.len()
+                ),
+            ));
+        }
+        let name: String = match args.first() {
+            Some(arg) => TryConvert::try_convert(*arg)?,
+            None => "root".to_string(),
         };
         let doc = &self.0;
         Ok(nogvl(move || {
