@@ -336,9 +336,9 @@ impl RbDoc {
 // ============================================================================
 
 /// A Lexical/Lexxy view over a `Y::Doc`. The schema knowledge (Lexxy 0.9.x
-/// node set, Lexxy's own serializer semantics) lives here, named for what it
-/// is — not on the schema-agnostic `Doc`. Holds a cheap clone of the doc
-/// (yrs `Doc` is an Arc handle), so it reads live state.
+/// node set and serializer semantics) lives here rather than on the
+/// schema-agnostic `Doc`. Holds a cheap clone of the doc (yrs `Doc` is an Arc
+/// handle), so it reads live state.
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
 /// inside `nogvl` and holds no lock across the GVL boundary.
@@ -356,8 +356,7 @@ impl RbLexical {
     /// editor. Output matches Lexxy's own serializer (the HTML a lexxy-editor
     /// submits to Rails) byte-for-byte on the reference fixture; see
     /// `lexical_html.rs` for the schema coverage and caveats. Returns nil when
-    /// the root is missing or not Lexical-shaped (e.g. a ProseMirror document)
-    /// — never a lossy rendering of an unknown schema.
+    /// the root is missing or not Lexical-shaped, e.g. a ProseMirror document.
     fn to_html(&self, args: &[Value]) -> Result<Option<String>, Error> {
         if args.len() > 1 {
             let ruby = Ruby::get().unwrap();

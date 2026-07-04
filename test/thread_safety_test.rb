@@ -105,9 +105,9 @@ class ThreadSafetyTest < Minitest::Test
   def test_concurrent_lexical_to_html_with_writers_does_not_deadlock
     # Y::Lexical holds an Arc handle to the same doc, so its renders contend
     # with writers on the doc's RwLock. Same guarantees as every other native
-    # op: one transaction per call, opened inside nogvl — this hammer both
-    # proves it under contention and would hang (CI timeout) if a future edit
-    # reintroduced a nested transaction in the render path.
+    # op: one transaction per call, opened inside nogvl. This exercises the
+    # render path under write contention; a future edit that reintroduced a
+    # nested transaction would deadlock and time out here.
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.expand_path("../ext/yrby/src/fixtures/lexxy_full.bin", __dir__)))
     lexical = Y::Lexical.new(doc)

@@ -47,12 +47,11 @@ const FMT_SUPERSCRIPT: u32 = 1 << 6;
 const FMT_HIGHLIGHT: u32 = 1 << 7;
 
 // Nesting caps. The block tree is walked on an explicit heap stack (no native
-// recursion), so these don't prevent a stack overflow — they bound the work a
-// pathological or hostile document can demand. Real docs nest a handful of
-// levels deep (the torture fixture peaks at ~8); past 1024 a subtree is
-// dropped, but its enclosing tags still close. Inline links are still walked
-// recursively (their body is inline content, never blocks), so they carry the
-// same cap to keep that recursion shallow.
+// recursion), so these don't prevent a stack overflow — they just bound how
+// deep the renderer descends. Real docs nest a handful of levels deep (the
+// torture fixture peaks at ~8); past 1024 a subtree is dropped, but its
+// enclosing tags still close. Inline links are still walked recursively (their
+// body is inline content, never blocks), so they carry the same cap.
 const MAX_BLOCK_DEPTH: usize = 1024;
 const MAX_INLINE_DEPTH: usize = 1024;
 
@@ -66,14 +65,13 @@ enum Work {
 }
 
 /// Render a Lexical/Lexxy-shaped XML root to HTML, or `None` when the root
-/// isn't Lexical-shaped. Lexical marks every node with a `__type` attribute;
-/// a root whose children carry none (a ProseMirror document, whose blocks are
-/// plain `<paragraph>`-style elements) is a different schema — refuse rather
-/// than emit a lossy rendering of it.
+/// isn't Lexical-shaped. Lexical marks every node with a `__type` attribute; a
+/// root whose children carry none — a ProseMirror document, say, whose blocks
+/// are plain `<paragraph>` elements — is a foreign schema, and render returns
+/// `None` for it rather than a lossy guess.
 ///
-/// Within a Lexical document, an *individual* unknown node type still renders
-/// its text content in a `<p>` rather than disappearing, so a Lexxy upgrade
-/// that adds a node degrades to readable output instead of silent loss.
+/// A `__type` the renderer doesn't recognize is handled differently: the node
+/// renders its text in a `<p>`, so a Lexxy release that adds one stays readable.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     if !is_lexical_shaped(txn, fragment) {
         return None;
@@ -127,8 +125,8 @@ fn str_attr<T: ReadTxn>(txn: &T, t: &XmlTextRef, name: &str) -> Option<String> {
 /// appending HTML to `out`. Container blocks (lists, tables, cells, list
 /// items) push their children back as more work plus a `Close` for their end
 /// tag; leaf blocks (paragraphs, headings, quotes, code) render in full on the
-/// spot. Doing this on the heap rather than the native call stack means a
-/// document nested arbitrarily deep costs memory, not a stack overflow.
+/// spot. The stack lives on the heap, so nesting depth can't overflow the
+/// native call stack.
 fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlTextRef, out: &mut String) {
     let mut stack: Vec<Work> = vec![Work::Open(root.clone(), 0)];
     while let Some(work) = stack.pop() {
@@ -250,12 +248,11 @@ fn open_block<T: ReadTxn>(
     }
 }
 
-/// Defer a container's block children onto the stack, followed (below them) by
-/// its closing tag, so the children render in order and the tag closes after.
-/// Past `MAX_BLOCK_DEPTH` the children are dropped — the container still closes,
-/// keeping the output well formed — so a pathologically deep tree can't demand
-/// unbounded work. `only_lists` renders just nested-list children (list items,
-/// whose inline content the caller has already emitted).
+/// Defer a container's block children onto the stack, with its closing tag
+/// below them, so the children render in order and the tag closes after. Past
+/// `MAX_BLOCK_DEPTH` the children are dropped (the container still closes, so
+/// the output stays well formed). `only_lists` keeps just nested-list children,
+/// for list items whose inline content the caller has already emitted.
 fn push_block_children<T: ReadTxn>(
     txn: &T,
     t: &XmlTextRef,
@@ -277,7 +274,7 @@ fn push_block_children<T: ReadTxn>(
     }
 }
 
-/// `<li>`: attribute order matches Lexxy's export exactly — checked items put
+/// `<li>`: attribute order follows Lexxy's export — checked items put
 /// `aria-checked` before `value`; items holding a nested list append the
 /// `lexxy-nested-listitem` class after `value`. Inline content renders now;
 /// the nested list (if any) is deferred to the stack.
@@ -342,8 +339,8 @@ fn is_inline_type(ty: &str) -> bool {
 /// links, and inline decorators. Nested block children are NOT rendered here
 /// (the block renderers handle them), so a list item's text doesn't duplicate
 /// its nested list. `depth` counts inline-link nesting only (a link's body is
-/// itself inline content); past `MAX_INLINE_DEPTH` a link renders as flat text
-/// so this shallow recursion can't overflow on a crafted link chain.
+/// itself inline content); past `MAX_INLINE_DEPTH` a link renders as flat text,
+/// capping the recursion.
 fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
     let mut out = String::new();
     // Format carries from the metadata Map that precedes each run. Lexxy always
@@ -400,7 +397,7 @@ fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
     out
 }
 
-/// One text run with Lexical's format bitmask, exactly as Lexxy exports it.
+/// One text run with Lexical's format bitmask, as Lexxy's exporter wraps it.
 fn render_run(text: &str, format: u32) -> String {
     let mut html = escape_text(text);
 
@@ -758,10 +755,9 @@ mod tests {
 
     #[test]
     fn deeply_nested_blocks_do_not_overflow_the_stack() {
-        // The block tree is walked on the heap, so a depth that would blow the
-        // native call stack (tens of thousands of frames on a small worker
-        // thread) renders fine — this is the regression guard for the crash.
-        // Runs on a 512 KiB thread to prove it doesn't rely on a large stack.
+        // Nesting this deep would overflow the native call stack (tens of
+        // thousands of frames) under recursion; on the heap it renders fine.
+        // Runs on a 512 KiB thread so it can't pass just by having room to spare.
         let handle = std::thread::Builder::new()
             .stack_size(512 * 1024)
             .spawn(|| {
@@ -796,8 +792,8 @@ mod tests {
     #[test]
     fn deeply_nested_links_do_not_overflow_the_stack() {
         // Links recurse (their body is inline content), so they carry their own
-        // depth cap. A crafted link-in-link chain renders as flat nested <a>s
-        // up to the cap, then bare text — never a crash.
+        // depth cap. A link-in-link chain renders as nested <a>s up to the cap,
+        // then bare text.
         use yrs::{XmlFragment, XmlTextPrelim};
         let doc = Doc::new();
         let root = doc.get_or_insert_xml_fragment("root");
