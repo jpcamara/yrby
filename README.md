@@ -195,9 +195,10 @@ styles editors use — Tiptap's `bulletList`/`bold` and prosemirror-schema-basic
 
 It covers paragraphs, headings, blockquotes, bullet/ordered/task lists, code
 blocks, links, images, mentions, details, hard breaks, horizontal rules,
-tables, and every text mark. A table renders as semantic `<table><tbody>`,
-without the column-width styling Tiptap's editor view adds. A root that isn't
-ProseMirror — a Lexical document, say — returns `nil`.
+tables, text styles (color, font family), and every text mark. A table renders
+as semantic `<table><tbody>`, without the column-width styling Tiptap's editor
+view adds. A root that isn't ProseMirror — a Lexical document, say — returns
+`nil`.
 
 ### Protocol codec (module functions)
 

@@ -20,6 +20,7 @@
 //! underline, highlight, then subscript/superscript. `code` excludes every
 //! other mark, so a code run is just `<code>`.
 
+use std::sync::Arc;
 use yrs::types::text::YChange;
 use yrs::types::Attrs;
 use yrs::{
@@ -358,10 +359,70 @@ fn render_run(text: &str, marks: Option<&Attrs>) -> String {
     if has(marks, &["bold", "strong"]) {
         html = wrap(html, "strong");
     }
+    if let Some(Any::Map(style)) = marks.get("textStyle") {
+        let css = text_style_css(style);
+        if !css.is_empty() {
+            html = format!("<span style=\"{}\">{html}</span>", escape_attr(&css));
+        }
+    }
     if let Some(Any::Map(link)) = marks.get("link") {
         html = wrap_link(html, link);
     }
     html
+}
+
+/// The `style` string for a textStyle mark (Tiptap's Color/FontFamily/etc.
+/// extensions all store their value as a textStyle attribute). Attributes are
+/// camelCase CSS property names; unset ones sit in the map as explicit nulls.
+/// Keys sort alphabetically, which is the order Tiptap serializes (color
+/// before font-family). Hex colors convert to rgb() because that's how they
+/// come back out of the browser's style attribute; other values pass through.
+fn text_style_css(style: &std::collections::HashMap<String, Any>) -> String {
+    let mut pairs: Vec<(&String, &Arc<str>)> = style
+        .iter()
+        .filter_map(|(k, v)| match v {
+            Any::String(s) => Some((k, s)),
+            _ => None,
+        })
+        .collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    let mut css = String::new();
+    for (key, value) in pairs {
+        if !css.is_empty() {
+            css.push(' ');
+        }
+        // camelCase -> kebab-case: fontFamily -> font-family.
+        for ch in key.chars() {
+            if ch.is_ascii_uppercase() {
+                css.push('-');
+                css.push(ch.to_ascii_lowercase());
+            } else {
+                css.push(ch);
+            }
+        }
+        css.push_str(": ");
+        css.push_str(&hex_to_rgb(value).unwrap_or_else(|| value.to_string()));
+        css.push(';');
+    }
+    css
+}
+
+/// `#rgb`/`#rrggbb` -> `rgb(r, g, b)`, matching the browser's style-attribute
+/// serialization. Anything else (named colors, rgb()/hsl(), fonts) is None.
+fn hex_to_rgb(value: &str) -> Option<String> {
+    let hex = value.strip_prefix('#')?;
+    let (r, g, b) = match hex.len() {
+        3 => {
+            let d = |i: usize| u8::from_str_radix(&hex[i..=i].repeat(2), 16);
+            (d(0).ok()?, d(1).ok()?, d(2).ok()?)
+        }
+        6 => {
+            let d = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16);
+            (d(0).ok()?, d(2).ok()?, d(4).ok()?)
+        }
+        _ => return None,
+    };
+    Some(format!("rgb({r}, {g}, {b})"))
 }
 
 /// `<a>` with Tiptap's attribute order (target, rel, class, href, title),
@@ -591,6 +652,40 @@ mod tests {
             render(&txn, &frag).unwrap(),
             include_str!("fixtures/prosemirror_mention.html")
         );
+    }
+
+    /// textStyle (captured from Tiptap's Color/FontFamily extensions): hex
+    /// colors come back out of the browser as rgb(), rgb() strings pass
+    /// through, font-family joins the same span, and the span wraps outside
+    /// bold.
+    #[test]
+    fn renders_the_captured_textstyle_document_byte_for_byte() {
+        let doc = doc_from(include_bytes!("fixtures/prosemirror_textstyle.bin"));
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("default").unwrap();
+        assert_eq!(
+            render(&txn, &frag).unwrap(),
+            include_str!("fixtures/prosemirror_textstyle.html")
+        );
+    }
+
+    #[test]
+    fn text_style_converts_hex_and_kebab_cases_keys() {
+        let mut style = HashMap::new();
+        style.insert("color".to_string(), Any::String("#ff0000".into()));
+        style.insert(
+            "fontFamily".to_string(),
+            Any::String("Georgia, serif".into()),
+        );
+        style.insert("fontSize".to_string(), Any::Null); // unset: skipped
+        assert_eq!(
+            text_style_css(&style),
+            "color: rgb(255, 0, 0); font-family: Georgia, serif;"
+        );
+
+        assert_eq!(hex_to_rgb("#0f8"), Some("rgb(0, 255, 136)".to_string()));
+        assert_eq!(hex_to_rgb("rebeccapurple"), None);
+        assert_eq!(hex_to_rgb("#12345"), None);
     }
 
     /// The details family follows tiptap-php's renderHTML (the Tiptap

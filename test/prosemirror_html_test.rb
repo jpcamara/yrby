@@ -81,6 +81,16 @@ class ProseMirrorHtmlTest < Minitest::Test
     assert_includes html, ">@u7</span>", "a label-less mention falls back to its id"
   end
 
+  def test_to_html_renders_text_styles
+    expected = File.read(File.join(FIXTURES, "prosemirror_textstyle.html"))
+    html = prosemirror_for("prosemirror_textstyle").to_html
+
+    assert_equal expected, html
+    assert_includes html, '<span style="color: rgb(255, 0, 0);">red</span>'
+    assert_includes html,
+                    '<span style="color: rgb(0, 128, 0); font-family: monospace;"><strong>both-bold</strong></span>'
+  end
+
   def test_to_html_rejects_extra_arguments
     error = assert_raises(ArgumentError) do
       Y::ProseMirror.new(Y::Doc.new).to_html("default", "extra")
