@@ -195,6 +195,14 @@ fn open_block<T: ReadTxn>(
         // text block.
         _ => {
             if has_element_child(txn, e) {
+                // Its direct text runs still render, before the children.
+                // (Not render_inline: that would also render inline element
+                // children the stack is about to walk, duplicating them.)
+                for node in e.children(txn) {
+                    if let XmlOut::Text(t) = node {
+                        render_text_runs(txn, &t, out);
+                    }
+                }
                 push_block_children(txn, e, depth, "", stack);
             } else {
                 let inline = render_inline(txn, e, 0);
@@ -328,41 +336,45 @@ fn render_text_runs<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut String) {
     }
 }
 
-/// Wrap one text run in its marks. `code` excludes all other marks; otherwise
-/// marks nest innermost-first: subscript/superscript, highlight, underline,
-/// strike, italic, bold, then link on the outside.
+/// Wrap one text run in its marks, nesting innermost-first:
+/// subscript/superscript, highlight, underline, strike, italic, bold, a
+/// textStyle span, then link on the outside. `code` renders alone among the
+/// formatting marks (Tiptap's Code mark excludes them all), but a link still
+/// wraps it — Tiptap can't produce code+link, prosemirror-schema-basic can,
+/// and dropping the link would lose the href.
 fn render_run(text: &str, marks: Option<&Attrs>) -> String {
     let mut html = escape_text(text);
     let Some(marks) = marks else {
         return html;
     };
     if has(marks, &["code"]) {
-        return format!("<code>{html}</code>");
-    }
-    if has(marks, &["subscript", "sub"]) {
-        html = wrap(html, "sub");
-    } else if has(marks, &["superscript", "sup"]) {
-        html = wrap(html, "sup");
-    }
-    if has(marks, &["highlight"]) {
-        html = wrap(html, "mark");
-    }
-    if has(marks, &["underline", "u"]) {
-        html = wrap(html, "u");
-    }
-    if has(marks, &["strike", "s"]) {
-        html = wrap(html, "s");
-    }
-    if has(marks, &["italic", "em"]) {
-        html = wrap(html, "em");
-    }
-    if has(marks, &["bold", "strong"]) {
-        html = wrap(html, "strong");
-    }
-    if let Some(Any::Map(style)) = marks.get("textStyle") {
-        let css = text_style_css(style);
-        if !css.is_empty() {
-            html = format!("<span style=\"{}\">{html}</span>", escape_attr(&css));
+        html = wrap(html, "code");
+    } else {
+        if has(marks, &["subscript", "sub"]) {
+            html = wrap(html, "sub");
+        } else if has(marks, &["superscript", "sup"]) {
+            html = wrap(html, "sup");
+        }
+        if has(marks, &["highlight"]) {
+            html = wrap(html, "mark");
+        }
+        if has(marks, &["underline", "u"]) {
+            html = wrap(html, "u");
+        }
+        if has(marks, &["strike", "s"]) {
+            html = wrap(html, "s");
+        }
+        if has(marks, &["italic", "em"]) {
+            html = wrap(html, "em");
+        }
+        if has(marks, &["bold", "strong"]) {
+            html = wrap(html, "strong");
+        }
+        if let Some(Any::Map(style)) = marks.get("textStyle") {
+            let css = text_style_css(style);
+            if !css.is_empty() {
+                html = format!("<span style=\"{}\">{html}</span>", escape_attr(&css));
+            }
         }
     }
     if let Some(Any::Map(link)) = marks.get("link") {
@@ -714,6 +726,38 @@ mod tests {
              <div data-type=\"detailsContent\"><p>The body.</p></div></details>\
              <details><summary></summary></details>"
         );
+    }
+
+    /// prosemirror-schema-basic's `code` mark has no excludes, so a code run
+    /// can also carry a link; the link must survive. (Tiptap's Code mark
+    /// excludes everything, so this shape only comes from schema-basic docs.)
+    #[test]
+    fn a_code_run_keeps_its_link() {
+        let mut link = HashMap::new();
+        link.insert("href".to_string(), Any::String("https://e.com".into()));
+        let mut a = Attrs::new();
+        a.insert("code".into(), Any::Map(Arc::new(HashMap::new())));
+        a.insert("link".into(), Any::Map(Arc::new(link)));
+        assert_eq!(
+            render_run("x", Some(&a)),
+            "<a href=\"https://e.com\"><code>x</code></a>"
+        );
+    }
+
+    /// An unknown block holding both text and child blocks keeps the text.
+    #[test]
+    fn an_unknown_block_with_mixed_content_keeps_its_text() {
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("default");
+        {
+            let mut txn = doc.transact_mut();
+            let callout = frag.push_back(&mut txn, XmlElementPrelim::empty("callout"));
+            callout.push_back(&mut txn, XmlTextPrelim::new("intro"));
+            let p = callout.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+            p.push_back(&mut txn, XmlTextPrelim::new("body"));
+        }
+        let txn = doc.transact();
+        assert_eq!(render(&txn, &frag).unwrap(), "intro<p>body</p>");
     }
 
     /// An unknown inline node keeps its text instead of vanishing.
