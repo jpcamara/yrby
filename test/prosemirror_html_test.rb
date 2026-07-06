@@ -71,6 +71,16 @@ class ProseMirrorHtmlTest < Minitest::Test
     end
   end
 
+  def test_to_html_renders_mentions
+    expected = File.read(File.join(FIXTURES, "prosemirror_mention.html"))
+    html = prosemirror_for("prosemirror_mention").to_html
+
+    assert_equal expected, html
+    assert_includes html, '<span data-type="mention" data-id="u42" data-label="Alice"'
+    assert_includes html, ">@Alice</span>"
+    assert_includes html, ">@u7</span>", "a label-less mention falls back to its id"
+  end
+
   def test_to_html_rejects_extra_arguments
     error = assert_raises(ArgumentError) do
       Y::ProseMirror.new(Y::Doc.new).to_html("default", "extra")

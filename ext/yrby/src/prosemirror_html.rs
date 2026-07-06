@@ -10,9 +10,11 @@
 //!
 //! Output follows `ueberdosis/tiptap-php` (the maintained PHP renderer for
 //! ProseMirror JSON) and matches Tiptap's own `getHTML()` byte for byte on the
-//! captured fixture, with one deliberate exception: a table renders as the
-//! semantic `<table><tbody>…`, without the `<colgroup>`/`min-width` styling
-//! Tiptap's editor view injects (tiptap-php drops it too).
+//! captured fixtures — including mentions — with one deliberate exception: a
+//! table renders as the semantic `<table><tbody>…`, without the
+//! `<colgroup>`/`min-width` styling Tiptap's editor view injects (tiptap-php
+//! drops it too). The details family follows tiptap-php's renderHTML, since
+//! that Tiptap extension is Pro-only.
 //!
 //! Marks nest in a fixed order (outermost first): link, bold, italic, strike,
 //! underline, highlight, then subscript/superscript. `code` excludes every
@@ -92,7 +94,7 @@ fn open_block<T: ReadTxn>(
 ) {
     match e.tag().as_ref() {
         "paragraph" => {
-            let inline = render_inline(txn, e);
+            let inline = render_inline(txn, e, 0);
             out.push_str("<p>");
             out.push_str(&inline);
             out.push_str("</p>");
@@ -103,7 +105,7 @@ fn open_block<T: ReadTxn>(
             out.push_str("<h");
             out.push(tag);
             out.push('>');
-            out.push_str(&render_inline(txn, e));
+            out.push_str(&render_inline(txn, e, 0));
             out.push_str("</h");
             out.push(tag);
             out.push('>');
@@ -160,6 +162,30 @@ fn open_block<T: ReadTxn>(
         "tableRow" | "table_row" => open_container(txn, e, depth, "<tr>", "</tr>", out, stack),
         "tableHeader" | "table_header" => open_cell(txn, e, depth, "th", "</th>", out, stack),
         "tableCell" | "table_cell" => open_cell(txn, e, depth, "td", "</td>", out, stack),
+        // The details family follows tiptap-php (the extension is Tiptap Pro,
+        // so there's no free getHTML() to capture against).
+        "details" => {
+            let open = if bool_attr(txn, e, "open") {
+                "<details open=\"open\">"
+            } else {
+                "<details>"
+            };
+            open_container(txn, e, depth, open, "</details>", out, stack);
+        }
+        "detailsSummary" | "details_summary" => {
+            out.push_str("<summary>");
+            out.push_str(&render_inline(txn, e, 0));
+            out.push_str("</summary>");
+        }
+        "detailsContent" | "details_content" => open_container(
+            txn,
+            e,
+            depth,
+            "<div data-type=\"detailsContent\">",
+            "</div>",
+            out,
+            stack,
+        ),
         "horizontalRule" | "horizontal_rule" => out.push_str("<hr>"),
         "image" => render_image(txn, e, out),
         "hardBreak" | "hard_break" => out.push_str("<br>"),
@@ -170,7 +196,7 @@ fn open_block<T: ReadTxn>(
             if has_element_child(txn, e) {
                 push_block_children(txn, e, depth, "", stack);
             } else {
-                let inline = render_inline(txn, e);
+                let inline = render_inline(txn, e, 0);
                 if !inline.is_empty() {
                     out.push_str("<p>");
                     out.push_str(&inline);
@@ -242,8 +268,10 @@ fn push_block_children<T: ReadTxn>(
 }
 
 /// Render a text block's inline content: text runs (with their marks) and
-/// inline elements (a hard break).
-fn render_inline<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> String {
+/// inline element nodes (hard breaks, mentions, inline images). An unknown
+/// inline node keeps its text instead of vanishing; `depth` caps that
+/// recursion on a crafted nest of unknowns.
+fn render_inline<T: ReadTxn>(txn: &T, e: &XmlElementRef, depth: usize) -> String {
     let mut out = String::new();
     for node in e.children(txn) {
         match node {
@@ -251,12 +279,43 @@ fn render_inline<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> String {
             XmlOut::Element(child) => match child.tag().as_ref() {
                 "hardBreak" | "hard_break" => out.push_str("<br>"),
                 "image" => render_image(txn, &child, &mut out),
-                _ => {} // other inline nodes carry no rendered form here
+                "mention" => render_mention(txn, &child, &mut out),
+                _ => {
+                    if depth < MAX_DEPTH {
+                        out.push_str(&render_inline(txn, &child, depth + 1));
+                    }
+                }
             },
             XmlOut::Fragment(_) => {}
         }
     }
     out
+}
+
+/// A mention, as Tiptap's Mention extension serializes it (no app-configured
+/// HTMLAttributes): `data-type`, `data-id`, `data-label` when present, the
+/// suggestion char, and `@label` (falling back to `@id`) as the text.
+fn render_mention<T: ReadTxn>(txn: &T, e: &XmlElementRef, out: &mut String) {
+    let id = str_attr(txn, e, "id");
+    let label = str_attr(txn, e, "label");
+    let char = str_attr(txn, e, "mentionSuggestionChar").unwrap_or_else(|| "@".to_string());
+    out.push_str("<span data-type=\"mention\"");
+    if let Some(id) = &id {
+        out.push_str(" data-id=\"");
+        out.push_str(&escape_attr(id));
+        out.push('"');
+    }
+    if let Some(label) = &label {
+        out.push_str(" data-label=\"");
+        out.push_str(&escape_attr(label));
+        out.push('"');
+    }
+    out.push_str(" data-mention-suggestion-char=\"");
+    out.push_str(&escape_attr(&char));
+    out.push_str("\">");
+    out.push_str(&escape_text(&char));
+    out.push_str(&escape_text(&label.or(id).unwrap_or_default()));
+    out.push_str("</span>");
 }
 
 /// Emit each formatted run of a Y.XmlText.
@@ -305,11 +364,11 @@ fn render_run(text: &str, marks: Option<&Attrs>) -> String {
     html
 }
 
-/// `<a>` with Tiptap's attribute order (target, rel, href), skipping any that
-/// are absent or null.
+/// `<a>` with Tiptap's attribute order (target, rel, class, href, title),
+/// skipping any that are absent or null.
 fn wrap_link(inner: String, link: &std::collections::HashMap<String, Any>) -> String {
     let mut out = String::from("<a");
-    for key in ["target", "rel", "href"] {
+    for key in ["target", "rel", "class", "href", "title"] {
         if let Some(Any::String(v)) = link.get(key) {
             out.push(' ');
             out.push_str(key);
@@ -504,6 +563,79 @@ mod tests {
             render_run("site", Some(&a)),
             "<a target=\"_blank\" rel=\"noopener\" href=\"https://e.com?a=1&amp;b=2\">site</a>"
         );
+
+        // class and title (Link's remaining attrs) keep Tiptap's serialized
+        // order: target, rel, class, href, title. Null-valued attrs skip.
+        let mut link = HashMap::new();
+        link.insert("href".to_string(), Any::String("https://d.example".into()));
+        link.insert("class".to_string(), Any::String("doc-link".into()));
+        link.insert("title".to_string(), Any::String("A Doc".into()));
+        link.insert("target".to_string(), Any::Null);
+        let mut a = Attrs::new();
+        a.insert("link".into(), Any::Map(Arc::new(link)));
+        assert_eq!(
+            render_run("the doc", Some(&a)),
+            "<a class=\"doc-link\" href=\"https://d.example\" title=\"A Doc\">the doc</a>"
+        );
+    }
+
+    /// Mentions (captured from Tiptap's Mention extension): the fixture holds
+    /// one mention with a label, one with only an id, and a link carrying
+    /// class and title.
+    #[test]
+    fn renders_the_captured_mention_document_byte_for_byte() {
+        let doc = doc_from(include_bytes!("fixtures/prosemirror_mention.bin"));
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("default").unwrap();
+        assert_eq!(
+            render(&txn, &frag).unwrap(),
+            include_str!("fixtures/prosemirror_mention.html")
+        );
+    }
+
+    /// The details family follows tiptap-php's renderHTML (the Tiptap
+    /// extension is Pro-only, so tiptap-php is the reference).
+    #[test]
+    fn renders_the_details_family_per_tiptap_php() {
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("default");
+        {
+            let mut txn = doc.transact_mut();
+            let details = frag.push_back(&mut txn, XmlElementPrelim::empty("details"));
+            details.insert_attribute(&mut txn, "open", true);
+            let summary = details.push_back(&mut txn, XmlElementPrelim::empty("detailsSummary"));
+            summary.push_back(&mut txn, XmlTextPrelim::new("More info"));
+            let content = details.push_back(&mut txn, XmlElementPrelim::empty("detailsContent"));
+            let p = content.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+            p.push_back(&mut txn, XmlTextPrelim::new("The body."));
+
+            let closed = frag.push_back(&mut txn, XmlElementPrelim::empty("details"));
+            closed.push_back(&mut txn, XmlElementPrelim::empty("detailsSummary"));
+        }
+        let txn = doc.transact();
+        assert_eq!(
+            render(&txn, &frag).unwrap(),
+            "<details open=\"open\"><summary>More info</summary>\
+             <div data-type=\"detailsContent\"><p>The body.</p></div></details>\
+             <details><summary></summary></details>"
+        );
+    }
+
+    /// An unknown inline node keeps its text instead of vanishing.
+    #[test]
+    fn an_unknown_inline_node_keeps_its_text() {
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("default");
+        {
+            let mut txn = doc.transact_mut();
+            let p = frag.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+            p.push_back(&mut txn, XmlTextPrelim::new("see "));
+            let custom = p.push_back(&mut txn, XmlElementPrelim::empty("customInline"));
+            custom.push_back(&mut txn, XmlTextPrelim::new("kept"));
+            p.push_back(&mut txn, XmlTextPrelim::new(" here"));
+        }
+        let txn = doc.transact();
+        assert_eq!(render(&txn, &frag).unwrap(), "<p>see kept here</p>");
     }
 
     /// The prosemirror-schema-basic spellings (snake_case nodes, `strong`/`em`
