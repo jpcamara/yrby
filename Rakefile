@@ -38,21 +38,29 @@ namespace :release do
       two gems together when the shared core API changes. JP runs the push steps
       (RubyGems MFA, npm auth, and the default-branch guard).
 
+      Each package has its own tag, and pushing the tag triggers the Release
+      workflow, which creates the GitHub release from the CHANGELOG. Core keeps
+      the bare `v` tags (the precompiled-gems workflow already runs on `v*`);
+      the companions are prefixed so the versions don't collide.
+
       1) yrby #{core}  — core gem, native extension; precompiled platform gems via CI
          a. bump lib/y/version.rb + CHANGELOG.md, then commit
          b. git tag v#{core} && git push origin main "v#{core}"
-         c. the "Precompiled gems" workflow builds 8 platform gems + the source gem
+         c. the "Precompiled gems" workflow builds 8 platform gems + the source gem;
+            the Release workflow creates the GitHub release
          d. gh run download <run-id> --dir tmp/ ; cp tmp/**/*.gem pkg/
          e. for g in pkg/yrby-#{core}*.gem; do gem push "$g" || break; done   # 9 gems (gem push takes ONE at a time)
 
       2) yrby-rails #{cable}  — gem, pure Ruby; one gem, no precompilation
          a. bump lib/yrby/rails/version.rb + CHANGELOG-rails.md, commit
-         b. rake rails_gem:build
-         c. gem push pkg/yrby-rails-#{cable}.gem
+         b. git tag yrby-rails-v#{cable} && git push origin "yrby-rails-v#{cable}"
+         c. rake rails_gem:build
+         d. gem push pkg/yrby-rails-#{cable}.gem
 
       3) yrby-client #{npm}  — npm package (client SDK: provider + sync engine + reliable delivery)
          a. bump packages/client/package.json version, commit
-         b. cd packages/client && npm publish
+         b. git tag yrby-client-v#{npm} && git push origin "yrby-client-v#{npm}"
+         c. cd packages/client && npm publish
 
       The actioncable gem pins a minimum `yrby` (a floor, so it tolerates
       newer core releases); only raise it when it needs a newer core API.
