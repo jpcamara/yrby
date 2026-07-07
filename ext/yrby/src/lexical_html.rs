@@ -205,6 +205,20 @@ fn open_block<T: ReadTxn>(
             push_block_children(txn, t, depth, close, false, stack);
         }
         "listitem" => open_listitem(txn, t, depth, out, stack),
+        "image_gallery" => {
+            // Adjacent previewable images grouped by Lexxy's gallery node.
+            // The class carries the image count (ActionText's convention).
+            let count = t
+                .diff(txn, YChange::identity)
+                .into_iter()
+                .filter(|d| matches!(d.insert, Out::YXmlElement(_)))
+                .count();
+            out.push_str("<div class=\"attachment-gallery attachment-gallery--");
+            out.push_str(&count.to_string());
+            out.push_str("\">");
+            out.push_str(&render_inline(txn, t, 0));
+            out.push_str("</div>");
+        }
         "table" | "wrapped_table_node" => {
             out.push_str("<figure class=\"lexxy-content__table-wrapper\"><table><tbody>");
             push_block_children(txn, t, depth, "</tbody></table></figure>", false, stack);
@@ -675,6 +689,25 @@ mod tests {
         ] {
             assert!(html.contains(probe), "{what}: missing {probe}");
         }
+    }
+
+    /// An image gallery (adjacent previewable images grouped by Lexxy's
+    /// gallery node) renders as ActionText's classed div. Captured live, like
+    /// the other pairs: three image attachments between two paragraphs.
+    #[test]
+    fn renders_the_captured_gallery_document_byte_for_byte() {
+        let bytes = include_bytes!("fixtures/lexxy_gallery.bin");
+        let expected = include_str!("fixtures/lexxy_gallery.html");
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(bytes).unwrap())
+            .unwrap();
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let html = render(&txn, &frag).unwrap();
+        assert_eq!(html, expected.trim_end());
+        assert!(html.contains("<div class=\"attachment-gallery attachment-gallery--3\">"));
+        assert_eq!(html.matches("<action-text-attachment").count(), 3);
     }
 
     #[test]

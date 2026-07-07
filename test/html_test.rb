@@ -98,6 +98,18 @@ class HtmlTest < Minitest::Test
     assert_includes text, "@Dave", "mention inside a table cell extracted"
   end
 
+  def test_to_html_renders_image_galleries
+    # Adjacent previewable images grouped by Lexxy's gallery node render as
+    # ActionText's classed div (count in the class). Captured live.
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_gallery.bin")))
+    expected = File.read(File.join(FIXTURES, "lexxy_gallery.html")).chomp
+    html = Y::Lexical.new(doc).to_html
+
+    assert_equal expected, html
+    assert_includes html, '<div class="attachment-gallery attachment-gallery--3">'
+  end
+
   def test_read_text_extraction_includes_attachments
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_full.bin")))

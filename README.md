@@ -187,7 +187,7 @@ running a browser.
 It handles the whole Lexxy 0.9.x node set: paragraphs, headings, every text
 format and their combinations (bold, italic, strike, underline, code, sub,
 sup, highlight), links, the four list types and nesting, blockquotes, code
-blocks, tabs and soft breaks, horizontal rules, tables with header cells, and
+blocks, tabs and soft breaks, horizontal rules, tables with header cells, image galleries, and
 ActionText attachments (uploads and mentions both emit `<action-text-attachment>`
 elements that ActionText can re-render).
 

@@ -75,6 +75,12 @@ const state = { root: { type: "root", ...elem, children: [
   table(
     tr(td(1, p(t("H1", 0))), td(1, p(t("H2", 0)))),
     tr(td(0, p(t("a", B))), td(0, p()))),
+  { type: "image_gallery", ...elem, children: [1, 2].map((n) => ({
+    type: "action_text_attachment", version: 1, tagName: "action-text-attachment",
+    sgid: `SGID_G${n}`, src: `${BASE}/files/g${n}.png`, previewable: true,
+    altText: `G${n}`, caption: null, contentType: "image/png",
+    fileName: `g${n}.png`, fileSize: n, width: 100, height: 80,
+  })) },
   p(t("tail 🚀 你好", 0)),
   p(),
 ] } }
@@ -104,7 +110,7 @@ const stateB64 = await js("window.__yrb.encodeState()")
 if (typeof editorHtml !== "string" || typeof stateB64 !== "string") {
   fail(`could not read editor value/state (value: ${typeof editorHtml}, state: ${typeof stateB64})`)
 }
-for (const [what, marker] of [["heading", "<h2>"], ["table", "</table>"], ["code block", "<pre"], ["checklist", "aria-checked"], ["divider", "<hr>"]]) {
+for (const [what, marker] of [["heading", "<h2>"], ["table", "</table>"], ["code block", "<pre"], ["checklist", "aria-checked"], ["divider", "<hr>"], ["gallery", 'class="attachment-gallery attachment-gallery--2"']]) {
   if (!editorHtml.includes(marker)) fail(`editor value is missing ${what} (${marker}); head: ${editorHtml.slice(0, 200)}`)
 }
 
