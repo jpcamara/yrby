@@ -114,7 +114,7 @@ for (const [what, marker] of [["heading", "<h2>"], ["table", "</table>"], ["code
   if (!editorHtml.includes(marker)) fail(`editor value is missing ${what} (${marker}); head: ${editorHtml.slice(0, 200)}`)
 }
 
-const actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb", "lexical", "root"], {
+const actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb", "root"], {
   input: Buffer.from(stateB64, "base64"),
   maxBuffer: 64 * 1024 * 1024,
 }).toString()
