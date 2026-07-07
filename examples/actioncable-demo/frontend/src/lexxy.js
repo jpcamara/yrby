@@ -34,7 +34,21 @@ const provider = new YrbyProvider(ydoc, consumer, "DocumentChannel", { id: docum
 const awareness = provider.awareness // the provider owns presence; read it back
 
 // Exposed for the browser console (parity with the Tiptap page's window.__yrb).
-window.__yrb = { provider, ydoc, awareness, user }
+// encodeState feeds the render-parity e2e: the doc's full state as base64.
+window.__yrb = {
+  provider,
+  ydoc,
+  awareness,
+  user,
+  encodeState: () => {
+    const bytes = Y.encodeStateAsUpdate(ydoc)
+    let binary = ""
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    }
+    return btoa(binary)
+  },
+}
 
 const setStatus = (state, text) => {
   statusEl.dataset.state = state
