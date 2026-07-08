@@ -164,7 +164,7 @@ fn any_to_json(a: &Any) -> String {
 
 /// Convert a yrs output value to an `Any` (which knows how to JSON-serialize),
 /// recursing through nested shared collections.
-fn out_to_any<T: ReadTxn>(txn: &T, out: &Out) -> Any {
+pub(crate) fn out_to_any<T: ReadTxn>(txn: &T, out: &Out) -> Any {
     match out {
         Out::Any(a) => a.clone(),
         Out::YText(v) => Any::from(v.get_string(txn)),

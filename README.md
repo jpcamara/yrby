@@ -44,6 +44,9 @@ npm install yrby-client
 - Optional server-side reads: `Doc#read_text` and `Doc#read_map` reconstruct a
   document's contents in Ruby - no Node process - for search, exports, validation,
   or server-side rendering.
+- Live `Y::Map` handles (`Doc#get_map`) to read *and write* actual shared map data
+  from Ruby - build or edit state server-side and let it sync - with the same
+  thread-safety guarantees as `Doc`.
 
 ## Scope
 
@@ -52,7 +55,9 @@ documents - a `Doc`, awareness, and the y-websocket protocol primitives. By defa
 the Ruby side treats a document as opaque CRDT state: it applies updates, answers
 sync handshakes, and records deltas without reaching into the contents - the browser
 editor owns the document's shape. When you do need to look inside, `Doc#read_text`
-and `Doc#read_map` reconstruct it server-side, in Ruby.
+and `Doc#read_map` reconstruct it server-side, in Ruby; and `Doc#get_map` returns a
+live `Y::Map` handle you can read and write when the server needs to build or edit
+shared state itself.
 
 ## Durability and delivery
 
@@ -156,6 +161,58 @@ doc.handle_sync_message(data)     # => [msg_type, sync_type, response]; answers 
                                   #    peer's SyncStep1 with an integrated-only
                                   #    SyncStep2 (never serves pending structs)
 ```
+
+### Reading document contents
+
+When you do need to look inside a document server-side (search, exports,
+validation, SSR), reconstruct it in Ruby with no Node process:
+
+```ruby
+doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
+doc.read_xml("default")       # => text of an XML root, one block per line
+doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
+```
+
+These are read-only snapshots. To *build or edit* a map from Ruby, use a live
+handle (below).
+
+### Y::Map (live shared maps)
+
+`Doc#get_map` returns a live handle to a `Y.Map` root — reading it reflects the
+current document, and writing it mutates the CRDT (so the change syncs to every
+peer). Handles carry the same thread-safety guarantees as `Doc`: every operation
+runs with the GVL released and holds no lock across the boundary.
+
+```ruby
+map = doc.get_map("state")   # root map, created if absent
+
+# Write — primitives, arrays, and (nested) hashes
+map["title"]  = "Dashboard"
+map["count"]  = 3
+map["tags"]   = %w[a b c]
+map["user"]   = { "name" => "Ada", "role" => "eng" }  # nested Y.Map
+
+# Read — a snapshot value (nested map/array come back as Hash/Array)
+map["title"]           # => "Dashboard"
+map.to_h               # => { "title" => "Dashboard", "count" => 3, ... }
+map.keys               # => ["title", "count", "tags", "user"]
+map.size               # => 4
+map.key?("title")      # => true
+map.each { |k, v| ... }
+
+# A live handle to a nested map — mutating it mutates the document
+user = map.get_map("user")   # => Y::Map (or nil if absent / not a map)
+user["name"] = "Grace"       # doc now has state.user.name == "Grace"
+
+# Delete
+map.delete("count")    # => 3 (the previous value)
+map.clear
+```
+
+A handle is addressed by its root name plus a path of keys and re-resolves on
+every operation, so it never caches a raw CRDT pointer that could dangle when the
+tree is mutated (possibly on another thread). A nested handle keeps working even
+as sibling keys change around it.
 
 ### Pending structs and gap-free state
 

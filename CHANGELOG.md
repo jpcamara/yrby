@@ -6,6 +6,28 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+<<<<<<< HEAD
+## [0.4.0] - 2026-07-01
+
+### Added
+
+- **Live `Y::Map` handles.** `Doc#get_map(name)` returns a `Y::Map` you can both
+  read and *write*: `map[key]`, `map[key] = value`, `delete`, `clear`, `keys`,
+  `size`, `key?`, `to_h`, and `each`. Writes mutate the CRDT, so they sync to
+  every peer. Values round-trip primitives, arrays, and nested hashes; a nested
+  hash becomes a real nested `Y.Map`, and `map.get_map(key)` returns a live handle
+  to it (mutating the child mutates the document). This is the first actual yrs
+  shared type exposed for building/editing state in Ruby, complementing the
+  read-only `read_text`/`read_xml`/`read_map` snapshots.
+
+  Handles carry the same thread-safety guarantees as `Doc`: every operation opens
+  its own transaction inside `nogvl` (GVL released) and holds no lock across the
+  boundary. A handle is addressed by root name plus a path of keys and re-resolves
+  per operation — it never caches a raw yrs branch pointer that could dangle when
+  the tree is mutated (possibly on another thread), so a nested handle keeps
+  working even as sibling keys change around it. `Y::Map` is asserted `Send + Sync`
+  at compile time alongside `Doc`.
+=======
 ### Added
 
 - **`Y::ProseMirror` — render ProseMirror/Tiptap documents to HTML.**
@@ -59,6 +81,7 @@ Fixes from a full source review.
 - The gem no longer packages the `yrby-decoder` gem's files (they ship in that
   gem; the duplicate copy could shadow a newer standalone release), and now
   ships `Cargo.lock` so source builds compile the exact crate graph CI tested.
+>>>>>>> main
 
 ## [0.3.0] - 2026-07-01
 
