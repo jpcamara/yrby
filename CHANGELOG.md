@@ -21,6 +21,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `read_xml` now pulls text out of attachments too: a mention's text goes
   inline, and an upload adds its caption, alt text, or filename. Before, both
   were dropped.
+- **`Y::ProseMirror` — render ProseMirror/Tiptap documents to HTML.**
+  `Y::ProseMirror.new(doc).to_html` turns a Tiptap document into HTML on the
+  server, with no Node process or headless editor. The output matches Tiptap's
+  own `getHTML()`; the tests check it byte-for-byte against a document captured
+  from a real editor. It follows `ueberdosis/tiptap-php` and reads both name
+  styles editors use — Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
+  `bullet_list`/`strong`. Covers paragraphs, headings, blockquotes,
+  bullet/ordered/task lists, code blocks, links, images, mentions, details,
+  hard breaks, horizontal rules, tables, text styles (color, font family), and
+  every text mark. A table renders as semantic `<table><tbody>` without the
+  editor's column-width styling. A root that isn't ProseMirror (a Lexical
+  document, say) returns `nil`.
 
 ## [0.3.1] - 2026-07-01
 
