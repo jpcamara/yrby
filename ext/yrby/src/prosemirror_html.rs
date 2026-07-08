@@ -20,7 +20,6 @@
 //! underline, highlight, then subscript/superscript. `code` excludes every
 //! other mark, so a code run is just `<code>`.
 
-use std::sync::Arc;
 use yrs::types::text::YChange;
 use yrs::types::Attrs;
 use yrs::{
@@ -52,9 +51,12 @@ pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> 
     for node in fragment.children(txn) {
         match node {
             XmlOut::Element(e) => render_block_tree(txn, &e, &mut out),
-            // A bare top-level text run is unusual for ProseMirror, but render
-            // it rather than drop it.
+            // y-prosemirror never writes a bare text run at the root, but a
+            // crafted doc can; render it rather than drop it.
             XmlOut::Text(t) => render_text_runs(txn, &t, &mut out),
+            // Fragments can't nest as children in yrs, so this arm shouldn't
+            // be reachable; it exists because the match must be exhaustive,
+            // and escaping the text is the safe degradation.
             XmlOut::Fragment(f) => out.push_str(&escape_text(&f.get_string(txn))),
         }
     }
@@ -95,9 +97,8 @@ fn open_block<T: ReadTxn>(
 ) {
     match e.tag().as_ref() {
         "paragraph" => {
-            let inline = render_inline(txn, e, 0);
             out.push_str("<p>");
-            out.push_str(&inline);
+            out.push_str(&render_inline(txn, e, 0));
             out.push_str("</p>");
         }
         "heading" => {
@@ -133,7 +134,7 @@ fn open_block<T: ReadTxn>(
                 }
                 _ => out.push_str("<ol>"),
             }
-            push_block_children(txn, e, depth, "</ol>", stack);
+            push_block_children(txn, e, depth, "</ol>", out, stack);
         }
         "listItem" | "list_item" => open_container(txn, e, depth, "<li>", "</li>", out, stack),
         "taskList" | "task_list" => open_container(
@@ -154,11 +155,11 @@ fn open_block<T: ReadTxn>(
                 out.push_str(" checked=\"checked\"");
             }
             out.push_str("><span></span></label><div>");
-            push_block_children(txn, e, depth, "</div></li>", stack);
+            push_block_children(txn, e, depth, "</div></li>", out, stack);
         }
         "table" => {
             out.push_str("<table><tbody>");
-            push_block_children(txn, e, depth, "</tbody></table>", stack);
+            push_block_children(txn, e, depth, "</tbody></table>", out, stack);
         }
         "tableRow" | "table_row" => open_container(txn, e, depth, "<tr>", "</tr>", out, stack),
         "tableHeader" | "table_header" => open_cell(txn, e, depth, "th", "</th>", out, stack),
@@ -195,15 +196,9 @@ fn open_block<T: ReadTxn>(
         // text block.
         _ => {
             if has_element_child(txn, e) {
-                // Its direct text runs still render, before the children.
-                // (Not render_inline: that would also render inline element
-                // children the stack is about to walk, duplicating them.)
-                for node in e.children(txn) {
-                    if let XmlOut::Text(t) = node {
-                        render_text_runs(txn, &t, out);
-                    }
-                }
-                push_block_children(txn, e, depth, "", stack);
+                // Renders its direct text runs, then the children, with no
+                // invented wrapper tags.
+                push_block_children(txn, e, depth, "", out, stack);
             } else {
                 let inline = render_inline(txn, e, 0);
                 if !inline.is_empty() {
@@ -226,7 +221,7 @@ fn open_container<T: ReadTxn>(
     stack: &mut Vec<Work>,
 ) {
     out.push_str(open);
-    push_block_children(txn, e, depth, close, stack);
+    push_block_children(txn, e, depth, close, out, stack);
 }
 
 /// A table cell: `<th>`/`<td>` carrying colspan/rowspan (default 1, always
@@ -247,19 +242,28 @@ fn open_cell<T: ReadTxn>(
     out.push_str("\" rowspan=\"");
     out.push_str(&num_attr(txn, e, "rowspan").unwrap_or(1).to_string());
     out.push_str("\">");
-    push_block_children(txn, e, depth, close, stack);
+    push_block_children(txn, e, depth, close, out, stack);
 }
 
 /// Defer a node's child *elements* onto the stack, closing tag below them, so
-/// they render in order and the tag closes after. Past `MAX_DEPTH` the children
-/// are dropped but the tag still closes, keeping the output well formed.
+/// they render in order and the tag closes after. Any direct text runs render
+/// to `out` first: schema-valid documents never put bare text in a container,
+/// but a crafted one can, and dropping it would lose content. Past `MAX_DEPTH`
+/// the children are dropped but the tag still closes, keeping the output well
+/// formed.
 fn push_block_children<T: ReadTxn>(
     txn: &T,
     e: &XmlElementRef,
     depth: usize,
     close: &'static str,
+    out: &mut String,
     stack: &mut Vec<Work>,
 ) {
+    for node in e.children(txn) {
+        if let XmlOut::Text(t) = node {
+            render_text_runs(txn, &t, out);
+        }
+    }
     stack.push(Work::Close(close));
     if depth >= MAX_DEPTH {
         return;
@@ -390,10 +394,10 @@ fn render_run(text: &str, marks: Option<&Attrs>) -> String {
 /// before font-family). Hex colors convert to rgb() because that's how they
 /// come back out of the browser's style attribute; other values pass through.
 fn text_style_css(style: &std::collections::HashMap<String, Any>) -> String {
-    let mut pairs: Vec<(&String, &Arc<str>)> = style
+    let mut pairs: Vec<_> = style
         .iter()
         .filter_map(|(k, v)| match v {
-            Any::String(s) => Some((k, s)),
+            Any::String(s) => Some((k, s.as_ref())),
             _ => None,
         })
         .collect();
@@ -423,6 +427,11 @@ fn text_style_css(style: &std::collections::HashMap<String, Any>) -> String {
 /// serialization. Anything else (named colors, rgb()/hsl(), fonts) is None.
 fn hex_to_rgb(value: &str) -> Option<String> {
     let hex = value.strip_prefix('#')?;
+    // len() and the slices below are byte-based; non-ASCII input would panic
+    // on a char boundary. Real hex never is, crafted input passes through.
+    if !hex.is_ascii() {
+        return None;
+    }
     let (r, g, b) = match hex.len() {
         3 => {
             let d = |i: usize| u8::from_str_radix(&hex[i..=i].repeat(2), 16);
@@ -698,6 +707,30 @@ mod tests {
         assert_eq!(hex_to_rgb("#0f8"), Some("rgb(0, 255, 136)".to_string()));
         assert_eq!(hex_to_rgb("rebeccapurple"), None);
         assert_eq!(hex_to_rgb("#12345"), None);
+        // Multibyte input must pass through, not panic on a byte-slice
+        // boundary ("日" is one char, three bytes — it enters the 3 arm).
+        assert_eq!(hex_to_rgb("#日"), None);
+        assert_eq!(hex_to_rgb("#日本"), None);
+    }
+
+    /// A known container with bare text jammed directly into it (schema-valid
+    /// documents never do this) keeps the text instead of dropping it.
+    #[test]
+    fn a_known_container_keeps_stray_direct_text() {
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("default");
+        {
+            let mut txn = doc.transact_mut();
+            let bq = frag.push_back(&mut txn, XmlElementPrelim::empty("blockquote"));
+            bq.push_back(&mut txn, XmlTextPrelim::new("stray"));
+            let p = bq.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+            p.push_back(&mut txn, XmlTextPrelim::new("body"));
+        }
+        let txn = doc.transact();
+        assert_eq!(
+            render(&txn, &frag).unwrap(),
+            "<blockquote>stray<p>body</p></blockquote>"
+        );
     }
 
     /// The details family follows tiptap-php's renderHTML (the Tiptap
