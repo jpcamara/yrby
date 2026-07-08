@@ -26,8 +26,11 @@
 //! inner tag `strong` (bold) / `em` (italic, when not bold); outer tag `code` /
 //! `mark` / `sub` / `sup`; an `<i>` wrap only when bold+italic combine (the
 //! `em` slot is taken); `<s>` / `<u>` wraps always; `<span>`s are unwrapped, so
-//! unformatted text is bare. `__style` (colors) and the case-transform format
-//! bits are not rendered, matching Lexxy's sanitize output for plain runs.
+//! unformatted text is bare. A run's `__style` (Lexxy's highlight colors)
+//! survives on the createDOM tag, filtered to color/background-color the way
+//! Lexxy's sanitize allows; on a plain or s/u-only run it dies with the
+//! unwrapped span. Case-transform format bits are never rendered (their
+//! text-transform style is outside the sanitize whitelist).
 
 use yrs::types::text::YChange;
 use yrs::{
@@ -368,6 +371,7 @@ fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
     // preceding Map would inherit the previous run's format (wrong, but only
     // reachable from a doc Lexxy didn't produce).
     let mut format: u32 = 0;
+    let mut style = String::new();
     let mut is_tab = false;
     for d in t.diff(txn, YChange::identity) {
         match d.insert {
@@ -381,15 +385,20 @@ fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
                     "tab" => {
                         is_tab = true;
                         format = 0;
+                        style.clear();
                     }
                     // "text", "code-highlight", and anything metadata-shaped:
-                    // read the format bits for the run that follows.
+                    // read the format bits and style for the run that follows.
                     _ => {
                         is_tab = false;
                         format = match m.get(txn, "__format") {
                             Some(Out::Any(Any::Number(n))) => n as u32,
                             Some(Out::Any(Any::BigInt(n))) => n as u32,
                             _ => 0,
+                        };
+                        style = match m.get(txn, "__style") {
+                            Some(Out::Any(Any::String(s))) => s.to_string(),
+                            _ => String::new(),
                         };
                     }
                 }
@@ -400,7 +409,7 @@ fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
                     out.push_str("<span>\t</span>");
                     is_tab = false;
                 } else {
-                    out.push_str(&render_run(&s, format));
+                    out.push_str(&render_run(&s, format, &style));
                 }
             }
             Out::YXmlText(child) => {
@@ -418,43 +427,87 @@ fn render_inline<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize) -> String {
 }
 
 /// One text run with Lexical's format bitmask, as Lexxy's exporter wraps it.
-fn render_run(text: &str, format: u32) -> String {
+fn render_run(text: &str, format: u32, style: &str) -> String {
     let mut html = escape_text(text);
+    // A run's __style survives export only on a real createDOM tag (colors
+    // from Lexxy's highlight dropdown). The style attribute rides the OUTER
+    // tag when one exists, else the inner tag; a plain or s/u-only run's span
+    // is unwrapped, and the style dies with it — all captured behavior.
+    let css = lexxy_style(style);
+    let outer_tag = if format & FMT_CODE != 0 {
+        Some("code")
+    } else if format & FMT_HIGHLIGHT != 0 {
+        Some("mark")
+    } else if format & FMT_SUBSCRIPT != 0 {
+        Some("sub")
+    } else if format & FMT_SUPERSCRIPT != 0 {
+        Some("sup")
+    } else {
+        None
+    };
 
     // Inner semantic tag (createDOM): strong for bold, em for italic-only.
     // A plain run's span is unwrapped, leaving bare text.
+    let inner_style = if outer_tag.is_none() {
+        css.as_deref()
+    } else {
+        None
+    };
     if format & FMT_BOLD != 0 {
-        html = format_wrap(html, "strong");
+        html = format_wrap(html, "strong", inner_style);
     } else if format & FMT_ITALIC != 0 {
-        html = format_wrap(html, "em");
+        html = format_wrap(html, "em", inner_style);
     }
     // Outer semantic tag (createDOM): first match wins.
-    if format & FMT_CODE != 0 {
-        html = format_wrap(html, "code");
-    } else if format & FMT_HIGHLIGHT != 0 {
-        html = format_wrap(html, "mark");
-    } else if format & FMT_SUBSCRIPT != 0 {
-        html = format_wrap(html, "sub");
-    } else if format & FMT_SUPERSCRIPT != 0 {
-        html = format_wrap(html, "sup");
+    if let Some(tag) = outer_tag {
+        html = format_wrap(html, tag, css.as_deref());
     }
     // Lexxy's wrap pass: <i> only when italic couldn't claim the inner tag
     // (bold took it); <b> never fires (bold always claims strong); <s>/<u>
     // always wrap.
     if format & FMT_ITALIC != 0 && format & FMT_BOLD != 0 {
-        html = format_wrap(html, "i");
+        html = format_wrap(html, "i", None);
     }
     if format & FMT_STRIKETHROUGH != 0 {
-        html = format_wrap(html, "s");
+        html = format_wrap(html, "s", None);
     }
     if format & FMT_UNDERLINE != 0 {
-        html = format_wrap(html, "u");
+        html = format_wrap(html, "u", None);
     }
     html
 }
 
-fn format_wrap(inner: String, tag: &str) -> String {
-    format!("<{tag}>{inner}</{tag}>")
+fn format_wrap(inner: String, tag: &str, style: Option<&str>) -> String {
+    match style {
+        Some(css) => format!("<{tag} style=\"{}\">{inner}</{tag}>", escape_attr(css)),
+        None => format!("<{tag}>{inner}</{tag}>"),
+    }
+}
+
+/// Filter a run's `__style` to what Lexxy's sanitize lets through — `color`
+/// and `background-color` — keeping source order, serialized the way the
+/// sanitize hook rebuilds it: `prop: value;` with no separator between
+/// properties. Everything else (text-transform, white-space, smuggled
+/// properties) is stripped, matching the captured value output.
+fn lexxy_style(style: &str) -> Option<String> {
+    let mut css = String::new();
+    for decl in style.split(';') {
+        let Some((prop, value)) = decl.split_once(':') else {
+            continue;
+        };
+        let (prop, value) = (prop.trim(), value.trim());
+        if (prop == "color" || prop == "background-color") && !value.is_empty() {
+            css.push_str(prop);
+            css.push_str(": ");
+            css.push_str(value);
+            css.push(';');
+        }
+    }
+    if css.is_empty() {
+        None
+    } else {
+        Some(css)
+    }
 }
 
 /// `link` / `autolink`: Lexxy's sanitize keeps only `href` and `title`
@@ -698,6 +751,55 @@ mod tests {
         }
     }
 
+    /// Highlight colors (captured live): a run's __style survives on the
+    /// createDOM tag — the outer tag when present, else the inner — filtered
+    /// to color/background-color; plain and s/u-only runs lose it with their
+    /// unwrapped span. The fixture's byte-for-byte match pins both the keeps
+    /// and the drops.
+    #[test]
+    fn renders_the_captured_styles_document_byte_for_byte() {
+        let bytes = include_bytes!("fixtures/lexxy_styles.bin");
+        let expected = include_str!("fixtures/lexxy_styles.html");
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(bytes).unwrap())
+            .unwrap();
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        assert_eq!(render(&txn, &frag).unwrap(), expected.trim_end());
+    }
+
+    #[test]
+    fn run_styles_ride_the_createdom_tag() {
+        // Outer tag takes the style over the inner one.
+        assert_eq!(
+            render_run("x", 128, "background-color: var(--highlight-bg-2);"),
+            "<mark style=\"background-color: var(--highlight-bg-2);\">x</mark>"
+        );
+        assert_eq!(
+            render_run("x", 1 | 128, "background-color: red;"),
+            "<mark style=\"background-color: red;\"><strong>x</strong></mark>"
+        );
+        // No outer tag: the inner takes it.
+        assert_eq!(
+            render_run("x", 1, "color: red;"),
+            "<strong style=\"color: red;\">x</strong>"
+        );
+        // Plain and s/u-only runs lose the style with their unwrapped span.
+        assert_eq!(render_run("x", 0, "color: red;"), "x");
+        assert_eq!(render_run("x", 4, "color: red;"), "<s>x</s>");
+        // Two properties: source order, no separator between them.
+        assert_eq!(
+            render_run("x", 128, "color: red; background-color: blue;"),
+            "<mark style=\"color: red;background-color: blue;\">x</mark>"
+        );
+        // Disallowed properties are stripped; quotes in values escape.
+        assert_eq!(
+            render_run("x", 128, "font-size: 40px; color: r\"ed;"),
+            "<mark style=\"color: r&quot;ed;\">x</mark>"
+        );
+    }
+
     /// A known container with inline content jammed directly into it
     /// (Lexxy never does this) keeps the content instead of dropping it.
     #[test]
@@ -743,26 +845,29 @@ mod tests {
     #[test]
     fn format_runs_match_lexxys_export_algorithm() {
         // Singles take their semantic tag; the span for plain text unwraps.
-        assert_eq!(render_run("x", 0), "x");
-        assert_eq!(render_run("x", 1), "<strong>x</strong>");
-        assert_eq!(render_run("x", 2), "<em>x</em>");
-        assert_eq!(render_run("x", 4), "<s>x</s>");
-        assert_eq!(render_run("x", 8), "<u>x</u>");
-        assert_eq!(render_run("x", 16), "<code>x</code>");
-        assert_eq!(render_run("x", 32), "<sub>x</sub>");
-        assert_eq!(render_run("x", 64), "<sup>x</sup>");
-        assert_eq!(render_run("x", 128), "<mark>x</mark>");
+        assert_eq!(render_run("x", 0, ""), "x");
+        assert_eq!(render_run("x", 1, ""), "<strong>x</strong>");
+        assert_eq!(render_run("x", 2, ""), "<em>x</em>");
+        assert_eq!(render_run("x", 4, ""), "<s>x</s>");
+        assert_eq!(render_run("x", 8, ""), "<u>x</u>");
+        assert_eq!(render_run("x", 16, ""), "<code>x</code>");
+        assert_eq!(render_run("x", 32, ""), "<sub>x</sub>");
+        assert_eq!(render_run("x", 64, ""), "<sup>x</sup>");
+        assert_eq!(render_run("x", 128, ""), "<mark>x</mark>");
         // bold+italic: bold claims the inner tag, italic falls back to <i>.
-        assert_eq!(render_run("x", 3), "<i><strong>x</strong></i>");
+        assert_eq!(render_run("x", 3, ""), "<i><strong>x</strong></i>");
         // Wrap order: u outside s outside the semantic core.
-        assert_eq!(render_run("x", 4 | 8), "<u><s>x</s></u>");
-        assert_eq!(render_run("x", 1 | 8), "<u><strong>x</strong></u>");
+        assert_eq!(render_run("x", 4 | 8, ""), "<u><s>x</s></u>");
+        assert_eq!(render_run("x", 1 | 8, ""), "<u><strong>x</strong></u>");
         // Outer tag composes with the inner one.
-        assert_eq!(render_run("x", 1 | 16), "<code><strong>x</strong></code>");
-        assert_eq!(render_run("x", 2 | 128), "<mark><em>x</em></mark>");
+        assert_eq!(
+            render_run("x", 1 | 16, ""),
+            "<code><strong>x</strong></code>"
+        );
+        assert_eq!(render_run("x", 2 | 128, ""), "<mark><em>x</em></mark>");
         // Everything at once: u(s(i(outer(inner)))).
         assert_eq!(
-            render_run("x", 1 | 2 | 4 | 8 | 16),
+            render_run("x", 1 | 2 | 4 | 8 | 16, ""),
             "<u><s><i><code><strong>x</strong></code></i></s></u>"
         );
     }

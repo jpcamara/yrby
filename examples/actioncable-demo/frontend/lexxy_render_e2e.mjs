@@ -61,6 +61,8 @@ const state = { root: { type: "root", ...elem, children: [
   h("h2", t("Live ", B), link("https://spec.example.com", { title: "Spec" }, t("parity", B | I))),
   p(t("a", B), t("b", I), t("c", B | I), t("d", S), t("e", U), t("f", C), t("g", HL),
     t("h", SUB), t("i", SUP), t("j", B | I | S | U | C)),
+  p({ ...t("hl-colored", HL), style: "background-color: var(--highlight-bg-2);" },
+    { ...t(" bold-colored", B), style: "color: var(--highlight-fg-1);" }),
   p(t('esc: <t> & "q" ', 0), link("https://e.com?a=1&b=2", {}, t("lnk", 0))),
   quote(t("quoted ", 0), t("bold", B), br(), tab(), t("after-tab", 0)),
   list("bullet", "ul",

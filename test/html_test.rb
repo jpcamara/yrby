@@ -98,6 +98,21 @@ class HtmlTest < Minitest::Test
     assert_includes text, "@Dave", "mention inside a table cell extracted"
   end
 
+  def test_to_html_renders_highlight_colors
+    # Lexxy's highlight dropdown stores color/background-color in the run's
+    # __style; it survives on the createDOM tag and is filtered to the two
+    # properties Lexxy's sanitize allows. Captured live; byte-for-byte also
+    # pins the drops (plain and strike-only runs lose their style).
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_styles.bin")))
+    expected = File.read(File.join(FIXTURES, "lexxy_styles.html")).chomp
+    html = Y::Lexical.new(doc).to_html
+
+    assert_equal expected, html
+    assert_includes html, '<mark style="background-color: var(--highlight-bg-2);">'
+    assert_includes html, '<strong style="color: var(--highlight-fg-2);">'
+  end
+
   def test_to_html_renders_image_galleries
     # Adjacent previewable images grouped by Lexxy's gallery node render as
     # ActionText's classed div (count in the class). Captured live.
