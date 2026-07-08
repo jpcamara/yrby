@@ -393,14 +393,18 @@ class SyncTest < Minitest::Test
     helper.sync_receive(msg, "doc-key")
 
     assert_equal [YjsFixtures::TwoDocsMerged::DOC1_UPDATE], store
-    assert_equal 1, broadcasts.length
+    # The retry is not re-RECORDED, but it IS re-broadcast: if the original
+    # attempt recorded and then crashed before distributing, the retry is the
+    # only mechanism that can still reach live subscribers. Idempotent apply
+    # makes the duplicate broadcast free.
+    assert_equal 2, broadcasts.length
     assert_equal [5, 5], acks_in(transmits)
   end
 
   def test_lost_ack_delete_retry_acks_without_double_recording
-    # A pure-delete retry the server already integrated must be acked but not
-    # recorded or re-broadcast. Insert content, delete a char, then replay the
-    # deletion: the second delivery is a no-op the guard must catch.
+    # A pure-delete retry the server already integrated must be acked and not
+    # re-recorded (it IS re-broadcast — see the retry test above). Insert
+    # content, delete a char, then replay the deletion.
     content = YjsFixtures::DeleteRetry::CONTENT
     deletion = YjsFixtures::DeleteRetry::DELETION
 
@@ -414,8 +418,48 @@ class SyncTest < Minitest::Test
     helper.sync_receive(update_message(deletion, id: 3), "doc-key") # lost-ack retry
 
     assert_equal 2, store.length, "the deletion records once; its retry does not"
-    assert_equal 2, broadcasts.length, "the retry is not re-broadcast"
+    assert_equal 3, broadcasts.length, "the retry re-broadcasts (crash-window heal)"
     assert_equal [1, 2, 3], acks_in(transmits), "every frame is still acked"
+  end
+
+  def test_cross_client_origin_gap_is_resynced_not_acked
+    # DELTA's origins reference client 3's blocks (CONTENT), which this store
+    # never saw. Its per-client clock lower bound passes, so a clock-only ready
+    # check used to let it through — and the advances? probe then misread the
+    # parked update as an already-applied retry: acked :applied and dropped.
+    # It must instead be rejected as a gap: resynced, never recorded, never
+    # acked.
+    store = []
+    broadcasts = []
+    transmits = []
+    helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts)
+
+    helper.sync_receive(update_message(YjsFixtures::CrossClientOrigin::DELTA, id: 7), "doc-key")
+
+    assert_empty store, "a causally-incomplete update is never recorded"
+    assert_empty broadcasts
+    assert_empty acks_in(transmits), "and never acked (the old bug acked it)"
+    assert_equal 1, transmits.length, "a resync (SyncStep1) was requested"
+
+    # Once the missing content arrives, the same delta is ready and records.
+    helper.sync_receive(update_message(YjsFixtures::CrossClientOrigin::CONTENT, id: 8), "doc-key")
+    helper.sync_receive(update_message(YjsFixtures::CrossClientOrigin::DELTA, id: 9), "doc-key")
+
+    assert_equal 2, store.length, "content + delta both recorded once healed"
+    assert_equal [8, 9], acks_in(transmits)
+  end
+
+  def test_receive_without_a_key_fails_closed
+    helper = helper_for
+
+    # No sync_subscribed, no key argument: recording under a nil key and acking
+    # would silently misfile the update, so the frame must raise instead.
+    error = assert_raises(Y::Error) do
+      helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 1))
+    end
+
+    assert_match(/document key/, error.message)
+    assert_empty acks_in(helper.transmits)
   end
 
   # -- Store-backed concurrency -------------------------------------------

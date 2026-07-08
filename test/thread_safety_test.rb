@@ -75,6 +75,33 @@ class ThreadSafetyTest < Minitest::Test
     end
   end
 
+  def test_concurrent_read_text_with_writers_does_not_deadlock
+    # Regression: read_text used to open a second read transaction while still
+    # holding the first (a chained temporary). yrs's lock is write-preferring, so
+    # a writer arriving between the two acquisitions deadlocked reader-vs-writer
+    # inside nogvl — uninterruptibly. With the fix this completes; without it,
+    # this test hangs (CI timeout catches it).
+    doc = Y::Doc.new
+    doc.apply_update(YjsFixtures::TextHelloWorld::UPDATE)
+    updates = [
+      YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
+      YjsFixtures::TwoDocsMerged::DOC2_UPDATE
+    ]
+
+    errors = run_threads do |i|
+      ITERATIONS.times do
+        if i.even?
+          doc.read_text("content")
+        else
+          doc.apply_update(updates[(i / 2) % updates.length])
+        end
+      end
+    end
+
+    assert_empty errors
+    refute_nil doc.read_text("content")
+  end
+
   def test_concurrent_fan_in_sync_to_shared_doc
     # Many threads sync different sources into ONE shared doc concurrently.
     shared = Y::Doc.new
@@ -100,6 +127,36 @@ class ThreadSafetyTest < Minitest::Test
 
     assert_equal sequential.encode_state_vector, shared.encode_state_vector
     assert_equal sequential.encode_state_as_update, shared.encode_state_as_update
+  end
+
+  def test_concurrent_prosemirror_to_html_with_writers_does_not_deadlock
+    # Y::ProseMirror holds an Arc handle to the same doc, so its renders contend
+    # with writers on the doc's RwLock. Same guarantees as every other native
+    # op: one transaction per call, opened inside nogvl. This exercises the
+    # render path under write contention; a future edit that reintroduced a
+    # nested transaction would deadlock and time out here.
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.expand_path("../ext/yrby/src/fixtures/prosemirror_tiptap.bin", __dir__)))
+    prosemirror = Y::ProseMirror.new(doc)
+    updates = [
+      YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
+      YjsFixtures::TwoDocsMerged::DOC2_UPDATE
+    ]
+
+    errors = run_threads do |i|
+      ITERATIONS.times do
+        if i.even?
+          html = prosemirror.to_html
+
+          raise "render lost content under contention" unless html&.include?("<h1>Heading One</h1>")
+        else
+          doc.apply_update(updates[(i / 2) % updates.length])
+        end
+      end
+    end
+
+    assert_empty errors
+    assert_includes prosemirror.to_html, "</blockquote>"
   end
 
   private

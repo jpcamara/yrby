@@ -78,6 +78,8 @@ export class ActionCableProvider {
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #onUnload: (() => void) | null = null;
+  #onRestore: ((event: PageTransitionEvent) => void) | null = null;
+  #stashedPresence: Record<string, unknown> | null = null;
 
   constructor(
     doc: Doc,
@@ -180,6 +182,13 @@ export class ActionCableProvider {
           provider.session.onDisconnect(); // pause retransmits, clear remote presence
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
         },
+        rejected() {
+          // The channel refused the subscription (auth, missing doc). Surface
+          // it and tear down — otherwise the provider sits at "connecting"
+          // forever, silently queueing edits. The app decides what's next.
+          provider.#onError(new Error("subscription rejected by the server"), "rejected");
+          provider.disconnect();
+        },
       }
     );
     this.#installUnloadHandler();
@@ -225,20 +234,39 @@ export class ActionCableProvider {
     for (const listener of this.#statusListeners) listener({ status: next });
   }
 
-  // Best-effort presence removal when the tab/page goes away (close, navigation,
-  // bfcache). `pagehide` fires while the socket is still live and is bfcache-safe
-  // (unlike `beforeunload`, which can block it). Sends are not guaranteed to
-  // flush on unload, so the server-side awareness timeout remains the backstop.
+  // Presence teardown/restore around page lifecycle:
+  // - `pagehide`: remove local presence while the socket is still live so peers
+  //   drop our cursor now (bfcache-safe; the awareness timeout is the backstop).
+  // - `pageshow` with `persisted`: the user came BACK (bfcache restore), so put
+  //   their presence back — editors set awareness once at setup, so without
+  //   this they'd rejoin as a ghost with no cursor.
   #installUnloadHandler(): void {
     if (typeof window === "undefined" || this.#onUnload) return;
-    this.#onUnload = () => this.session.removeLocalAwareness();
+    this.#onUnload = () => {
+      this.#stashedPresence = this.awareness.getLocalState();
+      this.session.removeLocalAwareness();
+    };
+    this.#onRestore = (event: PageTransitionEvent) => {
+      if (!event.persisted || !this.#stashedPresence) return;
+      if (this.awareness.getLocalState() === null) {
+        this.awareness.setLocalState(this.#stashedPresence);
+      }
+      this.#stashedPresence = null;
+    };
     window.addEventListener("pagehide", this.#onUnload);
+    window.addEventListener("pageshow", this.#onRestore);
   }
 
   #removeUnloadHandler(): void {
-    if (typeof window === "undefined" || !this.#onUnload) return;
-    window.removeEventListener("pagehide", this.#onUnload);
-    this.#onUnload = null;
+    if (typeof window === "undefined") return;
+    if (this.#onUnload) {
+      window.removeEventListener("pagehide", this.#onUnload);
+      this.#onUnload = null;
+    }
+    if (this.#onRestore) {
+      window.removeEventListener("pageshow", this.#onRestore);
+      this.#onRestore = null;
+    }
   }
 
   // Send one raw protocol frame over the cable. Awareness frames are whispered
@@ -251,11 +279,27 @@ export class ActionCableProvider {
     if (!sub) return;
     const update = toBase64(frame);
     const isAwareness = frame[0] === MessageType.Awareness;
-    if (isAwareness && typeof sub.whisper === "function") {
-      sub.whisper({ awareness: update });
-      return;
+    // Route transport failures (sync throws, or @anycable/web's rejected
+    // promises) to onError instead of letting them escape into update
+    // handlers. A failed send is recoverable: reliable frames stay queued
+    // until acked, and awareness is best-effort anyway.
+    try {
+      if (isAwareness && typeof sub.whisper === "function") {
+        this.#observe(sub.whisper({ awareness: update }));
+        return;
+      }
+      const payload = id === undefined ? { update } : { update, id };
+      this.#observe(sub.send(payload));
+    } catch (error) {
+      this.#onError(error, "send");
     }
-    const payload = id === undefined ? { update } : { update, id };
-    sub.send(payload);
+  }
+
+  // Attach a rejection handler when a transport returns a promise, so failures
+  // surface via onError instead of as unhandled rejections.
+  #observe(result: unknown): void {
+    if (result instanceof Promise) {
+      result.catch((error) => this.#onError(error, "send"));
+    }
   }
 }

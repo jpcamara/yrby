@@ -6,6 +6,46 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-01
+
+### Removed
+
+- The unhealable-gap strike defense that shipped in 0.3.0. That release was
+  published prematurely, before the feature had been reviewed; 0.3.1 supersedes
+  it with the defense removed while review happens. 0.3.0 remains installable
+  and functional; the feature returns in a future release once reviewed.
+
+## [0.3.0] - 2026-07-01
+
+Published prematurely (see 0.3.1): shipped the unhealable-gap strike defense
+(settle + drop a repeatedly-gapped update, `{ "ack" => id, "dropped" => true }`,
+`gap_strike_limit`, istate-backed strikes under AnyCable) alongside the fixes
+below. The fixes carry forward; the defense was withdrawn in 0.3.1 pending
+review.
+
+Fixes from a full source review:
+
+### Fixed
+
+- **A lost-ack retry now re-broadcasts.** If the original attempt recorded the
+  update and then crashed (or the pub/sub broadcast failed) before
+  distributing, the retry was previously settled as `:applied` without
+  re-broadcasting — live subscribers stayed stale until their next full resync,
+  and nothing else could reach them. The retry now re-broadcasts before acking;
+  idempotent CRDT apply makes the duplicate free for every receiver.
+- **A missing document key now fails closed.** Under a transport that doesn't
+  keep the channel instance alive across actions (AnyCable), an app that forgot
+  to pass `key` to `sync_receive` silently recorded updates under a nil key,
+  broadcast them to a stream no one subscribes to, and still acked them. The
+  frame now raises `Y::Error` instead.
+
+### Changed
+
+- Raised the `yrby` floor to `>= 0.3.1`, whose `update_ready?` is exact
+  (trial-integration, not just per-client clocks). With an older core, a
+  cross-client-origin gap passed the ready check and the `update_advances?`
+  probe then acked-and-dropped real content.
+
 ## [0.2.3] - 2026-07-01
 
 ### Changed

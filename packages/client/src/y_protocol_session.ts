@@ -248,7 +248,25 @@ export class YProtocolSession {
         break;
       }
       case MessageType.Awareness:
-        decoding.readVarUint8Array(decoder);
+        // Validate the payload's CONTENTS, not just the envelope.
+        // applyAwarenessUpdate mutates state entry by entry and only notifies
+        // listeners at the end — a bad entry mid-payload would leave earlier
+        // entries applied with no event fired. Dry-running every entry here
+        // makes the real apply infallible (and catches trailing garbage
+        // inside the blob).
+        {
+          const payload = decoding.readVarUint8Array(decoder);
+          const inner = decoding.createDecoder(payload);
+          const count = decoding.readVarUint(inner);
+          for (let i = 0; i < count; i++) {
+            decoding.readVarUint(inner); // clientID
+            decoding.readVarUint(inner); // clock
+            JSON.parse(decoding.readVarString(inner)); // state (null on removal)
+          }
+          if (decoding.hasContent(inner)) {
+            throw new Error("awareness payload has trailing bytes");
+          }
+        }
         break;
       default:
         return null; // a y-protocols type yrby doesn't speak: ignore

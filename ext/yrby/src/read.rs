@@ -62,6 +62,17 @@ fn lexical_type<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
     }
 }
 
+/// The `__type` of an embedded Lexical `Y.Map`. Two kinds appear inside a
+/// block: text-node metadata (`"text"`) and node maps like the LineBreakNode
+/// (`"linebreak"`). Structure confirmed from live-editor bytes (see the
+/// captured-fixture test).
+fn lexical_map_type<T: ReadTxn>(txn: &T, m: &MapRef) -> String {
+    match m.get(txn, "__type") {
+        Some(Out::Any(Any::String(s))) => s.to_string(),
+        _ => String::new(),
+    }
+}
+
 /// Gather the text of an inline Lexical element (its text runs and any nested
 /// inline elements) without introducing block breaks.
 fn inline_lexical_text<T: ReadTxn>(txn: &T, t: &XmlTextRef, buf: &mut String) {
@@ -69,7 +80,12 @@ fn inline_lexical_text<T: ReadTxn>(txn: &T, t: &XmlTextRef, buf: &mut String) {
         match d.insert {
             Out::Any(Any::String(s)) => buf.push_str(&s),
             Out::YXmlText(child) => inline_lexical_text(txn, &child, buf),
-            _ => {} // per-text-node metadata map, decorator embeds: no text
+            Out::YMap(m) => match lexical_map_type(txn, &m).as_str() {
+                "linebreak" => buf.push('\n'),
+                "tab" => buf.push('\t'),
+                _ => {} // per-text-node metadata: no text of its own
+            },
+            _ => {} // decorator embeds: no text
         }
     }
 }
@@ -81,17 +97,30 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
     for d in t.diff(txn, YChange::identity) {
         match d.insert {
             Out::Any(Any::String(s)) => line.push_str(&s),
+            // Node maps: linebreak/tab carry no text, so emit the character
+            // they represent ("foo⏎bar" must not become "foobar"). Metadata
+            // maps ("text") stay silent.
+            Out::YMap(m) => match lexical_map_type(txn, &m).as_str() {
+                "linebreak" => line.push('\n'),
+                "tab" => line.push('\t'),
+                _ => {}
+            },
             Out::YXmlText(child) => {
-                if is_inline_lexical_type(&lexical_type(txn, &child)) {
-                    inline_lexical_text(txn, &child, &mut line);
-                } else {
-                    if !line.is_empty() {
-                        out.push(std::mem::take(&mut line));
+                let ty = lexical_type(txn, &child);
+                match ty.as_str() {
+                    // Defensive only: real Lexical stores these as Y.Map embeds.
+                    "linebreak" => line.push('\n'),
+                    "tab" => line.push('\t'),
+                    _ if is_inline_lexical_type(&ty) => inline_lexical_text(txn, &child, &mut line),
+                    _ => {
+                        if !line.is_empty() {
+                            out.push(std::mem::take(&mut line));
+                        }
+                        walk_lexical_block(txn, &child, out);
                     }
-                    walk_lexical_block(txn, &child, out);
                 }
             }
-            _ => {} // per-text-node metadata map; embeds we don't read for text
+            _ => {} // decorator embeds we don't read for text
         }
     }
     if !line.is_empty() {
@@ -254,6 +283,53 @@ mod tests {
         let map = doc.get_or_insert_map("state");
         let txn = doc.transact();
         assert_eq!(map_json(&txn, &map), "{}");
+    }
+
+    #[test]
+    fn lexical_soft_line_break_and_tab_emit_their_characters() {
+        // A paragraph "foo⏎bar" (shift-enter): Lexical stores the LineBreakNode
+        // as an embedded Y.Map with __type=linebreak (the same shape as the
+        // per-text-node metadata maps, which must stay silent). It must come
+        // through as '\n', not vanish and glue the words. Same for tab.
+        use yrs::{Text, XmlTextPrelim};
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("lex");
+        {
+            let mut txn = doc.transact_mut();
+            let block = frag.push_back(&mut txn, XmlTextPrelim::new(""));
+            let meta: MapPrelim = [("__type", yrs::In::from("text"))].into_iter().collect();
+            block.insert_embed(&mut txn, 0, meta); // metadata map: no text
+            block.push(&mut txn, "foo");
+            let br: MapPrelim = [("__type", yrs::In::from("linebreak"))]
+                .into_iter()
+                .collect();
+            block.insert_embed(&mut txn, 4, br);
+            block.push(&mut txn, "bar");
+            let tab: MapPrelim = [("__type", yrs::In::from("tab"))].into_iter().collect();
+            block.insert_embed(&mut txn, 8, tab);
+            block.push(&mut txn, "baz");
+        }
+        let txn = doc.transact();
+        assert_eq!(xml_blocks_text(&txn, &frag), "foo\nbar\tbaz");
+    }
+
+    #[test]
+    fn lexical_real_captured_linebreak_extracts_as_newline() {
+        // Ground truth: bytes captured from a LIVE Lexxy editor (agent-browser
+        // typing "foo", pressing Shift+Enter, typing "barbaz"), served by the
+        // yrby test server's durable store. The hand-built test above models
+        // this structure; this one IS the structure. Regenerate by driving
+        // lexxy-realtime's test server and saving GET /content/:room.
+        use yrs::updates::decoder::Decode;
+        use yrs::Update;
+        let bytes = include_bytes!("fixtures/lexical_linebreak.bin");
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(bytes).unwrap())
+            .unwrap();
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        assert_eq!(xml_blocks_text(&txn, &frag), "foo\nbarbaz");
     }
 
     #[test]
