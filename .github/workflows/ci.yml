@@ -142,6 +142,14 @@ jobs:
         working-directory: examples/actioncable-demo/frontend
         run: bun install && bun run build
 
+      # A real Tiptap editor runs headless (JSDOM) and Y::ProseMirror must
+      # reproduce its getHTML() from the raw doc bytes. The gem's fixture
+      # tests pin parity with the editor version they were captured from;
+      # this catches serializer drift when @tiptap/* is bumped. No server.
+      - name: E2e — headless editor render parity
+        working-directory: examples/actioncable-demo
+        run: node frontend/render_e2e.mjs
+
       # Run the durability/concurrency suite against a Postgres-backed durable
       # store under a multi-process Puma cluster (WORKERS=2 + Redis) — a
       # realistic deployment where workers share documents only through the cable

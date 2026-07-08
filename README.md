@@ -175,6 +175,31 @@ guarantees keep serving safe:
   keeps its pending), while `encode_state_as_update` stays lossless so you can
   still preserve the raw pending bytes for recovery.
 
+### Rendering to HTML
+
+`Y::ProseMirror` renders a ProseMirror or Tiptap document to HTML on the
+server, with no Node process or headless editor:
+
+```ruby
+prosemirror = Y::ProseMirror.new(doc)
+prosemirror.to_html            # the "default" fragment (Tiptap's default root)
+prosemirror.to_html("content") # or another XML root
+```
+
+The output matches Tiptap's own `getHTML()`, checked byte-for-byte in the tests
+against a document captured from a real editor. So you can render, search, or
+email a collaborative document without running a browser. It follows
+[`tiptap-php`](https://github.com/ueberdosis/tiptap-php) and reads both name
+styles editors use — Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
+`bullet_list`/`strong`.
+
+It covers paragraphs, headings, blockquotes, bullet/ordered/task lists, code
+blocks, links, images, mentions, details, hard breaks, horizontal rules,
+tables, text styles (color, font family), and every text mark. A table renders
+as semantic `<table><tbody>`, without the column-width styling Tiptap's editor
+view adds. A root that isn't ProseMirror — a Lexical document, say — returns
+`nil`.
+
 ### Protocol codec (module functions)
 
 Classifying and unwrapping wire frames is stateless, so it's exposed as
