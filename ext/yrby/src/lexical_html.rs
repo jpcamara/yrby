@@ -201,6 +201,10 @@ fn open_block<T: ReadTxn>(
             out.push('<');
             out.push_str(tag);
             out.push('>');
+            // Direct inline content is crafted-only (Lexxy puts none here);
+            // keep it rather than drop it. Safe from double-render: this skips
+            // block children, and push_block_children skips inline content.
+            out.push_str(&render_inline(txn, t, 0));
             let close = if tag == "ol" { "</ol>" } else { "</ul>" };
             push_block_children(txn, t, depth, close, false, stack);
         }
@@ -221,10 +225,12 @@ fn open_block<T: ReadTxn>(
         }
         "table" | "wrapped_table_node" => {
             out.push_str("<figure class=\"lexxy-content__table-wrapper\"><table><tbody>");
+            out.push_str(&render_inline(txn, t, 0));
             push_block_children(txn, t, depth, "</tbody></table></figure>", false, stack);
         }
         "tablerow" => {
             out.push_str("<tr>");
+            out.push_str(&render_inline(txn, t, 0));
             push_block_children(txn, t, depth, "</tr>", false, stack);
         }
         "tablecell" => {
@@ -246,6 +252,7 @@ fn open_block<T: ReadTxn>(
                 out.push_str("<td>");
                 "</td>"
             };
+            out.push_str(&render_inline(txn, t, 0));
             push_block_children(txn, t, depth, close, false, stack);
         }
         // A block type this renderer doesn't know: degrade to a readable
@@ -689,6 +696,29 @@ mod tests {
         ] {
             assert!(html.contains(probe), "{what}: missing {probe}");
         }
+    }
+
+    /// A known container with inline content jammed directly into it
+    /// (Lexxy never does this) keeps the content instead of dropping it.
+    #[test]
+    fn a_known_container_keeps_stray_inline_content() {
+        use yrs::{XmlFragment, XmlTextPrelim};
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("root");
+        {
+            let mut txn = doc.transact_mut();
+            let list = frag.push_back(&mut txn, XmlTextPrelim::new("stray"));
+            list.insert_attribute(&mut txn, "__type", "list");
+            list.insert_attribute(&mut txn, "__tag", "ul");
+            let li = list.insert_embed(&mut txn, 5, XmlTextPrelim::new("item"));
+            li.insert_attribute(&mut txn, "__type", "listitem");
+        }
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let html = render(&txn, &frag).unwrap();
+
+        assert!(html.contains("stray"), "stray inline text kept: {html}");
+        assert!(html.contains("<li value=\"1\">item</li>"), "{html}");
     }
 
     /// An image gallery (adjacent previewable images grouped by Lexxy's

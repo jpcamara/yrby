@@ -6,8 +6,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-07-07
-
 ### Added
 
 - **`Y::Lexical` — render Lexical/Lexxy documents to HTML.**
@@ -23,6 +21,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `read_xml` now pulls text out of attachments too: a mention's text goes
   inline, and an upload adds its caption, alt text, or filename. Before, both
   were dropped.
+
+## [0.4.0] - 2026-07-07
+
+### Added
+
 - **`Y::ProseMirror` — render ProseMirror/Tiptap documents to HTML.**
   `Y::ProseMirror.new(doc).to_html` turns a Tiptap document into HTML on the
   server, with no Node process or headless editor. The output matches Tiptap's
