@@ -129,6 +129,36 @@ class ThreadSafetyTest < Minitest::Test
     assert_equal sequential.encode_state_as_update, shared.encode_state_as_update
   end
 
+  def test_concurrent_prosemirror_to_html_with_writers_does_not_deadlock
+    # Y::ProseMirror holds an Arc handle to the same doc, so its renders contend
+    # with writers on the doc's RwLock. Same guarantees as every other native
+    # op: one transaction per call, opened inside nogvl. This exercises the
+    # render path under write contention; a future edit that reintroduced a
+    # nested transaction would deadlock and time out here.
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.expand_path("../ext/yrby/src/fixtures/prosemirror_tiptap.bin", __dir__)))
+    prosemirror = Y::ProseMirror.new(doc)
+    updates = [
+      YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
+      YjsFixtures::TwoDocsMerged::DOC2_UPDATE
+    ]
+
+    errors = run_threads do |i|
+      ITERATIONS.times do
+        if i.even?
+          html = prosemirror.to_html
+
+          raise "render lost content under contention" unless html&.include?("<h1>Heading One</h1>")
+        else
+          doc.apply_update(updates[(i / 2) % updates.length])
+        end
+      end
+    end
+
+    assert_empty errors
+    assert_includes prosemirror.to_html, "</blockquote>"
+  end
+
   private
 
   # Run THREADS threads, collecting any exception raised in each.

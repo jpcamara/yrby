@@ -6,6 +6,7 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
 
+mod prosemirror_html;
 mod protocol;
 mod read;
 use protocol::{
@@ -30,6 +31,7 @@ struct RbDoc(Doc);
 fn assert_thread_safe() {
     fn is_send_sync<T: Send + Sync>() {}
     is_send_sync::<Doc>();
+    is_send_sync::<RbProseMirror>();
 }
 
 /// Run `f` with the GVL (Global VM Lock) released, so other Ruby threads,
@@ -330,6 +332,55 @@ impl RbDoc {
 }
 
 // ============================================================================
+// Y::ProseMirror — schema-pinned rendering of ProseMirror/Tiptap documents
+// ============================================================================
+
+/// A ProseMirror/Tiptap view over a `Y::Doc`. The schema knowledge (node/mark
+/// names, Tiptap's serializer semantics) lives here rather than on the
+/// schema-agnostic `Doc`. Holds a cheap clone of the doc (yrs `Doc` is an Arc
+/// handle), so it reads live state.
+///
+/// Thread safety matches `Y::Doc`: every method opens its own transaction
+/// inside `nogvl` and holds no lock across the GVL boundary.
+#[magnus::wrap(class = "Y::ProseMirror", free_immediately, size)]
+struct RbProseMirror(Doc);
+
+impl RbProseMirror {
+    /// `Y::ProseMirror.new(doc)`
+    fn new(doc: &RbDoc) -> Self {
+        RbProseMirror(doc.0.clone())
+    }
+
+    /// Render an XML root (default `"default"`, the fragment name Tiptap's
+    /// Collaboration extension uses) to HTML. Output follows tiptap-php and
+    /// matches Tiptap's `getHTML()` on the reference fixture; see
+    /// `prosemirror_html.rs` for coverage and caveats. Returns nil when the
+    /// root is missing or not ProseMirror-shaped (e.g. a Lexical document).
+    fn to_html(&self, args: &[Value]) -> Result<Option<String>, Error> {
+        if args.len() > 1 {
+            let ruby = Ruby::get().unwrap();
+            return Err(Error::new(
+                ruby.exception_arg_error(),
+                format!(
+                    "wrong number of arguments (given {}, expected 0..1)",
+                    args.len()
+                ),
+            ));
+        }
+        let name: String = match args.first() {
+            Some(arg) => TryConvert::try_convert(*arg)?,
+            None => "default".to_string(),
+        };
+        let doc = &self.0;
+        Ok(nogvl(move || {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(name.as_str())?;
+            prosemirror_html::render(&txn, &fragment)
+        }))
+    }
+}
+
+// ============================================================================
 // Protocol codec (stateless), exposed as `Y` module functions
 // ============================================================================
 //
@@ -409,6 +460,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "handle_sync_message",
         method!(RbDoc::handle_sync_message, 1),
     )?;
+    // Y::ProseMirror: schema-pinned ProseMirror/Tiptap rendering over a Doc.
+    let prosemirror_class = module.define_class("ProseMirror", ruby.class_object())?;
+    prosemirror_class.define_singleton_method("new", function!(RbProseMirror::new, 1))?;
+    prosemirror_class.define_method("to_html", method!(RbProseMirror::to_html, -1))?;
+
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;
     module.define_module_function("message_kind", function!(message_kind, 1))?;
