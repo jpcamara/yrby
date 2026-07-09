@@ -113,15 +113,37 @@ impl Emitter {
     }
 }
 
-/// When no callback rules are registered, output is a single string; return
-/// it directly so the common path stays allocation-flat and the Ruby layer
-/// can skip splicing. `None` means pending segments are present.
-pub fn flatten(segments: Vec<Segment>) -> Result<String, Vec<Segment>> {
+/// What flattening produced. Both variants are normal outcomes — `Pending`
+/// isn't a failure, it's "callback nodes are present, splice them" — so this
+/// is an enum, not a `Result`.
+pub enum Flattened {
+    Html(String),
+    Pending(Vec<Segment>),
+}
+
+impl Flattened {
+    /// The finished markup, or `None` when callback nodes still need
+    /// splicing. Handy where the caller knows no callback rules exist.
+    /// (Only test code needs it today, but it's part of the shape the
+    /// extracted crates will expose.)
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn into_html(self) -> Option<String> {
+        match self {
+            Flattened::Html(html) => Some(html),
+            Flattened::Pending(_) => None,
+        }
+    }
+}
+
+/// Join the segments when every one is finished markup, so the common
+/// no-callback path stays a single string and the splicing layer can be
+/// skipped; hand the segments back untouched when callback nodes are present.
+pub fn flatten(segments: Vec<Segment>) -> Flattened {
     if segments
         .iter()
         .any(|s| matches!(s, Segment::Pending { .. }))
     {
-        return Err(segments);
+        return Flattened::Pending(segments);
     }
     let mut out = String::new();
     for seg in &segments {
@@ -129,7 +151,7 @@ pub fn flatten(segments: Vec<Segment>) -> Result<String, Vec<Segment>> {
             out.push_str(s);
         }
     }
-    Ok(out)
+    Flattened::Html(out)
 }
 
 /// A piece of an attribute value or text template: a literal, or a reference
@@ -424,6 +446,6 @@ mod tests {
         em.push_str("b");
         let segs = em.into_segments();
         assert_eq!(segs.len(), 1);
-        assert_eq!(flatten(segs).unwrap(), "ab");
+        assert_eq!(flatten(segs).into_html().unwrap(), "ab");
     }
 }

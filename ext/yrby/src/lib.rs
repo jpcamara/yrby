@@ -470,8 +470,8 @@ fn segments_result(segments: Option<Vec<Segment>>) -> Result<Value, Error> {
     match segments {
         None => Ok(ruby.qnil().as_value()),
         Some(segs) => match render_rules::flatten(segs) {
-            Ok(html) => Ok(html.into_value_with(&ruby)),
-            Err(segs) => Ok(segments_to_ruby(&ruby, segs)?.as_value()),
+            render_rules::Flattened::Html(html) => Ok(html.into_value_with(&ruby)),
+            render_rules::Flattened::Pending(segs) => Ok(segments_to_ruby(&ruby, segs)?.as_value()),
         },
     }
 }

@@ -91,8 +91,11 @@ pub fn render_segments<T: ReadTxn>(
 /// tests pin. With no callback rules, segments always flatten.
 #[cfg(test)]
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
-    render_segments(txn, fragment, &Rules::empty())
-        .map(|segs| crate::render_rules::flatten(segs).unwrap_or_default())
+    render_segments(txn, fragment, &Rules::empty()).map(|segs| {
+        crate::render_rules::flatten(segs)
+            .into_html()
+            .expect("no callback rules registered")
+    })
 }
 
 /// A root is ProseMirror-shaped when it's empty or its first child is a block
@@ -1217,7 +1220,7 @@ mod tests {
         let txn = doc.transact();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
         assert_eq!(
-            crate::render_rules::flatten(segs).unwrap(),
+            crate::render_rules::flatten(segs).into_html().unwrap(),
             "<aside class=\"callout callout--warning\"><div class=\"para\">careful</div></aside>"
         );
     }

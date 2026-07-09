@@ -122,8 +122,11 @@ pub fn render_segments<T: ReadTxn>(
 /// tests pin. With no callback rules, segments always flatten.
 #[cfg(test)]
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
-    render_segments(txn, fragment, &Rules::empty())
-        .map(|segs| crate::render_rules::flatten(segs).unwrap_or_default())
+    render_segments(txn, fragment, &Rules::empty()).map(|segs| {
+        crate::render_rules::flatten(segs)
+            .into_html()
+            .expect("no callback rules registered")
+    })
 }
 
 /// A root is Lexical-shaped when it is empty or at least one child carries the
