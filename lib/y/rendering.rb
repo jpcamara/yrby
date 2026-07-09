@@ -41,8 +41,11 @@ module Y
   module RenderRules
     # What a callback receives. `attrs` keys are as stored (Lexical's own
     # props keep their "__" prefix); `content` is the node's children,
-    # already rendered to an HTML string.
-    Node = Data.define(:type, :attrs, :content)
+    # already rendered to an HTML string; `child_types` lists the node's
+    # element/block children by type, in document order — the structural
+    # facts attrs and content can't answer (a gallery's image count, whether
+    # a list item holds a nested list).
+    Node = Data.define(:type, :attrs, :content, :child_types)
 
     module_function
 
@@ -120,9 +123,10 @@ module Y
       segments.map do |segment|
         next segment if segment.is_a?(String)
 
-        type, attrs_json, content = segment
+        type, attrs_json, content, child_types = segment
         node = Node.new(type: type, attrs: JSON.parse(attrs_json),
-                        content: splice(content, callbacks))
+                        content: splice(content, callbacks),
+                        child_types: child_types)
         callbacks.fetch(type).call(node).to_s
       end.join
     end

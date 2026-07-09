@@ -52,7 +52,11 @@ enum Work {
     Open(XmlElementRef, usize),
     Close(&'static str),
     CloseOwned(String),
-    EndPending { ty: String, attrs_json: String },
+    EndPending {
+        ty: String,
+        attrs_json: String,
+        child_types: Vec<String>,
+    },
 }
 
 /// Render a ProseMirror/Tiptap-shaped XML root to segments, or `None` when the
@@ -109,9 +113,13 @@ fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlElementRef, em: &mut Emitter
         match work {
             Work::Close(tag) => em.push_str(tag),
             Work::CloseOwned(tag) => em.push_str(&tag),
-            Work::EndPending { ty, attrs_json } => {
+            Work::EndPending {
+                ty,
+                attrs_json,
+                child_types,
+            } => {
                 let content = em.end_frame();
-                em.emit_pending(ty, attrs_json, content);
+                em.emit_pending(ty, attrs_json, child_types, content);
             }
             Work::Open(node, depth) => open_block(txn, &node, depth, em, &mut stack, rules),
         }
@@ -291,6 +299,7 @@ fn open_rule_block<T: ReadTxn>(
         stack.push(Work::EndPending {
             ty,
             attrs_json: xml_attrs_json(txn, e),
+            child_types: element_child_types(txn, e),
         });
         match rule.content {
             Content::Inline => render_inline(txn, e, 0, em, rules),
@@ -435,6 +444,16 @@ fn element_children<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> Vec<XmlElementRef
         .collect()
 }
 
+/// The node type (tag) of every element child, in document order — handed to
+/// callback rules as `node.child_types` for the structural facts `attrs` and
+/// the rendered content can't answer.
+fn element_child_types<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> Vec<String> {
+    element_children(txn, e)
+        .iter()
+        .map(|el| el.tag().to_string())
+        .collect()
+}
+
 /// Render a text block's inline content: text runs (with their marks) and
 /// inline element nodes (hard breaks, mentions, inline images). A registered
 /// rule wins over the built-in inline nodes here too. An unknown inline node
@@ -489,7 +508,12 @@ fn render_rule_inline<T: ReadTxn>(
             render_inline(txn, e, depth + 1, em, rules);
         }
         let content = em.end_frame();
-        em.emit_pending(e.tag().to_string(), xml_attrs_json(txn, e), content);
+        em.emit_pending(
+            e.tag().to_string(),
+            xml_attrs_json(txn, e),
+            element_child_types(txn, e),
+            content,
+        );
         return;
     }
     let tag = rule.tag.as_deref().unwrap_or("div");
@@ -1224,6 +1248,7 @@ mod tests {
         let Segment::Pending {
             ty,
             attrs_json,
+            child_types,
             content,
         } = &segs[1]
         else {
@@ -1231,6 +1256,7 @@ mod tests {
         };
         assert_eq!(ty, "videoEmbed");
         assert_eq!(attrs_json, r#"{"src":"https://v.example/1"}"#);
+        assert_eq!(child_types, &["paragraph"]);
         assert!(matches!(&content[0], Segment::Html(s) if s == "<p>the caption</p>"));
     }
 

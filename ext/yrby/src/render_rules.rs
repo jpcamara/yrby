@@ -22,12 +22,17 @@ use yrs::{Any, Out, ReadTxn, Xml};
 /// One piece of renderer output. `Html` is finished markup; `Pending` is a
 /// callback node whose markup the Ruby layer supplies after the render.
 /// Content nests, so callback nodes inside callback nodes resolve depth-first.
+/// `child_types` lists the node's element/block children by type, in document
+/// order — the structural facts a callback can't recover from `attrs` or the
+/// rendered content (a gallery's image count, whether a list item holds a
+/// nested list).
 #[derive(Debug)]
 pub enum Segment {
     Html(String),
     Pending {
         ty: String,
         attrs_json: String,
+        child_types: Vec<String>,
         content: Vec<Segment>,
     },
 }
@@ -84,13 +89,20 @@ impl Emitter {
         }
     }
 
-    pub fn emit_pending(&mut self, ty: String, attrs_json: String, content: Vec<Segment>) {
+    pub fn emit_pending(
+        &mut self,
+        ty: String,
+        attrs_json: String,
+        child_types: Vec<String>,
+        content: Vec<Segment>,
+    ) {
         self.frames
             .last_mut()
             .expect("emitter frame")
             .push(Segment::Pending {
                 ty,
                 attrs_json,
+                child_types,
                 content,
             });
     }
@@ -398,7 +410,7 @@ mod tests {
         em.begin_frame();
         em.push_str("inner");
         let captured = em.end_frame();
-        em.emit_pending("video".into(), "{}".into(), captured);
+        em.emit_pending("video".into(), "{}".into(), Vec::new(), captured);
         em.push_str("</p>");
         let segs = em.into_segments();
         assert_eq!(segs.len(), 3);

@@ -484,12 +484,14 @@ fn segments_to_ruby(ruby: &Ruby, segments: Vec<Segment>) -> Result<RArray, Error
             Segment::Pending {
                 ty,
                 attrs_json,
+                child_types,
                 content,
             } => {
                 let entry = ruby.ary_new();
                 entry.push(ty)?;
                 entry.push(attrs_json)?;
                 entry.push(segments_to_ruby(ruby, content)?)?;
+                entry.push(child_types)?;
                 arr.push(entry)?;
             }
         }

@@ -75,7 +75,11 @@ enum Work {
     Open(XmlTextRef, usize),
     Close(&'static str),
     CloseOwned(String),
-    EndPending { ty: String, attrs_json: String },
+    EndPending {
+        ty: String,
+        attrs_json: String,
+        child_types: Vec<String>,
+    },
 }
 
 /// Render a Lexical/Lexxy-shaped XML root, or `None` when the root isn't
@@ -160,9 +164,13 @@ fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlTextRef, em: &mut Emitter, r
         match work {
             Work::Close(tag) => em.push_str(tag),
             Work::CloseOwned(tag) => em.push_str(&tag),
-            Work::EndPending { ty, attrs_json } => {
+            Work::EndPending {
+                ty,
+                attrs_json,
+                child_types,
+            } => {
                 let content = em.end_frame();
-                em.emit_pending(ty, attrs_json, content);
+                em.emit_pending(ty, attrs_json, child_types, content);
             }
             Work::Open(node, depth) => open_block(txn, &node, depth, em, &mut stack, rules),
         }
@@ -330,14 +338,17 @@ fn open_rule_block<T: ReadTxn>(
         em.begin_frame();
         // Children render into the frame; EndPending seals it. Blocks go via
         // the stack (pushed above the marker, so they complete first); inline
-        // content renders now.
+        // content renders now — in blocks mode too, since a block like a list
+        // item holds its own text alongside its nested blocks.
         stack.push(Work::EndPending {
             ty: ty.to_string(),
             attrs_json: xml_attrs_json(txn, t),
+            child_types: text_child_types(txn, t),
         });
         match rule.content {
             Content::Inline => render_inline(txn, t, 0, em, rules),
             Content::Blocks => {
+                render_inline(txn, t, 0, em, rules);
                 for child in block_children(txn, t).into_iter().rev() {
                     if depth < MAX_BLOCK_DEPTH {
                         stack.push(Work::Open(child, depth + 1));
@@ -480,6 +491,21 @@ fn block_children<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> Vec<XmlTextRef> {
 
 fn is_inline_type(ty: &str) -> bool {
     matches!(ty, "link" | "autolink")
+}
+
+/// The `__type` of every element/block child of a block, in document order —
+/// handed to callback rules as `node.child_types` (a gallery's image count,
+/// a list item's nested list). Text runs and metadata maps are not children.
+fn text_child_types<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> Vec<String> {
+    let mut out = Vec::new();
+    for d in t.diff(txn, YChange::identity) {
+        match d.insert {
+            Out::YXmlText(child) => out.push(node_type(txn, &child)),
+            Out::YXmlElement(child) => out.push(elem_type(txn, &child)),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Render a block's inline content: formatted text runs, linebreaks, tabs,
@@ -701,7 +727,12 @@ fn render_rule_element<T: ReadTxn>(
     em: &mut Emitter,
 ) {
     if rule.callback {
-        em.emit_pending(ty.to_string(), xml_attrs_json(txn, e), Vec::new());
+        em.emit_pending(
+            ty.to_string(),
+            xml_attrs_json(txn, e),
+            Vec::new(),
+            Vec::new(),
+        );
         return;
     }
     let tag = rule.tag.as_deref().unwrap_or("div");

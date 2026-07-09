@@ -273,16 +273,25 @@ lexical = Y::Lexical.new(doc, nodes: {
 })
 ```
 
-The block gets the node's type, its stored attributes, and `node.content` —
-the children, already rendered to HTML. Whatever it returns is spliced into
-the output as-is: it's trusted HTML, so escape any values you interpolate.
-To set the content mode for a callback, use the hash form:
+The block gets the node's type, its stored attributes, `node.content` — the
+children, already rendered to HTML — and `node.child_types`, the node's
+element/block children by type, in document order. `child_types` answers the
+structural questions attributes can't: how many images a gallery holds, or
+whether a list item carries a nested list. Whatever the block returns is
+spliced into the output as-is: it's trusted HTML, so escape any values you
+interpolate. To set the content mode for a callback, use the hash form:
 `{ content: :blocks, render: ->(node) { ... } }`.
 
 Callbacks never run while the document is locked. The render finishes first
 (inside one read transaction, GVL released), then the blocks run and their
 output is spliced in — so a callback can safely read or even write the same
 doc. With no callback rules, `to_html` skips the splicing entirely.
+
+Blocks are the escape hatch for everything the declarative form can't say,
+and they're proven sufficient: the gem's tests reimplement the entire
+built-in Lexxy schema through this API — simple nodes as hashes, the
+conditional and computed ones as blocks — and hold the output byte-identical
+to the native renderer on every captured fixture.
 
 `Y::ProseMirror` also takes `marks:` for custom marks:
 
