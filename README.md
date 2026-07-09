@@ -236,6 +236,66 @@ re-render).
 In both renderers an unknown node keeps its content — text falls back to a
 plain paragraph rather than disappearing.
 
+#### Custom nodes and marks
+
+The built-in schemas are pinned to what Tiptap and Lexxy ship, but apps add
+their own node types. Both renderers take rules for them. A rule is checked
+before the built-in schema, so it can add a node type or replace how a
+built-in renders.
+
+A declarative rule is markup as data, rendered natively:
+
+```ruby
+prosemirror = Y::ProseMirror.new(doc, nodes: {
+  "callout" => {
+    tag: "aside",
+    attrs: { "class" => ["callout callout--", :kind] },
+    content: :blocks
+  }
+})
+```
+
+`tag` names the element. `attrs` values are templates: a string is a literal,
+a symbol reads that attribute off the node, an array concatenates both kinds;
+an attribute that resolves empty is left out. `text` (same template form)
+emits literal text content. `content` says what renders inside the element —
+`:inline` (the default), `:blocks` for nested block children, or `:none`.
+`void: true` skips the closing tag.
+
+When markup-as-data isn't enough, pass a callable instead:
+
+```ruby
+lexical = Y::Lexical.new(doc, nodes: {
+  "video_embed" => ->(node) {
+    src = ERB::Util.html_escape(node.attrs["__src"])
+    %(<video controls src="#{src}"></video>)
+  }
+})
+```
+
+The block gets the node's type, its stored attributes, and `node.content` —
+the children, already rendered to HTML. Whatever it returns is spliced into
+the output as-is: it's trusted HTML, so escape any values you interpolate.
+To set the content mode for a callback, use the hash form:
+`{ content: :blocks, render: ->(node) { ... } }`.
+
+Callbacks never run while the document is locked. The render finishes first
+(inside one read transaction, GVL released), then the blocks run and their
+output is spliced in — so a callback can safely read or even write the same
+doc. With no callback rules, `to_html` skips the splicing entirely.
+
+`Y::ProseMirror` also takes `marks:` for custom marks:
+
+```ruby
+prosemirror = Y::ProseMirror.new(doc, marks: {
+  "comment" => { tag: "span", attrs: { "data-comment-id" => :id } }
+})
+```
+
+Symbol refs resolve against the mark's own attributes. A custom mark wraps
+outside every built-in mark; several on one run nest alphabetically. A rule
+for a built-in mark name (`"bold"`) replaces its built-in tag.
+
 ### Protocol codec (module functions)
 
 Classifying and unwrapping wire frames is stateless, so it's exposed as

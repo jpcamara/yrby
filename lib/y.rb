@@ -12,6 +12,8 @@ rescue LoadError
   require_relative "y/yrby"
 end
 
+require_relative "y/rendering"
+
 module Y
   # Doc, Error, and the protocol module functions are defined in the Rust
   # extension. The ActionCable integration (Y::ActionCable::Sync) lives in the

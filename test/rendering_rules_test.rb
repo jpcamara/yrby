@@ -1,0 +1,133 @@
+# frozen_string_literal: true
+
+require "test_helper"
+
+# Custom render rules (Y::RenderRules): the nodes:/marks: config both
+# renderers accept. Declarative rules render natively; callback rules run
+# Ruby after the document read has finished and splice into the output. The
+# rule engine itself (precedence, templates, segment shapes) is exercised in
+# the Rust tests; these cover the Ruby-facing surface end to end.
+class RenderingRulesTest < Minitest::Test
+  FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
+
+  def lexical_doc
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_full.bin")))
+    doc
+  end
+
+  def prosemirror_doc(name = "prosemirror_tiptap")
+    doc = Y::Doc.new
+    doc.apply_update(File.binread(File.join(FIXTURES, "#{name}.bin")))
+    doc
+  end
+
+  def test_no_rules_still_returns_a_plain_string
+    html = Y::Lexical.new(lexical_doc).to_html
+
+    assert_instance_of String, html
+  end
+
+  def test_a_declarative_rule_overrides_a_builtin_node
+    html = Y::ProseMirror.new(
+      prosemirror_doc,
+      nodes: { "blockquote" => { tag: "aside", attrs: { "class" => "quote" }, content: :blocks } }
+    ).to_html
+
+    assert_includes html, '<aside class="quote">'
+    refute_includes html, "<blockquote>"
+  end
+
+  def test_declarative_attr_templates_resolve_stored_attributes
+    # The mention fixture stores Tiptap Mention nodes with an `id` attribute.
+    html = Y::ProseMirror.new(
+      prosemirror_doc("prosemirror_mention"),
+      nodes: { "mention" => { tag: "x-mention", attrs: { "data-user" => [:id] }, text: [:label] } }
+    ).to_html
+
+    assert_includes html, '<x-mention data-user="'
+    refute_includes html, 'data-type="mention"'
+  end
+
+  def test_a_callback_rule_receives_the_node_and_splices_its_return_value
+    seen = []
+    html = Y::Lexical.new(
+      lexical_doc,
+      nodes: {
+        "paragraph" => lambda { |node|
+          seen << node
+          %(<p data-cb="1">#{node.content}</p>)
+        }
+      }
+    ).to_html
+
+    assert_includes html, '<p data-cb="1">'
+    refute_empty seen
+    assert_equal "paragraph", seen.first.type
+    assert_instance_of Hash, seen.first.attrs
+    assert(seen.any? { |node| node.content.include?("<strong>") },
+           "children arrive as already-rendered HTML")
+  end
+
+  def test_a_callback_may_touch_the_same_doc
+    # Callbacks run after the render's transaction has closed. Reading and
+    # writing the doc from inside one must not deadlock against the render.
+    doc = lexical_doc
+    renderer = Y::Lexical.new(doc)
+    html = Y::ProseMirror.new(
+      prosemirror_doc,
+      nodes: {
+        "horizontalRule" => lambda { |_node|
+          doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_full.bin")))
+          renderer.to_html # a fresh read transaction on another doc view
+          %(<hr data-cb="1">)
+        }
+      }
+    ).to_html
+
+    assert_includes html, %(<hr data-cb="1">)
+  end
+
+  def test_a_custom_mark_wraps_outside_the_builtins
+    html = Y::ProseMirror.new(
+      prosemirror_doc,
+      marks: { "bold" => { tag: "b" } }
+    ).to_html
+
+    assert_includes html, "<b>"
+    refute_includes html, "<strong>"
+  end
+
+  def test_invalid_rule_config_raises_argument_error
+    doc = Y::Doc.new
+
+    error = assert_raises(ArgumentError) do
+      Y::ProseMirror.new(doc, nodes: { "callout" => { content: :blocks } }) # no tag, no callback
+    end
+    assert_match(/needs a tag/, error.message)
+
+    assert_raises(ArgumentError) do
+      Y::ProseMirror.new(doc, nodes: { "callout" => { tag: "aside", content: :wat } })
+    end
+    assert_raises(ArgumentError) do
+      Y::Lexical.new(doc, nodes: { "callout" => "not a rule" })
+    end
+    assert_raises(ArgumentError, "marks are ProseMirror-only") do
+      Y::Lexical.new(doc, marks: { "comment" => { tag: "span" } })
+    end
+  end
+
+  def test_rules_hold_up_under_concurrent_renders
+    renderer = Y::Lexical.new(
+      lexical_doc,
+      nodes: { "paragraph" => ->(node) { "<p>#{node.content}</p>" } }
+    )
+    reference = renderer.to_html
+
+    results = Array.new(8) do
+      Thread.new { Array.new(25) { renderer.to_html } }
+    end.flat_map(&:value)
+
+    assert(results.all? { |html| html == reference })
+  end
+end

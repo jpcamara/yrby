@@ -6,6 +6,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Custom render rules for `Y::Lexical` and `Y::ProseMirror`.** Both
+  renderers now take `nodes:` (and `marks:` on ProseMirror) to render node
+  types the pinned schemas don't know, or to override how a built-in renders.
+  Declarative rules (`tag`/`attrs`/`text`/`content`, with templates mixing
+  literals and attribute references) render natively at full speed. Callback
+  rules run a Ruby block per node, receiving its type, attributes, and
+  already-rendered children — the block runs after the document read has
+  finished, never while the doc is locked, so it can safely read or write the
+  same doc. With no callback rules the render path is unchanged, byte for
+  byte. See "Custom nodes and marks" in the README.
+
 ## [0.5.0] - 2026-07-08
 
 ### Added
