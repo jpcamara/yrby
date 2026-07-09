@@ -348,7 +348,7 @@ impl RbDoc {
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
 /// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
-/// keep that discipline: the render emits pending segments, and the Ruby
+/// keep that discipline: the render emits deferred segments, and the Ruby
 /// layer runs the app's blocks only after the transaction has closed.
 #[magnus::wrap(class = "Y::Lexical", free_immediately, size)]
 struct RbLexical {
@@ -399,7 +399,7 @@ impl RbLexical {
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
 /// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
-/// keep that discipline: the render emits pending segments, and the Ruby
+/// keep that discipline: the render emits deferred segments, and the Ruby
 /// layer runs the app's blocks only after the transaction has closed.
 #[magnus::wrap(class = "Y::ProseMirror", free_immediately, size)]
 struct RbProseMirror {
@@ -471,7 +471,9 @@ fn segments_result(segments: Option<Vec<Segment>>) -> Result<Value, Error> {
         None => Ok(ruby.qnil().as_value()),
         Some(segs) => match render_rules::flatten(segs) {
             render_rules::Flattened::Html(html) => Ok(html.into_value_with(&ruby)),
-            render_rules::Flattened::Pending(segs) => Ok(segments_to_ruby(&ruby, segs)?.as_value()),
+            render_rules::Flattened::Deferred(segs) => {
+                Ok(segments_to_ruby(&ruby, segs)?.as_value())
+            }
         },
     }
 }
@@ -481,7 +483,7 @@ fn segments_to_ruby(ruby: &Ruby, segments: Vec<Segment>) -> Result<RArray, Error
     for seg in segments {
         match seg {
             Segment::Html(s) => arr.push(s)?,
-            Segment::Pending {
+            Segment::Deferred {
                 ty,
                 attrs_json,
                 child_types,

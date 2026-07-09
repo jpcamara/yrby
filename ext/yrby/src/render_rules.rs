@@ -8,7 +8,7 @@
 //!   full speed. This covers the tiptap-php `renderHTML` shape: markup as
 //!   data.
 //! - **Callback rules** defer to Ruby. Rendering never calls Ruby while the
-//!   document is locked — instead the renderer emits [`Segment::Pending`]
+//!   document is locked — instead the renderer emits [`Segment::Deferred`]
 //!   entries carrying the node's type, attributes (as JSON), and its
 //!   already-rendered children; the Ruby layer invokes the app's block after
 //!   the transaction has closed and the GVL is held again, then splices.
@@ -19,8 +19,10 @@
 use std::collections::HashMap;
 use yrs::{Any, Out, ReadTxn, Xml};
 
-/// One piece of renderer output. `Html` is finished markup; `Pending` is a
+/// One piece of renderer output. `Html` is finished markup; `Deferred` is a
 /// callback node whose markup the Ruby layer supplies after the render.
+/// ("Deferred", not "pending" — in Yjs parlance a pending update is one
+/// waiting on a missing causal dependency, and this gem uses it that way.)
 /// Content nests, so callback nodes inside callback nodes resolve depth-first.
 /// `child_types` lists the node's element/block children by type, in document
 /// order — the structural facts a callback can't recover from `attrs` or the
@@ -29,7 +31,7 @@ use yrs::{Any, Out, ReadTxn, Xml};
 #[derive(Debug)]
 pub enum Segment {
     Html(String),
-    Pending {
+    Deferred {
         ty: String,
         attrs_json: String,
         child_types: Vec<String>,
@@ -38,7 +40,7 @@ pub enum Segment {
 }
 
 /// Builds segmented output. Renderers append markup through this instead of a
-/// bare `String`; frames capture sub-output (a pending node's children, or a
+/// bare `String`; frames capture sub-output (a deferred node's children, or a
 /// "did this render anything?" probe) without string sentinels.
 pub struct Emitter {
     frames: Vec<Vec<Segment>>,
@@ -84,12 +86,16 @@ impl Emitter {
         for seg in segments {
             match seg {
                 Segment::Html(s) => self.push_str(&s),
-                pending => self.frames.last_mut().expect("emitter frame").push(pending),
+                deferred => self
+                    .frames
+                    .last_mut()
+                    .expect("emitter frame")
+                    .push(deferred),
             }
         }
     }
 
-    pub fn emit_pending(
+    pub fn emit_deferred(
         &mut self,
         ty: String,
         attrs_json: String,
@@ -99,7 +105,7 @@ impl Emitter {
         self.frames
             .last_mut()
             .expect("emitter frame")
-            .push(Segment::Pending {
+            .push(Segment::Deferred {
                 ty,
                 attrs_json,
                 child_types,
@@ -113,12 +119,12 @@ impl Emitter {
     }
 }
 
-/// What flattening produced. Both variants are normal outcomes — `Pending`
+/// What flattening produced. Both variants are normal outcomes — `Deferred`
 /// isn't a failure, it's "callback nodes are present, splice them" — so this
 /// is an enum, not a `Result`.
 pub enum Flattened {
     Html(String),
-    Pending(Vec<Segment>),
+    Deferred(Vec<Segment>),
 }
 
 impl Flattened {
@@ -130,7 +136,7 @@ impl Flattened {
     pub fn into_html(self) -> Option<String> {
         match self {
             Flattened::Html(html) => Some(html),
-            Flattened::Pending(_) => None,
+            Flattened::Deferred(_) => None,
         }
     }
 }
@@ -141,9 +147,9 @@ impl Flattened {
 pub fn flatten(segments: Vec<Segment>) -> Flattened {
     if segments
         .iter()
-        .any(|s| matches!(s, Segment::Pending { .. }))
+        .any(|s| matches!(s, Segment::Deferred { .. }))
     {
-        return Flattened::Pending(segments);
+        return Flattened::Deferred(segments);
     }
     let mut out = String::new();
     for seg in &segments {
@@ -432,15 +438,15 @@ mod tests {
         em.begin_frame();
         em.push_str("inner");
         let captured = em.end_frame();
-        em.emit_pending("video".into(), "{}".into(), Vec::new(), captured);
+        em.emit_deferred("video".into(), "{}".into(), Vec::new(), captured);
         em.push_str("</p>");
         let segs = em.into_segments();
         assert_eq!(segs.len(), 3);
         assert!(matches!(&segs[0], Segment::Html(s) if s == "<p>"));
-        assert!(matches!(&segs[1], Segment::Pending { ty, .. } if ty == "video"));
+        assert!(matches!(&segs[1], Segment::Deferred { ty, .. } if ty == "video"));
         assert!(matches!(&segs[2], Segment::Html(s) if s == "</p>"));
 
-        // Adjacent Html merges; flatten() refuses pendings.
+        // Adjacent Html merges; flatten() hands deferred segments back.
         let mut em = Emitter::new();
         em.push_str("a");
         em.push_str("b");

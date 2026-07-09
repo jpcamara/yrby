@@ -41,7 +41,7 @@
 //! Custom nodes: rules are registered by `__type` (see `render_rules`) and
 //! consulted before the built-in arms, so they extend the schema or override
 //! a built-in. Declarative rules render here; callback rules emit
-//! `Segment::Pending` for the Ruby layer to fill in after the render.
+//! `Segment::Deferred` for the Ruby layer to fill in after the render.
 
 use crate::render_rules::{
     resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, NodeRule, Rules, Segment,
@@ -71,17 +71,17 @@ const FMT_HIGHLIGHT: u32 = 1 << 7;
 const MAX_BLOCK_DEPTH: usize = 1024;
 const MAX_INLINE_DEPTH: usize = 1024;
 
-/// A unit of pending block work on the explicit traversal stack. `Open`
+/// A unit of block work on the explicit traversal stack. `Open`
 /// renders a block node (pushing its own children as more work); `Close` and
 /// `CloseOwned` emit an end tag once a container's children have all been
 /// processed (built-in containers close with fixed strings; rule containers
-/// close with their computed tag). `EndPending` seals a callback node: it pops
-/// the emitter frame its children rendered into and emits the pending segment.
+/// close with their computed tag). `EndDeferred` seals a callback node: it pops
+/// the emitter frame its children rendered into and emits the deferred segment.
 enum Work {
     Open(XmlTextRef, usize),
     Close(&'static str),
     CloseOwned(String),
-    EndPending {
+    EndDeferred {
         ty: String,
         attrs_json: String,
         child_types: Vec<String>,
@@ -173,13 +173,13 @@ fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlTextRef, em: &mut Emitter, r
         match work {
             Work::Close(tag) => em.push_str(tag),
             Work::CloseOwned(tag) => em.push_str(&tag),
-            Work::EndPending {
+            Work::EndDeferred {
                 ty,
                 attrs_json,
                 child_types,
             } => {
                 let content = em.end_frame();
-                em.emit_pending(ty, attrs_json, child_types, content);
+                em.emit_deferred(ty, attrs_json, child_types, content);
             }
             Work::Open(node, depth) => open_block(txn, &node, depth, em, &mut stack, rules),
         }
@@ -331,11 +331,11 @@ fn open_rule_block<T: ReadTxn>(
 ) {
     if rule.callback {
         em.begin_frame();
-        // Children render into the frame; EndPending seals it. Blocks go via
+        // Children render into the frame; EndDeferred seals it. Blocks go via
         // the stack (pushed above the marker, so they complete first); inline
         // content renders now — in blocks mode too, since a block like a list
         // item holds its own text alongside its nested blocks.
-        stack.push(Work::EndPending {
+        stack.push(Work::EndDeferred {
             ty: ty.to_string(),
             attrs_json: xml_attrs_json(txn, t),
             child_types: text_child_types(txn, t),
@@ -715,7 +715,7 @@ fn render_rule_element<T: ReadTxn>(
     em: &mut Emitter,
 ) {
     if rule.callback {
-        em.emit_pending(
+        em.emit_deferred(
             ty.to_string(),
             xml_attrs_json(txn, e),
             Vec::new(),

@@ -24,7 +24,7 @@
 //! (see `render_rules`). A node rule is consulted before the built-in arms, so
 //! it can extend the schema or override a built-in; a mark rule claims its
 //! mark from the built-in wraps and wraps outside everything, link included.
-//! Declarative rules render here; callback rules emit `Segment::Pending` for
+//! Declarative rules render here; callback rules emit `Segment::Deferred` for
 //! the Ruby layer to fill in after the render.
 
 use crate::render_rules::{
@@ -42,17 +42,17 @@ use yrs::{
 // stack frames; this caps the work a pathological document can demand.
 const MAX_DEPTH: usize = 1024;
 
-/// A pending block on the traversal stack. `Open` renders a node (pushing its
+/// A unit of block work on the traversal stack. `Open` renders a node (pushing its
 /// block children as more work); `Close` and `CloseOwned` emit a container's
 /// end tag once its children are done (built-in containers close with fixed
-/// strings; rule containers close with their computed tag). `EndPending` seals
+/// strings; rule containers close with their computed tag). `EndDeferred` seals
 /// a callback node: it pops the emitter frame its children rendered into and
-/// emits the pending segment.
+/// emits the deferred segment.
 enum Work {
     Open(XmlElementRef, usize),
     Close(&'static str),
     CloseOwned(String),
-    EndPending {
+    EndDeferred {
         ty: String,
         attrs_json: String,
         child_types: Vec<String>,
@@ -116,13 +116,13 @@ fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlElementRef, em: &mut Emitter
         match work {
             Work::Close(tag) => em.push_str(tag),
             Work::CloseOwned(tag) => em.push_str(&tag),
-            Work::EndPending {
+            Work::EndDeferred {
                 ty,
                 attrs_json,
                 child_types,
             } => {
                 let content = em.end_frame();
-                em.emit_pending(ty, attrs_json, child_types, content);
+                em.emit_deferred(ty, attrs_json, child_types, content);
             }
             Work::Open(node, depth) => open_block(txn, &node, depth, em, &mut stack, rules),
         }
@@ -296,10 +296,10 @@ fn open_rule_block<T: ReadTxn>(
     let ty = e.tag().to_string();
     if rule.callback {
         em.begin_frame();
-        // Children render into the frame; EndPending seals it. Blocks go via
+        // Children render into the frame; EndDeferred seals it. Blocks go via
         // the stack (pushed above the marker, so they complete first); inline
         // content renders now.
-        stack.push(Work::EndPending {
+        stack.push(Work::EndDeferred {
             ty,
             attrs_json: xml_attrs_json(txn, e),
             child_types: element_child_types(txn, e),
@@ -511,7 +511,7 @@ fn render_rule_inline<T: ReadTxn>(
             render_inline(txn, e, depth + 1, em, rules);
         }
         let content = em.end_frame();
-        em.emit_pending(
+        em.emit_deferred(
             e.tag().to_string(),
             xml_attrs_json(txn, e),
             element_child_types(txn, e),
@@ -1225,10 +1225,10 @@ mod tests {
         );
     }
 
-    /// A callback rule defers: the node comes back as a Pending segment with
+    /// A callback rule defers: the node comes back as a Deferred segment with
     /// its attrs as JSON and its children already rendered.
     #[test]
-    fn a_callback_rule_emits_a_pending_segment_with_rendered_content() {
+    fn a_callback_rule_emits_a_deferred_segment_with_rendered_content() {
         let rules = Rules::parse(
             r#"{ "nodes": { "videoEmbed": { "callback": true, "content": "blocks" } } }"#,
         )
@@ -1248,14 +1248,14 @@ mod tests {
         let segs = render_segments(&txn, &frag, &rules).unwrap();
         assert_eq!(segs.len(), 2);
         assert!(matches!(&segs[0], Segment::Html(s) if s == "<p>watch:</p>"));
-        let Segment::Pending {
+        let Segment::Deferred {
             ty,
             attrs_json,
             child_types,
             content,
         } = &segs[1]
         else {
-            panic!("expected a pending segment");
+            panic!("expected a deferred segment");
         };
         assert_eq!(ty, "videoEmbed");
         assert_eq!(attrs_json, r#"{"src":"https://v.example/1"}"#);
