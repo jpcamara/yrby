@@ -93,7 +93,7 @@ const expected = editorHtml
   .replaceAll(/<colgroup>.*?<\/colgroup>/g, "")
 
 const update = Buffer.from(Y.encodeStateAsUpdate(ydoc))
-const actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb", "default"], {
+const actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb", "prosemirror", "default"], {
   input: update,
   maxBuffer: 64 * 1024 * 1024,
 }).toString()

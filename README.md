@@ -157,6 +157,17 @@ doc.handle_sync_message(data)     # => [msg_type, sync_type, response]; answers 
                                   #    SyncStep2 (never serves pending structs)
 ```
 
+### Reading document contents
+
+Reconstruct a document server-side — search, exports, emails, SSR — with no
+Node process:
+
+```ruby
+doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
+doc.read_xml("root")          # => text of an XML root, one block per line
+doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
+```
+
 ### Pending structs and gap-free state
 
 If a doc applies an update whose causally-prior update is missing (a "gappy"
@@ -177,8 +188,13 @@ guarantees keep serving safe:
 
 ### Rendering to HTML
 
-`Y::ProseMirror` renders a ProseMirror or Tiptap document to HTML on the
-server, with no Node process or headless editor:
+Two schema-pinned renderers turn a collaborative document into HTML on the
+server, with no Node process or headless editor: `Y::ProseMirror` for
+ProseMirror/Tiptap documents and `Y::Lexical` for
+[Lexxy](https://github.com/basecamp/lexxy) (Lexical) documents. Each returns
+`nil` for a root that belongs to the other schema.
+
+#### `Y::ProseMirror`
 
 ```ruby
 prosemirror = Y::ProseMirror.new(doc)
@@ -187,8 +203,7 @@ prosemirror.to_html("content") # or another XML root
 ```
 
 The output matches Tiptap's own `getHTML()`, checked byte-for-byte in the tests
-against a document captured from a real editor. So you can render, search, or
-email a collaborative document without running a browser. It follows
+against a document captured from a real editor. It follows
 [`tiptap-php`](https://github.com/ueberdosis/tiptap-php) and reads both name
 styles editors use — Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
 `bullet_list`/`strong`.
@@ -197,8 +212,29 @@ It covers paragraphs, headings, blockquotes, bullet/ordered/task lists, code
 blocks, links, images, mentions, details, hard breaks, horizontal rules,
 tables, text styles (color, font family), and every text mark. A table renders
 as semantic `<table><tbody>`, without the column-width styling Tiptap's editor
-view adds. A root that isn't ProseMirror — a Lexical document, say — returns
-`nil`.
+view adds.
+
+#### `Y::Lexical`
+
+```ruby
+lexical = Y::Lexical.new(doc)
+lexical.to_html            # the "root" fragment (Lexical's default root name)
+lexical.to_html("notepad") # or another XML root
+```
+
+The HTML is identical to what a `lexxy-editor` submits to Rails (its `value`).
+The tests check this byte-for-byte against a document captured from a real
+editor.
+
+It handles the whole Lexxy 0.9.x node set: paragraphs, headings, every text
+format and their combinations, links, the four list types and nesting,
+blockquotes, code blocks, tabs and soft breaks, horizontal rules, tables with
+header cells, image galleries, and ActionText attachments (uploads and
+mentions both emit `<action-text-attachment>` elements that ActionText can
+re-render).
+
+In both renderers an unknown node keeps its content — text falls back to a
+plain paragraph rather than disappearing.
 
 ### Protocol codec (module functions)
 

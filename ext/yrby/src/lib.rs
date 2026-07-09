@@ -6,6 +6,7 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
 
+mod lexical_html;
 mod prosemirror_html;
 mod protocol;
 mod read;
@@ -31,6 +32,7 @@ struct RbDoc(Doc);
 fn assert_thread_safe() {
     fn is_send_sync<T: Send + Sync>() {}
     is_send_sync::<Doc>();
+    is_send_sync::<RbLexical>();
     is_send_sync::<RbProseMirror>();
 }
 
@@ -332,6 +334,56 @@ impl RbDoc {
 }
 
 // ============================================================================
+// Y::Lexical — schema-pinned rendering of Lexical/Lexxy documents
+// ============================================================================
+
+/// A Lexical/Lexxy view over a `Y::Doc`. The schema knowledge (Lexxy 0.9.x
+/// node set and serializer semantics) lives here rather than on the
+/// schema-agnostic `Doc`. Holds a cheap clone of the doc (yrs `Doc` is an Arc
+/// handle), so it reads live state.
+///
+/// Thread safety matches `Y::Doc`: every method opens its own transaction
+/// inside `nogvl` and holds no lock across the GVL boundary.
+#[magnus::wrap(class = "Y::Lexical", free_immediately, size)]
+struct RbLexical(Doc);
+
+impl RbLexical {
+    /// `Y::Lexical.new(doc)`
+    fn new(doc: &RbDoc) -> Self {
+        RbLexical(doc.0.clone())
+    }
+
+    /// Render the document's XML root (default `"root"`, Lexical's standard
+    /// collab root name) to HTML, natively — no Node process or headless
+    /// editor. Output matches Lexxy's own serializer (the HTML a lexxy-editor
+    /// submits to Rails) byte-for-byte on the reference fixture; see
+    /// `lexical_html.rs` for the schema coverage and caveats. Returns nil when
+    /// the root is missing or not Lexical-shaped, e.g. a ProseMirror document.
+    fn to_html(&self, args: &[Value]) -> Result<Option<String>, Error> {
+        if args.len() > 1 {
+            let ruby = Ruby::get().unwrap();
+            return Err(Error::new(
+                ruby.exception_arg_error(),
+                format!(
+                    "wrong number of arguments (given {}, expected 0..1)",
+                    args.len()
+                ),
+            ));
+        }
+        let name: String = match args.first() {
+            Some(arg) => TryConvert::try_convert(*arg)?,
+            None => "root".to_string(),
+        };
+        let doc = &self.0;
+        Ok(nogvl(move || {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(name.as_str())?;
+            lexical_html::render(&txn, &fragment)
+        }))
+    }
+}
+
+// ============================================================================
 // Y::ProseMirror — schema-pinned rendering of ProseMirror/Tiptap documents
 // ============================================================================
 
@@ -460,6 +512,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "handle_sync_message",
         method!(RbDoc::handle_sync_message, 1),
     )?;
+    // Y::Lexical: schema-pinned Lexical/Lexxy rendering over a Doc.
+    let lexical_class = module.define_class("Lexical", ruby.class_object())?;
+    lexical_class.define_singleton_method("new", function!(RbLexical::new, 1))?;
+    lexical_class.define_method("to_html", method!(RbLexical::to_html, -1))?;
     // Y::ProseMirror: schema-pinned ProseMirror/Tiptap rendering over a Doc.
     let prosemirror_class = module.define_class("ProseMirror", ruby.class_object())?;
     prosemirror_class.define_singleton_method("new", function!(RbProseMirror::new, 1))?;

@@ -6,6 +6,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`Y::Lexical` — render Lexical/Lexxy documents to HTML.**
+  `Y::Lexical.new(doc).to_html` turns a Lexxy document into HTML on the server,
+  with no Node process or headless editor. The output is identical to the HTML
+  a `lexxy-editor` submits to Rails; the tests check it byte-for-byte against a
+  document captured from a real editor. It covers the whole Lexxy 0.9.x node
+  set: headings, every text format, links, bullet/numbered/check/nested lists,
+  quotes, code blocks, horizontal rules, tables with header cells, image galleries, and
+  ActionText attachments. Unknown nodes fall back to a plain paragraph, and a
+  root that isn't Lexical (a ProseMirror document, say) returns `nil`. This is
+  what `tiptap-php` does for ProseMirror JSON, applied to the Yjs structure.
+- `read_xml` now pulls text out of attachments too: a mention's text goes
+  inline, and an upload adds its caption, alt text, or filename. Before, both
+  were dropped.
+
 ## [0.4.0] - 2026-07-07
 
 ### Added
