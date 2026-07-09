@@ -305,6 +305,78 @@ Symbol refs resolve against the mark's own attributes. A custom mark wraps
 outside every built-in mark; several on one run nest alphabetically. A rule
 for a built-in mark name (`"bold"`) replaces its built-in tag.
 
+##### Worked examples
+
+A video-embed node from an app's Tiptap extension — a type the pinned schema
+has never heard of:
+
+```ruby
+prosemirror = Y::ProseMirror.new(doc, nodes: {
+  "videoEmbed" => ->(node) {
+    src   = ERB::Util.html_escape(node.attrs["src"])
+    title = ERB::Util.html_escape(node.attrs["title"] || "Video")
+    %(<figure class="video"><iframe src="#{src}" title="#{title}" allowfullscreen></iframe></figure>)
+  }
+})
+```
+
+Resolving mentions against the database. Blocks run after the document read
+has finished, so hitting ActiveRecord (or the doc itself) inside one is safe:
+
+```ruby
+prosemirror = Y::ProseMirror.new(doc, nodes: {
+  "mention" => ->(node) {
+    user = User.find_by(id: node.attrs["id"])
+    next "<span>@unknown</span>" unless user
+
+    %(<a class="mention" href="/users/#{user.id}">@#{ERB::Util.html_escape(user.handle)}</a>)
+  }
+})
+```
+
+Overriding a built-in — rendering Lexxy uploads as real image markup instead
+of the `<action-text-attachment>` elements ActionText re-renders:
+
+```ruby
+lexical = Y::Lexical.new(doc, nodes: {
+  "action_text_attachment" => ->(node) {
+    src     = ERB::Util.html_escape(node.attrs["src"])
+    alt     = ERB::Util.html_escape(node.attrs["altText"].to_s)
+    caption = node.attrs["caption"].to_s
+    html = %(<img src="#{src}" alt="#{alt}" loading="lazy">)
+    html += "<figcaption>#{ERB::Util.html_escape(caption)}</figcaption>" unless caption.empty?
+    "<figure>#{html}</figure>"
+  }
+})
+```
+
+Markup that depends on structure — `node.child_types` lists the node's
+element/block children in document order, so a layout container can size
+itself by its column count while the columns themselves stay declarative:
+
+```ruby
+prosemirror = Y::ProseMirror.new(doc, nodes: {
+  "columns" => { content: :blocks, render: ->(node) {
+    %(<div class="columns columns--#{node.child_types.length}">#{node.content}</div>)
+  } },
+  "column" => { tag: "div", attrs: { "class" => "column" }, content: :blocks }
+})
+```
+
+Content-aware overrides — dropping the empty paragraphs an editor keeps
+around the cursor, since `node.content` arrives already rendered:
+
+```ruby
+lexical = Y::Lexical.new(doc, nodes: {
+  "paragraph" => ->(node) { node.content.empty? ? "" : "<p>#{node.content}</p>" }
+})
+```
+
+For a larger reference, the test suite reimplements the entire built-in
+Lexxy schema this way (`test/rendering_rules_test.rb`,
+`lexxy_schema_as_rules`) — headings, nested list items, galleries, header
+cells, and both attachment types, byte-identical to the native renderer.
+
 ### Protocol codec (module functions)
 
 Classifying and unwrapping wire frames is stateless, so it's exposed as
