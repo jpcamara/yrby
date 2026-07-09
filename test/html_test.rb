@@ -7,8 +7,10 @@ require "test_helper"
 # The reference pair under ext/yrby/src/fixtures was captured from one live
 # Lexxy editor session: lexxy_full.bin is the synced Yjs state, lexxy_full.html
 # is the editor's own `value` (the HTML a Lexxy form submits to Rails).
-# to_html must reproduce it byte for byte — the schema mapping itself is
-# exercised in the Rust tests.
+# to_html must reproduce it byte for byte. The native renderer covers core
+# Lexical; the Lexxy-specific half ships as render rules (Y::Lexxy::NODES),
+# so these fixture tests exercise the extension path end to end — they are
+# the Lexxy byte-parity guarantee.
 class HtmlTest < Minitest::Test
   FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
 

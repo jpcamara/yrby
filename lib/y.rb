@@ -13,6 +13,7 @@ rescue LoadError
 end
 
 require_relative "y/rendering"
+require_relative "y/lexxy"
 
 module Y
   # Doc, Error, and the protocol module functions are defined in the Rust

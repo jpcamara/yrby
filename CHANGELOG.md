@@ -22,6 +22,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Lexxy schema through this API, byte-identical to the native renderer on
   every fixture. With no callback rules the render path is unchanged, byte
   for byte. See "Custom nodes and marks" in the README.
+- `Y::RenderRules.escape_text` / `escape_attr` — the exact escaping the
+  native renderers use, for blocks that build markup from stored values
+  (ERB's `html_escape` also rewrites apostrophes, which breaks byte parity
+  with editor output).
+
+### Changed
+
+- **`Y::Lexical` is now layered: a core-Lexical native renderer plus the
+  Lexxy-specific schema shipped as render rules (`Y::Lexxy::NODES`).** The
+  native side renders core structure — paragraphs, headings, quotes, code,
+  lists, tables, links, the full text-format model. Lexxy's own node types
+  (attachments, galleries, `early_escape_code`, `horizontal_divider`) and its
+  decorations of core nodes (the table figure wrapper, header-cell styling,
+  the nested-list-item class) are rules applied beneath the app's, on the
+  same extension API — the gem's Lexxy support is the API's first consumer.
+  Output is unchanged: the fixture tests still hold `to_html` byte-identical
+  to a live editor's serialized value, now through the extension path. An
+  unknown Lexical container also degrades better: its block children render
+  without an invented wrapper instead of being dropped.
 
 ## [0.5.0] - 2026-07-08
 

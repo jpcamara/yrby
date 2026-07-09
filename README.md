@@ -233,8 +233,16 @@ header cells, image galleries, and ActionText attachments (uploads and
 mentions both emit `<action-text-attachment>` elements that ActionText can
 re-render).
 
-In both renderers an unknown node keeps its content — text falls back to a
-plain paragraph rather than disappearing.
+Internally that support is layered: the native renderer covers core Lexical
+structure, and everything Lexxy adds — its node types (attachments,
+galleries) and its decorations of core nodes (the table wrapper, header-cell
+styling, nested-list classes) — ships as render rules (`Y::Lexxy::NODES`)
+built on the extension API below. The gem's own Lexxy support is its first
+consumer: an app rule for one of those types simply replaces it, and a
+different Lexical editor can bring its own rule set to the same core.
+
+In both renderers an unknown node keeps its content — text and nested blocks
+fall back to readable markup rather than disappearing.
 
 #### Custom nodes and marks
 

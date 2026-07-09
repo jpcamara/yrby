@@ -118,97 +118,29 @@ class RenderingRulesTest < Minitest::Test
     end
   end
 
-  # The capability proof: the whole built-in Lexxy schema, reimplemented
-  # through the public extensibility API — simple nodes as declarative
-  # hashes, everything with logic as a block. Registered rules override the
-  # built-ins, so this renders every node through the extension path; the
-  # output must match the native renderer byte for byte on every captured
-  # fixture. If a Lexxy node can't be expressed this way, this test is where
-  # that shows up.
-  ESC_TEXT = ->(s) { s.to_s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;") }
-  ESC_ATTR = ->(s) { ESC_TEXT.call(s).gsub('"', "&quot;") }
+  # The Lexxy-specific half of the schema now ships AS rules (Y::Lexxy::NODES)
+  # on top of the core native renderer — the byte-parity fixture tests in
+  # html_test.rb exercise the extension path on every render. These cover the
+  # layering itself.
+  def test_the_lexxy_layer_is_rules_and_user_rules_override_it
+    assert_instance_of Hash, Y::Lexxy::NODES
+    assert_predicate Y::Lexxy::NODES, :frozen?
 
-  def lexxy_schema_as_rules
-    code = lambda { |n|
-      lang = n.attrs["__language"]
-      attrs = lang.to_s.empty? ? "" : %( data-language="#{ESC_ATTR.call(lang)}")
-      "<pre#{attrs}>#{n.content}</pre>"
-    }
-    table = lambda { |n|
-      %(<figure class="lexxy-content__table-wrapper"><table><tbody>#{n.content}</tbody></table></figure>)
-    }
+    # The gallery fixture holds three uploads; a user rule for the type
+    # replaces the shipped Lexxy rendering.
+    html = Y::Lexical.new(
+      lexical_doc("lexxy_gallery"),
+      nodes: {
+        "action_text_attachment" => lambda { |node|
+          %(<img src="#{Y::RenderRules.escape_attr(node.attrs["src"])}" loading="lazy">)
+        }
+      }
+    ).to_html
 
-    lexxy_attachment_rules.merge(
-      "paragraph" => ->(n) { n.content.empty? ? "<p><br></p>" : "<p>#{n.content}</p>" },
-      "provisonal_paragraph" => ->(n) { n.content.empty? ? "" : "<p>#{n.content}</p>" },
-      "heading" => lambda { |n|
-        tag = %w[h1 h2 h3 h4 h5 h6].include?(n.attrs["__tag"]) ? n.attrs["__tag"] : "h1"
-        "<#{tag}>#{n.content}</#{tag}>"
-      },
-      "quote" => { tag: "blockquote" },
-      "code" => code,
-      "early_escape_code" => code,
-      "list" => { content: :blocks,
-                  render: lambda { |n|
-                    tag = n.attrs["__tag"] == "ol" ? "ol" : "ul"
-                    "<#{tag}>#{n.content}</#{tag}>"
-                  } },
-      "listitem" => { content: :blocks, render: lambda { |n|
-        out = "<li"
-        checked = n.attrs["__checked"]
-        out += %( aria-checked="#{checked}") unless checked.nil?
-        out += %( value="#{n.attrs["__value"] || 1}")
-        out += %( class="lexxy-nested-listitem") if n.child_types.include?("list")
-        "#{out}>#{n.content}</li>"
-      } },
-      "image_gallery" => lambda { |n|
-        %(<div class="attachment-gallery attachment-gallery--#{n.child_types.length}">#{n.content}</div>)
-      },
-      "table" => { content: :blocks, render: table },
-      "wrapped_table_node" => { content: :blocks, render: table },
-      "tablerow" => { tag: "tr", content: :blocks },
-      "tablecell" => { content: :blocks, render: lambda { |n|
-        header = n.attrs["__headerState"].is_a?(Numeric) && n.attrs["__headerState"].positive?
-        if header
-          style = %(style="background-color: rgb(242, 243, 245);")
-          %(<th class="lexxy-content__table-cell--header" #{style}>#{n.content}</th>)
-        else
-          "<td>#{n.content}</td>"
-        end
-      } },
-      "horizontal_divider" => { tag: "hr", void: true }
-    )
-  end
-
-  def lexxy_attachment_rules
-    # A stored nil (unset) is skipped; a stored empty string still emits.
-    attr = lambda { |n, html_name, stored|
-      n.attrs[stored].nil? ? "" : %( #{html_name}="#{ESC_ATTR.call(n.attrs[stored])}")
-    }
-    upload = lambda { |n|
-      out = "<action-text-attachment#{attr.call(n, "sgid", "sgid")}"
-      out += %( previewable="true") if n.attrs["previewable"] == true
-      [%w[url src], %w[alt altText], %w[caption caption], %w[content-type contentType],
-       %w[filename fileName], %w[filesize fileSize], %w[width width], %w[height height]]
-        .each { |html_name, stored| out += attr.call(n, html_name, stored) }
-      %(#{out} presentation="gallery"></action-text-attachment>)
-    }
-    mention = lambda { |n|
-      out = "<action-text-attachment#{attr.call(n, "sgid", "sgid")}"
-      out += attr.call(n, "content", "innerHtml")
-      out += attr.call(n, "content-type", "contentType")
-      "#{out}></action-text-attachment>"
-    }
-    { "action_text_attachment" => upload, "custom_action_text_attachment" => mention }
-  end
-
-  def test_the_lexxy_schema_is_implementable_with_the_extensibility
-    %w[lexxy_full lexxy_torture lexxy_gallery lexxy_styles].each do |fixture|
-      native = Y::Lexical.new(lexical_doc(fixture)).to_html
-      reimplemented = Y::Lexical.new(lexical_doc(fixture), nodes: lexxy_schema_as_rules).to_html
-
-      assert_equal native, reimplemented, "schema-via-rules parity on #{fixture}"
-    end
+    assert_includes html, %(<img src=)
+    assert_includes html, %(loading="lazy")
+    refute_includes html, "<action-text-attachment"
+    assert_includes html, "attachment-gallery--3", "untouched Lexxy rules still apply"
   end
 
   def test_rules_hold_up_under_concurrent_renders

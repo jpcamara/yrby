@@ -1,40 +1,46 @@
-//! Native HTML rendering of Lexical/Lexxy documents from the yrs collab
-//! structure — no Node process, no headless editor.
+//! Native HTML rendering of Lexical documents from the yrs collab structure —
+//! no Node process, no headless editor.
 //!
-//! Pinned to Lexxy (37signals' Rails editor, 0.9.x). The output matches what
-//! `lexxy-editor` produces as its `value`: Lexical's `$generateHtmlFromNodes`,
-//! run through Lexxy's text export and DOMPurify. The tests check it byte for
-//! byte against a captured fixture. That's the HTML a Lexxy form submits to
-//! Rails, so you can store it as ActionText content straight from the CRDT.
+//! This renders **core Lexical**: paragraphs, headings, quotes, code, lists
+//! and list items, tables, horizontal rules, links, and the whole text-format
+//! model. Everything Lexxy-specific — its own node types (attachments,
+//! galleries, `early_escape_code`, `horizontal_divider`) and its decorations
+//! of core nodes (the table figure wrapper, header-cell styling, the
+//! nested-list-item class) — lives in the Ruby layer as render rules
+//! (`Y::Lexxy::NODES`), built on the same extension API apps use. The Lexxy
+//! byte-parity guarantee is held there: the Ruby fixture tests and the live
+//! headless-Chrome e2e pin `Y::Lexical#to_html` against a real editor's own
+//! serialized value. The native tests pin core output as regression goldens
+//! (stock Lexical has no canonical serializer to capture against).
 //!
 //! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in pure
 //! PHP — a schema-pinned renderer outside the JS runtime. This works from the
 //! collab (Yjs) structure rather than JSON.
 //!
-//! Storage model (verified against bytes captured from a live Lexxy editor):
+//! Storage model (verified against bytes captured from a live editor):
 //! - Blocks are `Y.XmlText` with a `__type` attribute (`paragraph`, `heading`
-//!   (+`__tag`), `quote`, `list`/`listitem`, `early_escape_code` (+`__language`),
-//!   `wrapped_table_node`/`tablerow`/`tablecell`, `link`/`autolink` (inline)).
+//!   (+`__tag`), `quote`, `code` (+`__language`), `list`/`listitem`,
+//!   `table`/`tablerow`/`tablecell`, `link`/`autolink` (inline)).
 //! - Text runs are preceded by an embedded `Y.Map` carrying per-run metadata
 //!   (`__type: "text" | "code-highlight" | "tab"`, `__format` bitmask).
 //! - `linebreak` is a bare metadata map; `tab` is a map followed by a "\t" run.
-//! - Decorator nodes are `Y.XmlElement`s: `horizontal_divider`,
-//!   `action_text_attachment` (uploads), `custom_action_text_attachment`
-//!   (mentions/embeds), with their fields as plain attributes.
+//! - Decorator nodes are `Y.XmlElement`s with their fields as plain
+//!   attributes (`horizontalrule` here; app/Lexxy decorators via rules).
 //!
-//! Text-format rendering replicates Lexxy's `exportTextNodeDOM` exactly:
-//! inner tag `strong` (bold) / `em` (italic, when not bold); outer tag `code` /
-//! `mark` / `sub` / `sup`; an `<i>` wrap only when bold+italic combine (the
-//! `em` slot is taken); `<s>` / `<u>` wraps always; `<span>`s are unwrapped, so
-//! unformatted text is bare. A run's `__style` (Lexxy's highlight colors)
-//! survives on the createDOM tag, filtered to color/background-color the way
-//! Lexxy's sanitize allows; on a plain or s/u-only run it dies with the
-//! unwrapped span. Case-transform format bits are never rendered (their
-//! text-transform style is outside the sanitize whitelist).
+//! Text-format rendering follows the export pipeline Lexxy runs (Lexical's
+//! `$generateHtmlFromNodes` + sanitize), which is the only externally
+//! pinnable truth for formatting: inner tag `strong` (bold) / `em` (italic,
+//! when not bold); outer tag `code` / `mark` / `sub` / `sup`; an `<i>` wrap
+//! only when bold+italic combine (the `em` slot is taken); `<s>` / `<u>`
+//! wraps always; `<span>`s are unwrapped, so unformatted text is bare. A
+//! run's `__style` (highlight colors) survives on the createDOM tag,
+//! filtered to color/background-color; on a plain or s/u-only run it dies
+//! with the unwrapped span. Case-transform format bits are never rendered
+//! (their text-transform style is outside the sanitize whitelist).
 //!
-//! Custom nodes: apps register rules by `__type` (see `render_rules`).
-//! A rule is consulted before the built-in arms, so it can extend the schema
-//! or override a built-in. Declarative rules render here; callback rules emit
+//! Custom nodes: rules are registered by `__type` (see `render_rules`) and
+//! consulted before the built-in arms, so they extend the schema or override
+//! a built-in. Declarative rules render here; callback rules emit
 //! `Segment::Pending` for the Ruby layer to fill in after the render.
 
 use crate::render_rules::{
@@ -195,16 +201,14 @@ fn open_block<T: ReadTxn>(
         return;
     }
     match ty.as_str() {
-        "paragraph" | "provisonal_paragraph" => {
-            // (sic: "provisonal" is Lexxy's spelling.) A provisional paragraph
-            // is a cursor-placement placeholder; empty ones export to nothing.
+        "paragraph" => {
+            // An empty paragraph exports with a <br>, as Lexical's own
+            // paragraph export does.
             em.begin_frame();
             render_inline(txn, t, 0, em, rules);
             let inline = em.end_frame();
             if inline.is_empty() {
-                if ty == "paragraph" {
-                    em.push_str("<p><br></p>");
-                }
+                em.push_str("<p><br></p>");
             } else {
                 em.push_str("<p>");
                 em.append(inline);
@@ -229,10 +233,9 @@ fn open_block<T: ReadTxn>(
             render_inline(txn, t, 0, em, rules);
             em.push_str("</blockquote>");
         }
-        "code" | "early_escape_code" => {
-            // Lexxy replaces Lexical's CodeNode with its own type; both shapes
-            // are accepted. Code highlighting is derived state: token runs
-            // flatten to plain text; linebreaks are <br>, tabs a wrapped \t.
+        "code" => {
+            // Code highlighting is derived state: token runs flatten to
+            // plain text; linebreaks are <br>, tabs a wrapped \t.
             em.push_str("<pre");
             if let Some(lang) = str_attr(txn, t, "__language").filter(|l| !l.is_empty()) {
                 em.push_str(" data-language=\"");
@@ -259,24 +262,10 @@ fn open_block<T: ReadTxn>(
             push_block_children(txn, t, depth, close, false, stack);
         }
         "listitem" => open_listitem(txn, t, depth, em, stack, rules),
-        "image_gallery" => {
-            // Adjacent previewable images grouped by Lexxy's gallery node.
-            // The class carries the image count (ActionText's convention).
-            let count = t
-                .diff(txn, YChange::identity)
-                .into_iter()
-                .filter(|d| matches!(d.insert, Out::YXmlElement(_)))
-                .count();
-            em.push_str("<div class=\"attachment-gallery attachment-gallery--");
-            em.push_str(&count.to_string());
-            em.push_str("\">");
+        "table" => {
+            em.push_str("<table><tbody>");
             render_inline(txn, t, 0, em, rules);
-            em.push_str("</div>");
-        }
-        "table" | "wrapped_table_node" => {
-            em.push_str("<figure class=\"lexxy-content__table-wrapper\"><table><tbody>");
-            render_inline(txn, t, 0, em, rules);
-            push_block_children(txn, t, depth, "</tbody></table></figure>", false, stack);
+            push_block_children(txn, t, depth, "</tbody></table>", false, stack);
         }
         "tablerow" => {
             em.push_str("<tr>");
@@ -292,11 +281,7 @@ fn open_block<T: ReadTxn>(
                 Some(Out::Any(Any::BigInt(n))) if n > 0
             );
             let close = if header {
-                // Class + background match Lexxy's own header-cell export.
-                em.push_str(
-                    "<th class=\"lexxy-content__table-cell--header\" \
-                     style=\"background-color: rgb(242, 243, 245);\">",
-                );
+                em.push_str("<th>");
                 "</th>"
             } else {
                 em.push_str("<td>");
@@ -305,16 +290,23 @@ fn open_block<T: ReadTxn>(
             render_inline(txn, t, 0, em, rules);
             push_block_children(txn, t, depth, close, false, stack);
         }
-        // A block type this renderer doesn't know: degrade to a readable
-        // paragraph instead of dropping content.
+        // A block type this renderer doesn't know: degrade readably instead
+        // of dropping content. A container's block children render with no
+        // invented wrapper (a Lexxy table wrapper's rows still come out as
+        // rows); a leaf's text becomes a plain paragraph.
         _ => {
-            em.begin_frame();
-            render_inline(txn, t, 0, em, rules);
-            let inline = em.end_frame();
-            if !inline.is_empty() {
-                em.push_str("<p>");
-                em.append(inline);
-                em.push_str("</p>");
+            if !block_children(txn, t).is_empty() {
+                render_inline(txn, t, 0, em, rules);
+                push_block_children(txn, t, depth, "", false, stack);
+            } else {
+                em.begin_frame();
+                render_inline(txn, t, 0, em, rules);
+                let inline = em.end_frame();
+                if !inline.is_empty() {
+                    em.push_str("<p>");
+                    em.append(inline);
+                    em.push_str("</p>");
+                }
             }
         }
     }
@@ -452,9 +444,6 @@ fn open_listitem<T: ReadTxn>(
         Some(Out::Any(Any::Bool(b))) => Some(b),
         _ => None,
     };
-    let has_nested_list = block_children(txn, t)
-        .iter()
-        .any(|c| node_type(txn, c) == "list");
 
     em.push_str("<li");
     if let Some(c) = checked {
@@ -465,9 +454,6 @@ fn open_listitem<T: ReadTxn>(
     em.push_str(" value=\"");
     em.push_str(&value.to_string());
     em.push('"');
-    if has_nested_list {
-        em.push_str(" class=\"lexxy-nested-listitem\"");
-    }
     em.push('>');
     // Inline content first, then any nested list blocks (Lexical stores the
     // nested list as a child of the item).
@@ -697,11 +683,10 @@ fn render_decorator<T: ReadTxn>(txn: &T, e: &XmlElementRef, em: &mut Emitter, ru
         render_rule_element(txn, e, &ty, rule, em);
         return;
     }
-    match ty.as_str() {
-        "horizontal_divider" => em.push_str("<hr>"),
-        "action_text_attachment" => render_upload_attachment(txn, e, em),
-        "custom_action_text_attachment" => render_custom_attachment(txn, e, em),
-        _ => {} // unknown decorator: nothing extractable
+    // Core Lexical's only decorator; unknown decorators render nothing
+    // (nothing extractable without a rule).
+    if ty == "horizontalrule" {
+        em.push_str("<hr>");
     }
 }
 
@@ -768,98 +753,6 @@ fn elem_type<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> String {
     }
 }
 
-fn elem_str<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<String> {
-    match e.get_attribute(txn, name) {
-        Some(Out::Any(Any::String(s))) => Some(s.to_string()),
-        _ => None,
-    }
-}
-
-/// A numeric attribute rendered the way JavaScript would print it (integers
-/// without a trailing `.0`). Assumes normal-magnitude, finite values — the
-/// only numbers here are file sizes and pixel dimensions. A value past i64 or
-/// a non-finite one would format differently from `String(n)` (e.g. `1e21`,
-/// `Infinity`), but no real attachment carries one.
-fn elem_num<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<String> {
-    match e.get_attribute(txn, name) {
-        Some(Out::Any(Any::Number(n))) => {
-            if n.fract() == 0.0 {
-                Some(format!("{}", n as i64))
-            } else {
-                Some(format!("{n}"))
-            }
-        }
-        Some(Out::Any(Any::BigInt(n))) => Some(format!("{n}")),
-        _ => None,
-    }
-}
-
-fn push_attr(em: &mut Emitter, name: &str, value: &str) {
-    em.push(' ');
-    em.push_str(name);
-    em.push_str("=\"");
-    em.push_str(&escape_attr(value));
-    em.push('"');
-}
-
-/// An upload attachment, in the exact shape ActionText round-trips: attribute
-/// order and presence mirror Lexxy's `exportDOM` (nulls omitted, `previewable`
-/// only when true, `presentation="gallery"` always).
-fn render_upload_attachment<T: ReadTxn>(txn: &T, e: &XmlElementRef, em: &mut Emitter) {
-    em.push_str("<action-text-attachment");
-    if let Some(v) = elem_str(txn, e, "sgid") {
-        push_attr(em, "sgid", &v);
-    }
-    if matches!(
-        e.get_attribute(txn, "previewable"),
-        Some(Out::Any(Any::Bool(true)))
-    ) {
-        push_attr(em, "previewable", "true");
-    }
-    if let Some(v) = elem_str(txn, e, "src") {
-        push_attr(em, "url", &v);
-    }
-    if let Some(v) = elem_str(txn, e, "altText") {
-        push_attr(em, "alt", &v);
-    }
-    if let Some(v) = elem_str(txn, e, "caption") {
-        push_attr(em, "caption", &v);
-    }
-    if let Some(v) = elem_str(txn, e, "contentType") {
-        push_attr(em, "content-type", &v);
-    }
-    if let Some(v) = elem_str(txn, e, "fileName") {
-        push_attr(em, "filename", &v);
-    }
-    if let Some(v) = elem_num(txn, e, "fileSize") {
-        push_attr(em, "filesize", &v);
-    }
-    if let Some(v) = elem_num(txn, e, "width") {
-        push_attr(em, "width", &v);
-    }
-    if let Some(v) = elem_num(txn, e, "height") {
-        push_attr(em, "height", &v);
-    }
-    push_attr(em, "presentation", "gallery");
-    em.push_str("></action-text-attachment>");
-}
-
-/// A content attachment (mention, embed): `content` carries the escaped inner
-/// HTML; `plainText` is not exported.
-fn render_custom_attachment<T: ReadTxn>(txn: &T, e: &XmlElementRef, em: &mut Emitter) {
-    em.push_str("<action-text-attachment");
-    if let Some(v) = elem_str(txn, e, "sgid") {
-        push_attr(em, "sgid", &v);
-    }
-    if let Some(v) = elem_str(txn, e, "innerHtml") {
-        push_attr(em, "content", &v);
-    }
-    if let Some(v) = elem_str(txn, e, "contentType") {
-        push_attr(em, "content-type", &v);
-    }
-    em.push_str("></action-text-attachment>");
-}
-
 /// Text-content escaping, matching what the browser's serializer emits:
 /// `&`, `<`, `>` escaped; quotes left alone in text.
 fn escape_text(s: &str) -> String {
@@ -879,15 +772,19 @@ mod tests {
     use yrs::updates::decoder::Decode;
     use yrs::{Doc, Transact, Update};
 
-    /// Rendering the captured full-schema document must match Lexxy's own
-    /// serializer byte for byte. The pair was captured together from one live
+    /// Core rendering of the captured full-schema document, pinned as a
+    /// golden (`.core.html`). Stock Lexical has no canonical serializer to
+    /// capture against, so this is a self-pinned regression guard; the
+    /// external truth — byte parity with a real Lexxy editor's value — is
+    /// held at the Ruby layer, where `Y::Lexxy::NODES` completes the schema.
+    /// The pair was captured together from one live
     /// editor session: `lexxy_full.bin` is the synced Yjs state, `lexxy_full.html`
     /// is `lexxy-editor.value` for the same document. It covers every block and
     /// format the schema map handles.
     #[test]
-    fn renders_the_captured_lexxy_document_byte_for_byte() {
+    fn core_rendering_of_the_full_fixture_is_pinned() {
         let bytes = include_bytes!("fixtures/lexxy_full.bin");
-        let expected = include_str!("fixtures/lexxy_full.html");
+        let expected = include_str!("fixtures/lexxy_full.core.html");
         let doc = Doc::new();
         doc.transact_mut()
             .apply_update(Update::decode_v1(bytes).unwrap())
@@ -905,9 +802,9 @@ mod tests {
     /// drops colSpan/rowSpan, so matching it byte-for-byte means not emitting
     /// them either.
     #[test]
-    fn renders_the_captured_torture_document_byte_for_byte() {
+    fn core_rendering_of_the_torture_fixture_is_pinned() {
         let bytes = include_bytes!("fixtures/lexxy_torture.bin");
-        let expected = include_str!("fixtures/lexxy_torture.html");
+        let expected = include_str!("fixtures/lexxy_torture.core.html");
         let doc = Doc::new();
         doc.transact_mut()
             .apply_update(Update::decode_v1(bytes).unwrap())
@@ -917,16 +814,13 @@ mod tests {
         let html = render(&txn, &frag).unwrap();
         assert_eq!(html, expected.trim_end());
 
-        // Byte-for-byte already proves these; name the load-bearing ones so
-        // a regression fails with the nested structure it broke.
+        // The golden already proves these; name the load-bearing core
+        // structures so a regression fails with the one it broke. (The
+        // fixture's Lexxy-only nodes — attachments, its code type — are
+        // covered at the Ruby layer, where the Lexxy rules render them.)
         for (what, probe) in [
             ("list nested in a table cell", "<td><ul><li"),
             ("quote in a table cell", "<td><blockquote>"),
-            (
-                "code block in a table cell",
-                "<td><pre data-language=\"javascript\">cell();</pre></td>",
-            ),
-            ("mention inside a header cell", "sgid=\"SGID_M_TABLE\""),
             (
                 "five-level mixed list nesting",
                 "<ol><li value=\"1\"><s><i><strong>Level five</strong></i></s></li></ol>",
@@ -944,10 +838,6 @@ mod tests {
                 "<strong>a &amp;&amp; b &lt; c &gt; d \"q\" '&amp;amp;'</strong>",
             ),
             ("emoji, CJK and RTL text", "🚀🎉 你好世界 العربية café"),
-            (
-                "an all-null upload keeps its normalized empty attrs",
-                "sgid=\"SGID_UP_MIN\" url=\"http://localhost:4111/files/min.bin\" alt=\"\" caption=\"\"",
-            ),
             (
                 "whitespace-only paragraphs",
                 "<p><span>\t</span></p><p><br></p><p><br></p>",
@@ -1029,13 +919,15 @@ mod tests {
         assert!(html.contains("<li value=\"1\">item</li>"), "{html}");
     }
 
-    /// An image gallery (adjacent previewable images grouped by Lexxy's
-    /// gallery node) renders as ActionText's classed div. Captured live, like
-    /// the other pairs: three image attachments between two paragraphs.
+    /// Lexxy-only nodes (this fixture is a gallery of attachments between
+    /// two paragraphs) are unknown to the core schema and degrade readably —
+    /// the paragraphs survive, the gallery renders nothing rather than
+    /// garbage. The Ruby layer's Lexxy rules render it fully; the Ruby
+    /// fixture tests pin that byte for byte.
     #[test]
-    fn renders_the_captured_gallery_document_byte_for_byte() {
+    fn core_degrades_lexxy_only_nodes_readably() {
         let bytes = include_bytes!("fixtures/lexxy_gallery.bin");
-        let expected = include_str!("fixtures/lexxy_gallery.html");
+        let expected = include_str!("fixtures/lexxy_gallery.core.html");
         let doc = Doc::new();
         doc.transact_mut()
             .apply_update(Update::decode_v1(bytes).unwrap())
@@ -1044,8 +936,7 @@ mod tests {
         let frag = txn.get_xml_fragment("root").unwrap();
         let html = render(&txn, &frag).unwrap();
         assert_eq!(html, expected.trim_end());
-        assert!(html.contains("<div class=\"attachment-gallery attachment-gallery--3\">"));
-        assert_eq!(html.matches("<action-text-attachment").count(), 3);
+        assert!(html.contains("<p>Before gallery</p>"));
     }
 
     #[test]

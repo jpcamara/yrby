@@ -117,6 +117,19 @@ module Y
       end
     end
 
+    # The escaping the native renderers use, for blocks that build markup
+    # from stored values. Text content escapes `&`, `<`, `>` (quotes stay
+    # literal, matching the browser serializer); attribute values also
+    # escape `"`. Prefer these over ERB::Util.html_escape when byte parity
+    # with editor output matters — html_escape also rewrites apostrophes.
+    def escape_text(value)
+      value.to_s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
+    end
+
+    def escape_attr(value)
+      escape_text(value).gsub('"', "&quot;")
+    end
+
     # Resolve callback segments depth-first, so a callback's `node.content`
     # is finished HTML even when callback nodes nest.
     def splice(segments, callbacks)
@@ -134,8 +147,11 @@ module Y
 
   class Lexical
     # `Y::Lexical.new(doc, nodes: { "type" => rule })` — see Y::RenderRules
-    # for the rule forms.
+    # for the rule forms. The Lexxy-specific schema (Y::Lexxy::NODES) is
+    # applied beneath the app's rules: the native renderer covers core
+    # Lexical, and an app rule for a Lexxy type replaces it.
     def self.new(doc, nodes: {})
+      nodes = Lexxy::NODES.merge(nodes.transform_keys(&:to_s))
       rules_json, callbacks = RenderRules.compile(nodes, {})
       renderer = _native_new(doc, rules_json)
       renderer.instance_variable_set(:@render_callbacks, callbacks)
