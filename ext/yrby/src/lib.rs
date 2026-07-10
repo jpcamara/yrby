@@ -350,14 +350,14 @@ impl RbDoc {
 /// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
 /// keep that discipline: the render emits deferred segments, and the Ruby
 /// layer runs the app's blocks only after the transaction has closed.
-#[magnus::wrap(class = "Y::Lexical", free_immediately, size)]
+#[magnus::wrap(class = "Y::NativeLexical", free_immediately, size)]
 struct RbLexical {
     doc: Doc,
     rules: Rules,
 }
 
 impl RbLexical {
-    /// `Y::Lexical._native_new(doc, rules_json)` — the Ruby layer's `new`
+    /// `Y::NativeLexical.new(doc, rules_json)` — the Y::Lexical facade
     /// compiles its `nodes:` config to the rules JSON.
     fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
         Ok(RbLexical {
@@ -402,14 +402,14 @@ impl RbLexical {
 /// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
 /// keep that discipline: the render emits deferred segments, and the Ruby
 /// layer runs the app's blocks only after the transaction has closed.
-#[magnus::wrap(class = "Y::ProseMirror", free_immediately, size)]
+#[magnus::wrap(class = "Y::NativeProseMirror", free_immediately, size)]
 struct RbProseMirror {
     doc: Doc,
     rules: Rules,
 }
 
 impl RbProseMirror {
-    /// `Y::ProseMirror._native_new(doc, rules_json)` — the Ruby layer's `new`
+    /// `Y::NativeProseMirror.new(doc, rules_json)` — the Y::ProseMirror facade
     /// compiles its `nodes:`/`marks:` config to the rules JSON.
     fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
         Ok(RbProseMirror {
@@ -582,18 +582,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "handle_sync_message",
         method!(RbDoc::handle_sync_message, 1),
     )?;
-    // Y::Lexical: schema-pinned Lexical/Lexxy rendering over a Doc.
-    let lexical_class = module.define_class("Lexical", ruby.class_object())?;
-    lexical_class.define_singleton_method("_native_new", function!(RbLexical::native_new, 2))?;
-    lexical_class.define_method("_native_to_html", method!(RbLexical::native_to_html, -1))?;
-    // Y::ProseMirror: schema-pinned ProseMirror/Tiptap rendering over a Doc.
-    let prosemirror_class = module.define_class("ProseMirror", ruby.class_object())?;
-    prosemirror_class
-        .define_singleton_method("_native_new", function!(RbProseMirror::native_new, 2))?;
-    prosemirror_class.define_method(
-        "_native_to_html",
-        method!(RbProseMirror::native_to_html, -1),
-    )?;
+    // The native renderers are the handles the Ruby facades (Y::Lexical and
+    // Y::ProseMirror in lib/y/rendering.rb) hold; the Ruby layer marks these
+    // classes private_constant.
+    let lexical_class = module.define_class("NativeLexical", ruby.class_object())?;
+    lexical_class.define_singleton_method("new", function!(RbLexical::native_new, 2))?;
+    lexical_class.define_method("to_html", method!(RbLexical::native_to_html, -1))?;
+    let prosemirror_class = module.define_class("NativeProseMirror", ruby.class_object())?;
+    prosemirror_class.define_singleton_method("new", function!(RbProseMirror::native_new, 2))?;
+    prosemirror_class.define_method("to_html", method!(RbProseMirror::native_to_html, -1))?;
 
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;

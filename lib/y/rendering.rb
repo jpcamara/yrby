@@ -145,21 +145,23 @@ module Y
     end
   end
 
+  # Y::Lexical and Y::ProseMirror are plain Ruby facades over the native
+  # renderers (Y::NativeLexical / Y::NativeProseMirror, private constants):
+  # they compile the rules config, hold the callbacks, and splice deferred
+  # segments after a render. The native handle does everything else.
   class Lexical
     # `Y::Lexical.new(doc, nodes: { "type" => rule })` — see Y::RenderRules
     # for the rule forms. The Lexxy-specific schema (Y::Lexxy::NODES) is
     # applied beneath the app's rules: the native renderer covers core
     # Lexical, and an app rule for a Lexxy type replaces it.
-    def self.new(doc, nodes: {})
+    def initialize(doc, nodes: {})
       nodes = Lexxy::NODES.merge(nodes.transform_keys(&:to_s))
-      rules_json, callbacks = RenderRules.compile(nodes, {})
-      renderer = _native_new(doc, rules_json)
-      renderer.instance_variable_set(:@render_callbacks, callbacks)
-      renderer
+      rules_json, @render_callbacks = RenderRules.compile(nodes, {})
+      @native = NativeLexical.new(doc, rules_json)
     end
 
     def to_html(root = nil)
-      result = root.nil? ? _native_to_html : _native_to_html(root)
+      result = root.nil? ? @native.to_html : @native.to_html(root)
       return result unless result.is_a?(Array)
 
       RenderRules.splice(result, @render_callbacks)
@@ -169,18 +171,18 @@ module Y
   class ProseMirror
     # `Y::ProseMirror.new(doc, nodes: {...}, marks: {...})` — see
     # Y::RenderRules for the rule forms.
-    def self.new(doc, nodes: {}, marks: {})
-      rules_json, callbacks = RenderRules.compile(nodes, marks)
-      renderer = _native_new(doc, rules_json)
-      renderer.instance_variable_set(:@render_callbacks, callbacks)
-      renderer
+    def initialize(doc, nodes: {}, marks: {})
+      rules_json, @render_callbacks = RenderRules.compile(nodes, marks)
+      @native = NativeProseMirror.new(doc, rules_json)
     end
 
     def to_html(root = nil)
-      result = root.nil? ? _native_to_html : _native_to_html(root)
+      result = root.nil? ? @native.to_html : @native.to_html(root)
       return result unless result.is_a?(Array)
 
       RenderRules.splice(result, @render_callbacks)
     end
   end
+
+  private_constant :NativeLexical, :NativeProseMirror
 end
