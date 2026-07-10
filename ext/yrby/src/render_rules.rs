@@ -200,19 +200,16 @@ pub fn resolve_parts<F: Fn(&str) -> Option<String>>(
 /// props as `__kind` — try the raw name first, then prefixed. (ProseMirror
 /// stores attrs bare, so the fallback never fires there.)
 pub fn xml_ref_attr<T: ReadTxn, N: Xml>(txn: &T, node: &N, name: &str) -> Option<String> {
-    attr_value_string(node.get_attribute(txn, name))
-        .or_else(|| attr_value_string(node.get_attribute(txn, &format!("__{name}"))))
+    let value = |out: Option<Out>| match out {
+        Some(Out::Any(any)) => any_attr_string(&any),
+        _ => None,
+    };
+    value(node.get_attribute(txn, name))
+        .or_else(|| value(node.get_attribute(txn, &format!("__{name}"))))
 }
 
 /// A stored attribute as a string: strings pass through; numbers print
-/// JS-style; bools as true/false. Anything else (or absence) is None.
-pub fn attr_value_string(out: Option<Out>) -> Option<String> {
-    match out {
-        Some(Out::Any(any)) => any_attr_string(&any),
-        _ => None,
-    }
-}
-
+/// JS-style; bools as true/false. Anything else is None.
 pub fn any_attr_string(any: &Any) -> Option<String> {
     match any {
         Any::String(s) => Some(s.to_string()),
