@@ -571,7 +571,7 @@ fn render_inline<T: ReadTxn>(
                 }
                 // Nested blocks are rendered by their parent block's renderer.
             }
-            Out::YXmlElement(e) => render_inline_decorator(txn, &e, em, rules),
+            Out::YXmlElement(e) => render_decorator(txn, &e, em, rules),
             _ => {}
         }
     }
@@ -686,8 +686,9 @@ fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize, em: &mut Emitt
     em.push_str("</a>");
 }
 
-/// Root-level decorators: horizontal rule and upload attachments. Registered
-/// rules win here too, so custom decorator elements render or defer.
+/// Decorator elements (root-level or inline): core Lexical's horizontal rule,
+/// plus whatever the registered rules cover — Lexxy's attachments arrive that
+/// way. Rules win here too, so custom decorators render or defer.
 fn render_decorator<T: ReadTxn>(txn: &T, e: &XmlElementRef, em: &mut Emitter, rules: &Rules) {
     let ty = elem_type(txn, e);
     if let Some(rule) = rules.nodes.get(ty.as_str()) {
@@ -699,16 +700,6 @@ fn render_decorator<T: ReadTxn>(txn: &T, e: &XmlElementRef, em: &mut Emitter, ru
     if ty == "horizontalrule" {
         em.push_str("<hr>");
     }
-}
-
-/// Inline decorators (inside a paragraph): mention/embed attachments.
-fn render_inline_decorator<T: ReadTxn>(
-    txn: &T,
-    e: &XmlElementRef,
-    em: &mut Emitter,
-    rules: &Rules,
-) {
-    render_decorator(txn, e, em, rules)
 }
 
 /// A decorator element rendered through a registered rule. Decorators are
