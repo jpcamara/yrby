@@ -376,8 +376,14 @@ fn parse_attrs(
     attrs: Option<&serde_json::Value>,
 ) -> Result<Vec<(String, Vec<AttrPart>)>, String> {
     let mut out = Vec::new();
-    let Some(serde_json::Value::Array(entries)) = attrs else {
-        return Ok(out);
+    let entries = match attrs {
+        None | Some(serde_json::Value::Null) => return Ok(out),
+        Some(serde_json::Value::Array(entries)) => entries,
+        Some(_) => {
+            return Err(format!(
+                "rule for {name:?}: attrs must be an array of [name, template] pairs"
+            ))
+        }
     };
     for entry in entries {
         let (Some(attr_name), Some(serde_json::Value::Array(parts))) =
@@ -446,6 +452,12 @@ mod tests {
         assert!(Rules::parse(r#"{ "nodes": { "x": {} } }"#).is_err()); // no tag, no callback
         assert!(Rules::parse(r#"{ "nodes": { "x": { "tag": "a", "content": "wat" } } }"#).is_err());
         assert!(Rules::parse(r#"{ "marks": { "x": {} } }"#).is_err());
+        // attrs present but not the array-of-pairs form must fail loudly,
+        // not silently drop the attributes.
+        assert!(
+            Rules::parse(r#"{ "nodes": { "x": { "tag": "a", "attrs": {"class": "y"} } } }"#)
+                .is_err()
+        );
     }
 
     #[test]
