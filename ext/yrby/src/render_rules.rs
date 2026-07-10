@@ -149,10 +149,16 @@ pub fn flatten(segments: Vec<Segment>) -> Flattened {
     {
         return Flattened::Deferred(segments);
     }
+    // The merge invariant makes the common case exactly one Html segment;
+    // move it out rather than copying the whole document.
     let mut out = String::new();
-    for seg in &segments {
+    for seg in segments {
         if let Segment::Html(s) = seg {
-            out.push_str(s);
+            if out.is_empty() {
+                out = s;
+            } else {
+                out.push_str(&s);
+            }
         }
     }
     Flattened::Html(out)
