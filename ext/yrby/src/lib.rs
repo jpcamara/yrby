@@ -367,13 +367,14 @@ impl RbLexical {
     }
 
     /// Render the document's XML root (default `"root"`, Lexical's standard
-    /// collab root name) natively — no Node process or headless editor.
-    /// Output matches Lexxy's own serializer (the HTML a lexxy-editor submits
-    /// to Rails) byte-for-byte on the reference fixture; see `lexical_html.rs`
-    /// for the schema coverage and caveats. Returns nil when the root is
-    /// missing or not Lexical-shaped, e.g. a ProseMirror document; a String
-    /// when no callback rule fired; otherwise the nested segment arrays the
-    /// Ruby layer splices.
+    /// collab root name) natively — no Node process or headless editor. The
+    /// native side renders core Lexical plus whatever the rules cover; with
+    /// the Lexxy rule set the Ruby layer always passes, output matches
+    /// Lexxy's own serializer byte-for-byte on the reference fixtures (see
+    /// `lexical_html.rs`). Returns nil when the root is missing or not
+    /// Lexical-shaped, e.g. a ProseMirror document; a String when no
+    /// callback rule fired; otherwise the nested segment arrays the Ruby
+    /// layer splices.
     fn native_to_html(&self, args: &[Value]) -> Result<Value, Error> {
         let name = root_name_arg(args, "root")?;
         let doc = &self.doc;
