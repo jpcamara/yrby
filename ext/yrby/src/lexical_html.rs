@@ -329,54 +329,62 @@ fn open_rule_block<T: ReadTxn>(
     stack: &mut Vec<Work>,
     rules: &Rules,
 ) {
-    if rule.callback {
-        em.begin_frame();
-        // Children render into the frame; EndDeferred seals it. Blocks go via
-        // the stack (pushed above the marker, so they complete first); inline
-        // content renders now — in blocks mode too, since a block like a list
-        // item holds its own text alongside its nested blocks.
-        stack.push(Work::EndDeferred {
-            node_type: ty.to_string(),
-            attrs_json: xml_attrs_json(txn, t),
-            child_types: text_child_types(txn, t),
-        });
-        match rule.content {
-            Content::Inline => render_inline(txn, t, 0, em, rules),
-            Content::Blocks => {
-                render_inline(txn, t, 0, em, rules);
-                for child in block_children(txn, t).into_iter().rev() {
-                    if depth < MAX_BLOCK_DEPTH {
-                        stack.push(Work::Open(child, depth + 1));
+    let (tag, void, attrs, text, content) = match rule {
+        NodeRule::Callback { content } => {
+            em.begin_frame();
+            // Children render into the frame; EndDeferred seals it. Blocks go
+            // via the stack (pushed above the marker, so they complete first);
+            // inline content renders now — in blocks mode too, since a block
+            // like a list item holds its own text alongside its nested blocks.
+            stack.push(Work::EndDeferred {
+                node_type: ty.to_string(),
+                attrs_json: xml_attrs_json(txn, t),
+                child_types: text_child_types(txn, t),
+            });
+            match content {
+                Content::Inline => render_inline(txn, t, 0, em, rules),
+                Content::Blocks => {
+                    render_inline(txn, t, 0, em, rules);
+                    for child in block_children(txn, t).into_iter().rev() {
+                        if depth < MAX_BLOCK_DEPTH {
+                            stack.push(Work::Open(child, depth + 1));
+                        }
                     }
                 }
+                Content::None => {}
             }
-            Content::None => {}
+            return;
         }
-        return;
-    }
+        NodeRule::Declarative {
+            tag,
+            void,
+            attrs,
+            text,
+            content,
+        } => (tag, *void, attrs, text, *content),
+    };
 
-    let tag = rule.tag.as_deref().unwrap_or("div");
     em.push('<');
     em.push_str(tag);
-    for (name, parts) in &rule.attrs {
+    for (name, parts) in attrs {
         if let Some(value) = resolve_parts(parts, |r| xml_ref_attr(txn, t, r)) {
             em.push(' ');
             em.push_str(name);
             em.push_str("=\"");
             em.push_str(&escape_attr(&value));
-            em.push('"');
+            em.push('\"');
         }
     }
     em.push('>');
-    if rule.void {
+    if void {
         return;
     }
-    if let Some(text) = &rule.text {
+    if let Some(text) = text {
         if let Some(value) = resolve_parts(text, |r| xml_ref_attr(txn, t, r)) {
             em.push_str(&escape_text(&value));
         }
     }
-    match rule.content {
+    match content {
         Content::Inline => {
             render_inline(txn, t, 0, em, rules);
             em.push_str("</");
@@ -714,32 +722,40 @@ fn render_rule_element<T: ReadTxn>(
     rule: &NodeRule,
     em: &mut Emitter,
 ) {
-    if rule.callback {
-        em.emit_deferred(
-            ty.to_string(),
-            xml_attrs_json(txn, e),
-            Vec::new(),
-            Vec::new(),
-        );
-        return;
-    }
-    let tag = rule.tag.as_deref().unwrap_or("div");
+    let (tag, void, attrs, text) = match rule {
+        NodeRule::Callback { .. } => {
+            em.emit_deferred(
+                ty.to_string(),
+                xml_attrs_json(txn, e),
+                Vec::new(),
+                Vec::new(),
+            );
+            return;
+        }
+        NodeRule::Declarative {
+            tag,
+            void,
+            attrs,
+            text,
+            ..
+        } => (tag, *void, attrs, text),
+    };
     em.push('<');
     em.push_str(tag);
-    for (name, parts) in &rule.attrs {
+    for (name, parts) in attrs {
         if let Some(value) = resolve_parts(parts, |r| xml_ref_attr(txn, e, r)) {
             em.push(' ');
             em.push_str(name);
             em.push_str("=\"");
             em.push_str(&escape_attr(&value));
-            em.push('"');
+            em.push('\"');
         }
     }
     em.push('>');
-    if rule.void {
+    if void {
         return;
     }
-    if let Some(text) = &rule.text {
+    if let Some(text) = text {
         if let Some(value) = resolve_parts(text, |r| xml_ref_attr(txn, e, r)) {
             em.push_str(&escape_text(&value));
         }

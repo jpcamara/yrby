@@ -255,14 +255,20 @@ pub enum Content {
     None,
 }
 
-pub struct NodeRule {
-    /// None for callback rules (the caller supplies the markup).
-    pub tag: Option<String>,
-    pub void: bool,
-    pub attrs: Vec<(String, Vec<AttrPart>)>,
-    pub text: Option<Vec<AttrPart>>,
-    pub content: Content,
-    pub callback: bool,
+/// One node rule: markup as data, or a deferral to the caller.
+pub enum NodeRule {
+    /// Render natively: the element, its attribute/text templates, and what
+    /// goes inside it.
+    Declarative {
+        tag: String,
+        void: bool,
+        attrs: Vec<(String, Vec<AttrPart>)>,
+        text: Option<Vec<AttrPart>>,
+        content: Content,
+    },
+    /// Emit a [`Segment::Deferred`] for the caller to fill in; `content` is
+    /// what renders into its children.
+    Callback { content: Content },
 }
 
 /// A custom mark (ProseMirror only): a wrapping tag with attributes read from
@@ -306,7 +312,7 @@ impl Rules {
         if let Some(nodes) = root.get("nodes").and_then(|v| v.as_object()) {
             for (name, spec) in nodes {
                 let rule = parse_node_rule(name, spec)?;
-                rules.has_callbacks |= rule.callback;
+                rules.has_callbacks |= matches!(rule, NodeRule::Callback { .. });
                 rules.nodes.insert(name.clone(), rule);
             }
         }
@@ -322,16 +328,28 @@ impl Rules {
 }
 
 fn parse_node_rule(name: &str, spec: &serde_json::Value) -> Result<NodeRule, String> {
-    let callback = spec
+    let content = match spec.get("content").and_then(|v| v.as_str()) {
+        Some("blocks") => Content::Blocks,
+        Some("inline") | None => Content::Inline,
+        Some("none") => Content::None,
+        Some(other) => {
+            return Err(format!(
+                "rule for {name:?}: unknown content kind {other:?} (blocks|inline|none)"
+            ))
+        }
+    };
+    if spec
         .get("callback")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let tag = spec.get("tag").and_then(|v| v.as_str()).map(String::from);
-    if !callback && tag.is_none() {
-        return Err(format!("rule for {name:?} needs a tag (or a callback)"));
+        .unwrap_or(false)
+    {
+        return Ok(NodeRule::Callback { content });
     }
-    Ok(NodeRule {
-        tag,
+    let Some(tag) = spec.get("tag").and_then(|v| v.as_str()) else {
+        return Err(format!("rule for {name:?} needs a tag (or a callback)"));
+    };
+    Ok(NodeRule::Declarative {
+        tag: tag.to_string(),
         void: spec.get("void").and_then(|v| v.as_bool()).unwrap_or(false),
         attrs: parse_attrs(name, spec.get("attrs"))?,
         text: match spec.get("text") {
@@ -339,17 +357,7 @@ fn parse_node_rule(name: &str, spec: &serde_json::Value) -> Result<NodeRule, Str
             Some(serde_json::Value::Null) | None => None,
             Some(_) => return Err(format!("rule for {name:?}: text must be a template array")),
         },
-        content: match spec.get("content").and_then(|v| v.as_str()) {
-            Some("blocks") => Content::Blocks,
-            Some("inline") | None => Content::Inline,
-            Some("none") => Content::None,
-            Some(other) => {
-                return Err(format!(
-                    "rule for {name:?}: unknown content kind {other:?} (blocks|inline|none)"
-                ))
-            }
-        },
-        callback,
+        content,
     })
 }
 
@@ -417,11 +425,19 @@ mod tests {
         .unwrap();
         assert_eq!(rules.nodes.len(), 2);
         assert!(rules.has_callbacks);
-        let callout = &rules.nodes["callout"];
-        assert_eq!(callout.tag.as_deref(), Some("aside"));
-        assert!(matches!(callout.content, Content::Blocks));
-        assert_eq!(callout.attrs.len(), 2);
-        assert!(rules.nodes["video"].callback);
+        let NodeRule::Declarative {
+            tag,
+            attrs,
+            content,
+            ..
+        } = &rules.nodes["callout"]
+        else {
+            panic!("callout should be declarative");
+        };
+        assert_eq!(tag, "aside");
+        assert!(matches!(content, Content::Blocks));
+        assert_eq!(attrs.len(), 2);
+        assert!(matches!(rules.nodes["video"], NodeRule::Callback { .. }));
         assert_eq!(rules.marks["comment"].tag, "span");
     }
 
