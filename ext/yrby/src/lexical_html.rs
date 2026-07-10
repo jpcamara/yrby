@@ -82,7 +82,7 @@ enum Work {
     Close(&'static str),
     CloseOwned(String),
     EndDeferred {
-        ty: String,
+        node_type: String,
         attrs_json: String,
         child_types: Vec<String>,
     },
@@ -174,12 +174,12 @@ fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlTextRef, em: &mut Emitter, r
             Work::Close(tag) => em.push_str(tag),
             Work::CloseOwned(tag) => em.push_str(&tag),
             Work::EndDeferred {
-                ty,
+                node_type,
                 attrs_json,
                 child_types,
             } => {
                 let content = em.end_frame();
-                em.emit_deferred(ty, attrs_json, child_types, content);
+                em.emit_deferred(node_type, attrs_json, child_types, content);
             }
             Work::Open(node, depth) => open_block(txn, &node, depth, em, &mut stack, rules),
         }
@@ -336,7 +336,7 @@ fn open_rule_block<T: ReadTxn>(
         // content renders now — in blocks mode too, since a block like a list
         // item holds its own text alongside its nested blocks.
         stack.push(Work::EndDeferred {
-            ty: ty.to_string(),
+            node_type: ty.to_string(),
             attrs_json: xml_attrs_json(txn, t),
             child_types: text_child_types(txn, t),
         });

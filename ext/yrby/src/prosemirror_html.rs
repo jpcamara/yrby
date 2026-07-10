@@ -53,7 +53,7 @@ enum Work {
     Close(&'static str),
     CloseOwned(String),
     EndDeferred {
-        ty: String,
+        node_type: String,
         attrs_json: String,
         child_types: Vec<String>,
     },
@@ -117,12 +117,12 @@ fn render_block_tree<T: ReadTxn>(txn: &T, root: &XmlElementRef, em: &mut Emitter
             Work::Close(tag) => em.push_str(tag),
             Work::CloseOwned(tag) => em.push_str(&tag),
             Work::EndDeferred {
-                ty,
+                node_type,
                 attrs_json,
                 child_types,
             } => {
                 let content = em.end_frame();
-                em.emit_deferred(ty, attrs_json, child_types, content);
+                em.emit_deferred(node_type, attrs_json, child_types, content);
             }
             Work::Open(node, depth) => open_block(txn, &node, depth, em, &mut stack, rules),
         }
@@ -300,7 +300,7 @@ fn open_rule_block<T: ReadTxn>(
         // the stack (pushed above the marker, so they complete first); inline
         // content renders now.
         stack.push(Work::EndDeferred {
-            ty,
+            node_type: ty,
             attrs_json: xml_attrs_json(txn, e),
             child_types: element_child_types(txn, e),
         });
@@ -1249,7 +1249,7 @@ mod tests {
         assert_eq!(segs.len(), 2);
         assert!(matches!(&segs[0], Segment::Html(s) if s == "<p>watch:</p>"));
         let Segment::Deferred {
-            ty,
+            node_type,
             attrs_json,
             child_types,
             content,
@@ -1257,7 +1257,7 @@ mod tests {
         else {
             panic!("expected a deferred segment");
         };
-        assert_eq!(ty, "videoEmbed");
+        assert_eq!(node_type, "videoEmbed");
         assert_eq!(attrs_json, r#"{"src":"https://v.example/1"}"#);
         assert_eq!(child_types, &["paragraph"]);
         assert!(matches!(&content[0], Segment::Html(s) if s == "<p>the caption</p>"));

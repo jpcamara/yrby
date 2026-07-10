@@ -484,13 +484,13 @@ fn segments_to_ruby(ruby: &Ruby, segments: Vec<Segment>) -> Result<RArray, Error
         match seg {
             Segment::Html(s) => arr.push(s)?,
             Segment::Deferred {
-                ty,
+                node_type,
                 attrs_json,
                 child_types,
                 content,
             } => {
                 let entry = ruby.ary_new();
-                entry.push(ty)?;
+                entry.push(node_type)?;
                 entry.push(attrs_json)?;
                 entry.push(segments_to_ruby(ruby, content)?)?;
                 entry.push(child_types)?;

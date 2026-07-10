@@ -20,19 +20,17 @@ use std::collections::HashMap;
 use yrs::{Any, Out, ReadTxn, Xml};
 
 /// One piece of renderer output. `Html` is finished markup; `Deferred` is a
-/// callback node whose markup the Ruby layer supplies after the render.
-/// ("Deferred", not "pending" — in Yjs parlance a pending update is one
-/// waiting on a missing causal dependency, and this gem uses it that way.)
-/// Content nests, so callback nodes inside callback nodes resolve depth-first.
-/// `child_types` lists the node's element/block children by type, in document
-/// order — the structural facts a callback can't recover from `attrs` or the
-/// rendered content (a gallery's image count, whether a list item holds a
-/// nested list).
+/// callback node whose markup the caller supplies after the render, carrying
+/// everything needed to produce it. Content nests, so callback nodes inside
+/// callback nodes resolve depth-first. `child_types` lists the node's
+/// element/block children by type, in document order — structural facts a
+/// callback can't recover from `attrs` or the rendered content (an image
+/// count, whether a list item holds a nested list).
 #[derive(Debug)]
 pub enum Segment {
     Html(String),
     Deferred {
-        ty: String,
+        node_type: String,
         attrs_json: String,
         child_types: Vec<String>,
         content: Vec<Segment>,
@@ -97,7 +95,7 @@ impl Emitter {
 
     pub fn emit_deferred(
         &mut self,
-        ty: String,
+        node_type: String,
         attrs_json: String,
         child_types: Vec<String>,
         content: Vec<Segment>,
@@ -106,7 +104,7 @@ impl Emitter {
             .last_mut()
             .expect("emitter frame")
             .push(Segment::Deferred {
-                ty,
+                node_type,
                 attrs_json,
                 child_types,
                 content,
@@ -443,7 +441,7 @@ mod tests {
         let segs = em.into_segments();
         assert_eq!(segs.len(), 3);
         assert!(matches!(&segs[0], Segment::Html(s) if s == "<p>"));
-        assert!(matches!(&segs[1], Segment::Deferred { ty, .. } if ty == "video"));
+        assert!(matches!(&segs[1], Segment::Deferred { node_type, .. } if node_type == "video"));
         assert!(matches!(&segs[2], Segment::Html(s) if s == "</p>"));
 
         // Adjacent Html merges; flatten() hands deferred segments back.
