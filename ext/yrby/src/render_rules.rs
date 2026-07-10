@@ -281,7 +281,6 @@ pub struct MarkRule {
 pub struct Rules {
     pub nodes: HashMap<String, NodeRule>,
     pub marks: HashMap<String, MarkRule>,
-    pub has_callbacks: bool,
 }
 
 impl Rules {
@@ -289,7 +288,6 @@ impl Rules {
         Rules {
             nodes: HashMap::new(),
             marks: HashMap::new(),
-            has_callbacks: false,
         }
     }
 
@@ -311,9 +309,9 @@ impl Rules {
 
         if let Some(nodes) = root.get("nodes").and_then(|v| v.as_object()) {
             for (name, spec) in nodes {
-                let rule = parse_node_rule(name, spec)?;
-                rules.has_callbacks |= matches!(rule, NodeRule::Callback { .. });
-                rules.nodes.insert(name.clone(), rule);
+                rules
+                    .nodes
+                    .insert(name.clone(), parse_node_rule(name, spec)?);
             }
         }
         if let Some(marks) = root.get("marks").and_then(|v| v.as_object()) {
@@ -424,7 +422,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rules.nodes.len(), 2);
-        assert!(rules.has_callbacks);
         let NodeRule::Declarative {
             tag,
             attrs,
