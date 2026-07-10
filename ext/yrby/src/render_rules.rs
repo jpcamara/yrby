@@ -291,14 +291,16 @@ impl Rules {
         }
     }
 
-    /// Parse the rules JSON (however the caller compiled it). Shape:
+    /// Parse the rules JSON (however the caller compiled it). Absent keys
+    /// take their defaults (`void`/`callback` false, `content` inline), so a
+    /// typical document looks like:
     ///
     /// ```json
-    /// { "nodes": { "callout": { "tag": "aside", "void": false,
+    /// { "nodes": { "callout": { "tag": "aside",
     ///                           "attrs": [["class", [{"lit": "callout"}]],
     ///                                     ["data-kind", [{"ref": "kind"}]]],
-    ///                           "text": null, "content": "blocks",
-    ///                           "callback": false } },
+    ///                           "content": "blocks" },
+    ///              "video":   { "callback": true } },
     ///   "marks": { "comment": { "tag": "span",
     ///                           "attrs": [["data-id", [{"ref": "id"}]]] } } }
     /// ```
