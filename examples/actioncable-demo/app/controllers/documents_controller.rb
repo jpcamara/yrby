@@ -21,6 +21,37 @@ class DocumentsController < ApplicationController
   # extension. Same DocumentChannel, same durable store.
   def rhino
     @document_id = params[:id]
+    @note = Note.find_by(document_id: @document_id)
+  end
+
+  # Rhino's node names are Tiptap's; the one place its serialized HTML
+  # deliberately differs from stock is strike — Rhino replaces Tiptap's
+  # Strike with its own "rhino-strike" mark and emits <del>, not <s>. One
+  # mark rule teaches Y::ProseMirror the custom mark.
+  RHINO_RENDER_RULES = { marks: { "rhino-strike" => { tag: "del" } } }.freeze
+
+  # The ActionText save, derived from the CRDT rather than the client: no
+  # editor HTML crosses the wire. The durable store replays into a Y::Doc and
+  # Y::ProseMirror renders the Rhino page's fragment server-side, so what
+  # lands in ActionText is what the authoritative document says — not what
+  # the submitting browser claims it says.
+  def rhino_save
+    update = Store.current.replay(params[:id])
+    if update.nil?
+      return redirect_to document_rhino_path(params[:id]), alert: "Nothing recorded for this document yet."
+    end
+
+    ydoc = Y::Doc.new
+    ydoc.apply_update(update)
+    html = Y::ProseMirror.new(ydoc, **RHINO_RENDER_RULES).to_html("rhino")
+    if html.nil?
+      return redirect_to document_rhino_path(params[:id]), alert: "No Rhino content in this document yet."
+    end
+
+    note = Note.find_or_initialize_by(document_id: params[:id])
+    note.content = html
+    note.save!
+    redirect_to document_rhino_path(params[:id]), notice: "Saved to ActionText from the CRDT."
   end
 
   # "Opaque state" demos. Each renders a different kind of collaborative app over

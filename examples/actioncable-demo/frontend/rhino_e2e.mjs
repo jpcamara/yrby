@@ -1,8 +1,10 @@
 // The Rhino page (Tiptap 3 via rhino-editor, bound with raw y-prosemirror
 // plugins) through REAL Chrome: two browsers on the same document, concurrent
-// typing, byte-for-byte convergence, remote carets, and undo staying local.
-// Complements agent_browsers.mjs (the Tiptap 2 page) — same protocol, third
-// front end.
+// typing, byte-for-byte convergence, remote carets, undo staying local, and
+// the ActionText save — the server replays the durable store into a Y::Doc
+// and renders it with Y::ProseMirror, so the persisted rich text is derived
+// from the CRDT, not from any browser's serialized HTML. Complements
+// agent_browsers.mjs (the Tiptap 2 page) — same protocol, third front end.
 //
 //   PORT=3777 node rhino_e2e.mjs
 //
@@ -90,6 +92,38 @@ const after = await docText(A)
 check(`A's '1's undone (got ${countChar(after, "1")})`, countChar(after, "1") === 0)
 check(`B's '2's survived A's undo (got ${countChar(after, "2")})`, countChar(after, "2") === PER)
 await waitFor("both browsers agree after undo", async () => (await docText(A)) === (await docText(B)))
+
+// 5) The ActionText save: the button posts NO editor HTML — the server
+// derives the rich text from the durable store via Y::ProseMirror. After the
+// form redirect the page shows the persisted ActionText content, and the
+// editor must re-bind to the live document (a reload/late-join in passing).
+await ab(A, "click", "form.button_to button, section.actiontext-save button")
+await waitFor("saved ActionText content rendered after redirect", async () => {
+  const saved = await ab(A, "eval", `(document.querySelector("#saved-note") || {}).textContent || ""`)
+  return countChar(saved, "2") === PER && countChar(saved, "1") === 0
+})
+const saved = await ab(A, "eval", `document.querySelector("#saved-note").innerHTML`)
+check("saved rich text holds the surviving characters", countChar(saved, "2") === PER)
+check("saved rich text is server-rendered ActionText markup", /action-text|<p>/.test(saved))
+
+// 6) A Rhino-specific mark through the render rules: Rhino's strike is its
+// own "rhino-strike" mark serializing <del>; the save's mark rule must
+// reproduce that. Strike everything in A, save again, and the persisted
+// ActionText must carry <del> — Y::ProseMirror rendering a mark the pinned
+// schema has never heard of.
+await ab(A, "eval", `window.__yrb.editor.chain().focus().selectAll().toggleStrike().run()`)
+await waitFor("strike recorded on the shared doc", async () =>
+  (await docText(A)).includes("rhino-strike"))
+await sleep(500) // let the server ack/record the strike delta
+await ab(A, "click", "section.actiontext-save button")
+await waitFor("saved rich text carries Rhino's <del> strike", async () => {
+  const struck = await ab(A, "eval", `(document.querySelector("#saved-note") || {}).innerHTML || ""`)
+  return struck.includes("<del>") && countChar(struck, "2") === PER
+})
+check("rhino-strike rendered as <del> via the mark rule", true)
+await waitFor("editor re-synced after the save redirect", async () => /\btrue\b/.test(await synced(A)))
+const reloaded = await docText(A)
+check("reloaded editor still holds the live document", countChar(reloaded, "2") === PER)
 
 console.log(failures === 0 ? "\nRHINO E2E PASS" : `\nRHINO E2E FAIL (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

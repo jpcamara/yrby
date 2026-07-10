@@ -41,6 +41,28 @@
   </header>
 
   <rhino-editor id="editor" defer-initialize data-document-id="<%= @document_id %>"></rhino-editor>
+
+  <section class="actiontext-save" style="margin-top:1rem">
+    <%# The ActionText half of the Rhino story: the save posts NO editor
+        HTML — the server replays the durable store into a Y::Doc and renders
+        this page's fragment with Y::ProseMirror. What persists is derived
+        from the authoritative CRDT, not the submitting browser. %>
+    <%= button_to "Save to ActionText (rendered server-side from the CRDT)",
+                  document_rhino_save_path(@document_id) %>
+    <% if flash[:notice] %><p class="status" data-state="connected"><%= flash[:notice] %></p><% end %>
+    <% if flash[:alert] %><p class="status" data-state="error"><%= flash[:alert] %></p><% end %>
+
+    <% if @note %>
+      <h2 style="margin-top:1rem">Saved ActionText content</h2>
+      <p style="color:#666;font-size:.85rem">
+        <code>Note#content</code> (an <code>ActionText::RichText</code>),
+        rendered by Rails — saved <%= time_ago_in_words(@note.content.updated_at) %> ago.
+      </p>
+      <div id="saved-note" style="border:1px solid #ddd;border-radius:6px;padding:.5rem 1rem">
+        <%= @note.content %>
+      </div>
+    <% end %>
+  </section>
 </div>
 
 <script src="/rhino.js" defer></script>

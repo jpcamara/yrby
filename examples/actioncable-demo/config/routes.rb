@@ -4,6 +4,7 @@ Rails.application.routes.draw do
   get "docs/:id", to: "documents#show", as: :document
   get "docs/:id/lexxy", to: "documents#lexxy", as: :document_lexxy
   get "docs/:id/rhino", to: "documents#rhino", as: :document_rhino
+  post "docs/:id/rhino/save", to: "documents#rhino_save", as: :document_rhino_save
   # "Opaque state" demos: the same DocumentChannel, different Yjs shapes.
   get "docs/:id/codemirror", to: "documents#codemirror", as: :document_codemirror
   get "docs/:id/whiteboard", to: "documents#whiteboard", as: :document_whiteboard
