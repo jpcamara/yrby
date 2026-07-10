@@ -465,7 +465,8 @@ fn parse_rules(json: &str) -> Result<Rules, Error> {
 
 /// A render's result as a Ruby value: nil (root missing or foreign-shaped),
 /// a String when every segment is finished HTML, or nested arrays of
-/// `String | [type, attrs_json, content]` for the Ruby layer to splice.
+/// `String | [node_type, attrs_json, content, child_types]` for the Ruby
+/// layer to splice.
 fn segments_result(segments: Option<Vec<Segment>>) -> Result<Value, Error> {
     let ruby = Ruby::get().unwrap();
     match segments {
