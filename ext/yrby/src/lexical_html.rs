@@ -41,7 +41,7 @@
 //! Custom nodes: rules are registered by `__type` (see `render_rules`) and
 //! consulted before the built-in arms, so they extend the schema or override
 //! a built-in. Declarative rules render here; callback rules emit
-//! `Segment::Deferred` for the Ruby layer to fill in after the render.
+//! `Segment::Deferred` for the caller to fill in after the render.
 
 use crate::render_rules::{
     resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, NodeRule, Rules, Segment,
@@ -317,7 +317,7 @@ fn open_block<T: ReadTxn>(
 
 /// Render a block through a registered rule. Declarative rules emit the tag,
 /// resolved attributes, and template text here; callback rules capture their
-/// children into a frame and defer the markup to the Ruby layer.
+/// children into a frame and defer the markup to the caller.
 #[allow(clippy::too_many_arguments)]
 fn open_rule_block<T: ReadTxn>(
     txn: &T,

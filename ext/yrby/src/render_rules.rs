@@ -1,20 +1,21 @@
 //! Custom render rules and segmented output — the extensibility core shared
 //! by both HTML renderers.
 //!
-//! Apps register per-node rules from Ruby. Two tiers:
+//! Callers register per-node rules. Two tiers:
 //!
 //! - **Declarative rules** (tag, attributes, text, content slot) compile to
-//!   [`NodeRule`]/[`MarkRule`] here and render natively, inside `nogvl`, at
-//!   full speed. This covers the tiptap-php `renderHTML` shape: markup as
-//!   data.
-//! - **Callback rules** defer to Ruby. Rendering never calls Ruby while the
-//!   document is locked — instead the renderer emits [`Segment::Deferred`]
+//!   [`NodeRule`]/[`MarkRule`] here and render natively, inside the document
+//!   transaction, at full speed. This covers the tiptap-php `renderHTML`
+//!   shape: markup as data.
+//! - **Callback rules** defer to the caller. Rendering never runs app code
+//!   while the document is locked — the renderer emits [`Segment::Deferred`]
 //!   entries carrying the node's type, attributes (as JSON), and its
-//!   already-rendered children; the Ruby layer invokes the app's block after
-//!   the transaction has closed and the GVL is held again, then splices.
+//!   already-rendered children, and the caller fills them in after the
+//!   render returns. (In the Ruby gem, that caller is the app's block, run
+//!   once the transaction has closed and the GVL is held again.)
 //!
-//! Rules cross the Ruby boundary as one JSON document (see `parse`), so the
-//! same format serves any future binding.
+//! Rules arrive as one JSON document (see `parse`), so the same format
+//! serves any binding or caller.
 
 use std::collections::HashMap;
 use yrs::{Any, Out, ReadTxn, Xml};
@@ -255,7 +256,7 @@ pub enum Content {
 }
 
 pub struct NodeRule {
-    /// None for callback rules (Ruby supplies the markup).
+    /// None for callback rules (the caller supplies the markup).
     pub tag: Option<String>,
     pub void: bool,
     pub attrs: Vec<(String, Vec<AttrPart>)>,
@@ -286,7 +287,7 @@ impl Rules {
         }
     }
 
-    /// Parse the JSON the Ruby layer compiles. Shape:
+    /// Parse the rules JSON (however the caller compiled it). Shape:
     ///
     /// ```json
     /// { "nodes": { "callout": { "tag": "aside", "void": false,

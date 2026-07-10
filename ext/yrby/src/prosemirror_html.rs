@@ -25,7 +25,7 @@
 //! it can extend the schema or override a built-in; a mark rule claims its
 //! mark from the built-in wraps and wraps outside everything, link included.
 //! Declarative rules render here; callback rules emit `Segment::Deferred` for
-//! the Ruby layer to fill in after the render.
+//! the caller to fill in after the render.
 
 use crate::render_rules::{
     any_attr_string, resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, MarkRule,
@@ -282,7 +282,7 @@ fn open_block<T: ReadTxn>(
 
 /// Render a block through a registered rule. Declarative rules emit the tag,
 /// resolved attributes, and template text here; callback rules capture their
-/// children into a frame and defer the markup to the Ruby layer.
+/// children into a frame and defer the markup to the caller.
 #[allow(clippy::too_many_arguments)]
 fn open_rule_block<T: ReadTxn>(
     txn: &T,
