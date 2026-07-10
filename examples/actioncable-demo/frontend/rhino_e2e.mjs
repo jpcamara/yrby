@@ -75,9 +75,13 @@ await waitFor("remote carets visible in both browsers", async () => {
 check("remote carets rendered", true)
 
 // 4) Undo stays local: A undoes its own typing (yUndoPlugin), B's content
-// survives. Rhino's built-in UndoRedo is disabled, so Mod-z hits the Yjs undo.
+// survives. Rhino's built-in UndoRedo is disabled, so Mod-z hits the Yjs
+// undo. ProseMirror's Mod is Meta on macOS and Control elsewhere — ask the
+// browser, or this test only passes on a Mac.
+const isMac = /\btrue\b/.test(await ab(A, "eval", `navigator.platform.startsWith("Mac")`))
+const undoCombo = isMac ? "Meta+z" : "Control+z"
 await ab(A, "click", ".ProseMirror")
-for (let i = 0; i < PER; i++) await ab(A, "press", "Meta+z")
+for (let i = 0; i < PER; i++) await ab(A, "press", undoCombo)
 await waitFor("undo removed A's characters but kept B's", async () => {
   const ta = await docText(A)
   return countChar(ta, "1") === 0 && countChar(ta, "2") === PER
