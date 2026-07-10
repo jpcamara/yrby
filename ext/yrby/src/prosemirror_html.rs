@@ -609,7 +609,8 @@ fn render_text_runs<T: ReadTxn>(txn: &T, t: &XmlTextRef, em: &mut Emitter, rules
 /// A registered mark rule claims its stored name from the built-in wraps
 /// (overriding it) and wraps outside everything; multiple custom marks nest
 /// alphabetically by name, so output is deterministic regardless of
-/// registration order.
+/// registration order. Overriding changes the markup, not the semantics: a
+/// claimed `code` still excludes the other formatting marks.
 fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
     let mut html = escape_text(text);
     let Some(marks) = marks else {
@@ -617,7 +618,10 @@ fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
     };
     if has(marks, &["code"], rules) {
         html = wrap(html, "code");
-    } else {
+    } else if !marks.contains_key("code") {
+        // (A claimed `code` lands here too — on the run, but skipped by the
+        // else-if: the rule replaces the wrap, via wrap_custom_marks below,
+        // and code's exclusivity over the other formatting marks holds.)
         if has(marks, &["subscript", "sub"], rules) {
             html = wrap(html, "sub");
         } else if has(marks, &["superscript", "sup"], rules) {
@@ -1299,5 +1303,13 @@ mod tests {
             render_run("x", Some(&a), &rules),
             "<span data-comment-id=\"c1\"><b><em>x</em></b></span>"
         );
+
+        // Overriding code replaces its tag, not its semantics: the other
+        // formatting marks stay excluded.
+        let kbd = Rules::parse(r#"{ "marks": { "code": { "tag": "kbd" } } }"#).unwrap();
+        let mut a = Attrs::new();
+        a.insert("code".into(), Any::Bool(true));
+        a.insert("bold".into(), Any::Bool(true));
+        assert_eq!(render_run("x", Some(&a), &kbd), "<kbd>x</kbd>");
     }
 }
