@@ -340,11 +340,11 @@ impl RbDoc {
 // Y::Lexical — schema-pinned rendering of Lexical/Lexxy documents
 // ============================================================================
 
-/// A Lexical/Lexxy view over a `Y::Doc`. The schema knowledge (Lexxy 0.9.x
-/// node set and serializer semantics) lives here rather than on the
-/// schema-agnostic `Doc`. Holds a cheap clone of the doc (yrs `Doc` is an Arc
-/// handle), so it reads live state, plus the custom render rules compiled at
-/// construction (see `render_rules`).
+/// A Lexical view over a `Y::Doc`. The schema knowledge lives here rather
+/// than on the schema-agnostic `Doc`: core Lexical natively, everything else
+/// through the render rules compiled at construction (see `render_rules` —
+/// the Ruby layer's Lexxy rule set arrives that way). Holds a cheap clone of
+/// the doc (yrs `Doc` is an Arc handle), so it reads live state.
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
 /// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
