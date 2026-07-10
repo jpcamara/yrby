@@ -42,6 +42,7 @@ reachable through several front ends (linked from the nav on each page):
 |------|--------------|---------|
 | `/docs/demo` | `Y.XmlFragment` | Tiptap (rich text) |
 | `/docs/demo/lexxy` | `Y.XmlText` | Lexxy / Lexical |
+| `/docs/demo/rhino` | `Y.XmlFragment` | Rhino (Tiptap 3, raw y-prosemirror plugins) |
 | `/docs/demo/codemirror` | `Y.Text` | CodeMirror 6 (code + cursors) |
 | `/docs/demo/whiteboard` | `Y.Map` of shapes | draggable sticky notes |
 | `/docs/demo/kanban` | `Y.Array` of card `Y.Map`s | add / move / delete |
@@ -76,6 +77,7 @@ Then open two windows:
 
 - http://localhost:3100/docs/demo — the Tiptap editor
 - http://localhost:3100/docs/demo/lexxy — the Lexxy editor (lexxy-realtime)
+- http://localhost:3100/docs/demo/rhino — the Rhino editor (rhino-editor)
 
 The image carries Rust (to compile the native extension) and bun (to build the
 front end); the build context is the **repo root** because the demo uses the gem

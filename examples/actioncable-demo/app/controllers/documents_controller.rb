@@ -16,6 +16,13 @@ class DocumentsController < ApplicationController
     @document_id = params[:id]
   end
 
+  # A third front end: Rhino Editor (Tiptap 3, ActionText-compatible), bound
+  # through raw y-prosemirror plugins rather than a Tiptap Collaboration
+  # extension. Same DocumentChannel, same durable store.
+  def rhino
+    @document_id = params[:id]
+  end
+
   # "Opaque state" demos. Each renders a different kind of collaborative app over
   # the SAME DocumentChannel, to show yrby syncs any Yjs shape (the views use
   # a per-demo suffix on the document id so the shapes don't collide).
