@@ -303,6 +303,14 @@ bin/rails db:prepare   # creates yrby_demo_development + document_changes
 (`config/database.yml` defaults to the local socket as `$USER`.) `GET
 /docs/:id/audit` returns the stored deltas (base64).
 
+Both stores keep every delta forever and `replay` applies the full history —
+deliberately, because auditability is this demo's story (`/audit` replaying
+the log byte-matches the live doc). At scale that's the knob to turn:
+checkpoint a snapshot periodically (`Doc#compacted_state_update` is the
+gap-free encoding for exactly this) and replay only the tail since — cold
+loads and derived-view materializations (see `NoteMaterializer`) both drop
+from O(all changes) to O(changes since the snapshot).
+
 ## Record Before Distribute
 
 The channel records every change durably before it broadcasts or acknowledges
