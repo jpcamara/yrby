@@ -30,14 +30,17 @@ module Y
   #     })
   #   The block runs after the document read has finished (never while the
   #   document is locked) and receives a RenderRules::Node with the node's
-  #   type, stored attributes, and children already rendered to HTML. Its
-  #   return value is spliced in verbatim — it is trusted HTML, so escape any
-  #   attribute values you interpolate.
+  #   type, stored attributes, children already rendered to HTML, and
+  #   child_types (its element/block children by type). Its return value is
+  #   spliced in verbatim — it is trusted HTML, so escape any attribute
+  #   values you interpolate.
   #
   # Mark rules (ProseMirror only) are declarative: `tag` plus `attrs`
   # templates whose Symbol refs resolve against the mark's own attributes. A
   # custom mark wraps outside every built-in mark; several custom marks nest
-  # alphabetically.
+  # alphabetically. A rule for a built-in mark's stored name replaces its
+  # wrap (the markup changes, the semantics don't — an overridden code mark
+  # still excludes the other formatting).
   module RenderRules
     # What a callback receives. `attrs` keys are as stored (Lexical's own
     # props keep their "__" prefix); `content` is the node's children,
