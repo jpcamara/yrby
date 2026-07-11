@@ -45,7 +45,7 @@
   <section class="actiontext-save" style="margin-top:1rem">
     <%# The ActionText half of the Rhino story: the save posts NO editor
         HTML — the server replays the durable store into a Y::Doc and renders
-        this page's fragment with Y::ProseMirror. What persists is derived
+        this page's fragment with Y::Tiptap. What persists is derived
         from the authoritative CRDT, not the submitting browser. %>
     <%= button_to "Save to ActionText (rendered server-side from the CRDT)",
                   document_rhino_save_path(@document_id) %>

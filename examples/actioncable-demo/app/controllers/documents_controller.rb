@@ -24,15 +24,15 @@ class DocumentsController < ApplicationController
     @note = Note.find_by(document_id: @document_id)
   end
 
-  # Rhino's node names are Tiptap's; the one place its serialized HTML
-  # deliberately differs from stock is strike — Rhino replaces Tiptap's
-  # Strike with its own "rhino-strike" mark and emits <del>, not <s>. One
-  # mark rule teaches Y::ProseMirror the custom mark.
+  # Rhino is Tiptap under the hood, so Y::Tiptap is its renderer; the one
+  # place its serialized HTML deliberately differs from stock is strike —
+  # Rhino replaces Tiptap's Strike with its own "rhino-strike" mark and
+  # emits <del>, not <s>. One mark rule teaches the renderer the custom mark.
   RHINO_RENDER_RULES = { marks: { "rhino-strike" => { tag: "del" } } }.freeze
 
   # The ActionText save, derived from the CRDT rather than the client: no
   # editor HTML crosses the wire. The durable store replays into a Y::Doc and
-  # Y::ProseMirror renders the Rhino page's fragment server-side, so what
+  # Y::Tiptap renders the Rhino page's fragment server-side, so what
   # lands in ActionText is what the authoritative document says — not what
   # the submitting browser claims it says.
   def rhino_save
@@ -43,7 +43,7 @@ class DocumentsController < ApplicationController
 
     ydoc = Y::Doc.new
     ydoc.apply_update(update)
-    html = Y::ProseMirror.new(ydoc, **RHINO_RENDER_RULES).to_html("rhino")
+    html = Y::Tiptap.new(ydoc, **RHINO_RENDER_RULES).to_html("rhino")
     if html.nil?
       return redirect_to document_rhino_path(params[:id]), alert: "No Rhino content in this document yet."
     end

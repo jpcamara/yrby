@@ -2,7 +2,7 @@
 // plugins) through REAL Chrome: two browsers on the same document, concurrent
 // typing, byte-for-byte convergence, remote carets, undo staying local, and
 // the ActionText save — the server replays the durable store into a Y::Doc
-// and renders it with Y::ProseMirror, so the persisted rich text is derived
+// and renders it with Y::Tiptap, so the persisted rich text is derived
 // from the CRDT, not from any browser's serialized HTML. Complements
 // agent_browsers.mjs (the Tiptap 2 page) — same protocol, third front end.
 //
@@ -94,7 +94,7 @@ check(`B's '2's survived A's undo (got ${countChar(after, "2")})`, countChar(aft
 await waitFor("both browsers agree after undo", async () => (await docText(A)) === (await docText(B)))
 
 // 5) The ActionText save: the button posts NO editor HTML — the server
-// derives the rich text from the durable store via Y::ProseMirror. After the
+// derives the rich text from the durable store via Y::Tiptap. After the
 // form redirect the page shows the persisted ActionText content, and the
 // editor must re-bind to the live document (a reload/late-join in passing).
 await ab(A, "click", "form.button_to button, section.actiontext-save button")
@@ -109,7 +109,7 @@ check("saved rich text is server-rendered ActionText markup", /action-text|<p>/.
 // 6) A Rhino-specific mark through the render rules: Rhino's strike is its
 // own "rhino-strike" mark serializing <del>; the save's mark rule must
 // reproduce that. Strike everything in A, save again, and the persisted
-// ActionText must carry <del> — Y::ProseMirror rendering a mark the pinned
+// ActionText must carry <del> — Y::Tiptap rendering a mark the pinned
 // schema has never heard of.
 await ab(A, "eval", `window.__yrb.editor.chain().focus().selectAll().toggleStrike().run()`)
 await waitFor("strike recorded on the shared doc", async () =>
