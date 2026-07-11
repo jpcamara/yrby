@@ -38,6 +38,18 @@ class RenderingRulesTest < Minitest::Test
     refute_includes html, "<blockquote>"
   end
 
+  def test_a_rule_overrides_a_builtin_in_inline_position
+    # Links live inside text blocks, not at block level — the rule must
+    # reach inline position. The fixture's links store __url.
+    html = Y::Lexxy.new(
+      lexical_doc,
+      nodes: { "link" => { tag: "a", attrs: { "class" => "app-link", "href" => [:url] } } }
+    ).to_html
+
+    assert_includes html, '<a class="app-link" href="https://example.com/a?b=1&amp;c=2">'
+    refute_includes html, '<a href="https://example.com/a?b=1&amp;c=2">'
+  end
+
   def test_declarative_attr_templates_resolve_stored_attributes
     # The mention fixture stores Tiptap Mention nodes with an `id` attribute.
     html = Y::ProseMirror.new(

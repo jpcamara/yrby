@@ -306,7 +306,7 @@ fn open_block<T: ReadTxn>(
             // An empty paragraph exports with a <br>, as Lexical's own
             // paragraph export does.
             em.begin_frame();
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, true, em, rules);
             let inline = em.end_frame();
             if inline.is_empty() {
                 em.push_str("<p><br></p>");
@@ -324,14 +324,14 @@ fn open_block<T: ReadTxn>(
             em.push('<');
             em.push_str(&tag);
             em.push('>');
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, true, em, rules);
             em.push_str("</");
             em.push_str(&tag);
             em.push('>');
         }
         "quote" => {
             em.push_str("<blockquote>");
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, true, em, rules);
             em.push_str("</blockquote>");
         }
         "code" => {
@@ -344,7 +344,7 @@ fn open_block<T: ReadTxn>(
                 em.push('"');
             }
             em.push('>');
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, true, em, rules);
             em.push_str("</pre>");
         }
         "list" => {
@@ -358,19 +358,19 @@ fn open_block<T: ReadTxn>(
             // Direct inline content is crafted-only (Lexxy puts none here);
             // keep it rather than drop it. Safe from double-render: this skips
             // block children, and push_block_children skips inline content.
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, false, em, rules);
             let close = if tag == "ol" { "</ol>" } else { "</ul>" };
             push_block_children(txn, t, depth, close, false, stack);
         }
         "listitem" => open_listitem(txn, t, depth, em, stack, rules),
         "table" => {
             em.push_str("<table><tbody>");
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, false, em, rules);
             push_block_children(txn, t, depth, "</tbody></table>", false, stack);
         }
         "tablerow" => {
             em.push_str("<tr>");
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, false, em, rules);
             push_block_children(txn, t, depth, "</tr>", false, stack);
         }
         "tablecell" => {
@@ -388,7 +388,7 @@ fn open_block<T: ReadTxn>(
                 em.push_str("<td>");
                 "</td>"
             };
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, false, em, rules);
             push_block_children(txn, t, depth, close, false, stack);
         }
         // A block type this renderer doesn't know: degrade readably instead
@@ -397,11 +397,11 @@ fn open_block<T: ReadTxn>(
         // rows); a leaf's text becomes a plain paragraph.
         _ => {
             if !block_children(txn, t).is_empty() {
-                render_inline(txn, t, 0, em, rules);
+                render_inline(txn, t, 0, false, em, rules);
                 push_block_children(txn, t, depth, "", false, stack);
             } else {
                 em.begin_frame();
-                render_inline(txn, t, 0, em, rules);
+                render_inline(txn, t, 0, true, em, rules);
                 let inline = em.end_frame();
                 if !inline.is_empty() {
                     em.push_str("<p>");
@@ -440,9 +440,9 @@ fn open_rule_block<T: ReadTxn>(
                 child_types: text_child_types(txn, t),
             });
             match content {
-                Content::Inline => render_inline(txn, t, 0, em, rules),
+                Content::Inline => render_inline(txn, t, 0, true, em, rules),
                 Content::Blocks => {
-                    render_inline(txn, t, 0, em, rules);
+                    render_inline(txn, t, 0, false, em, rules);
                     for child in block_children(txn, t).into_iter().rev() {
                         if depth < MAX_BLOCK_DEPTH {
                             stack.push(Work::Open(child, depth + 1));
@@ -484,13 +484,13 @@ fn open_rule_block<T: ReadTxn>(
     }
     match content {
         Content::Inline => {
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, true, em, rules);
             em.push_str("</");
             em.push_str(tag);
             em.push('>');
         }
         Content::Blocks => {
-            render_inline(txn, t, 0, em, rules);
+            render_inline(txn, t, 0, false, em, rules);
             stack.push(Work::CloseOwned(format!("</{tag}>")));
             if depth < MAX_BLOCK_DEPTH {
                 for child in block_children(txn, t).into_iter().rev() {
@@ -566,7 +566,7 @@ fn open_listitem<T: ReadTxn>(
     em.push('>');
     // Inline content first, then any nested list blocks (Lexical stores the
     // nested list as a child of the item).
-    render_inline(txn, t, 0, em, rules);
+    render_inline(txn, t, 0, true, em, rules);
     push_block_children(txn, t, depth, "</li>", true, stack);
 }
 
@@ -604,15 +604,25 @@ fn text_child_types<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> Vec<String> {
 }
 
 /// Render a block's inline content: formatted text runs, linebreaks, tabs,
-/// links, and inline decorators. Nested block children are NOT rendered here
-/// (the block renderers handle them), so a list item's text doesn't duplicate
-/// its nested list. `depth` counts inline-link nesting only (a link's body is
-/// itself inline content); past `MAX_INLINE_DEPTH` a link renders as flat text,
-/// capping the recursion.
+/// links, and inline decorators. A registered rule wins over the built-in
+/// link arm. Nested block children are NOT rendered here (the block
+/// renderers handle them), so a list item's text doesn't duplicate its
+/// nested list. `depth` counts inline-link nesting only (a link's body is
+/// itself inline content); past `MAX_INLINE_DEPTH` a link renders as flat
+/// text, capping the recursion.
+///
+/// `ruled_inline` says whether a non-core `Y.XmlText` child with a
+/// registered rule renders here as a custom inline node. Callers that walk
+/// their block children pass false — for them every non-link `Y.XmlText`
+/// child renders as a block, and rendering it here too would double it.
+/// Callers that don't (the leaf text blocks, list items, inline-content
+/// rules, link bodies) pass true: for them such a child would otherwise be
+/// dropped.
 fn render_inline<T: ReadTxn>(
     txn: &T,
     t: &XmlTextRef,
     depth: usize,
+    ruled_inline: bool,
     em: &mut Emitter,
     rules: &Rules,
 ) {
@@ -665,7 +675,14 @@ fn render_inline<T: ReadTxn>(
             Out::YXmlText(child) => {
                 let ty = node_type(txn, &child);
                 if is_inline_type(&ty) {
-                    render_link(txn, &child, depth, em, rules);
+                    match rules.nodes.get(ty.as_str()) {
+                        Some(rule) => render_rule_inline(txn, &child, &ty, rule, depth, em, rules),
+                        None => render_link(txn, &child, depth, em, rules),
+                    }
+                } else if ruled_inline && !is_builtin(&ty) {
+                    if let Some(rule) = rules.nodes.get(ty.as_str()) {
+                        render_rule_inline(txn, &child, &ty, rule, depth, em, rules);
+                    }
                 }
                 // Nested blocks are rendered by their parent block's renderer.
             }
@@ -775,13 +792,77 @@ fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize, em: &mut Emitt
     }
     em.push('>');
     if depth < MAX_INLINE_DEPTH {
-        render_inline(txn, t, depth + 1, em, rules);
+        render_inline(txn, t, depth + 1, true, em, rules);
     } else {
         // A link chain nested past the cap (only crafted input reaches here):
         // keep its text, drop any further link structure.
         em.push_str(&escape_text(&t.get_string(txn)));
     }
     em.push_str("</a>");
+}
+
+/// A rule node in inline position (a `Y.XmlText` child inside a text block):
+/// an overridden link, or a custom inline node the core schema doesn't know.
+/// Its body is inline content, so a blocks content slot behaves like inline
+/// here, and `depth` carries the inline nesting cap through.
+fn render_rule_inline<T: ReadTxn>(
+    txn: &T,
+    t: &XmlTextRef,
+    ty: &str,
+    rule: &NodeRule,
+    depth: usize,
+    em: &mut Emitter,
+    rules: &Rules,
+) {
+    let (tag, void, attrs, text, content) = match rule {
+        NodeRule::Callback { content } => {
+            em.begin_frame();
+            if *content != Content::None && depth < MAX_INLINE_DEPTH {
+                render_inline(txn, t, depth + 1, true, em, rules);
+            }
+            let captured = em.end_frame();
+            em.emit_deferred(
+                ty.to_string(),
+                xml_attrs_json(txn, t),
+                text_child_types(txn, t),
+                captured,
+            );
+            return;
+        }
+        NodeRule::Declarative {
+            tag,
+            void,
+            attrs,
+            text,
+            content,
+        } => (tag, *void, attrs, text, *content),
+    };
+    em.push('<');
+    em.push_str(tag);
+    for (name, parts) in attrs {
+        if let Some(value) = resolve_parts(parts, |r| xml_ref_attr(txn, t, r)) {
+            em.push(' ');
+            em.push_str(name);
+            em.push_str("=\"");
+            em.push_str(&escape_attr(&value));
+            em.push('\"');
+        }
+    }
+    em.push('>');
+    if void {
+        return;
+    }
+    if let Some(text) = text {
+        if let Some(value) = resolve_parts(text, |r| xml_ref_attr(txn, t, r)) {
+            em.push_str(&escape_text(&value));
+        }
+    }
+    if content != Content::None && depth < MAX_INLINE_DEPTH {
+        render_inline(txn, t, depth + 1, true, em, rules);
+    }
+    em.push_str("</");
+    em.push_str(tag);
+    em.push('>');
 }
 
 /// Decorator elements (root-level or inline): core Lexical's horizontal rule,
@@ -1184,6 +1265,44 @@ mod tests {
         let frag = txn.get_xml_fragment("root").unwrap();
         let html = render(&txn, &frag).unwrap();
         assert_eq!(html.matches("<a").count(), html.matches("</a>").count());
+    }
+
+    /// Rules reach inline position too: a rule for `link` overrides the
+    /// built-in `<a>`, and a custom inline node (a `Y.XmlText` type the
+    /// core schema doesn't know) renders through its rule instead of being
+    /// dropped.
+    #[test]
+    fn rules_render_inline_nodes_and_override_links() {
+        use yrs::{XmlFragment, XmlTextPrelim};
+        let rules = Rules::parse(
+            r#"{ "nodes": {
+                 "link": { "tag": "a", "attrs": [["class", [{"lit": "app-link"}]],
+                                                 ["href", [{"ref": "url"}]]] },
+                 "keyword": { "tag": "kbd", "attrs": [["data-kind", [{"ref": "kind"}]]] } } }"#,
+        )
+        .unwrap();
+        let doc = Doc::new();
+        let root = doc.get_or_insert_xml_fragment("root");
+        {
+            let mut txn = doc.transact_mut();
+            let p = root.push_back(&mut txn, XmlTextPrelim::new(""));
+            p.insert_attribute(&mut txn, "__type", "paragraph");
+            let link = p.insert_embed(&mut txn, 0, XmlTextPrelim::new("site"));
+            link.insert_attribute(&mut txn, "__type", "link");
+            link.insert_attribute(&mut txn, "__url", "https://x.example");
+            let kw = p.insert_embed(&mut txn, 1, XmlTextPrelim::new("crdt"));
+            kw.insert_attribute(&mut txn, "__type", "keyword");
+            kw.insert_attribute(&mut txn, "__kind", "term");
+        }
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let segs = render_segments(&txn, &frag, &rules).unwrap();
+        let html = crate::render_rules::flatten(segs).into_html().unwrap();
+        assert_eq!(
+            html,
+            "<p><a class=\"app-link\" href=\"https://x.example\">site</a>\
+             <kbd data-kind=\"term\">crdt</kbd></p>"
+        );
     }
 
     #[test]

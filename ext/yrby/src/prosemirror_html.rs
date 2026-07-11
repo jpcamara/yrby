@@ -621,7 +621,8 @@ fn render_text_runs<T: ReadTxn>(txn: &T, t: &XmlTextRef, em: &mut Emitter, rules
 /// (overriding it) and wraps outside everything; multiple custom marks nest
 /// alphabetically by name, so output is deterministic regardless of
 /// registration order. Overriding replaces only the markup: a claimed
-/// `code` still excludes the other formatting marks.
+/// `code` still excludes the other formatting marks, and a claimed
+/// formatting mark stays excluded from a code run.
 fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
     let mut html = escape_text(text);
     let Some(marks) = marks else {
@@ -673,13 +674,19 @@ fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
     html
 }
 
-/// Apply the run's registered custom marks, outermost of everything.
+/// Apply the run's registered custom marks, outermost of everything. A code
+/// run keeps its exclusivity under overrides too: only the `code` and `link`
+/// claims themselves may wrap it, matching what the built-in wraps allow —
+/// otherwise overriding a formatting mark would change which marks render on
+/// a code run, not just their markup.
 fn wrap_custom_marks(html: String, marks: &Attrs, rules: &Rules) -> String {
+    let code = marks.contains_key("code");
     let mut names: Vec<&str> = rules
         .marks
         .keys()
         .map(String::as_str)
         .filter(|name| marks.contains_key(*name))
+        .filter(|name| !code || matches!(*name, "code" | "link"))
         .collect();
     names.sort_unstable();
     let mut html = html;
@@ -1326,5 +1333,33 @@ mod tests {
         a.insert("code".into(), Any::Bool(true));
         a.insert("bold".into(), Any::Bool(true));
         assert_eq!(render_run("x", Some(&a), &kbd), "<kbd>x</kbd>");
+    }
+
+    /// The exclusivity holds from the other direction too: a claimed
+    /// formatting mark must not sneak onto a code run through the custom
+    /// wrap when the built-in wrap would have excluded it.
+    #[test]
+    fn a_claimed_formatting_mark_stays_excluded_on_a_code_run() {
+        let rules = Rules::parse(r#"{ "marks": { "bold": { "tag": "b" } } }"#).unwrap();
+        let mut a = Attrs::new();
+        a.insert("code".into(), Any::Bool(true));
+        a.insert("bold".into(), Any::Bool(true));
+        assert_eq!(render_run("x", Some(&a), &rules), "<code>x</code>");
+
+        // The link claim is the exception, matching the built-in behavior
+        // (schema-basic can produce code+link; the href must survive).
+        let link_rule =
+            Rules::parse(r#"{ "marks": { "link": { "tag": "a", "attrs": [["href", [{"ref": "href"}]]] }, "bold": { "tag": "b" } } }"#)
+                .unwrap();
+        let mut link = HashMap::new();
+        link.insert("href".to_string(), Any::String("https://e.com".into()));
+        let mut a = Attrs::new();
+        a.insert("code".into(), Any::Bool(true));
+        a.insert("bold".into(), Any::Bool(true));
+        a.insert("link".into(), Any::Map(Arc::new(link)));
+        assert_eq!(
+            render_run("x", Some(&a), &link_rule),
+            "<a href=\"https://e.com\"><code>x</code></a>"
+        );
     }
 }
