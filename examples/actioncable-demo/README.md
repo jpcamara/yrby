@@ -52,6 +52,39 @@ Each is a self-contained entry under `frontend/src/`; the only thing that differ
 is the Yjs binding. A two-window agent-browser check for the last four lives in
 `frontend/opaque_demos_e2e.mjs` (run the server with `STORE_KIND=file` first).
 
+### Using this in your own app
+
+Don't copy the demo's build setup — you won't need it. The rule that keeps an
+integration clean: **only yjs objects cross the yrby-client boundary** (a
+`Y.Doc` and `provider.awareness`; both are peer dependencies, so your app has
+exactly one copy). Every editor-framework object should come from your
+editor's own dependency tree. For a Tiptap-based editor (including Rhino),
+that means the editor's own Collaboration extension rather than hand-wired
+y-prosemirror plugins:
+
+```js
+import * as Y from "yjs"
+import { createConsumer } from "@rails/actioncable"
+import { ActionCableProvider } from "yrby-client"
+// Collaboration/CollaborationCaret from your editor's own @tiptap tree
+
+const ydoc = new Y.Doc()
+const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChannel", { id })
+provider.connect()
+await provider.whenSynced // bind only after the first catch-up
+// configure the editor with Collaboration({ document: ydoc }) and
+// CollaborationCaret({ provider }) — that's the whole integration
+```
+
+No bundler plugins, no plugin-ordering rules, no undo wiring — the
+Collaboration extension owns all of that. The demo can't take this route on
+the Rhino page only because it deliberately hosts **three editors across two
+`@tiptap` majors in one bundle**; that's what `frontend/build.mjs`'s
+per-entry resolution exists for, and why `rhino.js` binds raw y-prosemirror
+plugins instead (which also serves as proof the plain-ProseMirror route
+works for editors with no collaboration package at all). One editor, one
+app: none of it applies.
+
 > The default durable store is Postgres, reached over the `/tmp` unix socket — so
 > "Run it" above expects a local Postgres. To avoid that (or a port clash with
 > your own services), use Docker below.

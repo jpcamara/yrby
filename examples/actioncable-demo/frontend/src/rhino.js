@@ -7,7 +7,9 @@
 // version into the demo), the raw y-prosemirror plugins go straight into the
 // editor via `editor.registerPlugin`. y-prosemirror is plain ProseMirror, so
 // the same recipe works for any ProseMirror-based editor regardless of the
-// wrapper around it.
+// wrapper around it. In your own app, prefer the editor's own Collaboration
+// extension — see "Using this in your own app" in the demo README; the raw
+// route below is the fallback for editors that don't ship one.
 import "rhino-editor"
 import "rhino-editor/exports/styles/trix.css"
 import * as Y from "yjs"
@@ -78,12 +80,4 @@ function startEditor() {
   editorEl.removeAttribute("defer-initialize")
 }
 
-if (provider.synced) {
-  startEditor()
-} else {
-  const poll = setInterval(() => {
-    if (!provider.synced) return
-    clearInterval(poll)
-    startEditor()
-  }, 50)
-}
+provider.whenSynced.then(startEditor)

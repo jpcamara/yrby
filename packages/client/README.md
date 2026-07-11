@@ -61,9 +61,24 @@ provider.onStatusChange(({ status }) => render(status)); // returns an unsubscri
 // provider.status     -> the current status (same union as above)
 // provider.awareness  -> the provider's Awareness instance (always a fresh one)
 // provider.synced     -> caught up with the server
+// provider.whenSynced -> Promise for the FIRST catch-up (see below)
 // provider.hasPending -> unacked local edits in flight
 // provider.destroy()  -> tear down
 ```
+
+Editors that must not bind before the first sync (Tiptap's Collaboration
+extension and most rich-text bindings seed an empty document on mount, so
+binding early makes each client insert its own competing top-level node) gate
+on `whenSynced`:
+
+```js
+provider.connect();
+await provider.whenSynced; // resolves immediately if already synced
+// now hand the doc to the editor binding
+```
+
+It resolves once, on the first catch-up, and stays resolved across later
+reconnects — `onStatusChange` is the signal for the live connection.
 
 On `disconnect()` / `destroy()` — and on browser `pagehide` — the provider
 broadcasts a presence removal so peers drop your cursor immediately instead of

@@ -10,7 +10,8 @@
 //
 // The constructor does not auto-connect: wire up your editor binding first, then
 // call `connect()`. Watch the connection with `onStatusChange(({ status }) => ...)`
-// or the `status` getter. On `disconnect()`/`destroy()`, and on browser
+// or the `status` getter; editors that must not bind before the first sync
+// `await provider.whenSynced` after connect(). On `disconnect()`/`destroy()`, and on browser
 // `pagehide`, the provider broadcasts a presence removal so peers drop our cursor
 // right away instead of waiting for the awareness timeout.
 import { YProtocolSession, MessageType, type YProtocolSessionOptions } from "./y_protocol_session.js";
@@ -77,6 +78,7 @@ export class ActionCableProvider {
   #connected = false;
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
+  #whenSynced: Promise<void> | null = null;
   #onUnload: (() => void) | null = null;
   #onRestore: ((event: PageTransitionEvent) => void) | null = null;
   #stashedPresence: Record<string, unknown> | null = null;
@@ -106,6 +108,33 @@ export class ActionCableProvider {
   /** True once the document has caught up with the server (received a SyncStep2). */
   get synced(): boolean {
     return this.session.synced;
+  }
+
+  /**
+   * Resolves once the document has first caught up with the server — the
+   * bind-after-sync gate every editor integration needs (binding earlier
+   * makes each client seed its own competing top-level node):
+   *
+   *   provider.connect();
+   *   await provider.whenSynced;
+   *   // now hand the doc to the editor binding
+   *
+   * Resolves immediately when already synced, and stays resolved across
+   * later reconnects (watch `onStatusChange` for those). If the provider is
+   * destroyed before the first sync the promise never settles — the code
+   * awaiting it is being torn down with it.
+   */
+  get whenSynced(): Promise<void> {
+    this.#whenSynced ??= this.synced
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          const off = this.onStatusChange(({ status }) => {
+            if (status !== "synced") return;
+            off();
+            resolve();
+          });
+        });
+    return this.#whenSynced;
   }
 
   /** True while there are unacknowledged local document updates in flight. */

@@ -50,12 +50,4 @@ function startEditor() {
   statusEl.textContent = `synced, editing as ${user.name}`
 }
 
-if (provider.synced) {
-  startEditor()
-} else {
-  const poll = setInterval(() => {
-    if (!provider.synced) return
-    clearInterval(poll)
-    startEditor()
-  }, 50)
-}
+provider.whenSynced.then(startEditor)
