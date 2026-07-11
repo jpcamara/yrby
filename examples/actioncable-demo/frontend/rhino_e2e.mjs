@@ -67,6 +67,24 @@ check(`all ${PER} of '1' present (got ${countChar(t, "1")})`, countChar(t, "1") 
 check(`all ${PER} of '2' present (got ${countChar(t, "2")})`, countChar(t, "2") === PER)
 check("both browsers byte-identical", t === (await docText(B)))
 
+// 2b) Auto-materialization: NO button, no browser action — the channel's
+// on_change re-arms NoteMaterializer, and once the doc goes quiet the server
+// renders and persists the ActionText on its own. A plain HTTP fetch of the
+// page must show the saved content.
+const savedNoteHtml = async () => {
+  const res = await fetch(`${BASE}/docs/${ROOM}/rhino`)
+  const html = await res.text()
+  const m = html.match(/<div id="saved-note"[^>]*>([\s\S]*?)<\/div>/)
+  // Text content only: dev-mode template annotations put gem paths (with
+  // digits!) in HTML comments, which would pollute the character counts.
+  return m ? m[1].replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, "") : ""
+}
+await waitFor("ActionText auto-materialized after edits went quiet", async () => {
+  const saved = await savedNoteHtml()
+  return countChar(saved, "1") === PER && countChar(saved, "2") === PER
+})
+check("auto-saved rich text holds both users' characters", true)
+
 // 3) Remote carets: each browser shows the other's CollaborationCaret.
 await waitFor("remote carets visible in both browsers", async () => {
   const seen = await Promise.all(

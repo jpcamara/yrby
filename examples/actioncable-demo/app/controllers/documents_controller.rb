@@ -24,38 +24,17 @@ class DocumentsController < ApplicationController
     @note = Note.find_by(document_id: @document_id)
   end
 
-  # Rhino is Tiptap under the hood, so Y::Tiptap is its renderer; the one
-  # place its serialized HTML deliberately differs from stock is strike —
-  # Rhino replaces Tiptap's Strike with its own "rhino-strike" mark and
-  # emits <del>, not <s>. One mark rule teaches the renderer the custom mark.
-  RHINO_RENDER_RULES = { marks: { "rhino-strike" => { tag: "del" } } }.freeze
-
-  # The ActionText save, derived from the CRDT rather than the client: no
-  # editor HTML crosses the wire. The durable store replays into a Y::Doc and
-  # Y::Tiptap renders the Rhino page's fragment server-side, so what
-  # lands in ActionText is what the authoritative document says — not what
-  # the submitting browser claims it says.
+  # The user-triggered "save now": same replay -> Y::Tiptap render -> Note
+  # upsert as the automatic path (see NoteMaterializer, re-armed by the
+  # channel on every recorded change) — no editor HTML crosses the wire
+  # either way. What lands in ActionText is what the authoritative document
+  # says, not what the submitting browser claims it says.
   def rhino_save
-    update = Store.current.replay(params[:id])
-    if update.nil?
-      return redirect_to document_rhino_path(params[:id]), alert: "Nothing recorded for this document yet."
+    if NoteMaterializer.materialize(params[:id])
+      redirect_to document_rhino_path(params[:id]), notice: "Saved to ActionText from the CRDT."
+    else
+      redirect_to document_rhino_path(params[:id]), alert: "No Rhino content recorded for this document yet."
     end
-
-    ydoc = Y::Doc.new
-    ydoc.apply_update(update)
-    html = Y::Tiptap.new(ydoc, **RHINO_RENDER_RULES).to_html("rhino")
-    if html.nil?
-      return redirect_to document_rhino_path(params[:id]), alert: "No Rhino content in this document yet."
-    end
-
-    # create_or_find_by!: two browsers saving a fresh document concurrently
-    # both reach here; the unique index turns the loser's INSERT into a find
-    # instead of a RecordNotUnique raise. Content is then last-write-wins,
-    # which is fine — both render the same authoritative store.
-    note = Note.create_or_find_by!(document_id: params[:id])
-    note.content = html
-    note.save!
-    redirect_to document_rhino_path(params[:id]), notice: "Saved to ActionText from the CRDT."
   end
 
   # "Opaque state" demos. Each renders a different kind of collaborative app over

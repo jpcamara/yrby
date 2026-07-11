@@ -118,7 +118,9 @@ Then open two windows:
 - http://localhost:3100/docs/demo — the Tiptap editor
 - http://localhost:3100/docs/demo/lexxy — the Lexxy editor (lexxy-realtime)
 - http://localhost:3100/docs/demo/rhino — the Rhino editor (rhino-editor),
-  with an ActionText save rendered server-side from the CRDT by `Y::Tiptap`
+  with ActionText auto-materialized server-side from the CRDT by `Y::Tiptap`
+  (a debounce follows the recorded changes — see `NoteMaterializer`; the
+  Save button runs the same path on demand)
 
 The image carries Rust (to compile the native extension) and bun (to build the
 front end); the build context is the **repo root** because the demo uses the gem
