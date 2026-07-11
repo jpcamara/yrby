@@ -17,8 +17,8 @@ class DocumentsController < ApplicationController
   end
 
   # A third front end: Rhino Editor (Tiptap 3, ActionText-compatible), bound
-  # through raw y-prosemirror plugins rather than a Tiptap Collaboration
-  # extension. Same DocumentChannel, same durable store.
+  # through Tiptap's own Collaboration extensions — the real-app recipe.
+  # Same DocumentChannel, same durable store.
   def rhino
     @document_id = params[:id]
     @note = Note.find_by(document_id: @document_id)

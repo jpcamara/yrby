@@ -1,7 +1,7 @@
 <%= tag.link rel: "stylesheet", href: "/rhino.css" %>
 <style>
-  /* y-prosemirror's remote carets, styled like the Tiptap page's cursors. */
-  .ProseMirror-yjs-cursor {
+  /* CollaborationCaret's remote carets, styled like the Tiptap page's cursors. */
+  .collaboration-carets__caret {
     position: relative;
     border-left: 2px solid;
     margin-left: -1px;
@@ -9,7 +9,7 @@
     word-break: normal;
     pointer-events: none;
   }
-  .ProseMirror-yjs-cursor > div {
+  .collaboration-carets__label {
     position: absolute;
     top: -1.3em;
     left: -2px;
@@ -32,8 +32,8 @@
       server as the <a href="<%= document_path(@document_id) %>">Tiptap</a> and
       <a href="<%= document_lexxy_path(@document_id) %>">Lexxy</a> editors; this
       one is <a href="https://github.com/KonnorRogers/rhino-editor">Rhino</a>
-      (Tiptap 3), bound through raw y-prosemirror plugins — no
-      editor-specific collaboration package.
+      (Tiptap 3), bound the way a real app would: Tiptap's own Collaboration
+      extensions, configured before the editor initializes.
       <a href="<%= document_content_path(@document_id) %>" target="_blank">
         View server-side state</a> (the raw CRDT, base64, read in Ruby with no JS).
     </p>

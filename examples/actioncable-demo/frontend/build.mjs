@@ -85,8 +85,8 @@ const tiptapFromRhino = {
 const ENTRIES = [
   { entry: "src/app.js", name: "app.js" },
   { entry: "src/lexxy.js", name: "lexxy.js" },
-  // Rhino (Tiptap 3, ActionText-compatible): binds via raw y-prosemirror
-  // plugins, so its whole bundle must share one prosemirror instance tree.
+  // Rhino (Tiptap 3, ActionText-compatible): binds via Tiptap's Collaboration
+  // extensions, so its whole bundle must share one prosemirror instance tree.
   {
     entry: "src/rhino.js",
     name: "rhino.js",

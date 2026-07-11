@@ -42,7 +42,7 @@ reachable through several front ends (linked from the nav on each page):
 |------|--------------|---------|
 | `/docs/demo` | `Y.XmlFragment` | Tiptap (rich text) |
 | `/docs/demo/lexxy` | `Y.XmlText` | Lexxy / Lexical |
-| `/docs/demo/rhino` | `Y.XmlFragment` | Rhino (Tiptap 3, raw y-prosemirror plugins) |
+| `/docs/demo/rhino` | `Y.XmlFragment` | Rhino (Tiptap 3, its Collaboration extensions) |
 | `/docs/demo/codemirror` | `Y.Text` | CodeMirror 6 (code + cursors) |
 | `/docs/demo/whiteboard` | `Y.Map` of shapes | draggable sticky notes |
 | `/docs/demo/kanban` | `Y.Array` of card `Y.Map`s | add / move / delete |
@@ -59,31 +59,38 @@ integration clean: **only yjs objects cross the yrby-client boundary** (a
 `Y.Doc` and `provider.awareness`; both are peer dependencies, so your app has
 exactly one copy). Every editor-framework object should come from your
 editor's own dependency tree. For a Tiptap-based editor (including Rhino),
-that means the editor's own Collaboration extension rather than hand-wired
-y-prosemirror plugins:
+that means the editor's own Collaboration extensions:
 
 ```js
 import * as Y from "yjs"
 import { createConsumer } from "@rails/actioncable"
 import { ActionCableProvider } from "yrby-client"
-// Collaboration/CollaborationCaret from your editor's own @tiptap tree
+import Collaboration from "@tiptap/extension-collaboration"
+import CollaborationCaret from "@tiptap/extension-collaboration-caret"
 
 const ydoc = new Y.Doc()
 const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChannel", { id })
 provider.connect()
 await provider.whenSynced // bind only after the first catch-up
-// configure the editor with Collaboration({ document: ydoc }) and
-// CollaborationCaret({ provider }) — that's the whole integration
+// configure the editor with Collaboration({ fragment: ydoc.getXmlFragment("...") })
+// and CollaborationCaret({ provider, user }) — that's the whole integration
 ```
 
-No bundler plugins, no plugin-ordering rules, no undo wiring — the
-Collaboration extension owns all of that. The demo can't take this route on
-the Rhino page only because it deliberately hosts **three editors across two
-`@tiptap` majors in one bundle**; that's what `frontend/build.mjs`'s
-per-entry resolution exists for, and why `rhino.js` binds raw y-prosemirror
-plugins instead (which also serves as proof the plain-ProseMirror route
-works for editors with no collaboration package at all). One editor, one
-app: none of it applies.
+No bundler plugins, no plugin wiring, no undo plumbing — the Collaboration
+extension owns all of that. **The Rhino page (`frontend/src/rhino.js`) is
+this recipe, live and e2e-tested**; its one demo-ism is importing the v3
+extensions under an npm alias, because this demo deliberately bundles
+**three editors across two `@tiptap` majors** — that's also what
+`frontend/build.mjs`'s per-entry resolution exists for. One editor, one app:
+none of it applies.
+
+For a ProseMirror editor with no collaboration package, the raw
+y-prosemirror plugins work too (`ySyncPlugin`, `yCursorPlugin`,
+`yUndoPlugin`, and a keymap binding `undo`/`redo`). One trap if you inject
+them into an already-initialized editor via repeated `registerPlugin` calls:
+each call recreates plugin views, and the undo plugin's view teardown
+destroys its `UndoManager` — register `yUndoPlugin` last, or undo silently
+captures nothing. Prefer passing all plugins at editor creation.
 
 > The default durable store is Postgres, reached over the `/tmp` unix socket — so
 > "Run it" above expects a local Postgres. To avoid that (or a port clash with

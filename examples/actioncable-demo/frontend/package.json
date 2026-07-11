@@ -19,6 +19,8 @@
     "@tiptap/extension-collaboration-cursor": "^2.11.0",
     "@tiptap/pm": "^2.11.0",
     "@tiptap/starter-kit": "^2.11.0",
+    "@tiptap-v3/extension-collaboration": "npm:@tiptap/extension-collaboration@^3.27",
+    "@tiptap-v3/extension-collaboration-caret": "npm:@tiptap/extension-collaboration-caret@^3.27",
     "codemirror": "^6.0.1",
     "lexical": "^0.44",
     "lexxy-realtime": "^0.2.1",

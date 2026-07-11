@@ -1,5 +1,5 @@
-// The Rhino page (Tiptap 3 via rhino-editor, bound with raw y-prosemirror
-// plugins) through REAL Chrome: two browsers on the same document, concurrent
+// The Rhino page (Tiptap 3 via rhino-editor, bound with Tiptap's own
+// Collaboration extensions) through REAL Chrome: two browsers on the same document, concurrent
 // typing, byte-for-byte convergence, remote carets, undo staying local, and
 // the ActionText save — the server replays the durable store into a Y::Doc
 // and renders it with Y::Tiptap, so the persisted rich text is derived
@@ -67,10 +67,10 @@ check(`all ${PER} of '1' present (got ${countChar(t, "1")})`, countChar(t, "1") 
 check(`all ${PER} of '2' present (got ${countChar(t, "2")})`, countChar(t, "2") === PER)
 check("both browsers byte-identical", t === (await docText(B)))
 
-// 3) Remote carets: each browser shows the other's y-prosemirror cursor.
+// 3) Remote carets: each browser shows the other's CollaborationCaret.
 await waitFor("remote carets visible in both browsers", async () => {
   const seen = await Promise.all(
-    SESSIONS.map((s) => ab(s, "eval", `document.querySelectorAll(".ProseMirror-yjs-cursor").length`))
+    SESSIONS.map((s) => ab(s, "eval", `document.querySelectorAll(".collaboration-carets__caret").length`))
   )
   return seen.every((n) => Number(n) >= 1)
 })
