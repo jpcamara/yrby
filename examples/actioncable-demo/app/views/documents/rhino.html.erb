@@ -46,7 +46,14 @@
     <%# The ActionText half of the Rhino story: the save posts NO editor
         HTML — the server replays the durable store into a Y::Doc and renders
         this page's fragment with Y::Tiptap. What persists is derived
-        from the authoritative CRDT, not the submitting browser. %>
+        from the authoritative CRDT, not the submitting browser.
+
+        The live document is already durable (every update is recorded before
+        it's distributed) — this save MATERIALIZES it as ActionText for the
+        rest of the app (search, mailers, plain views). The button is the
+        demo's stand-in for whatever trigger your app chooses: a debounced
+        on_change, a "publish" action, or a background job run the same
+        server-side path with no browser involved at all. %>
     <%= button_to "Save to ActionText (rendered server-side from the CRDT)",
                   document_rhino_save_path(@document_id) %>
     <% if flash[:notice] %><p class="status" data-state="connected"><%= flash[:notice] %></p><% end %>
