@@ -74,3 +74,21 @@ editorEl.addEventListener(
 // Initialize only after the first sync: binding before the server's state
 // arrives makes every client seed its own competing top-level node.
 provider.whenSynced.then(() => editorEl.removeAttribute("defer-initialize"))
+
+// The Save button replays the server's durable store, and the last local
+// edits reach that store over the cable, racing the form POST. The server
+// acks an update only after recording it, so `hasPending` false means every
+// local edit is already in the store the save will replay — hold the submit
+// until then.
+const saveForm = document.querySelector("section.actiontext-save form")
+if (saveForm) {
+  saveForm.addEventListener("submit", (event) => {
+    if (!provider.hasPending) return
+    event.preventDefault()
+    const drain = setInterval(() => {
+      if (provider.hasPending) return
+      clearInterval(drain)
+      saveForm.submit() // bypasses this handler — no loop
+    }, 50)
+  })
+}

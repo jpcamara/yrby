@@ -79,6 +79,10 @@ export class ActionCableProvider {
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #whenSynced: Promise<void> | null = null;
+  // `session.synced` resets on every transport drop (a reconnect re-handshakes);
+  // the FIRST catch-up is a permanent fact, tracked here so `whenSynced` doesn't
+  // depend on when it's first read.
+  #everSynced = false;
   #onUnload: (() => void) | null = null;
   #onRestore: ((event: PageTransitionEvent) => void) | null = null;
   #stashedPresence: Record<string, unknown> | null = null;
@@ -119,13 +123,15 @@ export class ActionCableProvider {
    *   await provider.whenSynced;
    *   // now hand the doc to the editor binding
    *
-   * Resolves immediately when already synced, and stays resolved across
-   * later reconnects (watch `onStatusChange` for those). If the provider is
-   * destroyed before the first sync the promise never settles — the code
-   * awaiting it is being torn down with it.
+   * Resolves immediately when the first catch-up has already happened —
+   * even if the transport is currently down (`synced` resets while
+   * reconnecting; the first catch-up is a fact that doesn't) — and stays
+   * resolved across later reconnects (watch `onStatusChange` for those).
+   * If the provider is destroyed before the first sync the promise never
+   * settles — the code awaiting it is being torn down with it.
    */
   get whenSynced(): Promise<void> {
-    this.#whenSynced ??= this.synced
+    this.#whenSynced ??= this.#everSynced
       ? Promise.resolve()
       : new Promise((resolve) => {
           const off = this.onStatusChange(({ status }) => {
@@ -260,6 +266,7 @@ export class ActionCableProvider {
     const next = this.#computeStatus();
     if (next === this.#status) return;
     this.#status = next;
+    if (next === "synced") this.#everSynced = true;
     for (const listener of this.#statusListeners) listener({ status: next });
   }
 

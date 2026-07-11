@@ -48,7 +48,11 @@ class DocumentsController < ApplicationController
       return redirect_to document_rhino_path(params[:id]), alert: "No Rhino content in this document yet."
     end
 
-    note = Note.find_or_initialize_by(document_id: params[:id])
+    # create_or_find_by!: two browsers saving a fresh document concurrently
+    # both reach here; the unique index turns the loser's INSERT into a find
+    # instead of a RecordNotUnique raise. Content is then last-write-wins,
+    # which is fine — both render the same authoritative store.
+    note = Note.create_or_find_by!(document_id: params[:id])
     note.content = html
     note.save!
     redirect_to document_rhino_path(params[:id]), notice: "Saved to ActionText from the CRDT."

@@ -225,6 +225,21 @@ test("whenSynced stays resolved across a reconnect", async (t) => {
   await p.whenSynced;
 });
 
+test("whenSynced first accessed during a disconnect still knows the first sync happened", async (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "ws4" });
+  p.connect();
+  c.deliverConnected();
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+
+  // The session resets `synced` on a transport drop (a reconnect will
+  // re-handshake), so `p.synced` is false here — but the first catch-up is
+  // a fact, and the promise's answer must not depend on when it's first read.
+  c.deliverDisconnected();
+  assert.equal(p.synced, false, "session synced resets while reconnecting");
+  await p.whenSynced; // must resolve immediately, not hang until re-sync
+});
+
 test("the returned unsubscribe stops a status listener", (t) => {
   const c = fakeConsumer();
   const p = makeProvider(t, new Y.Doc(), c, { id: "s3" });

@@ -114,7 +114,8 @@ check("saved rich text is server-rendered ActionText markup", /action-text|<p>/.
 await ab(A, "eval", `window.__yrb.editor.chain().focus().selectAll().toggleStrike().run()`)
 await waitFor("strike recorded on the shared doc", async () =>
   (await docText(A)).includes("rhino-strike"))
-await sleep(500) // let the server ack/record the strike delta
+// No settle sleep needed: the page holds the form submit until the strike
+// delta is acked (recorded server-side) — provider.hasPending drains first.
 await ab(A, "click", "section.actiontext-save button")
 await waitFor("saved rich text carries Rhino's <del> strike", async () => {
   const struck = await ab(A, "eval", `(document.querySelector("#saved-note") || {}).innerHTML || ""`)
