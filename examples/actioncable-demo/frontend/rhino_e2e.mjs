@@ -67,10 +67,10 @@ check(`all ${PER} of '1' present (got ${countChar(t, "1")})`, countChar(t, "1") 
 check(`all ${PER} of '2' present (got ${countChar(t, "2")})`, countChar(t, "2") === PER)
 check("both browsers byte-identical", t === (await docText(B)))
 
-// 2b) Auto-materialization: NO button, no browser action — the channel's
-// on_change re-arms NoteMaterializer, and once the doc goes quiet the server
-// renders and persists the ActionText on its own. A plain HTTP fetch of the
-// page must show the saved content.
+// 2b) Freshen-on-read materialization: no button, no editor action — a
+// plain HTTP GET of the page makes the server render the store's current
+// state as ActionText (NoteMaterializer.fresh) and must show every typed
+// character. (waitFor covers the last deltas' cable flight to the store.)
 const savedNoteHtml = async () => {
   const res = await fetch(`${BASE}/docs/${ROOM}/rhino`)
   const html = await res.text()
@@ -79,11 +79,11 @@ const savedNoteHtml = async () => {
   // digits!) in HTML comments, which would pollute the character counts.
   return m ? m[1].replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, "") : ""
 }
-await waitFor("ActionText auto-materialized after edits went quiet", async () => {
+await waitFor("ActionText materialized on read with all content", async () => {
   const saved = await savedNoteHtml()
   return countChar(saved, "1") === PER && countChar(saved, "2") === PER
 })
-check("auto-saved rich text holds both users' characters", true)
+check("materialized rich text holds both users' characters", true)
 
 // 3) Remote carets: each browser shows the other's CollaborationCaret.
 await waitFor("remote carets visible in both browsers", async () => {
@@ -111,38 +111,39 @@ check(`A's '1's undone (got ${countChar(after, "1")})`, countChar(after, "1") ==
 check(`B's '2's survived A's undo (got ${countChar(after, "2")})`, countChar(after, "2") === PER)
 await waitFor("both browsers agree after undo", async () => (await docText(A)) === (await docText(B)))
 
-// 5) The ActionText save: the button posts NO editor HTML — the server
-// derives the rich text from the durable store via Y::Tiptap. After the
-// form redirect the page shows the persisted ActionText content, and the
-// editor must re-bind to the live document (a reload/late-join in passing).
-await ab(A, "click", "form.button_to button, section.actiontext-save button")
-await waitFor("saved ActionText content rendered after redirect", async () => {
-  const saved = await ab(A, "eval", `(document.querySelector("#saved-note") || {}).textContent || ""`)
+// 5) Freshen-on-read tracks the undo: no action beyond reading the page —
+// the persisted ActionText must now hold B's characters and none of A's.
+// (waitFor covers the last delta's cable flight to the store.)
+await waitFor("materialized ActionText follows the undo on read", async () => {
+  const saved = await savedNoteHtml()
   return countChar(saved, "2") === PER && countChar(saved, "1") === 0
 })
-const saved = await ab(A, "eval", `document.querySelector("#saved-note").innerHTML`)
-check("saved rich text holds the surviving characters", countChar(saved, "2") === PER)
-check("saved rich text is server-rendered ActionText markup", /action-text|<p>/.test(saved))
+check("materialized rich text holds the surviving characters", true)
 
 // 6) A Rhino-specific mark through the render rules: Rhino's strike is its
-// own "rhino-strike" mark serializing <del>; the save's mark rule must
-// reproduce that. Strike everything in A, save again, and the persisted
-// ActionText must carry <del> — Y::Tiptap rendering a mark the pinned
-// schema has never heard of.
+// own "rhino-strike" mark serializing <del>; the materializer's mark rule
+// must reproduce that — Y::Tiptap rendering a mark the pinned schema has
+// never heard of.
 await ab(A, "eval", `window.__yrb.editor.chain().focus().selectAll().toggleStrike().run()`)
 await waitFor("strike recorded on the shared doc", async () =>
   (await docText(A)).includes("rhino-strike"))
-// No settle sleep needed: the page holds the form submit until the strike
-// delta is acked (recorded server-side) — provider.hasPending drains first.
-await ab(A, "click", "section.actiontext-save button")
-await waitFor("saved rich text carries Rhino's <del> strike", async () => {
-  const struck = await ab(A, "eval", `(document.querySelector("#saved-note") || {}).innerHTML || ""`)
-  return struck.includes("<del>") && countChar(struck, "2") === PER
+await waitFor("materialized rich text carries Rhino's <del> strike", async () => {
+  const res = await fetch(`${BASE}/docs/${ROOM}/rhino`)
+  const html = await res.text()
+  const m = html.match(/<div id="saved-note"[^>]*>([\s\S]*?)<\/div>/)
+  const struck = m ? m[1].replace(/<!--[\s\S]*?-->/g, "") : ""
+  return struck.includes("<del>") && countChar(struck.replace(/<[^>]*>/g, ""), "2") === PER
 })
 check("rhino-strike rendered as <del> via the mark rule", true)
-await waitFor("editor re-synced after the save redirect", async () => /\btrue\b/.test(await synced(A)))
+
+// 7) Reload/late-join in passing: a fresh page load re-binds to the live
+// document and shows the materialized content inline.
+await ab(A, "open", `${BASE}/docs/${ROOM}/rhino`)
+await waitFor("editor re-synced after a reload", async () => /\btrue\b/.test(await synced(A)))
 const reloaded = await docText(A)
 check("reloaded editor still holds the live document", countChar(reloaded, "2") === PER)
+const inlineSaved = await ab(A, "eval", `(document.querySelector("#saved-note") || {}).textContent || ""`)
+check("reloaded page shows the materialized note inline", countChar(inlineSaved, "2") === PER)
 
 console.log(failures === 0 ? "\nRHINO E2E PASS" : `\nRHINO E2E FAIL (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

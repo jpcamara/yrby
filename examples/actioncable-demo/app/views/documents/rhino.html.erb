@@ -44,27 +44,20 @@
 
   <section class="actiontext-save" style="margin-top:1rem">
     <%# The ActionText half of the Rhino story. The live document is already
-        durable (every update is recorded before it's distributed) — this
-        section is about MATERIALIZING it as ActionText for the rest of the
-        app (search, mailers, plain views). It happens automatically: every
-        recorded change re-arms NoteMaterializer's trailing debounce, and
-        once the doc goes quiet the server replays the durable store into a
-        Y::Doc and renders this page's fragment with Y::Tiptap. No editor
-        HTML ever crosses the wire — what persists is derived from the
-        authoritative CRDT, not from any browser. The button runs the same
-        path on demand ("save now"), user-triggered but no more trusted. %>
-    <%= button_to "Save to ActionText now (it also auto-saves as you edit)",
-                  document_rhino_save_path(@document_id) %>
-    <% if flash[:notice] %><p class="status" data-state="connected"><%= flash[:notice] %></p><% end %>
-    <% if flash[:alert] %><p class="status" data-state="error"><%= flash[:alert] %></p><% end %>
-
+        durable (every update is recorded before it's distributed) — the
+        Note below is a DERIVED VIEW for the rest of the app (search,
+        mailers, plain views), i.e. a cache over the authoritative store.
+        It's freshened on read: loading this page renders the store's
+        current state server-side with Y::Tiptap whenever the store has
+        changes the note hasn't seen. No editor HTML ever crosses the wire —
+        what persists is derived from the authoritative CRDT, not from any
+        browser. %>
     <% if @note %>
-      <h2 style="margin-top:1rem">Saved ActionText content</h2>
+      <h2 style="margin-top:1rem">Materialized ActionText content</h2>
       <p style="color:#666;font-size:.85rem">
         <code>Note#content</code> (an <code>ActionText::RichText</code>),
-        rendered by Rails — saved <%= time_ago_in_words(@note.content.updated_at) %> ago.
-        Auto-materialized about a second after edits go quiet; reload to see
-        the latest.
+        rendered by Rails — freshened on read (through store version
+        <%= @note.through_version %>). Edit above, reload, and it follows.
       </p>
       <div id="saved-note" style="border:1px solid #ddd;border-radius:6px;padding:.5rem 1rem">
         <%= @note.content %>

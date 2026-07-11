@@ -2,7 +2,7 @@
 
 # Selects the durable store. STORE_KIND=file uses the simple fsync'd append
 # log (AuditLog); the default is the PostgreSQL store (PgStore). Both expose
-# record / replay / entries / reset!.
+# record / replay / entries / version / reset!.
 module Store
   module_function
 

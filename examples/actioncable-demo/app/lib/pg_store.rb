@@ -40,6 +40,13 @@ module PgStore
     doc.encode_state_as_update
   end
 
+  # A monotonic version for the document: the highest change id recorded.
+  # Grows with every record, so "is this derived view current?" is one
+  # integer compare (see NoteMaterializer). 0 for an unknown document.
+  def version(key)
+    DocumentChange.where(doc_key: key).maximum(:id) || 0
+  end
+
   # Base64 deltas (for the /audit endpoint). Count reflects stored rows.
   def entries(key)
     DocumentChange.where(doc_key: key).order(:id).pluck(:delta).map { |u| Base64.strict_encode64(binary(u)) }

@@ -42,6 +42,14 @@ class AuditLog
       end
     end
 
+    # A monotonic version for the document: the log's byte size (append-only,
+    # so it grows with every record). "Is this derived view current?" is one
+    # integer compare (see NoteMaterializer). 0 for an unknown document.
+    def version(key)
+      path = path_for(key)
+      File.exist?(path) ? File.size(path) : 0
+    end
+
     def entries(key)
       path = path_for(key)
       return [] unless File.exist?(path)

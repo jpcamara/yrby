@@ -7,13 +7,7 @@ class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable::Sync
 
   on_load  { |key| Store.current.replay(key) }
-  on_change do |key, update|
-    Store.current.record(key, update)
-    # Derived state follows the writes: re-arm the ActionText materializer
-    # (trailing debounce; renders server-side once the doc goes quiet).
-    # schedule never raises — a raise here would reject the change.
-    NoteMaterializer.schedule(key)
-  end
+  on_change { |key, update| Store.current.record(key, update) }
 
   # Pass params[:id] on every action so the channel works under AnyCable too,
   # where each RPC command gets a fresh channel instance (no ivars persist).

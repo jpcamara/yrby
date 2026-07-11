@@ -18,23 +18,13 @@ class DocumentsController < ApplicationController
 
   # A third front end: Rhino Editor (Tiptap 3, ActionText-compatible), bound
   # through Tiptap's own Collaboration extensions — the real-app recipe.
-  # Same DocumentChannel, same durable store.
+  # Same DocumentChannel, same durable store. The note is freshened on read
+  # (see NoteMaterializer): rendered server-side from the authoritative
+  # store whenever the store has changes it hasn't seen — no editor HTML
+  # ever crosses the wire.
   def rhino
     @document_id = params[:id]
-    @note = Note.find_by(document_id: @document_id)
-  end
-
-  # The user-triggered "save now": same replay -> Y::Tiptap render -> Note
-  # upsert as the automatic path (see NoteMaterializer, re-armed by the
-  # channel on every recorded change) — no editor HTML crosses the wire
-  # either way. What lands in ActionText is what the authoritative document
-  # says, not what the submitting browser claims it says.
-  def rhino_save
-    if NoteMaterializer.materialize(params[:id])
-      redirect_to document_rhino_path(params[:id]), notice: "Saved to ActionText from the CRDT."
-    else
-      redirect_to document_rhino_path(params[:id]), alert: "No Rhino content recorded for this document yet."
-    end
+    @note = NoteMaterializer.fresh(@document_id)
   end
 
   # "Opaque state" demos. Each renders a different kind of collaborative app over
