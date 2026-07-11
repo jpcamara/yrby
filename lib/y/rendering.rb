@@ -10,24 +10,33 @@ module Y
   # `marks:`. A rule is consulted before the built-in schema, so it can add a
   # custom node or override a built-in one.
   #
+  # The usual way in is the block form — one `rules.node` call per type,
+  # keyword options for markup-as-data, a Ruby block for logic (see Builder
+  # below). The nodes:/marks: keywords take the same rules as plain hashes,
+  # for shipping rule sets as data.
+  #
   # Two kinds of rule:
   #
-  # - Declarative (a Hash): markup as data, rendered natively at full speed.
-  #     Y::ProseMirror.new(doc, nodes: {
-  #       "callout" => { tag: "aside",
-  #                      attrs: { "class" => ["callout callout--", :kind] },
-  #                      content: :blocks }
-  #     })
+  # - Declarative (keyword options / a Hash): markup as data, rendered
+  #   natively at full speed.
+  #     Y::ProseMirror.new(doc) do |rules|
+  #       rules.node "callout", tag: "aside",
+  #                             attrs: { "class" => ["callout callout--", :kind] },
+  #                             content: :blocks
+  #     end
   #   `tag` is the element; `attrs` values are templates — a String literal,
   #   a Symbol referencing one of the node's stored attributes, or an Array
   #   mixing both (an attribute that resolves empty is omitted); `text` is a
   #   template for literal text content; `void: true` emits no closing tag;
   #   `content` is what renders inside: :inline (default), :blocks, or :none.
   #
-  # - Callback (a callable, or `render:` in a Hash to also set `content`):
-  #     Y::Lexical.new(doc, nodes: {
-  #       "video_embed" => ->(node) { %(<video src="#{ERB::Util.html_escape(node.attrs["src"])}"></video>) }
-  #     })
+  # - Callback (a block; in the hash form, a callable or `render:` plus
+  #   `content`):
+  #     Y::Lexical.new(doc) do |rules|
+  #       rules.node "video_embed" do |node|
+  #         %(<video src="#{ERB::Util.html_escape(node.attrs["src"])}"></video>)
+  #       end
+  #     end
   #   The block runs after the document read has finished (never while the
   #   document is locked) and receives a RenderRules::Node with the node's
   #   type, stored attributes, children already rendered to HTML, and
@@ -133,6 +142,51 @@ module Y
       escape_text(value).gsub('"', "&quot;")
     end
 
+    # Yielded by Y::Lexical.new / Y::ProseMirror.new: register rules one
+    # call per node type. Keyword options are the markup-as-data; a block is
+    # the logic; both together give a callback its content mode:
+    #
+    #   Y::ProseMirror.new(doc) do |rules|
+    #     rules.node "callout", tag: "aside", content: :blocks
+    #     rules.node "video" do |node|
+    #       %(<video src="#{RenderRules.escape_attr(node.attrs["src"])}"></video>)
+    #     end
+    #     rules.node "columns", content: :blocks do |node|
+    #       %(<div class="cols--#{node.child_types.length}">#{node.content}</div>)
+    #     end
+    #     rules.mark "comment", tag: "span", attrs: { "data-comment-id" => :id }
+    #   end
+    #
+    # It compiles to the same rule hashes the nodes:/marks: keywords take, so
+    # both forms mean the same thing; the keywords remain the data form for
+    # shipping rule sets (Y::Lexxy::NODES is one).
+    class Builder
+      attr_reader :nodes, :marks
+
+      def initialize(marks_allowed:)
+        @nodes = {}
+        @marks = {}
+        @marks_allowed = marks_allowed
+      end
+
+      def node(type, **options, &block)
+        @nodes[type.to_s] =
+          if block && options.empty?
+            block
+          elsif block
+            options.merge(render: block)
+          else
+            options
+          end
+      end
+
+      def mark(name, **options)
+        raise ArgumentError, "marks are ProseMirror-only" unless @marks_allowed
+
+        @marks[name.to_s] = options
+      end
+    end
+
     # Resolve callback segments depth-first, so a callback's `node.content`
     # is finished HTML even when callback nodes nest.
     def splice(segments, callbacks)
@@ -158,7 +212,11 @@ module Y
     # applied beneath the app's rules: the native renderer covers core
     # Lexical, and an app rule for a Lexxy type replaces it.
     def initialize(doc, nodes: {})
-      nodes = Lexxy::NODES.merge(nodes.transform_keys(&:to_s))
+      builder = RenderRules::Builder.new(marks_allowed: false)
+      yield builder if block_given?
+      nodes = Lexxy::NODES
+              .merge(nodes.transform_keys(&:to_s))
+              .merge(builder.nodes)
       rules_json, @render_callbacks = RenderRules.compile(nodes, {})
       @native = NativeLexical.new(doc, rules_json)
     end
@@ -175,6 +233,10 @@ module Y
     # `Y::ProseMirror.new(doc, nodes: {...}, marks: {...})` — see
     # Y::RenderRules for the rule forms.
     def initialize(doc, nodes: {}, marks: {})
+      builder = RenderRules::Builder.new(marks_allowed: true)
+      yield builder if block_given?
+      nodes = nodes.transform_keys(&:to_s).merge(builder.nodes)
+      marks = marks.transform_keys(&:to_s).merge(builder.marks)
       rules_json, @render_callbacks = RenderRules.compile(nodes, marks)
       @native = NativeProseMirror.new(doc, rules_json)
     end

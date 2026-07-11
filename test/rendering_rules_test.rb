@@ -143,6 +143,29 @@ class RenderingRulesTest < Minitest::Test
     assert_includes html, "attachment-gallery--3", "untouched Lexxy rules still apply"
   end
 
+  def test_the_block_form_registers_declarative_callback_and_mark_rules
+    html = Y::ProseMirror.new(prosemirror_doc) do |rules|
+      rules.node "blockquote", tag: "aside", attrs: { "class" => "quote" }, content: :blocks
+      rules.node "horizontalRule" do |node|
+        %(<hr data-cb="#{node.type}">)
+      end
+      rules.node "bulletList", content: :blocks do |node|
+        %(<ul data-count="#{node.child_types.length}">#{node.content}</ul>)
+      end
+      rules.mark "bold", tag: "b"
+    end.to_html
+
+    assert_includes html, '<aside class="quote">'
+    assert_includes html, '<hr data-cb="horizontalRule">'
+    assert_match(/<ul data-count="\d+">/, html)
+    assert_includes html, "<b>"
+    refute_includes html, "<strong>"
+
+    assert_raises(ArgumentError, "marks are ProseMirror-only") do
+      Y::Lexical.new(Y::Doc.new) { |rules| rules.mark "comment", tag: "span" }
+    end
+  end
+
   def test_rules_hold_up_under_concurrent_renders
     renderer = Y::Lexical.new(
       lexical_doc,

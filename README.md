@@ -251,16 +251,15 @@ their own node types. Both renderers take rules for them. A rule is checked
 before the built-in schema, so it can add a node type or replace how a
 built-in renders.
 
-A declarative rule is markup as data, rendered natively:
+Rules register in a block — one `rules.node` call per type. A declarative
+rule is markup as data, rendered natively:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc, nodes: {
-  "callout" => {
-    tag: "aside",
-    attrs: { "class" => ["callout callout--", :kind] },
-    content: :blocks
-  }
-})
+prosemirror = Y::ProseMirror.new(doc) do |rules|
+  rules.node "callout", tag: "aside",
+                        attrs: { "class" => ["callout callout--", :kind] },
+                        content: :blocks
+end
 ```
 
 `tag` names the element. `attrs` values are templates: a string is a literal,
@@ -270,15 +269,15 @@ emits literal text content. `content` says what renders inside the element —
 `:inline` (the default), `:blocks` for nested block children, or `:none`.
 `void: true` skips the closing tag.
 
-When markup-as-data isn't enough, pass a callable instead:
+When markup-as-data isn't enough, give the node a block:
 
 ```ruby
-lexical = Y::Lexical.new(doc, nodes: {
-  "video_embed" => ->(node) {
+lexical = Y::Lexical.new(doc) do |rules|
+  rules.node "video_embed" do |node|
     src = ERB::Util.html_escape(node.attrs["__src"])
     %(<video controls src="#{src}"></video>)
-  }
-})
+  end
+end
 ```
 
 The block gets the node's type, its stored attributes, `node.content` — the
@@ -287,8 +286,8 @@ element/block children by type, in document order. `child_types` answers the
 structural questions attributes can't: how many images a gallery holds, or
 whether a list item carries a nested list. Whatever the block returns is
 spliced into the output as-is: it's trusted HTML, so escape any values you
-interpolate. To set the content mode for a callback, use the hash form:
-`{ content: :blocks, render: ->(node) { ... } }`.
+interpolate. To set the content mode for a callback, give the node both —
+`rules.node "embed", content: :blocks do |node| ... end`.
 
 Callbacks never run while the document is locked. The render finishes first
 (inside one read transaction, GVL released), then the blocks run and their
@@ -302,12 +301,12 @@ logic as plain methods mapped by node type (a `Method` responds to `call`
 like any lambda) — and the fixture tests hold its output byte-identical to a
 live editor's.
 
-`Y::ProseMirror` also takes `marks:` for custom marks:
+`Y::ProseMirror` also takes custom marks:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc, marks: {
-  "comment" => { tag: "span", attrs: { "data-comment-id" => :id } }
-})
+prosemirror = Y::ProseMirror.new(doc) do |rules|
+  rules.mark "comment", tag: "span", attrs: { "data-comment-id" => :id }
+end
 ```
 
 Symbol refs resolve against the mark's own attributes. A custom mark wraps
@@ -320,43 +319,43 @@ A video-embed node from an app's Tiptap extension — a type the pinned schema
 has never heard of:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc, nodes: {
-  "videoEmbed" => ->(node) {
+prosemirror = Y::ProseMirror.new(doc) do |rules|
+  rules.node "videoEmbed" do |node|
     src   = ERB::Util.html_escape(node.attrs["src"])
     title = ERB::Util.html_escape(node.attrs["title"] || "Video")
     %(<figure class="video"><iframe src="#{src}" title="#{title}" allowfullscreen></iframe></figure>)
-  }
-})
+  end
+end
 ```
 
 Resolving mentions against the database. Blocks run after the document read
 has finished, so hitting ActiveRecord (or the doc itself) inside one is safe:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc, nodes: {
-  "mention" => ->(node) {
+prosemirror = Y::ProseMirror.new(doc) do |rules|
+  rules.node "mention" do |node|
     user = User.find_by(id: node.attrs["id"])
     next "<span>@unknown</span>" unless user
 
     %(<a class="mention" href="/users/#{user.id}">@#{ERB::Util.html_escape(user.handle)}</a>)
-  }
-})
+  end
+end
 ```
 
 Overriding a built-in — rendering Lexxy uploads as real image markup instead
 of the `<action-text-attachment>` elements ActionText re-renders:
 
 ```ruby
-lexical = Y::Lexical.new(doc, nodes: {
-  "action_text_attachment" => ->(node) {
+lexical = Y::Lexical.new(doc) do |rules|
+  rules.node "action_text_attachment" do |node|
     src     = ERB::Util.html_escape(node.attrs["src"])
     alt     = ERB::Util.html_escape(node.attrs["altText"].to_s)
     caption = node.attrs["caption"].to_s
     html = %(<img src="#{src}" alt="#{alt}" loading="lazy">)
     html += "<figcaption>#{ERB::Util.html_escape(caption)}</figcaption>" unless caption.empty?
     "<figure>#{html}</figure>"
-  }
-})
+  end
+end
 ```
 
 Markup that depends on structure — `node.child_types` lists the node's
@@ -364,21 +363,23 @@ element/block children in document order, so a layout container can size
 itself by its column count while the columns themselves stay declarative:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc, nodes: {
-  "columns" => { content: :blocks, render: ->(node) {
+prosemirror = Y::ProseMirror.new(doc) do |rules|
+  rules.node "columns", content: :blocks do |node|
     %(<div class="columns columns--#{node.child_types.length}">#{node.content}</div>)
-  } },
-  "column" => { tag: "div", attrs: { "class" => "column" }, content: :blocks }
-})
+  end
+  rules.node "column", tag: "div", attrs: { "class" => "column" }, content: :blocks
+end
 ```
 
 Content-aware overrides — dropping the empty paragraphs an editor keeps
 around the cursor, since `node.content` arrives already rendered:
 
 ```ruby
-lexical = Y::Lexical.new(doc, nodes: {
-  "paragraph" => ->(node) { node.content.empty? ? "" : "<p>#{node.content}</p>" }
-})
+lexical = Y::Lexical.new(doc) do |rules|
+  rules.node "paragraph" do |node|
+    node.content.empty? ? "" : "<p>#{node.content}</p>"
+  end
+end
 ```
 
 For a larger reference, the gem's own Lexxy schema ships this way — see
