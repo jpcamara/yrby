@@ -13,8 +13,9 @@ module Y
   # The usual way in is the block form — one `rules.node` call per type,
   # keyword options for markup-as-data, a Ruby block for logic (see Builder
   # below). `contains:` says what's inside the node: :inline (formatted
-  # text, the default), :blocks (child block nodes), or :none (a leaf). The nodes:/marks: keywords take the same rules as plain hashes,
-  # for shipping rule sets as data.
+  # text, the default), :blocks (child block nodes), or :none (a leaf). The
+  # nodes:/marks: keywords take the same rules as plain hashes, for shipping
+  # rule sets as data.
   #
   # Two kinds of rule:
   #
