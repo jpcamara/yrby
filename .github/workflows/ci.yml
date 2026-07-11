@@ -142,7 +142,7 @@ jobs:
         working-directory: examples/actioncable-demo/frontend
         run: bun install && bun run build
 
-      # A real Tiptap editor runs headless (JSDOM) and Y::ProseMirror must
+      # A real Tiptap editor runs headless (JSDOM) and Y::Tiptap must
       # reproduce its getHTML() from the raw doc bytes. The gem's fixture
       # tests pin parity with the editor version they were captured from;
       # this catches serializer drift when @tiptap/* is bumped. No server.
@@ -174,7 +174,7 @@ jobs:
           # highlights, caret surviving concurrent edits, presence reaping).
           PORT=3777 node frontend/agent_collab.mjs
           # Render parity: a live Lexxy editor builds a document covering every
-          # node type and Y::Lexical must reproduce its `value` byte for byte
+          # node type and Y::Lexxy must reproduce its `value` byte for byte
           # from the doc bytes. Needs real Chrome: Lexxy's value getter runs
           # DOMPurify, which misbehaves under emulated DOMs.
           PORT=3777 node frontend/lexxy_render_e2e.mjs
