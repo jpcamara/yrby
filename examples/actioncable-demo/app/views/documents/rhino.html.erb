@@ -51,7 +51,13 @@
         current state server-side with Y::Tiptap whenever the store has
         changes the note hasn't seen. No editor HTML ever crosses the wire —
         what persists is derived from the authoritative CRDT, not from any
-        browser. %>
+        browser.
+
+        The read path is stock ActionText (`@note.content` renders through
+        its layout partial + sanitizer, like any Rails app). Only the WRITE
+        path is inverted: a normal Rhino app is a Trix drop-in — a
+        rich_text_area posting the browser's HTML on submit — which is
+        exactly the trust model a collaborative document can't use. %>
     <% if @note %>
       <h2 style="margin-top:1rem">Materialized ActionText content</h2>
       <p style="color:#666;font-size:.85rem">
