@@ -188,11 +188,12 @@ guarantees keep serving safe:
 
 ### Rendering to HTML
 
-Two schema-pinned renderers turn a collaborative document into HTML on the
+Schema-pinned renderers turn a collaborative document into HTML on the
 server, with no Node process or headless editor: `Y::ProseMirror` for
-ProseMirror/Tiptap documents and `Y::Lexical` for
-[Lexxy](https://github.com/basecamp/lexxy) (Lexical) documents. Each returns
-`nil` for a root that belongs to the other schema.
+ProseMirror/Tiptap documents, and for Lexical documents `Y::Lexxy` (the
+[Lexxy](https://github.com/basecamp/lexxy) editor, byte-for-byte) built on
+`Y::Lexical` (the core-Lexical base any other Lexical editor extends with
+rules). Each returns `nil` for a root that belongs to the other schema.
 
 #### `Y::ProseMirror`
 
@@ -214,17 +215,21 @@ tables, text styles (color, font family), and every text mark. A table renders
 as semantic `<table><tbody>`, without the column-width styling Tiptap's editor
 view adds.
 
-#### `Y::Lexical`
+#### `Y::Lexxy` (and `Y::Lexical`, its base)
 
 ```ruby
-lexical = Y::Lexical.new(doc)
-lexical.to_html            # the "root" fragment (Lexical's default root name)
-lexical.to_html("notepad") # or another XML root
+lexxy = Y::Lexxy.new(doc)
+lexxy.to_html            # the "root" fragment (Lexical's default root name)
+lexxy.to_html("notepad") # or another XML root
 ```
 
 The HTML is identical to what a `lexxy-editor` submits to Rails (its `value`).
 The tests check this byte-for-byte against a document captured from a real
-editor.
+editor. Stock Lexical has no canonical serializer — every editor configures
+its own — so the editor-specific class carries the editor's name, and
+`Y::Lexical` is the core-Lexical base: paragraphs, headings, quotes, code,
+lists, tables, links, and the full text-format model, for any other Lexical
+editor to extend with rules.
 
 It handles the whole Lexxy 0.9.x node set: paragraphs, headings, every text
 format and their combinations, links, the four list types and nesting,
@@ -233,13 +238,13 @@ header cells, image galleries, and ActionText attachments (uploads and
 mentions both emit `<action-text-attachment>` elements that ActionText can
 re-render).
 
-Internally that support is layered: the native renderer covers core Lexical
-structure, and everything Lexxy adds — its node types (attachments,
+Internally that support is layered: `Y::Lexical` covers core Lexical
+structure natively, and everything Lexxy adds — its node types (attachments,
 galleries) and its decorations of core nodes (the table wrapper, header-cell
-styling, nested-list classes) — ships as render rules (`Y::Lexxy::NODES`)
-built on the extension API below. The gem's own Lexxy support is its first
-consumer: an app rule for one of those types simply replaces it, and a
-different Lexical editor can bring its own rule set to the same core.
+styling, nested-list classes) — is `Y::Lexxy`'s rule set
+(`Y::Lexxy::NODES`), built on the extension API below. The gem's own Lexxy
+support is the API's first consumer: an app rule for one of those types
+simply replaces it.
 
 In both renderers an unknown node keeps its content — text and nested blocks
 fall back to readable markup rather than disappearing.
@@ -312,8 +317,8 @@ output is spliced in — so a callback can safely read or even write the same
 doc. With no callback rules, `to_html` skips the splicing entirely.
 
 Blocks are the escape hatch for everything the declarative form can't say,
-and they're proven sufficient: the gem's own Lexxy support is built on this
-API (`lib/y/lexxy.rb`) — simple nodes as declarative hashes, everything with
+and they're proven sufficient: `Y::Lexxy` itself is built on this API
+(`lib/y/lexxy.rb`) — simple nodes as declarative hashes, everything with
 logic as plain methods mapped by node type (a `Method` responds to `call`
 like any lambda) — and the fixture tests hold its output byte-identical to a
 live editor's.
@@ -359,11 +364,11 @@ prosemirror = Y::ProseMirror.new(doc) do |rules|
 end
 ```
 
-Overriding a built-in — rendering Lexxy uploads as real image markup instead
-of the `<action-text-attachment>` elements ActionText re-renders:
+Overriding a shipped rule — rendering Lexxy uploads as real image markup
+instead of the `<action-text-attachment>` elements ActionText re-renders:
 
 ```ruby
-lexical = Y::Lexical.new(doc) do |rules|
+lexxy = Y::Lexxy.new(doc) do |rules|
   rules.node "action_text_attachment" do |node|
     src     = ERB::Util.html_escape(node.attrs["src"])
     alt     = ERB::Util.html_escape(node.attrs["altText"].to_s)

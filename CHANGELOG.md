@@ -38,8 +38,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **`Y::Lexical` is now layered: a core-Lexical native renderer plus the
-  Lexxy-specific schema shipped as render rules (`Y::Lexxy::NODES`).** The
+- **Lexical rendering is now two classes: `Y::Lexical` (core Lexical) and
+  `Y::Lexxy` (core plus the Lexxy schema as render rules).** Stock Lexical
+  has no canonical serializer, so the editor-specific class carries the
+  editor's name — `Y::Lexxy.new(doc).to_html` is the byte-parity call for
+  Lexxy/Rails apps, and `Y::Lexical` is the base any other Lexical editor
+  extends with its own rules.** The
   native side renders core structure — paragraphs, headings, quotes, code,
   lists, tables, links, the full text-format model. Lexxy's own node types
   (attachments, galleries, `early_escape_code`, `horizontal_divider`) and its

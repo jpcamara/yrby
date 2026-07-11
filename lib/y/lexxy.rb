@@ -1,40 +1,34 @@
 # frozen_string_literal: true
 
 module Y
-  # The Lexxy-specific half of the Lexical schema, expressed as render rules —
-  # the same extension API apps use, so this file doubles as the reference for
-  # augmenting a renderer: simple nodes are declarative hashes, nodes with
-  # logic are plain methods mapped in NODES.
-  #
-  # The native renderer handles core Lexical structure (paragraphs, headings,
-  # quotes, code, lists, tables, text formatting, links). Everything Lexxy
-  # adds or restyles lives here. `Y::Lexical.new` applies NODES beneath the
-  # app's rules, so an app rule for one of these types simply replaces it.
-  #
-  # The Lexxy-parity guarantee is unchanged: the fixture tests hold
-  # `Y::Lexical.new(doc).to_html` byte-identical to a live editor's own
+  # The Lexxy renderer: Y::Lexical (core Lexical) plus the Lexxy-specific
+  # schema, applied beneath the app's rules — an app rule for one of these
+  # types simply replaces it. This is the byte-parity class: the fixture
+  # tests hold `Y::Lexxy.new(doc).to_html` identical to a live editor's own
   # serialized value.
-  module Lexxy
-    module_function
-
+  #
+  # The schema doubles as the reference for augmenting a renderer: simple
+  # nodes are declarative hashes, nodes with logic are plain methods mapped
+  # in NODES.
+  class Lexxy < Lexical
     # A cursor-placement placeholder; empty ones export to nothing.
-    def provisional_paragraph(node)
+    def self.provisional_paragraph(node)
       node.content.empty? ? "" : "<p>#{node.content}</p>"
     end
 
     # Adjacent previewable images; the class carries the image count
     # (ActionText's convention).
-    def gallery(node)
+    def self.gallery(node)
       %(<div class="attachment-gallery attachment-gallery--#{node.child_types.length}">#{node.content}</div>)
     end
 
     # Lexxy wraps tables in a styled figure.
-    def table(node)
+    def self.table(node)
       %(<figure class="lexxy-content__table-wrapper"><table><tbody>#{node.content}</tbody></table></figure>)
     end
 
     # Class + background match Lexxy's own header-cell export.
-    def table_cell(node)
+    def self.table_cell(node)
       header = node.attrs["__headerState"].is_a?(Numeric) && node.attrs["__headerState"].positive?
       return "<td>#{node.content}</td>" unless header
 
@@ -45,7 +39,7 @@ module Y
     # Attribute order follows Lexxy's export — checked items put aria-checked
     # before value; items holding a nested list append the
     # lexxy-nested-listitem class after value.
-    def list_item(node)
+    def self.list_item(node)
       out = +"<li"
       checked = node.attrs["__checked"]
       out << %( aria-checked="#{checked}") unless checked.nil?
@@ -57,7 +51,7 @@ module Y
     # An upload, in the exact shape ActionText round-trips: attribute order
     # and presence mirror Lexxy's exportDOM (nulls omitted, `previewable`
     # only when true, `presentation="gallery"` always).
-    def upload(node)
+    def self.upload(node)
       out = +"<action-text-attachment"
       out << attachment_attr(node, "sgid", "sgid")
       out << %( previewable="true") if node.attrs["previewable"] == true
@@ -70,7 +64,7 @@ module Y
 
     # A content attachment (mention, embed): `content` carries the escaped
     # inner HTML; `plainText` is not exported.
-    def mention(node)
+    def self.mention(node)
       out = +"<action-text-attachment"
       out << attachment_attr(node, "sgid", "sgid")
       out << attachment_attr(node, "content", "innerHtml")
@@ -79,7 +73,7 @@ module Y
     end
 
     # A stored nil (unset) is skipped; a stored empty string still emits.
-    def attachment_attr(node, html_name, stored)
+    def self.attachment_attr(node, html_name, stored)
       return "" if node.attrs[stored].nil?
 
       %( #{html_name}="#{RenderRules.escape_attr(node.attrs[stored])}")
@@ -98,5 +92,9 @@ module Y
       "action_text_attachment" => method(:upload),
       "custom_action_text_attachment" => method(:mention)
     }.freeze
+
+    def initialize(doc, nodes: {}, &)
+      super(doc, nodes: NODES.merge(nodes.transform_keys(&:to_s)), &)
+    end
   end
 end

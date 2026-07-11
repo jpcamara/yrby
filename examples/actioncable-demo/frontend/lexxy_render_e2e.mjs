@@ -1,6 +1,6 @@
 // Render-parity e2e: a real Lexxy editor (headless Chrome via agent-browser,
 // against the demo's lexxy page and server) builds a document covering every
-// node type, and the gem's Y::Lexical must reproduce the editor's own `value`
+// node type, and the gem's Y::Lexxy must reproduce the editor's own `value`
 // — the sanitized HTML a Lexxy form submits to Rails — from the raw doc bytes.
 //
 // The gem's fixture tests pin parity with the editor version they were
@@ -122,12 +122,12 @@ const actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb
 }).toString()
 
 if (actual === editorHtml) {
-  console.log(`lexxy render e2e OK: Y::Lexical matches a live Lexxy value (${actual.length} chars)`)
+  console.log(`lexxy render e2e OK: Y::Lexxy matches a live Lexxy value (${actual.length} chars)`)
   process.exit(0)
 }
 let i = 0
 while (i < Math.min(actual.length, editorHtml.length) && actual[i] === editorHtml[i]) i++
-console.error("lexxy render e2e MISMATCH: Y::Lexical diverges from the live editor")
+console.error("lexxy render e2e MISMATCH: Y::Lexxy diverges from the live editor")
 console.error(`first difference at ${i}:`)
 console.error(`  editor: …${JSON.stringify(editorHtml.slice(Math.max(0, i - 60), i + 80))}`)
 console.error(`  ruby:   …${JSON.stringify(actual.slice(Math.max(0, i - 60), i + 80))}`)

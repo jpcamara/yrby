@@ -118,8 +118,8 @@ class RenderingRulesTest < Minitest::Test
     end
   end
 
-  # The Lexxy-specific half of the schema now ships AS rules (Y::Lexxy::NODES)
-  # on top of the core native renderer — the byte-parity fixture tests in
+  # The Lexxy-specific half of the schema ships as Y::Lexxy's rule set on
+  # top of the core Y::Lexical renderer — the byte-parity fixture tests in
   # html_test.rb exercise the extension path on every render. These cover the
   # layering itself.
   def test_the_lexxy_layer_is_rules_and_user_rules_override_it
@@ -128,7 +128,7 @@ class RenderingRulesTest < Minitest::Test
 
     # The gallery fixture holds three uploads; a user rule for the type
     # replaces the shipped Lexxy rendering.
-    html = Y::Lexical.new(
+    html = Y::Lexxy.new(
       lexical_doc("lexxy_gallery"),
       nodes: {
         "action_text_attachment" => lambda { |node|
@@ -170,13 +170,19 @@ class RenderingRulesTest < Minitest::Test
   # they look like (attrs as stored, child types, text), and which ones
   # still need a rule ("handled" nil).
   def test_node_types_reports_the_documents_schema_as_facts
-    types = Y::Lexical.new(lexical_doc).node_types
+    types = Y::Lexxy.new(lexical_doc).node_types
 
     assert_equal "builtin", types["paragraph"]["handled"]
     assert_equal "rule", types["action_text_attachment"]["handled"],
-                 "the Lexxy layer covers attachments"
+                 "Y::Lexxy's schema covers attachments"
     assert_includes types["heading"]["attrs"], "__tag"
     assert types["paragraph"]["text"]
+
+    # Core Y::Lexical reports the same type as unhandled — the honest signal
+    # that it needs a rule (or Y::Lexxy).
+    core = Y::Lexical.new(lexical_doc).node_types
+
+    assert_nil core["action_text_attachment"]["handled"]
 
     pm_types = Y::ProseMirror.new(prosemirror_doc("prosemirror_mention")).node_types
 

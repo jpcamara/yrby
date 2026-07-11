@@ -213,15 +213,14 @@ module Y
   # segments after a render. The native handle does everything else.
   class Lexical
     # `Y::Lexical.new(doc, nodes: { "type" => rule })` — see Y::RenderRules
-    # for the rule forms. The Lexxy-specific schema (Y::Lexxy::NODES) is
-    # applied beneath the app's rules: the native renderer covers core
-    # Lexical, and an app rule for a Lexxy type replaces it.
+    # for the rule forms. This is core Lexical only: paragraphs, headings,
+    # quotes, code, lists, tables, links, text formatting. Editor-specific
+    # nodes arrive as rules — Y::Lexxy subclasses this with the Lexxy schema;
+    # a different Lexical editor brings its own rule set the same way.
     def initialize(doc, nodes: {})
       builder = RenderRules::Builder.new(marks_allowed: false)
       yield builder if block_given?
-      nodes = Lexxy::NODES
-              .merge(nodes.transform_keys(&:to_s))
-              .merge(builder.nodes)
+      nodes = nodes.transform_keys(&:to_s).merge(builder.nodes)
       rules_json, @render_callbacks = RenderRules.compile(nodes, {})
       @native = NativeLexical.new(doc, rules_json)
     end

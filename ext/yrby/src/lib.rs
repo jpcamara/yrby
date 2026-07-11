@@ -343,7 +343,7 @@ impl RbDoc {
 /// A Lexical view over a `Y::Doc`. The schema knowledge lives here rather
 /// than on the schema-agnostic `Doc`: core Lexical natively, everything else
 /// through the render rules compiled at construction (see `render_rules` —
-/// the Ruby layer's Lexxy rule set arrives that way). Holds a cheap clone of
+/// the `Y::Lexxy` facade's rule set arrives that way). Holds a cheap clone of
 /// the doc (yrs `Doc` is an Arc handle), so it reads live state.
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
@@ -369,9 +369,8 @@ impl RbLexical {
     /// Render the document's XML root (default `"root"`, Lexical's standard
     /// collab root name) natively — no Node process or headless editor. The
     /// native side renders core Lexical plus whatever the rules cover; with
-    /// the Lexxy rule set the Ruby layer always passes, output matches
-    /// Lexxy's own serializer byte-for-byte on the reference fixtures (see
-    /// `lexical_html.rs`). Returns nil when the root is missing or not
+    /// the rule set `Y::Lexxy` passes, output matches Lexxy's own serializer
+    /// byte-for-byte on the reference fixtures (see `lexical_html.rs`). Returns nil when the root is missing or not
     /// Lexical-shaped, e.g. a ProseMirror document; a String when no
     /// callback rule fired; otherwise the nested segment arrays the Ruby
     /// layer splices.
@@ -637,9 +636,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "handle_sync_message",
         method!(RbDoc::handle_sync_message, 1),
     )?;
-    // The native renderers are the handles the Ruby facades (Y::Lexical and
-    // Y::ProseMirror in lib/y/rendering.rb) hold; the Ruby layer marks these
-    // classes private_constant.
+    // The native renderers are the handles the Ruby facades (Y::Lexical /
+    // Y::Lexxy and Y::ProseMirror in lib/y/) hold; the Ruby layer marks
+    // these classes private_constant.
     let lexical_class = module.define_class("NativeLexical", ruby.class_object())?;
     lexical_class.define_singleton_method("new", function!(RbLexical::native_new, 2))?;
     lexical_class.define_method("to_html", method!(RbLexical::native_to_html, -1))?;

@@ -6,11 +6,11 @@
 //! model. Everything Lexxy-specific — its own node types (attachments,
 //! galleries, `early_escape_code`, `horizontal_divider`) and its decorations
 //! of core nodes (the table figure wrapper, header-cell styling, the
-//! nested-list-item class) — lives in the Ruby layer as render rules
-//! (`Y::Lexxy::NODES`), built on the same extension API apps use. The Lexxy
-//! byte-parity guarantee is held there: the Ruby fixture tests and the live
-//! headless-Chrome e2e pin `Y::Lexical#to_html` against a real editor's own
-//! serialized value. The native tests pin core output as regression goldens
+//! nested-list-item class) — lives in the Ruby layer as the `Y::Lexxy`
+//! renderer's rule set, built on the same extension API apps use
+//! (`Y::Lexical` is the core base class). The Lexxy byte-parity guarantee is
+//! held there: the Ruby fixture tests and the live headless-Chrome e2e pin
+//! `Y::Lexxy#to_html` against a real editor's own serialized value. The native tests pin core output as regression goldens
 //! (stock Lexical has no canonical serializer to capture against).
 //!
 //! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in pure
@@ -882,7 +882,7 @@ mod tests {
     /// golden (`.core.html`). Stock Lexical has no canonical serializer to
     /// capture against, so this is a self-pinned regression guard; the
     /// external truth — byte parity with a real Lexxy editor's value — is
-    /// held at the Ruby layer, where `Y::Lexxy::NODES` completes the schema.
+    /// held at the Ruby layer, where `Y::Lexxy` completes the schema.
     /// The pair was captured together from one live
     /// editor session: `lexxy_full.bin` is the synced Yjs state, `lexxy_full.html`
     /// is `lexxy-editor.value` for the same document. It covers every block and
@@ -1028,8 +1028,8 @@ mod tests {
     /// Lexxy-only nodes (this fixture is a gallery of attachments between
     /// two paragraphs) are unknown to the core schema and degrade readably —
     /// the paragraphs survive, the gallery renders nothing rather than
-    /// garbage. The Ruby layer's Lexxy rules render it fully; the Ruby
-    /// fixture tests pin that byte for byte.
+    /// garbage. Y::Lexxy's rules render it fully; the Ruby fixture tests pin
+    /// that byte for byte.
     #[test]
     fn core_degrades_lexxy_only_nodes_readably() {
         let bytes = include_bytes!("fixtures/lexxy_gallery.bin");
