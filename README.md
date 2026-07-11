@@ -296,10 +296,11 @@ output is spliced in — so a callback can safely read or even write the same
 doc. With no callback rules, `to_html` skips the splicing entirely.
 
 Blocks are the escape hatch for everything the declarative form can't say,
-and they're proven sufficient: the gem's tests reimplement the entire
-built-in Lexxy schema through this API — simple nodes as hashes, the
-conditional and computed ones as blocks — and hold the output byte-identical
-to the native renderer on every captured fixture.
+and they're proven sufficient: the gem's own Lexxy support is built on this
+API (`lib/y/lexxy.rb`) — simple nodes as declarative hashes, everything with
+logic as plain methods mapped by node type (a `Method` responds to `call`
+like any lambda) — and the fixture tests hold its output byte-identical to a
+live editor's.
 
 `Y::ProseMirror` also takes `marks:` for custom marks:
 
@@ -380,10 +381,10 @@ lexical = Y::Lexical.new(doc, nodes: {
 })
 ```
 
-For a larger reference, the test suite reimplements the entire built-in
-Lexxy schema this way (`test/rendering_rules_test.rb`,
-`lexxy_schema_as_rules`) — headings, nested list items, galleries, header
-cells, and both attachment types, byte-identical to the native renderer.
+For a larger reference, the gem's own Lexxy schema ships this way — see
+`Y::Lexxy::NODES` in `lib/y/lexxy.rb`: declarative hashes for the simple
+nodes, a plain method per node that needs logic (galleries, list items,
+header cells, both attachment types), mapped with `method(:name)`.
 
 ### Protocol codec (module functions)
 
