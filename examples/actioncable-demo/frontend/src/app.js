@@ -22,6 +22,9 @@ const ydoc = new Y.Doc()
 const consumer = createConsumer()
 const provider = new ActionCableProvider(ydoc, consumer, "DocumentChannel", { id: documentId })
 provider.connect()
+// Presence is visible to peers as soon as the provider connects, before the
+// editor exists (CollaborationCursor sets the same field once it mounts).
+provider.awareness.setLocalStateField("user", user)
 
 // Exposed for the browser console and the multi-browser test harness. The
 // editor is attached once the document has synced (see below).
