@@ -31,6 +31,11 @@ class NoteMaterializer
     # Returns nil when there's nothing to materialize (no recorded changes,
     # or a document with no "rhino" fragment — one only ever edited through
     # the other pages).
+    #
+    # Freshness holds for readers who come THROUGH this method; loading
+    # Note directly gets whatever was last stamped. Edits still in flight
+    # (not yet recorded) are invisible to version and replay alike — the
+    # next read after they're recorded picks them up.
     def fresh(document_id)
       version = Store.current.version(document_id)
       note = Note.find_by(document_id: document_id)
