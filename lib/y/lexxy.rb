@@ -91,10 +91,10 @@ module Y
       "horizontal_divider" => { tag: "hr", void: true },
       "provisonal_paragraph" => method(:provisional_paragraph), # (sic: Lexxy's spelling)
       "image_gallery" => method(:gallery),
-      "table" => { content: :blocks, render: method(:table) },
-      "wrapped_table_node" => { content: :blocks, render: method(:table) },
-      "tablecell" => { content: :blocks, render: method(:table_cell) },
-      "listitem" => { content: :blocks, render: method(:list_item) },
+      "table" => { contains: :blocks, render: method(:table) },
+      "wrapped_table_node" => { contains: :blocks, render: method(:table) },
+      "tablecell" => { contains: :blocks, render: method(:table_cell) },
+      "listitem" => { contains: :blocks, render: method(:list_item) },
       "action_text_attachment" => method(:upload),
       "custom_action_text_attachment" => method(:mention)
     }.freeze

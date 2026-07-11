@@ -258,16 +258,16 @@ rule is markup as data, rendered natively:
 prosemirror = Y::ProseMirror.new(doc) do |rules|
   rules.node "callout", tag: "aside",
                         attrs: { "class" => ["callout callout--", :kind] },
-                        content: :blocks
+                        contains: :blocks
 end
 ```
 
 `tag` names the element. `attrs` values are templates: a string is a literal,
 a symbol reads that attribute off the node, an array concatenates both kinds;
 an attribute that resolves empty is left out. `text` (same template form)
-emits literal text content. `content` says what renders inside the element —
-`:inline` (the default), `:blocks` for nested block children, or `:none`.
-`void: true` skips the closing tag.
+emits literal text content. `contains` declares what lives inside the node — `:inline` (formatted text,
+the default), `:blocks` (child block nodes — a container), or `:none` (a
+leaf). `void: true` skips the closing tag.
 
 When markup-as-data isn't enough, give the node a block:
 
@@ -287,7 +287,7 @@ structural questions attributes can't: how many images a gallery holds, or
 whether a list item carries a nested list. Whatever the block returns is
 spliced into the output as-is: it's trusted HTML, so escape any values you
 interpolate. To set the content mode for a callback, give the node both —
-`rules.node "embed", content: :blocks do |node| ... end`.
+`rules.node "embed", contains: :blocks do |node| ... end`.
 
 Callbacks never run while the document is locked. The render finishes first
 (inside one read transaction, GVL released), then the blocks run and their
@@ -364,10 +364,10 @@ itself by its column count while the columns themselves stay declarative:
 
 ```ruby
 prosemirror = Y::ProseMirror.new(doc) do |rules|
-  rules.node "columns", content: :blocks do |node|
+  rules.node "columns", contains: :blocks do |node|
     %(<div class="columns columns--#{node.child_types.length}">#{node.content}</div>)
   end
-  rules.node "column", tag: "div", attrs: { "class" => "column" }, content: :blocks
+  rules.node "column", tag: "div", attrs: { "class" => "column" }, contains: :blocks
 end
 ```
 

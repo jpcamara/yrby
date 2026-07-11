@@ -31,7 +31,7 @@ class RenderingRulesTest < Minitest::Test
   def test_a_declarative_rule_overrides_a_builtin_node
     html = Y::ProseMirror.new(
       prosemirror_doc,
-      nodes: { "blockquote" => { tag: "aside", attrs: { "class" => "quote" }, content: :blocks } }
+      nodes: { "blockquote" => { tag: "aside", attrs: { "class" => "quote" }, contains: :blocks } }
     ).to_html
 
     assert_includes html, '<aside class="quote">'
@@ -103,12 +103,12 @@ class RenderingRulesTest < Minitest::Test
     doc = Y::Doc.new
 
     error = assert_raises(ArgumentError) do
-      Y::ProseMirror.new(doc, nodes: { "callout" => { content: :blocks } }) # no tag, no callback
+      Y::ProseMirror.new(doc, nodes: { "callout" => { contains: :blocks } }) # no tag, no callback
     end
     assert_match(/needs a tag/, error.message)
 
     assert_raises(ArgumentError) do
-      Y::ProseMirror.new(doc, nodes: { "callout" => { tag: "aside", content: :wat } })
+      Y::ProseMirror.new(doc, nodes: { "callout" => { tag: "aside", contains: :wat } })
     end
     assert_raises(ArgumentError) do
       Y::Lexical.new(doc, nodes: { "callout" => "not a rule" })
@@ -145,11 +145,11 @@ class RenderingRulesTest < Minitest::Test
 
   def test_the_block_form_registers_declarative_callback_and_mark_rules
     html = Y::ProseMirror.new(prosemirror_doc) do |rules|
-      rules.node "blockquote", tag: "aside", attrs: { "class" => "quote" }, content: :blocks
+      rules.node "blockquote", tag: "aside", attrs: { "class" => "quote" }, contains: :blocks
       rules.node "horizontalRule" do |node|
         %(<hr data-cb="#{node.type}">)
       end
-      rules.node "bulletList", content: :blocks do |node|
+      rules.node "bulletList", contains: :blocks do |node|
         %(<ul data-count="#{node.child_types.length}">#{node.content}</ul>)
       end
       rules.mark "bold", tag: "b"

@@ -12,7 +12,8 @@ module Y
   #
   # The usual way in is the block form — one `rules.node` call per type,
   # keyword options for markup-as-data, a Ruby block for logic (see Builder
-  # below). The nodes:/marks: keywords take the same rules as plain hashes,
+  # below). `contains:` says what's inside the node: :inline (formatted
+  # text, the default), :blocks (child block nodes), or :none (a leaf). The nodes:/marks: keywords take the same rules as plain hashes,
   # for shipping rule sets as data.
   #
   # Two kinds of rule:
@@ -22,16 +23,18 @@ module Y
   #     Y::ProseMirror.new(doc) do |rules|
   #       rules.node "callout", tag: "aside",
   #                             attrs: { "class" => ["callout callout--", :kind] },
-  #                             content: :blocks
+  #                             contains: :blocks
   #     end
   #   `tag` is the element; `attrs` values are templates — a String literal,
   #   a Symbol referencing one of the node's stored attributes, or an Array
   #   mixing both (an attribute that resolves empty is omitted); `text` is a
   #   template for literal text content; `void: true` emits no closing tag;
-  #   `content` is what renders inside: :inline (default), :blocks, or :none.
+  #   `contains` declares what lives inside the node and renders there:
+  #   :inline (default) for formatted text, :blocks for child block nodes
+  #   (a container), :none for a leaf.
   #
   # - Callback (a block; in the hash form, a callable or `render:` plus
-  #   `content`):
+  #   `contains`):
   #     Y::Lexical.new(doc) do |rules|
   #       rules.node "video_embed" do |node|
   #         %(<video src="#{ERB::Util.html_escape(node.attrs["src"])}"></video>)
@@ -89,7 +92,7 @@ module Y
       if rule[:render]
         callbacks[type] = rule[:render]
         compiled = { "callback" => true }
-        compiled["content"] = rule[:content].to_s if rule[:content]
+        compiled["content"] = rule[:contains].to_s if rule[:contains]
         return compiled
       end
       compile_declarative_node(rule)
@@ -101,7 +104,7 @@ module Y
       compiled["void"] = true if rule[:void]
       compiled["attrs"] = compile_attrs(rule[:attrs]) if rule[:attrs]
       compiled["text"] = compile_parts(rule[:text]) if rule[:text]
-      compiled["content"] = rule[:content].to_s if rule[:content]
+      compiled["content"] = rule[:contains].to_s if rule[:contains]
       compiled
     end
 
@@ -144,14 +147,15 @@ module Y
 
     # Yielded by Y::Lexical.new / Y::ProseMirror.new: register rules one
     # call per node type. Keyword options are the markup-as-data; a block is
-    # the logic; both together give a callback its content mode:
+    # the logic; both together say what a callback node contains and how to
+    # render it:
     #
     #   Y::ProseMirror.new(doc) do |rules|
-    #     rules.node "callout", tag: "aside", content: :blocks
+    #     rules.node "callout", tag: "aside", contains: :blocks
     #     rules.node "video" do |node|
     #       %(<video src="#{RenderRules.escape_attr(node.attrs["src"])}"></video>)
     #     end
-    #     rules.node "columns", content: :blocks do |node|
+    #     rules.node "columns", contains: :blocks do |node|
     #       %(<div class="cols--#{node.child_types.length}">#{node.content}</div>)
     #     end
     #     rules.mark "comment", tag: "span", attrs: { "data-comment-id" => :id }

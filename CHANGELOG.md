@@ -14,7 +14,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   logic — plus `nodes:`/`marks:` keywords as the equivalent data form, to
   render node types the pinned schemas don't know or to override how a
   built-in renders.
-  Declarative rules (`tag`/`attrs`/`text`/`content`, with templates mixing
+  Declarative rules (`tag`/`attrs`/`text`/`contains`, with templates mixing
   literals and attribute references) render natively at full speed. Callback
   rules run a Ruby block per node, receiving its type, attributes,
   already-rendered children, and `child_types` (its element/block children by
