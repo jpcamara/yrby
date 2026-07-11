@@ -1,10 +1,11 @@
 // The Rhino page (Tiptap 3 via rhino-editor, bound with Tiptap's own
-// Collaboration extensions) through REAL Chrome: two browsers on the same document, concurrent
-// typing, byte-for-byte convergence, remote carets, undo staying local, and
-// the ActionText save — the server replays the durable store into a Y::Doc
-// and renders it with Y::Tiptap, so the persisted rich text is derived
-// from the CRDT, not from any browser's serialized HTML. Complements
-// agent_browsers.mjs (the Tiptap 2 page) — same protocol, third front end.
+// Collaboration extensions) through REAL Chrome: two browsers on the same
+// document, concurrent typing, byte-for-byte convergence, remote carets,
+// undo staying local, and the materialized ActionText — freshened on read,
+// the server replaying the durable store into a Y::Doc and rendering it
+// with Y::Tiptap, so the persisted rich text is derived from the CRDT, not
+// from any browser's serialized HTML. Complements agent_browsers.mjs (the
+// Tiptap 2 page) — same protocol, third front end.
 //
 //   PORT=3777 node rhino_e2e.mjs
 //
