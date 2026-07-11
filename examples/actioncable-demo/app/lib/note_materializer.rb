@@ -11,10 +11,9 @@
 # store's version — monotonic in VISIBILITY order, which is the property
 # that makes the compare sound; see each store's `version` for how, and
 # why Postgres counts rows instead of taking MAX(id)). Nothing runs while
-# documents are being edited,
-# there is no background machinery, and a reader always gets current
-# content. No browser is involved in the render either way; what persists
-# can only be what the authoritative store says.
+# documents are being edited, there is no background machinery, and a
+# reader always gets current content. No browser is involved in the render
+# either way; what persists can only be what the authoritative store says.
 #
 # An app with push consumers (search indexing, webhooks) would call
 # `materialize` from the channel's `on_change` instead — debounced, and
