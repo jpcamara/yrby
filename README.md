@@ -189,18 +189,19 @@ guarantees keep serving safe:
 ### Rendering to HTML
 
 Schema-pinned renderers turn a collaborative document into HTML on the
-server, with no Node process or headless editor: `Y::ProseMirror` for
-ProseMirror/Tiptap documents, and for Lexical documents `Y::Lexxy` (the
-[Lexxy](https://github.com/basecamp/lexxy) editor, byte-for-byte) built on
-`Y::Lexical` (the core-Lexical base any other Lexical editor extends with
-rules). Each returns `nil` for a root that belongs to the other schema.
+server, with no Node process or headless editor. Each is an editor-specific
+class (byte-for-byte with that editor's own serializer) built on a core base
+any other editor extends with rules: `Y::Tiptap` on `Y::ProseMirror` for
+ProseMirror documents, and `Y::Lexxy` (the
+[Lexxy](https://github.com/basecamp/lexxy) editor) on `Y::Lexical`. Each
+returns `nil` for a root that belongs to the other schema.
 
-#### `Y::ProseMirror`
+#### `Y::Tiptap` (and `Y::ProseMirror`, its base)
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc)
-prosemirror.to_html            # the "default" fragment (Tiptap's default root)
-prosemirror.to_html("content") # or another XML root
+tiptap = Y::Tiptap.new(doc)
+tiptap.to_html            # the "default" fragment (Tiptap's default root)
+tiptap.to_html("content") # or another XML root
 ```
 
 The output matches Tiptap's own `getHTML()`, checked byte-for-byte in the tests
@@ -214,6 +215,16 @@ blocks, links, images, mentions, details, hard breaks, horizontal rules,
 tables, text styles (color, font family), and every text mark. A table renders
 as semantic `<table><tbody>`, without the column-width styling Tiptap's editor
 view adds.
+
+The support is layered like the Lexical side: `Y::ProseMirror` covers core
+ProseMirror natively — prosemirror-schema-basic plus the prosemirror-tables
+family — and Tiptap's extension nodes (task lists, mentions, the details
+family) are `Y::Tiptap`'s rule set (`Y::Tiptap::NODES`), built on the
+extension API below. Marks are the one Tiptap-flavored piece that stays in
+the base: mark rendering (nesting order, `textStyle` CSS, `code`
+exclusivity) runs through native text-run machinery that node rules don't
+reach, so `Y::ProseMirror` renders Tiptap's mark set as-is and `rules.mark`
+overrides individual marks.
 
 #### `Y::Lexxy` (and `Y::Lexical`, its base)
 
@@ -260,7 +271,7 @@ Rules register in a block — one `rules.node` call per type. A declarative
 rule is markup as data, rendered natively:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc) do |rules|
+tiptap = Y::Tiptap.new(doc) do |rules|
   rules.node "callout", tag: "aside",
                         attrs: { "class" => ["callout callout--", :kind] },
                         contains: :blocks
@@ -280,7 +291,7 @@ and attributes under names you'd never predict (Rhino's strike mark is
 document instead — make one in your editor using your custom node, then:
 
 ```ruby
-Y::ProseMirror.new(doc).node_types
+Y::Tiptap.new(doc).node_types
 # => { "callout"   => { "count" => 2, "attrs" => ["kind"],
 #                       "children" => ["paragraph"], "text" => false,
 #                       "handled" => nil },
@@ -317,16 +328,16 @@ output is spliced in — so a callback can safely read or even write the same
 doc. With no callback rules, `to_html` skips the splicing entirely.
 
 Blocks are the escape hatch for everything the declarative form can't say,
-and they're proven sufficient: `Y::Lexxy` itself is built on this API
-(`lib/y/lexxy.rb`) — simple nodes as declarative hashes, everything with
-logic as plain methods mapped by node type (a `Method` responds to `call`
-like any lambda) — and the fixture tests hold its output byte-identical to a
-live editor's.
+and they're proven sufficient: `Y::Lexxy` and `Y::Tiptap` are themselves
+built on this API (`lib/y/lexxy.rb`, `lib/y/tiptap.rb`) — simple nodes as
+declarative hashes, everything with logic as plain methods mapped by node
+type (a `Method` responds to `call` like any lambda) — and the fixture tests
+hold their output byte-identical to a live editor's.
 
-`Y::ProseMirror` also takes custom marks:
+The ProseMirror side also takes custom marks:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc) do |rules|
+tiptap = Y::Tiptap.new(doc) do |rules|
   rules.mark "comment", tag: "span", attrs: { "data-comment-id" => :id }
 end
 ```
@@ -341,7 +352,7 @@ A video-embed node from an app's Tiptap extension — a type the pinned schema
 has never heard of:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc) do |rules|
+tiptap = Y::Tiptap.new(doc) do |rules|
   rules.node "videoEmbed" do |node|
     src   = ERB::Util.html_escape(node.attrs["src"])
     title = ERB::Util.html_escape(node.attrs["title"] || "Video")
@@ -354,7 +365,7 @@ Resolving mentions against the database. Blocks run after the document read
 has finished, so hitting ActiveRecord (or the doc itself) inside one is safe:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc) do |rules|
+tiptap = Y::Tiptap.new(doc) do |rules|
   rules.node "mention" do |node|
     user = User.find_by(id: node.attrs["id"])
     next "<span>@unknown</span>" unless user
@@ -385,7 +396,7 @@ element/block children in document order, so a layout container can size
 itself by its column count while the columns themselves stay declarative:
 
 ```ruby
-prosemirror = Y::ProseMirror.new(doc) do |rules|
+tiptap = Y::Tiptap.new(doc) do |rules|
   rules.node "columns", contains: :blocks do |node|
     %(<div class="columns columns--#{node.child_types.length}">#{node.content}</div>)
   end
@@ -404,10 +415,12 @@ lexical = Y::Lexical.new(doc) do |rules|
 end
 ```
 
-For a larger reference, the gem's own Lexxy schema ships this way — see
-`Y::Lexxy::NODES` in `lib/y/lexxy.rb`: declarative hashes for the simple
-nodes, a plain method per node that needs logic (galleries, list items,
-header cells, both attachment types), mapped with `method(:name)`.
+For a larger reference, the gem's own editor schemas ship this way — see
+`Y::Lexxy::NODES` in `lib/y/lexxy.rb` (declarative hashes for the simple
+nodes, a plain method per node that needs logic — galleries, list items,
+header cells, both attachment types — mapped with `method(:name)`) and
+`Y::Tiptap::NODES` in `lib/y/tiptap.rb` (task lists, mentions, the details
+family).
 
 ### Protocol codec (module functions)
 

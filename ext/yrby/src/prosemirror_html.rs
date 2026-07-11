@@ -8,17 +8,26 @@
 //! both spellings in use: Tiptap's camelCase (`bulletList`, `bold`) and the
 //! prosemirror-schema-basic snake_case (`bullet_list`, `strong`).
 //!
-//! Output follows `ueberdosis/tiptap-php` (the maintained PHP renderer for
-//! ProseMirror JSON) and matches Tiptap's own `getHTML()` byte for byte on the
-//! captured fixtures — including mentions — with one deliberate exception: a
-//! table renders as the semantic `<table><tbody>…`, without the
-//! `<colgroup>`/`min-width` styling Tiptap's editor view injects (tiptap-php
-//! drops it too). The details family follows tiptap-php's renderHTML, since
-//! that Tiptap extension is Pro-only.
+//! This renders **core ProseMirror**: the prosemirror-schema-basic node set
+//! plus the prosemirror-tables family — paragraphs, headings, blockquotes,
+//! code blocks, bullet/ordered lists, images, hard breaks, horizontal rules,
+//! and tables (semantic `<table><tbody>…`, without the `<colgroup>`/
+//! `min-width` styling editor views inject). Tiptap's extension nodes — task
+//! lists, mentions, the details family — live in the Ruby layer as the
+//! `Y::Tiptap` renderer's rule set, built on the same extension API apps use
+//! (`Y::ProseMirror` is the core base class). Output follows
+//! `ueberdosis/tiptap-php`, and with `Y::Tiptap`'s rules it matches Tiptap's
+//! own `getHTML()` byte for byte on the captured fixtures — that guarantee
+//! is held at the Ruby layer; the native tests pin core output as goldens
+//! where a fixture contains Tiptap-only nodes.
 //!
-//! Marks nest in a fixed order (outermost first): link, bold, italic, strike,
-//! underline, highlight, then subscript/superscript. `code` excludes every
-//! other mark, so a code run is just `<code>`.
+//! Marks are the one Tiptap-flavored piece that stays native, deliberately:
+//! mark serialization is text-run machinery (nesting order, textStyle's CSS,
+//! code's exclusivity), not node structure, so it can't ride the rule
+//! system. The built-in set covers schema-basic's marks and Tiptap's —
+//! nesting outermost-first: link, bold, italic, strike, underline,
+//! highlight, then subscript/superscript. `code` excludes every other mark,
+//! so a code run is just `<code>`.
 //!
 //! Custom nodes and marks: apps register rules by node type and mark name
 //! (see `render_rules`). A node rule is consulted before the built-in arms, so
@@ -114,10 +123,6 @@ pub fn is_builtin(ty: &str) -> bool {
             | "ordered_list"
             | "listItem"
             | "list_item"
-            | "taskList"
-            | "task_list"
-            | "taskItem"
-            | "task_item"
             | "table"
             | "tableRow"
             | "table_row"
@@ -125,17 +130,11 @@ pub fn is_builtin(ty: &str) -> bool {
             | "table_header"
             | "tableCell"
             | "table_cell"
-            | "details"
-            | "detailsSummary"
-            | "details_summary"
-            | "detailsContent"
-            | "details_content"
             | "horizontalRule"
             | "horizontal_rule"
             | "image"
             | "hardBreak"
             | "hard_break"
-            | "mention"
     )
 }
 
@@ -284,27 +283,6 @@ fn open_block<T: ReadTxn>(
         "listItem" | "list_item" => {
             open_container(txn, e, depth, "<li>", "</li>", em, stack, rules)
         }
-        "taskList" | "task_list" => open_container(
-            txn,
-            e,
-            depth,
-            "<ul data-type=\"taskList\">",
-            "</ul>",
-            em,
-            stack,
-            rules,
-        ),
-        "taskItem" | "task_item" => {
-            let checked = bool_attr(txn, e, "checked");
-            em.push_str("<li data-checked=\"");
-            em.push_str(if checked { "true" } else { "false" });
-            em.push_str("\" data-type=\"taskItem\"><label><input type=\"checkbox\"");
-            if checked {
-                em.push_str(" checked=\"checked\"");
-            }
-            em.push_str("><span></span></label><div>");
-            push_block_children(txn, e, depth, "</div></li>", em, stack, rules);
-        }
         "table" => {
             em.push_str("<table><tbody>");
             push_block_children(txn, e, depth, "</tbody></table>", em, stack, rules);
@@ -314,31 +292,6 @@ fn open_block<T: ReadTxn>(
         }
         "tableHeader" | "table_header" => open_cell(txn, e, depth, "th", "</th>", em, stack, rules),
         "tableCell" | "table_cell" => open_cell(txn, e, depth, "td", "</td>", em, stack, rules),
-        // The details family follows tiptap-php (the extension is Tiptap Pro,
-        // so there's no free getHTML() to capture against).
-        "details" => {
-            let open = if bool_attr(txn, e, "open") {
-                "<details open=\"open\">"
-            } else {
-                "<details>"
-            };
-            open_container(txn, e, depth, open, "</details>", em, stack, rules);
-        }
-        "detailsSummary" | "details_summary" => {
-            em.push_str("<summary>");
-            render_inline(txn, e, 0, em, rules);
-            em.push_str("</summary>");
-        }
-        "detailsContent" | "details_content" => open_container(
-            txn,
-            e,
-            depth,
-            "<div data-type=\"detailsContent\">",
-            "</div>",
-            em,
-            stack,
-            rules,
-        ),
         "horizontalRule" | "horizontal_rule" => em.push_str("<hr>"),
         "image" => render_image(txn, e, em),
         "hardBreak" | "hard_break" => em.push_str("<br>"),
@@ -550,7 +503,7 @@ fn element_child_types<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> Vec<String> {
 }
 
 /// Render a text block's inline content: text runs (with their marks) and
-/// inline element nodes (hard breaks, mentions, inline images). A registered
+/// inline element nodes (hard breaks, inline images). A registered
 /// rule wins over the built-in inline nodes here too. An unknown inline node
 /// keeps its text instead of vanishing; `depth` caps that recursion on a
 /// crafted nest of unknowns.
@@ -572,7 +525,6 @@ fn render_inline<T: ReadTxn>(
                 match child.tag().as_ref() {
                     "hardBreak" | "hard_break" => em.push_str("<br>"),
                     "image" => render_image(txn, &child, em),
-                    "mention" => render_mention(txn, &child, em),
                     _ => {
                         if depth < MAX_DEPTH {
                             render_inline(txn, &child, depth + 1, em, rules);
@@ -646,32 +598,6 @@ fn render_rule_inline<T: ReadTxn>(
     em.push_str("</");
     em.push_str(tag);
     em.push('>');
-}
-
-/// A mention, as Tiptap's Mention extension serializes it (no app-configured
-/// HTMLAttributes): `data-type`, `data-id`, `data-label` when present, the
-/// suggestion char, and `@label` (falling back to `@id`) as the text.
-fn render_mention<T: ReadTxn>(txn: &T, e: &XmlElementRef, em: &mut Emitter) {
-    let id = str_attr(txn, e, "id");
-    let label = str_attr(txn, e, "label");
-    let char = str_attr(txn, e, "mentionSuggestionChar").unwrap_or_else(|| "@".to_string());
-    em.push_str("<span data-type=\"mention\"");
-    if let Some(id) = &id {
-        em.push_str(" data-id=\"");
-        em.push_str(&escape_attr(id));
-        em.push('"');
-    }
-    if let Some(label) = &label {
-        em.push_str(" data-label=\"");
-        em.push_str(&escape_attr(label));
-        em.push('"');
-    }
-    em.push_str(" data-mention-suggestion-char=\"");
-    em.push_str(&escape_attr(&char));
-    em.push_str("\">");
-    em.push_str(&escape_text(&char));
-    em.push_str(&escape_text(&label.or(id).unwrap_or_default()));
-    em.push_str("</span>");
 }
 
 /// Emit each formatted run of a Y.XmlText.
@@ -929,10 +855,6 @@ fn num_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<i64> {
     }
 }
 
-fn bool_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> bool {
-    matches!(e.get_attribute(txn, name), Some(Out::Any(Any::Bool(true))))
-}
-
 /// Text-content escaping, matching the browser serializer: `&`, `<`, `>`.
 fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -973,20 +895,23 @@ mod tests {
         render_run(text, marks, &Rules::empty())
     }
 
-    /// The core proof: a document captured from a real Tiptap editor renders to
-    /// exactly the editor's own `getHTML()`. The fixture covers headings,
-    /// every mark and combination, links, escaping, blockquote, nested bullet
-    /// and ordered lists (with a `start`), a task list, code blocks with and
-    /// without a language, a hard break, a horizontal rule, an image, and the
-    /// trailing empty paragraph Tiptap keeps.
+    /// Core rendering of the captured Tiptap document, pinned as a golden
+    /// (`.core.html`). The task list renders through the unknown-container
+    /// fallback here (unwrapped children); the external truth — byte parity
+    /// with the editor's own `getHTML()` — is held at the Ruby layer, where
+    /// `Y::Tiptap` completes the schema. The fixture covers headings, every
+    /// mark and combination, links, escaping, blockquote, nested bullet and
+    /// ordered lists (with a `start`), a task list, code blocks with and
+    /// without a language, a hard break, a horizontal rule, an image, and
+    /// the trailing empty paragraph Tiptap keeps.
     #[test]
-    fn renders_the_captured_tiptap_document_byte_for_byte() {
+    fn core_rendering_of_the_tiptap_fixture_is_pinned() {
         let doc = doc_from(include_bytes!("fixtures/prosemirror_tiptap.bin"));
         let txn = doc.transact();
         let frag = txn.get_xml_fragment("default").unwrap();
         assert_eq!(
             render(&txn, &frag).unwrap(),
-            include_str!("fixtures/prosemirror_tiptap.html")
+            include_str!("fixtures/prosemirror_tiptap.core.html")
         );
     }
 
@@ -1066,17 +991,20 @@ mod tests {
         );
     }
 
-    /// Mentions (captured from Tiptap's Mention extension): the fixture holds
-    /// one mention with a label, one with only an id, and a link carrying
-    /// class and title.
+    /// Core rendering of the captured mention document, pinned as a golden
+    /// (`.core.html`). Mention is a Tiptap extension node — an atom with no
+    /// children — so core renders it to nothing; parity with the editor's
+    /// `getHTML()` is held at the Ruby layer by `Y::Tiptap`. The fixture
+    /// holds one mention with a label, one with only an id, and a link
+    /// carrying class and title.
     #[test]
-    fn renders_the_captured_mention_document_byte_for_byte() {
+    fn core_rendering_of_the_mention_fixture_is_pinned() {
         let doc = doc_from(include_bytes!("fixtures/prosemirror_mention.bin"));
         let txn = doc.transact();
         let frag = txn.get_xml_fragment("default").unwrap();
         assert_eq!(
             render(&txn, &frag).unwrap(),
-            include_str!("fixtures/prosemirror_mention.html")
+            include_str!("fixtures/prosemirror_mention.core.html")
         );
     }
 
@@ -1135,34 +1063,6 @@ mod tests {
         assert_eq!(
             render(&txn, &frag).unwrap(),
             "<blockquote>stray<p>body</p></blockquote>"
-        );
-    }
-
-    /// The details family follows tiptap-php's renderHTML (the Tiptap
-    /// extension is Pro-only, so tiptap-php is the reference).
-    #[test]
-    fn renders_the_details_family_per_tiptap_php() {
-        let doc = Doc::new();
-        let frag = doc.get_or_insert_xml_fragment("default");
-        {
-            let mut txn = doc.transact_mut();
-            let details = frag.push_back(&mut txn, XmlElementPrelim::empty("details"));
-            details.insert_attribute(&mut txn, "open", true);
-            let summary = details.push_back(&mut txn, XmlElementPrelim::empty("detailsSummary"));
-            summary.push_back(&mut txn, XmlTextPrelim::new("More info"));
-            let content = details.push_back(&mut txn, XmlElementPrelim::empty("detailsContent"));
-            let p = content.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
-            p.push_back(&mut txn, XmlTextPrelim::new("The body."));
-
-            let closed = frag.push_back(&mut txn, XmlElementPrelim::empty("details"));
-            closed.push_back(&mut txn, XmlElementPrelim::empty("detailsSummary"));
-        }
-        let txn = doc.transact();
-        assert_eq!(
-            render(&txn, &frag).unwrap(),
-            "<details open=\"open\"><summary>More info</summary>\
-             <div data-type=\"detailsContent\"><p>The body.</p></div></details>\
-             <details><summary></summary></details>"
         );
     }
 

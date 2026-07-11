@@ -54,6 +54,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to a live editor's serialized value, now through the extension path. An
   unknown Lexical container also degrades better: its block children render
   without an invented wrapper instead of being dropped.
+- **ProseMirror rendering gets the same split: `Y::ProseMirror` (core
+  ProseMirror) and `Y::Tiptap` (core plus Tiptap's extension nodes as render
+  rules).** `Y::Tiptap.new(doc).to_html` is the byte-parity call for Tiptap
+  apps. The native side renders prosemirror-schema-basic plus the
+  prosemirror-tables family; Tiptap's extension nodes — task lists, mentions,
+  the details family — are `Y::Tiptap::NODES` rules. Marks stay native in the
+  base class: mark rendering (nesting order, `textStyle` CSS, `code`
+  exclusivity) runs through text-run machinery node rules don't reach, so
+  `Y::ProseMirror` still renders Tiptap's full mark set and `rules.mark`
+  overrides individual marks. Output through `Y::Tiptap` is unchanged, held
+  byte-identical to a live editor's `getHTML()` by the fixture tests.
 
 ## [0.5.0] - 2026-07-08
 

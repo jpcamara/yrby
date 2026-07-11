@@ -184,11 +184,17 @@ class RenderingRulesTest < Minitest::Test
 
     assert_nil core["action_text_attachment"]["handled"]
 
-    pm_types = Y::ProseMirror.new(prosemirror_doc("prosemirror_mention")).node_types
+    # Same split on the ProseMirror side: core reports mention unhandled,
+    # Y::Tiptap's schema covers it.
+    pm_core = Y::ProseMirror.new(prosemirror_doc("prosemirror_mention")).node_types
 
-    assert_equal "builtin", pm_types["mention"]["handled"]
-    assert_includes pm_types["mention"]["attrs"], "mentionSuggestionChar"
-    assert_includes pm_types["paragraph"]["children"], "mention"
+    assert_nil pm_core["mention"]["handled"]
+    assert_includes pm_core["mention"]["attrs"], "mentionSuggestionChar"
+    assert_includes pm_core["paragraph"]["children"], "mention"
+
+    pm_types = Y::Tiptap.new(prosemirror_doc("prosemirror_mention")).node_types
+
+    assert_equal "rule", pm_types["mention"]["handled"]
 
     assert_nil Y::Lexical.new(Y::Doc.new).node_types("nope")
   end
