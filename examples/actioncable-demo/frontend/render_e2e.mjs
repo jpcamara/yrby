@@ -1,5 +1,5 @@
 // Render-parity e2e: a real Tiptap editor runs headless (JSDOM), builds a
-// document over the y-prosemirror collab binding, and the gem's Y::ProseMirror
+// document over the y-prosemirror collab binding, and the gem's Y::Tiptap
 // must reproduce the editor's own getHTML() from the raw doc bytes.
 //
 // This is the live version of the captured-fixture tests in the gem: the
@@ -84,7 +84,7 @@ editor.commands.insertContent([
 
 const editorHtml = editor.getHTML()
 
-// The one intended divergence: Y::ProseMirror renders tables semantically
+// The one intended divergence: Y::Tiptap renders tables semantically
 // (like tiptap-php), without the <colgroup>/min-width sizing Tiptap's editor
 // VIEW injects into getHTML (it isn't in the CRDT). Strip it from the
 // editor's output; everything else must match byte for byte.
@@ -99,12 +99,12 @@ const actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb
 }).toString()
 
 if (actual === expected) {
-  console.log(`render e2e OK: Y::ProseMirror matches a live Tiptap getHTML() (${actual.length} chars)`)
+  console.log(`render e2e OK: Y::Tiptap matches a live Tiptap getHTML() (${actual.length} chars)`)
   process.exit(0)
 }
 let i = 0
 while (i < Math.min(actual.length, expected.length) && actual[i] === expected[i]) i++
-console.error("render e2e MISMATCH: Y::ProseMirror diverges from the live editor")
+console.error("render e2e MISMATCH: Y::Tiptap diverges from the live editor")
 console.error(`first difference at ${i}:`)
 console.error(`  editor: …${JSON.stringify(expected.slice(Math.max(0, i - 60), i + 80))}`)
 console.error(`  ruby:   …${JSON.stringify(actual.slice(Math.max(0, i - 60), i + 80))}`)

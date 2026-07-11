@@ -6,6 +6,67 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Custom render rules for `Y::Lexical` and `Y::ProseMirror`.** Both
+  renderers now take a block registering rules per node type —
+  `rules.node "callout", tag: "aside"` for markup-as-data, a Ruby block for
+  logic — plus `nodes:`/`marks:` keywords as the equivalent data form, to
+  render node types the pinned schemas don't know or to override how a
+  built-in renders.
+  Declarative rules (`tag`/`attrs`/`text`/`contains`, with templates mixing
+  literals and attribute references) render natively at full speed. Callback
+  rules run a Ruby block per node, receiving its type, attributes,
+  already-rendered children, and `child_types` (its element/block children by
+  type — the structural facts behind gallery counts and nested-list classes).
+  The block runs after the document read has finished, never while the doc is
+  locked, so it can safely read or write the same doc. Blocks are proven
+  sufficient for whole schemas: the gem's own editor schemas (`Y::Lexxy`,
+  `Y::Tiptap`) ship through this API, and the fixture tests hold their
+  output byte-identical to a live editor's. With no callback rules the
+  render path is unchanged, byte for byte. See "Custom nodes and marks" in
+  the README.
+- **`Y::Lexical#node_types` / `Y::ProseMirror#node_types` — schema
+  discovery.** Ask a real document which node types it holds and what they
+  look like: counts, attribute names as stored, child types, whether text
+  runs appear, and whether a builtin or one of your rules already handles
+  each ("handled" nil marks what still needs a rule). Editors store names
+  you'd never guess; this is how you find them.
+- `Y::RenderRules.escape_text` / `escape_attr` — the exact escaping the
+  native renderers use, for blocks that build markup from stored values
+  (ERB's `html_escape` also rewrites apostrophes, which breaks byte parity
+  with editor output).
+
+### Changed
+
+- **Lexical rendering is now two classes: `Y::Lexical` (core Lexical) and
+  `Y::Lexxy` (core plus the Lexxy schema as render rules).** Stock Lexical
+  has no canonical serializer, so the editor-specific class carries the
+  editor's name — `Y::Lexxy.new(doc).to_html` is the byte-parity call for
+  Lexxy/Rails apps, and `Y::Lexical` is the base any other Lexical editor
+  extends with its own rules. The
+  native side renders core structure — paragraphs, headings, quotes, code,
+  lists, tables, links, the full text-format model. Lexxy's own node types
+  (attachments, galleries, `early_escape_code`, `horizontal_divider`) and its
+  decorations of core nodes (the table figure wrapper, header-cell styling,
+  the nested-list-item class) are rules applied beneath the app's, on the
+  same extension API — the gem's Lexxy support is the API's first consumer.
+  Output is unchanged: the fixture tests still hold `to_html` byte-identical
+  to a live editor's serialized value, now through the extension path. An
+  unknown Lexical container also degrades better: its block children render
+  without an invented wrapper instead of being dropped.
+- **ProseMirror rendering gets the same split: `Y::ProseMirror` (core
+  ProseMirror) and `Y::Tiptap` (core plus Tiptap's extension nodes as render
+  rules).** `Y::Tiptap.new(doc).to_html` is the byte-parity call for Tiptap
+  apps. The native side renders prosemirror-schema-basic plus the
+  prosemirror-tables family; Tiptap's extension nodes — task lists, mentions,
+  the details family — are `Y::Tiptap::NODES` rules. Marks stay native in the
+  base class: mark rendering (nesting order, `textStyle` CSS, `code`
+  exclusivity) runs through text-run machinery node rules don't reach, so
+  `Y::ProseMirror` still renders Tiptap's full mark set and `rules.mark`
+  overrides individual marks. Output through `Y::Tiptap` is unchanged, held
+  byte-identical to a live editor's `getHTML()` by the fixture tests.
+
 ## [0.5.0] - 2026-07-08
 
 ### Added

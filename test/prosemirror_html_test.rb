@@ -2,41 +2,45 @@
 
 require "test_helper"
 
-# Y::ProseMirror: schema-pinned rendering of ProseMirror/Tiptap documents. The
-# fixtures under ext/yrby/src/fixtures were captured from a real Tiptap editor:
-# prosemirror_tiptap.bin is the synced Yjs state, prosemirror_tiptap.html is the
-# editor's own getHTML(). to_html reproduces it byte for byte. The schema
-# mapping itself is exercised in the Rust tests.
+# Y::Tiptap: schema-pinned rendering of Tiptap documents (Y::ProseMirror, its
+# base class, renders core ProseMirror; Y::Tiptap adds Tiptap's extension
+# nodes as rules). The fixtures under ext/yrby/src/fixtures were captured from
+# a real Tiptap editor: prosemirror_tiptap.bin is the synced Yjs state,
+# prosemirror_tiptap.html is the editor's own getHTML(). to_html reproduces it
+# byte for byte. The core schema mapping is exercised in the Rust tests; the
+# Tiptap-specific half is Y::Tiptap's rule set, so these fixture tests
+# exercise the extension path end to end — they are the Tiptap byte-parity
+# guarantee.
 class ProseMirrorHtmlTest < Minitest::Test
   FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
 
-  def prosemirror_for(name)
+  def tiptap_for(name)
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.join(FIXTURES, "#{name}.bin")))
-    Y::ProseMirror.new(doc)
+    Y::Tiptap.new(doc)
   end
 
   def test_to_html_matches_tiptaps_gethtml_byte_for_byte
     expected = File.read(File.join(FIXTURES, "prosemirror_tiptap.html"))
 
-    assert_equal expected, prosemirror_for("prosemirror_tiptap").to_html
-    assert_equal expected, prosemirror_for("prosemirror_tiptap").to_html("default"),
+    assert_equal expected, tiptap_for("prosemirror_tiptap").to_html
+    assert_equal expected, tiptap_for("prosemirror_tiptap").to_html("default"),
                  "explicit root name"
   end
 
   def test_to_html_renders_a_semantic_table
     expected = File.read(File.join(FIXTURES, "prosemirror_table.html"))
 
-    assert_equal expected, prosemirror_for("prosemirror_table").to_html
+    assert_equal expected, tiptap_for("prosemirror_table").to_html
   end
 
   def test_to_html_returns_nil_for_a_missing_root
-    assert_nil Y::ProseMirror.new(Y::Doc.new).to_html("nope")
+    assert_nil Y::Tiptap.new(Y::Doc.new).to_html("nope")
   end
 
   def test_to_html_reads_live_state
     doc = Y::Doc.new
-    prosemirror = Y::ProseMirror.new(doc)
+    prosemirror = Y::Tiptap.new(doc)
 
     assert_nil prosemirror.to_html("default"), "no root yet"
     doc.apply_update(File.binread(File.join(FIXTURES, "prosemirror_tiptap.bin")))
@@ -46,7 +50,7 @@ class ProseMirrorHtmlTest < Minitest::Test
   end
 
   def test_to_html_covers_the_node_and_mark_set
-    html = prosemirror_for("prosemirror_tiptap").to_html
+    html = tiptap_for("prosemirror_tiptap").to_html
 
     {
       "headings" => "<h6>Heading Six</h6>",
@@ -73,7 +77,7 @@ class ProseMirrorHtmlTest < Minitest::Test
 
   def test_to_html_renders_mentions
     expected = File.read(File.join(FIXTURES, "prosemirror_mention.html"))
-    html = prosemirror_for("prosemirror_mention").to_html
+    html = tiptap_for("prosemirror_mention").to_html
 
     assert_equal expected, html
     assert_includes html, '<span data-type="mention" data-id="u42" data-label="Alice"'
@@ -81,9 +85,20 @@ class ProseMirrorHtmlTest < Minitest::Test
     assert_includes html, ">@u7</span>", "a label-less mention falls back to its id"
   end
 
+  # The details family follows tiptap-php's renderHTML (the Tiptap extension
+  # is Pro-only, so tiptap-php is the reference).
+  def test_to_html_renders_the_details_family
+    expected = File.read(File.join(FIXTURES, "prosemirror_details.html"))
+    html = tiptap_for("prosemirror_details").to_html
+
+    assert_equal expected, html
+    assert_includes html, '<details open="open"><summary>More info</summary>'
+    assert_includes html, "<details><summary></summary></details>", "a closed details omits open"
+  end
+
   def test_to_html_renders_text_styles
     expected = File.read(File.join(FIXTURES, "prosemirror_textstyle.html"))
-    html = prosemirror_for("prosemirror_textstyle").to_html
+    html = tiptap_for("prosemirror_textstyle").to_html
 
     assert_equal expected, html
     assert_includes html, '<span style="color: rgb(255, 0, 0);">red</span>'
@@ -93,7 +108,7 @@ class ProseMirrorHtmlTest < Minitest::Test
 
   def test_to_html_rejects_extra_arguments
     error = assert_raises(ArgumentError) do
-      Y::ProseMirror.new(Y::Doc.new).to_html("default", "extra")
+      Y::Tiptap.new(Y::Doc.new).to_html("default", "extra")
     end
     assert_match(/given 2, expected 0\.\.1/, error.message)
   end

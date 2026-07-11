@@ -2,20 +2,23 @@
 
 require "test_helper"
 
-# Y::Lexical: schema-pinned rendering of Lexical/Lexxy documents. The class is
-# named for the schema it understands — the Doc itself stays schema-agnostic.
+# Y::Lexxy: schema-pinned rendering of Lexxy documents (Y::Lexical, its base
+# class, renders core Lexical; Y::Lexxy adds the Lexxy schema as rules). The
+# Doc itself stays schema-agnostic.
 # The reference pair under ext/yrby/src/fixtures was captured from one live
 # Lexxy editor session: lexxy_full.bin is the synced Yjs state, lexxy_full.html
 # is the editor's own `value` (the HTML a Lexxy form submits to Rails).
-# to_html must reproduce it byte for byte — the schema mapping itself is
-# exercised in the Rust tests.
+# to_html must reproduce it byte for byte. The native renderer covers core
+# Lexical; the Lexxy-specific half is Y::Lexxy's rule set, so these fixture
+# tests exercise the extension path end to end — they are the Lexxy
+# byte-parity guarantee.
 class HtmlTest < Minitest::Test
   FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
 
   def lexical_for_fixture
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_full.bin")))
-    Y::Lexical.new(doc)
+    Y::Lexxy.new(doc)
   end
 
   def test_to_html_matches_lexxys_own_serializer_byte_for_byte
@@ -26,17 +29,17 @@ class HtmlTest < Minitest::Test
   end
 
   def test_to_html_returns_nil_for_a_missing_root
-    assert_nil Y::Lexical.new(Y::Doc.new).to_html("nope")
+    assert_nil Y::Lexxy.new(Y::Doc.new).to_html("nope")
   end
 
   def test_to_html_rejects_extra_arguments
-    error = assert_raises(ArgumentError) { Y::Lexical.new(Y::Doc.new).to_html("root", "extra") }
+    error = assert_raises(ArgumentError) { Y::Lexxy.new(Y::Doc.new).to_html("root", "extra") }
     assert_match(/given 2, expected 0\.\.1/, error.message)
   end
 
   def test_to_html_reads_live_state
     doc = Y::Doc.new
-    lexical = Y::Lexical.new(doc)
+    lexical = Y::Lexxy.new(doc)
 
     assert_nil lexical.to_html, "no root yet"
     doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_full.bin")))
@@ -85,7 +88,7 @@ class HtmlTest < Minitest::Test
     doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_torture.bin")))
     expected = File.read(File.join(FIXTURES, "lexxy_torture.html")).chomp
 
-    assert_equal expected, Y::Lexical.new(doc).to_html
+    assert_equal expected, Y::Lexxy.new(doc).to_html
   end
 
   def test_read_text_extraction_survives_the_torture_document
@@ -106,7 +109,7 @@ class HtmlTest < Minitest::Test
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_styles.bin")))
     expected = File.read(File.join(FIXTURES, "lexxy_styles.html")).chomp
-    html = Y::Lexical.new(doc).to_html
+    html = Y::Lexxy.new(doc).to_html
 
     assert_equal expected, html
     assert_includes html, '<mark style="background-color: var(--highlight-bg-2);">'
@@ -119,7 +122,7 @@ class HtmlTest < Minitest::Test
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_gallery.bin")))
     expected = File.read(File.join(FIXTURES, "lexxy_gallery.html")).chomp
-    html = Y::Lexical.new(doc).to_html
+    html = Y::Lexxy.new(doc).to_html
 
     assert_equal expected, html
     assert_includes html, '<div class="attachment-gallery attachment-gallery--3">'

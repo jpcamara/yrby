@@ -1,5 +1,6 @@
 use magnus::{
-    function, method, prelude::*, Error, ExceptionClass, RString, Ruby, TryConvert, Value,
+    function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RString, Ruby,
+    TryConvert, Value,
 };
 use yrs::sync::{Message, SyncMessage};
 use yrs::updates::decoder::Decode;
@@ -10,10 +11,12 @@ mod lexical_html;
 mod prosemirror_html;
 mod protocol;
 mod read;
+mod render_rules;
 use protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
     update_is_ready,
 };
+use render_rules::{Rules, Segment};
 
 /// Wrapper around yrs Doc.
 ///
@@ -337,49 +340,77 @@ impl RbDoc {
 // Y::Lexical — schema-pinned rendering of Lexical/Lexxy documents
 // ============================================================================
 
-/// A Lexical/Lexxy view over a `Y::Doc`. The schema knowledge (Lexxy 0.9.x
-/// node set and serializer semantics) lives here rather than on the
-/// schema-agnostic `Doc`. Holds a cheap clone of the doc (yrs `Doc` is an Arc
-/// handle), so it reads live state.
+/// A Lexical view over a `Y::Doc`. The schema knowledge lives here rather
+/// than on the schema-agnostic `Doc`: core Lexical natively, everything else
+/// through the render rules compiled at construction (see `render_rules` —
+/// the `Y::Lexxy` facade's rule set arrives that way). Holds a cheap clone of
+/// the doc (yrs `Doc` is an Arc handle), so it reads live state.
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
-/// inside `nogvl` and holds no lock across the GVL boundary.
-#[magnus::wrap(class = "Y::Lexical", free_immediately, size)]
-struct RbLexical(Doc);
+/// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
+/// keep that discipline: the render emits deferred segments, and the Ruby
+/// layer runs the app's blocks only after the transaction has closed.
+#[magnus::wrap(class = "Y::NativeLexical", free_immediately, size)]
+struct RbLexical {
+    doc: Doc,
+    rules: Rules,
+}
 
 impl RbLexical {
-    /// `Y::Lexical.new(doc)`
-    fn new(doc: &RbDoc) -> Self {
-        RbLexical(doc.0.clone())
+    /// `Y::NativeLexical.new(doc, rules_json)` — the Y::Lexical facade
+    /// compiles its `nodes:` config to the rules JSON.
+    fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
+        Ok(RbLexical {
+            doc: doc.0.clone(),
+            rules: parse_rules(&rules_json)?,
+        })
     }
 
     /// Render the document's XML root (default `"root"`, Lexical's standard
-    /// collab root name) to HTML, natively — no Node process or headless
-    /// editor. Output matches Lexxy's own serializer (the HTML a lexxy-editor
-    /// submits to Rails) byte-for-byte on the reference fixture; see
-    /// `lexical_html.rs` for the schema coverage and caveats. Returns nil when
-    /// the root is missing or not Lexical-shaped, e.g. a ProseMirror document.
-    fn to_html(&self, args: &[Value]) -> Result<Option<String>, Error> {
-        if args.len() > 1 {
-            let ruby = Ruby::get().unwrap();
-            return Err(Error::new(
-                ruby.exception_arg_error(),
-                format!(
-                    "wrong number of arguments (given {}, expected 0..1)",
-                    args.len()
-                ),
-            ));
-        }
-        let name: String = match args.first() {
-            Some(arg) => TryConvert::try_convert(*arg)?,
-            None => "root".to_string(),
-        };
-        let doc = &self.0;
-        Ok(nogvl(move || {
+    /// collab root name) natively — no Node process or headless editor. The
+    /// native side renders core Lexical plus whatever the rules cover; with
+    /// the rule set `Y::Lexxy` passes, output matches Lexxy's own serializer
+    /// byte-for-byte on the reference fixtures (see `lexical_html.rs`). Returns nil when the root is missing or not
+    /// Lexical-shaped, e.g. a ProseMirror document; a String when no
+    /// callback rule fired; otherwise the nested segment arrays the Ruby
+    /// layer splices.
+    fn native_to_html(&self, args: &[Value]) -> Result<Value, Error> {
+        let name = root_name_arg(args, "root")?;
+        let doc = &self.doc;
+        let rules = &self.rules;
+        let segments = nogvl(move || {
             let txn = doc.transact();
             let fragment = txn.get_xml_fragment(name.as_str())?;
-            lexical_html::render(&txn, &fragment)
-        }))
+            lexical_html::render_segments(&txn, &fragment, rules)
+        });
+        segments_result(segments)
+    }
+
+    /// The document's node types as observed facts, JSON-encoded — the
+    /// native half of the facade's `node_types` discovery aid. Nil when the
+    /// root is missing or not Lexical-shaped.
+    fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
+        let name = root_name_arg(args, "root")?;
+        let doc = &self.doc;
+        let map = nogvl(move || {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(name.as_str())?;
+            lexical_html::collect_node_types(&txn, &fragment)
+        });
+        let ruby = Ruby::get().unwrap();
+        match map {
+            None => Ok(ruby.qnil().as_value()),
+            Some(map) => Ok(render_rules::type_map_json(&map, |ty| {
+                if self.rules.nodes.contains_key(ty) {
+                    Some("rule")
+                } else if lexical_html::is_builtin(ty) {
+                    Some("builtin")
+                } else {
+                    None
+                }
+            })
+            .into_value_with(&ruby)),
+        }
     }
 }
 
@@ -387,49 +418,145 @@ impl RbLexical {
 // Y::ProseMirror — schema-pinned rendering of ProseMirror/Tiptap documents
 // ============================================================================
 
-/// A ProseMirror/Tiptap view over a `Y::Doc`. The schema knowledge (node/mark
-/// names, Tiptap's serializer semantics) lives here rather than on the
-/// schema-agnostic `Doc`. Holds a cheap clone of the doc (yrs `Doc` is an Arc
-/// handle), so it reads live state.
+/// A ProseMirror view over a `Y::Doc`. The schema knowledge lives here rather
+/// than on the schema-agnostic `Doc`: core ProseMirror natively, everything
+/// else through the render rules compiled at construction (see
+/// `render_rules` — the `Y::Tiptap` facade's rule set arrives that way).
+/// Holds a cheap clone of the doc (yrs `Doc` is an Arc handle), so it reads
+/// live state.
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
-/// inside `nogvl` and holds no lock across the GVL boundary.
-#[magnus::wrap(class = "Y::ProseMirror", free_immediately, size)]
-struct RbProseMirror(Doc);
+/// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
+/// keep that discipline: the render emits deferred segments, and the Ruby
+/// layer runs the app's blocks only after the transaction has closed.
+#[magnus::wrap(class = "Y::NativeProseMirror", free_immediately, size)]
+struct RbProseMirror {
+    doc: Doc,
+    rules: Rules,
+}
 
 impl RbProseMirror {
-    /// `Y::ProseMirror.new(doc)`
-    fn new(doc: &RbDoc) -> Self {
-        RbProseMirror(doc.0.clone())
+    /// `Y::NativeProseMirror.new(doc, rules_json)` — the Y::ProseMirror facade
+    /// compiles its `nodes:`/`marks:` config to the rules JSON.
+    fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
+        Ok(RbProseMirror {
+            doc: doc.0.clone(),
+            rules: parse_rules(&rules_json)?,
+        })
     }
 
     /// Render an XML root (default `"default"`, the fragment name Tiptap's
-    /// Collaboration extension uses) to HTML. Output follows tiptap-php and
-    /// matches Tiptap's `getHTML()` on the reference fixture; see
-    /// `prosemirror_html.rs` for coverage and caveats. Returns nil when the
-    /// root is missing or not ProseMirror-shaped (e.g. a Lexical document).
-    fn to_html(&self, args: &[Value]) -> Result<Option<String>, Error> {
-        if args.len() > 1 {
-            let ruby = Ruby::get().unwrap();
-            return Err(Error::new(
-                ruby.exception_arg_error(),
-                format!(
-                    "wrong number of arguments (given {}, expected 0..1)",
-                    args.len()
-                ),
-            ));
-        }
-        let name: String = match args.first() {
-            Some(arg) => TryConvert::try_convert(*arg)?,
-            None => "default".to_string(),
-        };
-        let doc = &self.0;
-        Ok(nogvl(move || {
+    /// Collaboration extension uses). The native side renders core
+    /// ProseMirror plus whatever the rules cover; with the rule set
+    /// `Y::Tiptap` passes, output matches Tiptap's own `getHTML()`
+    /// byte-for-byte on the reference fixtures (see `prosemirror_html.rs`
+    /// for coverage and caveats). Returns nil when the root is missing or
+    /// not ProseMirror-shaped (e.g. a Lexical document); a String when no
+    /// callback rule fired; otherwise the nested segment arrays the Ruby
+    /// layer splices.
+    fn native_to_html(&self, args: &[Value]) -> Result<Value, Error> {
+        let name = root_name_arg(args, "default")?;
+        let doc = &self.doc;
+        let rules = &self.rules;
+        let segments = nogvl(move || {
             let txn = doc.transact();
             let fragment = txn.get_xml_fragment(name.as_str())?;
-            prosemirror_html::render(&txn, &fragment)
-        }))
+            prosemirror_html::render_segments(&txn, &fragment, rules)
+        });
+        segments_result(segments)
     }
+
+    /// The document's node types as observed facts, JSON-encoded — the
+    /// native half of the facade's `node_types` discovery aid. Nil when the
+    /// root is missing or not ProseMirror-shaped.
+    fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
+        let name = root_name_arg(args, "default")?;
+        let doc = &self.doc;
+        let map = nogvl(move || {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(name.as_str())?;
+            prosemirror_html::collect_node_types(&txn, &fragment)
+        });
+        let ruby = Ruby::get().unwrap();
+        match map {
+            None => Ok(ruby.qnil().as_value()),
+            Some(map) => Ok(render_rules::type_map_json(&map, |ty| {
+                if self.rules.nodes.contains_key(ty) {
+                    Some("rule")
+                } else if prosemirror_html::is_builtin(ty) {
+                    Some("builtin")
+                } else {
+                    None
+                }
+            })
+            .into_value_with(&ruby)),
+        }
+    }
+}
+
+/// The optional positional root-fragment name both renderers take.
+fn root_name_arg(args: &[Value], default: &str) -> Result<String, Error> {
+    if args.len() > 1 {
+        let ruby = Ruby::get().unwrap();
+        return Err(Error::new(
+            ruby.exception_arg_error(),
+            format!(
+                "wrong number of arguments (given {}, expected 0..1)",
+                args.len()
+            ),
+        ));
+    }
+    match args.first() {
+        Some(arg) => TryConvert::try_convert(*arg),
+        None => Ok(default.to_string()),
+    }
+}
+
+fn parse_rules(json: &str) -> Result<Rules, Error> {
+    Rules::parse(json).map_err(|e| {
+        let ruby = Ruby::get().unwrap();
+        Error::new(ruby.exception_arg_error(), e)
+    })
+}
+
+/// A render's result as a Ruby value: nil (root missing or foreign-shaped),
+/// a String when every segment is finished HTML, or nested arrays of
+/// `String | [node_type, attrs_json, content, child_types]` for the Ruby
+/// layer to splice.
+fn segments_result(segments: Option<Vec<Segment>>) -> Result<Value, Error> {
+    let ruby = Ruby::get().unwrap();
+    match segments {
+        None => Ok(ruby.qnil().as_value()),
+        Some(segs) => match render_rules::flatten(segs) {
+            render_rules::Flattened::Html(html) => Ok(html.into_value_with(&ruby)),
+            render_rules::Flattened::Deferred(segs) => {
+                Ok(segments_to_ruby(&ruby, segs)?.as_value())
+            }
+        },
+    }
+}
+
+fn segments_to_ruby(ruby: &Ruby, segments: Vec<Segment>) -> Result<RArray, Error> {
+    let arr = ruby.ary_new();
+    for seg in segments {
+        match seg {
+            Segment::Html(s) => arr.push(s)?,
+            Segment::Deferred {
+                node_type,
+                attrs_json,
+                child_types,
+                content,
+            } => {
+                let entry = ruby.ary_new();
+                entry.push(node_type)?;
+                entry.push(attrs_json)?;
+                entry.push(segments_to_ruby(ruby, content)?)?;
+                entry.push(child_types)?;
+                arr.push(entry)?;
+            }
+        }
+    }
+    Ok(arr)
 }
 
 // ============================================================================
@@ -512,14 +639,17 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "handle_sync_message",
         method!(RbDoc::handle_sync_message, 1),
     )?;
-    // Y::Lexical: schema-pinned Lexical/Lexxy rendering over a Doc.
-    let lexical_class = module.define_class("Lexical", ruby.class_object())?;
-    lexical_class.define_singleton_method("new", function!(RbLexical::new, 1))?;
-    lexical_class.define_method("to_html", method!(RbLexical::to_html, -1))?;
-    // Y::ProseMirror: schema-pinned ProseMirror/Tiptap rendering over a Doc.
-    let prosemirror_class = module.define_class("ProseMirror", ruby.class_object())?;
-    prosemirror_class.define_singleton_method("new", function!(RbProseMirror::new, 1))?;
-    prosemirror_class.define_method("to_html", method!(RbProseMirror::to_html, -1))?;
+    // The native renderers are the handles the Ruby facades (Y::Lexical /
+    // Y::Lexxy and Y::ProseMirror / Y::Tiptap in lib/y/) hold; the Ruby
+    // layer marks these classes private_constant.
+    let lexical_class = module.define_class("NativeLexical", ruby.class_object())?;
+    lexical_class.define_singleton_method("new", function!(RbLexical::native_new, 2))?;
+    lexical_class.define_method("to_html", method!(RbLexical::native_to_html, -1))?;
+    lexical_class.define_method("node_types", method!(RbLexical::node_types, -1))?;
+    let prosemirror_class = module.define_class("NativeProseMirror", ruby.class_object())?;
+    prosemirror_class.define_singleton_method("new", function!(RbProseMirror::native_new, 2))?;
+    prosemirror_class.define_method("to_html", method!(RbProseMirror::native_to_html, -1))?;
+    prosemirror_class.define_method("node_types", method!(RbProseMirror::node_types, -1))?;
 
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;
