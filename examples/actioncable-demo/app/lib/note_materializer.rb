@@ -16,6 +16,11 @@
 # An app with push consumers (search indexing, webhooks) would call
 # `materialize` from the channel's `on_change` instead — debounced, and
 # never raising (a raise there rejects the user's change).
+#
+# Nothing here is Rhino-specific: the pattern is per fragment + renderer.
+# Materializing the Tiptap page is the same code with `to_html("default")`
+# and no mark rule; the Lexxy page, `Y::Lexxy.new(ydoc).to_html("root")`.
+# The demo materializes one fragment because a real app has one editor.
 class NoteMaterializer
   # Rhino's strike is its own "rhino-strike" mark serializing <del>; one
   # mark rule teaches the renderer (see the Rhino page).
