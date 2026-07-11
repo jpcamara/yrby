@@ -10,8 +10,9 @@
 //! renderer's rule set, built on the same extension API apps use
 //! (`Y::Lexical` is the core base class). The Lexxy byte-parity guarantee is
 //! held there: the Ruby fixture tests and the live headless-Chrome e2e pin
-//! `Y::Lexxy#to_html` against a real editor's own serialized value. The native tests pin core output as regression goldens
-//! (stock Lexical has no canonical serializer to capture against).
+//! `Y::Lexxy#to_html` against a real editor's own serialized value. The
+//! native tests pin core output as regression goldens (stock Lexical has no
+//! canonical serializer to capture against).
 //!
 //! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in pure
 //! PHP — a schema-pinned renderer outside the JS runtime. This works from the
@@ -96,8 +97,9 @@ enum Work {
 /// `None` for it rather than a lossy guess.
 ///
 /// A `__type` the renderer doesn't recognize is handled differently: a
-/// registered rule renders it; otherwise the node renders its text in a
-/// `<p>`, so a Lexxy release that adds one stays readable.
+/// registered rule renders it; otherwise a leaf's text renders in a `<p>`
+/// and a container's block children render without an invented wrapper, so
+/// an editor node the schema hasn't heard of stays readable.
 pub fn render_segments<T: ReadTxn>(
     txn: &T,
     fragment: &XmlFragmentRef,
@@ -154,9 +156,9 @@ pub fn is_builtin(ty: &str) -> bool {
 }
 
 /// Walk the document and record what each node type actually looks like —
-/// the discovery aid behind `Y::Lexical#node_types`. Facts only: counts,
-/// attribute names (minus `__type`, which is the key), child types, and
-/// whether text runs were seen.
+/// the discovery aid behind `Y::Lexical#node_types`. It records facts:
+/// counts, attribute names (minus `__type`, which is the key), child types,
+/// and whether text runs were seen.
 pub fn collect_node_types<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<TypeMap> {
     if !is_lexical_shaped(txn, fragment) {
         return None;
@@ -904,9 +906,8 @@ mod tests {
     /// cells, five-level mixed lists, formatted links in headings, the full
     /// format stack, unicode and escaping edge cases, whitespace-only
     /// paragraphs. The load-bearing structures are probed by name below.
-    /// One non-obvious parity fact worth stating: Lexxy's sanitized export
-    /// drops colSpan/rowSpan, so matching it byte-for-byte means not emitting
-    /// them either.
+    /// Lexxy's sanitized export drops colSpan/rowSpan, so matching it
+    /// byte-for-byte means not emitting them either.
     #[test]
     fn core_rendering_of_the_torture_fixture_is_pinned() {
         let bytes = include_bytes!("fixtures/lexxy_torture.bin");

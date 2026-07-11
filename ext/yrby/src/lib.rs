@@ -418,11 +418,12 @@ impl RbLexical {
 // Y::ProseMirror — schema-pinned rendering of ProseMirror/Tiptap documents
 // ============================================================================
 
-/// A ProseMirror/Tiptap view over a `Y::Doc`. The schema knowledge (node/mark
-/// names, Tiptap's serializer semantics) lives here rather than on the
-/// schema-agnostic `Doc`. Holds a cheap clone of the doc (yrs `Doc` is an Arc
-/// handle), so it reads live state, plus the custom render rules compiled at
-/// construction (see `render_rules`).
+/// A ProseMirror view over a `Y::Doc`. The schema knowledge lives here rather
+/// than on the schema-agnostic `Doc`: core ProseMirror natively, everything
+/// else through the render rules compiled at construction (see
+/// `render_rules` — the `Y::Tiptap` facade's rule set arrives that way).
+/// Holds a cheap clone of the doc (yrs `Doc` is an Arc handle), so it reads
+/// live state.
 ///
 /// Thread safety matches `Y::Doc`: every method opens its own transaction
 /// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
@@ -445,12 +446,14 @@ impl RbProseMirror {
     }
 
     /// Render an XML root (default `"default"`, the fragment name Tiptap's
-    /// Collaboration extension uses). Output follows tiptap-php and matches
-    /// Tiptap's `getHTML()` on the reference fixture; see
-    /// `prosemirror_html.rs` for coverage and caveats. Returns nil when the
-    /// root is missing or not ProseMirror-shaped (e.g. a Lexical document); a
-    /// String when no callback rule fired; otherwise the nested segment arrays
-    /// the Ruby layer splices.
+    /// Collaboration extension uses). The native side renders core
+    /// ProseMirror plus whatever the rules cover; with the rule set
+    /// `Y::Tiptap` passes, output matches Tiptap's own `getHTML()`
+    /// byte-for-byte on the reference fixtures (see `prosemirror_html.rs`
+    /// for coverage and caveats). Returns nil when the root is missing or
+    /// not ProseMirror-shaped (e.g. a Lexical document); a String when no
+    /// callback rule fired; otherwise the nested segment arrays the Ruby
+    /// layer splices.
     fn native_to_html(&self, args: &[Value]) -> Result<Value, Error> {
         let name = root_name_arg(args, "default")?;
         let doc = &self.doc;
@@ -637,8 +640,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbDoc::handle_sync_message, 1),
     )?;
     // The native renderers are the handles the Ruby facades (Y::Lexical /
-    // Y::Lexxy and Y::ProseMirror in lib/y/) hold; the Ruby layer marks
-    // these classes private_constant.
+    // Y::Lexxy and Y::ProseMirror / Y::Tiptap in lib/y/) hold; the Ruby
+    // layer marks these classes private_constant.
     let lexical_class = module.define_class("NativeLexical", ruby.class_object())?;
     lexical_class.define_singleton_method("new", function!(RbLexical::native_new, 2))?;
     lexical_class.define_method("to_html", method!(RbLexical::native_to_html, -1))?;

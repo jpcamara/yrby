@@ -21,10 +21,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   type — the structural facts behind gallery counts and nested-list classes).
   The block runs after the document read has finished, never while the doc is
   locked, so it can safely read or write the same doc. Blocks are proven
-  sufficient for whole schemas: the tests reimplement the entire built-in
-  Lexxy schema through this API, byte-identical to the native renderer on
-  every fixture. With no callback rules the render path is unchanged, byte
-  for byte. See "Custom nodes and marks" in the README.
+  sufficient for whole schemas: the gem's own editor schemas (`Y::Lexxy`,
+  `Y::Tiptap`) ship through this API, and the fixture tests hold their
+  output byte-identical to a live editor's. With no callback rules the
+  render path is unchanged, byte for byte. See "Custom nodes and marks" in
+  the README.
 - **`Y::Lexical#node_types` / `Y::ProseMirror#node_types` — schema
   discovery.** Ask a real document which node types it holds and what they
   look like: counts, attribute names as stored, child types, whether text
@@ -43,7 +44,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   has no canonical serializer, so the editor-specific class carries the
   editor's name — `Y::Lexxy.new(doc).to_html` is the byte-parity call for
   Lexxy/Rails apps, and `Y::Lexical` is the base any other Lexical editor
-  extends with its own rules.** The
+  extends with its own rules. The
   native side renders core structure — paragraphs, headings, quotes, code,
   lists, tables, links, the full text-format model. Lexxy's own node types
   (attachments, galleries, `early_escape_code`, `horizontal_divider`) and its

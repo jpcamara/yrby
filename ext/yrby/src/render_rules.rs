@@ -119,8 +119,8 @@ impl Emitter {
 }
 
 /// What flattening produced. Both variants are normal outcomes — `Deferred`
-/// isn't a failure, it's "callback nodes are present, splice them" — so this
-/// is an enum, not a `Result`.
+/// means callback nodes are present and need splicing — so this is an enum
+/// rather than a `Result`.
 pub enum Flattened {
     Html(String),
     Deferred(Vec<Segment>),

@@ -21,13 +21,13 @@
 //! is held at the Ruby layer; the native tests pin core output as goldens
 //! where a fixture contains Tiptap-only nodes.
 //!
-//! Marks are the one Tiptap-flavored piece that stays native, deliberately:
-//! mark serialization is text-run machinery (nesting order, textStyle's CSS,
-//! code's exclusivity), not node structure, so it can't ride the rule
-//! system. The built-in set covers schema-basic's marks and Tiptap's —
-//! nesting outermost-first: link, bold, italic, strike, underline,
-//! highlight, then subscript/superscript. `code` excludes every other mark,
-//! so a code run is just `<code>`.
+//! Marks stay native on purpose: mark serialization is text-run machinery
+//! (nesting order, textStyle's CSS, code's exclusivity), which the rule
+//! system can't express. The built-in set covers schema-basic's marks and
+//! Tiptap's — nesting outermost-first: link, a textStyle span, bold, italic,
+//! strike, underline, highlight, then subscript/superscript. `code` excludes
+//! the other formatting marks, so a code run is `<code>` alone — though a
+//! link still wraps it (see `render_run`).
 //!
 //! Custom nodes and marks: apps register rules by node type and mark name
 //! (see `render_rules`). A node rule is consulted before the built-in arms, so
@@ -47,8 +47,8 @@ use yrs::{
     XmlTextRef,
 };
 
-// The block tree is walked on a heap stack, so depth costs memory, not native
-// stack frames; this caps the work a pathological document can demand.
+// The block tree is walked on a heap stack, so depth can't overflow the
+// native call stack; this caps the work a pathological document can demand.
 const MAX_DEPTH: usize = 1024;
 
 /// A unit of block work on the traversal stack. `Open` renders a node (pushing its
@@ -139,10 +139,11 @@ pub fn is_builtin(ty: &str) -> bool {
 }
 
 /// Walk the document and record what each node type actually looks like —
-/// the discovery aid behind `Y::ProseMirror#node_types`. Facts only: counts,
-/// attribute names, child element types, and whether text runs were seen
-/// (child types plus text is what tells a human `contains: :blocks` vs
-/// `:inline` — the storage can't say, but their own schema can).
+/// the discovery aid behind `Y::ProseMirror#node_types`. It records facts:
+/// counts, attribute names, child element types, and whether text runs were
+/// seen. The inline-vs-blocks distinction itself is editor-schema knowledge
+/// the storage never serializes, so the rule author reads it off the child
+/// types and text flags.
 pub fn collect_node_types<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<TypeMap> {
     if !is_prosemirror_shaped(txn, fragment) {
         return None;
@@ -540,7 +541,7 @@ fn render_inline<T: ReadTxn>(
 /// A rule node in inline position (inside a text block). Unlike Lexical's
 /// childless decorators, a ProseMirror inline node can hold real content, so
 /// the content slot renders — as inline content, since there are no blocks
-/// inside a text block (`content: blocks` behaves like `inline` here).
+/// inside a text block (a blocks content slot behaves like inline here).
 fn render_rule_inline<T: ReadTxn>(
     txn: &T,
     e: &XmlElementRef,
@@ -619,8 +620,8 @@ fn render_text_runs<T: ReadTxn>(txn: &T, t: &XmlTextRef, em: &mut Emitter, rules
 /// A registered mark rule claims its stored name from the built-in wraps
 /// (overriding it) and wraps outside everything; multiple custom marks nest
 /// alphabetically by name, so output is deterministic regardless of
-/// registration order. Overriding changes the markup, not the semantics: a
-/// claimed `code` still excludes the other formatting marks.
+/// registration order. Overriding replaces only the markup: a claimed
+/// `code` still excludes the other formatting marks.
 fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
     let mut html = escape_text(text);
     let Some(marks) = marks else {
@@ -1318,7 +1319,7 @@ mod tests {
             "<span data-comment-id=\"c1\"><b><em>x</em></b></span>"
         );
 
-        // Overriding code replaces its tag, not its semantics: the other
+        // Overriding code replaces only its tag: the other
         // formatting marks stay excluded.
         let kbd = Rules::parse(r#"{ "marks": { "code": { "tag": "kbd" } } }"#).unwrap();
         let mut a = Attrs::new();

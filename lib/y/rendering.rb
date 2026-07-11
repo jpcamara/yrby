@@ -245,7 +245,12 @@ module Y
 
   class ProseMirror
     # `Y::ProseMirror.new(doc, nodes: {...}, marks: {...})` — see
-    # Y::RenderRules for the rule forms.
+    # Y::RenderRules for the rule forms. This is core ProseMirror only:
+    # prosemirror-schema-basic plus the prosemirror-tables family, and the
+    # full mark set (marks are native — see `rules.mark` for overrides).
+    # Editor-specific nodes arrive as rules — Y::Tiptap subclasses this with
+    # Tiptap's extension nodes; a different ProseMirror editor brings its
+    # own rule set the same way.
     def initialize(doc, nodes: {}, marks: {})
       builder = RenderRules::Builder.new(marks_allowed: true)
       yield builder if block_given?

@@ -220,11 +220,10 @@ The support is layered like the Lexical side: `Y::ProseMirror` covers core
 ProseMirror natively — prosemirror-schema-basic plus the prosemirror-tables
 family — and Tiptap's extension nodes (task lists, mentions, the details
 family) are `Y::Tiptap`'s rule set (`Y::Tiptap::NODES`), built on the
-extension API below. Marks are the one Tiptap-flavored piece that stays in
-the base: mark rendering (nesting order, `textStyle` CSS, `code`
-exclusivity) runs through native text-run machinery that node rules don't
-reach, so `Y::ProseMirror` renders Tiptap's mark set as-is and `rules.mark`
-overrides individual marks.
+extension API below. Marks stay in the base: mark rendering (nesting order,
+`textStyle` CSS, `code` exclusivity) runs through native text-run machinery
+that node rules don't reach, so `Y::ProseMirror` renders Tiptap's mark set
+as-is and `rules.mark` overrides individual marks.
 
 #### `Y::Lexxy` (and `Y::Lexical`, its base)
 

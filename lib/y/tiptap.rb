@@ -8,8 +8,8 @@ module Y
   # identical to a live editor's own `getHTML()`.
   #
   # Tiptap's marks (underline, highlight, sub/superscript, textStyle) render
-  # natively in the base class — mark serialization is text-run machinery,
-  # not node structure, so it isn't expressible as rules.
+  # natively in the base class — mark serialization is text-run machinery
+  # the rule system can't express.
   class Tiptap < ProseMirror
     # Tiptap's TaskItem markup: the data-checked flag (false when unset), a
     # label wrapping the checkbox, and the item body in a div.

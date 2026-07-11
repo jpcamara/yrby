@@ -178,8 +178,8 @@ class RenderingRulesTest < Minitest::Test
     assert_includes types["heading"]["attrs"], "__tag"
     assert types["paragraph"]["text"]
 
-    # Core Y::Lexical reports the same type as unhandled — the honest signal
-    # that it needs a rule (or Y::Lexxy).
+    # Core Y::Lexical reports the same type as unhandled — it needs a rule
+    # (or Y::Lexxy).
     core = Y::Lexical.new(lexical_doc).node_types
 
     assert_nil core["action_text_attachment"]["handled"]
