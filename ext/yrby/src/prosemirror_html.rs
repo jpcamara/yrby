@@ -29,7 +29,7 @@
 
 use crate::render_rules::{
     any_attr_string, resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, MarkRule,
-    NodeRule, Rules, Segment,
+    NodeRule, Rules, Segment, TypeMap,
 };
 use yrs::types::text::YChange;
 use yrs::types::Attrs;
@@ -96,6 +96,90 @@ pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> 
             .into_html()
             .expect("no callback rules registered")
     })
+}
+
+/// The node types the built-in arms cover (both Tiptap and schema-basic
+/// spellings). Everything else needs a rule.
+pub fn is_builtin(ty: &str) -> bool {
+    matches!(
+        ty,
+        "paragraph"
+            | "heading"
+            | "codeBlock"
+            | "code_block"
+            | "blockquote"
+            | "bulletList"
+            | "bullet_list"
+            | "orderedList"
+            | "ordered_list"
+            | "listItem"
+            | "list_item"
+            | "taskList"
+            | "task_list"
+            | "taskItem"
+            | "task_item"
+            | "table"
+            | "tableRow"
+            | "table_row"
+            | "tableHeader"
+            | "table_header"
+            | "tableCell"
+            | "table_cell"
+            | "details"
+            | "detailsSummary"
+            | "details_summary"
+            | "detailsContent"
+            | "details_content"
+            | "horizontalRule"
+            | "horizontal_rule"
+            | "image"
+            | "hardBreak"
+            | "hard_break"
+            | "mention"
+    )
+}
+
+/// Walk the document and record what each node type actually looks like —
+/// the discovery aid behind `Y::ProseMirror#node_types`. Facts only: counts,
+/// attribute names, child element types, and whether text runs were seen
+/// (child types plus text is what tells a human `contains: :blocks` vs
+/// `:inline` — the storage can't say, but their own schema can).
+pub fn collect_node_types<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<TypeMap> {
+    if !is_prosemirror_shaped(txn, fragment) {
+        return None;
+    }
+    let mut map = TypeMap::new();
+    for node in fragment.children(txn) {
+        if let XmlOut::Element(e) = node {
+            observe(txn, &e, &mut map, 0);
+        }
+    }
+    Some(map)
+}
+
+fn observe<T: ReadTxn>(txn: &T, e: &XmlElementRef, map: &mut TypeMap, depth: usize) {
+    let ty = e.tag().to_string();
+    let info = map.entry(ty.clone()).or_default();
+    info.count += 1;
+    for (key, _) in e.attributes(txn) {
+        info.attrs.insert(key.to_string());
+    }
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    for child in e.children(txn) {
+        match child {
+            XmlOut::Text(_) => map.get_mut(&ty).expect("just inserted").text = true,
+            XmlOut::Element(el) => {
+                map.get_mut(&ty)
+                    .expect("just inserted")
+                    .children
+                    .insert(el.tag().to_string());
+                observe(txn, &el, map, depth + 1);
+            }
+            XmlOut::Fragment(_) => {}
+        }
+    }
 }
 
 /// A root is ProseMirror-shaped when it's empty or its first child is a block
@@ -1281,6 +1365,36 @@ mod tests {
         assert_eq!(attrs_json, r#"{"src":"https://v.example/1"}"#);
         assert_eq!(child_types, &["paragraph"]);
         assert!(matches!(&content[0], Segment::Html(s) if s == "<p>the caption</p>"));
+    }
+
+    /// Discovery reports facts per type, and an unknown type annotates as
+    /// unhandled (null) — the signal a rule author filters for.
+    #[test]
+    fn node_type_discovery_reports_unknown_types_as_unhandled() {
+        let doc = Doc::new();
+        let frag = doc.get_or_insert_xml_fragment("default");
+        {
+            let mut txn = doc.transact_mut();
+            let callout = frag.push_back(&mut txn, XmlElementPrelim::empty("callout"));
+            callout.insert_attribute(&mut txn, "kind", "warning");
+            let p = callout.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+            p.push_back(&mut txn, XmlTextPrelim::new("body"));
+        }
+        let txn = doc.transact();
+        let map = collect_node_types(&txn, &frag).unwrap();
+        let json = crate::render_rules::type_map_json(&map, |ty| {
+            if is_builtin(ty) {
+                Some("builtin")
+            } else {
+                None
+            }
+        });
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["callout"]["handled"], serde_json::Value::Null);
+        assert_eq!(v["callout"]["attrs"][0], "kind");
+        assert_eq!(v["callout"]["children"][0], "paragraph");
+        assert_eq!(v["paragraph"]["handled"], "builtin");
+        assert_eq!(v["paragraph"]["text"], true);
     }
 
     /// A custom mark claims its stored name from the built-ins and wraps

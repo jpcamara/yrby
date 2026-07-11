@@ -232,6 +232,16 @@ module Y
 
       RenderRules.splice(result, @render_callbacks)
     end
+
+    # What node types this document actually contains — the discovery aid
+    # for writing rules. Facts per type: "count", "attrs" (names as stored),
+    # "children" (child node types), "text" (whether it holds text runs),
+    # and "handled" ("builtin", "rule", or nil — nil marks the types you
+    # still need a rule for). Children plus text is how you pick contains:.
+    def node_types(root = nil)
+      json = root.nil? ? @native.node_types : @native.node_types(root)
+      json && JSON.parse(json)
+    end
   end
 
   class ProseMirror
@@ -251,6 +261,16 @@ module Y
       return result unless result.is_a?(Array)
 
       RenderRules.splice(result, @render_callbacks)
+    end
+
+    # What node types this document actually contains — the discovery aid
+    # for writing rules. Facts per type: "count", "attrs" (names as stored),
+    # "children" (child node types), "text" (whether it holds text runs),
+    # and "handled" ("builtin", "rule", or nil — nil marks the types you
+    # still need a rule for). Children plus text is how you pick contains:.
+    def node_types(root = nil)
+      json = root.nil? ? @native.node_types : @native.node_types(root)
+      json && JSON.parse(json)
     end
   end
 

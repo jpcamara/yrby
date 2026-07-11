@@ -17,7 +17,7 @@
 //! Rules arrive as one JSON document (see `parse`), so the same format
 //! serves any binding or caller.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use yrs::{Any, Out, ReadTxn, Xml};
 
 /// One piece of renderer output. `Html` is finished markup; `Deferred` is a
@@ -281,6 +281,49 @@ pub struct MarkRule {
 pub struct Rules {
     pub nodes: HashMap<String, NodeRule>,
     pub marks: HashMap<String, MarkRule>,
+}
+
+/// What a document walk observed about one node type — the facts behind
+/// `Y::Lexical#node_types` / `Y::ProseMirror#node_types`, the discovery aid
+/// for writing rules against a real document.
+#[derive(Default)]
+pub struct TypeInfo {
+    pub count: usize,
+    pub attrs: BTreeSet<String>,
+    pub children: BTreeSet<String>,
+    pub text: bool,
+}
+
+/// Per-type observations, ordered for stable output.
+pub type TypeMap = BTreeMap<String, TypeInfo>;
+
+/// Serialize the observations, annotating each type with what already
+/// handles it (`"rule"`, `"builtin"`, or null — the ones a rule author needs
+/// to cover).
+pub fn type_map_json(map: &TypeMap, handled: impl Fn(&str) -> Option<&'static str>) -> String {
+    let mut root = serde_json::Map::new();
+    for (ty, info) in map {
+        let mut entry = serde_json::Map::new();
+        entry.insert("count".into(), info.count.into());
+        entry.insert(
+            "attrs".into(),
+            info.attrs.iter().cloned().collect::<Vec<_>>().into(),
+        );
+        entry.insert(
+            "children".into(),
+            info.children.iter().cloned().collect::<Vec<_>>().into(),
+        );
+        entry.insert("text".into(), info.text.into());
+        entry.insert(
+            "handled".into(),
+            match handled(ty) {
+                Some(by) => by.into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        root.insert(ty.clone(), entry.into());
+    }
+    serde_json::Value::Object(root).to_string()
 }
 
 impl Rules {

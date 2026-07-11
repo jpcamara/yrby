@@ -386,6 +386,33 @@ impl RbLexical {
         });
         segments_result(segments)
     }
+
+    /// The document's node types as observed facts, JSON-encoded — the
+    /// native half of the facade's `node_types` discovery aid. Nil when the
+    /// root is missing or not Lexical-shaped.
+    fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
+        let name = root_name_arg(args, "root")?;
+        let doc = &self.doc;
+        let map = nogvl(move || {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(name.as_str())?;
+            lexical_html::collect_node_types(&txn, &fragment)
+        });
+        let ruby = Ruby::get().unwrap();
+        match map {
+            None => Ok(ruby.qnil().as_value()),
+            Some(map) => Ok(render_rules::type_map_json(&map, |ty| {
+                if self.rules.nodes.contains_key(ty) {
+                    Some("rule")
+                } else if lexical_html::is_builtin(ty) {
+                    Some("builtin")
+                } else {
+                    None
+                }
+            })
+            .into_value_with(&ruby)),
+        }
+    }
 }
 
 // ============================================================================
@@ -435,6 +462,33 @@ impl RbProseMirror {
             prosemirror_html::render_segments(&txn, &fragment, rules)
         });
         segments_result(segments)
+    }
+
+    /// The document's node types as observed facts, JSON-encoded — the
+    /// native half of the facade's `node_types` discovery aid. Nil when the
+    /// root is missing or not ProseMirror-shaped.
+    fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
+        let name = root_name_arg(args, "default")?;
+        let doc = &self.doc;
+        let map = nogvl(move || {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(name.as_str())?;
+            prosemirror_html::collect_node_types(&txn, &fragment)
+        });
+        let ruby = Ruby::get().unwrap();
+        match map {
+            None => Ok(ruby.qnil().as_value()),
+            Some(map) => Ok(render_rules::type_map_json(&map, |ty| {
+                if self.rules.nodes.contains_key(ty) {
+                    Some("rule")
+                } else if prosemirror_html::is_builtin(ty) {
+                    Some("builtin")
+                } else {
+                    None
+                }
+            })
+            .into_value_with(&ruby)),
+        }
     }
 }
 
@@ -589,9 +643,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let lexical_class = module.define_class("NativeLexical", ruby.class_object())?;
     lexical_class.define_singleton_method("new", function!(RbLexical::native_new, 2))?;
     lexical_class.define_method("to_html", method!(RbLexical::native_to_html, -1))?;
+    lexical_class.define_method("node_types", method!(RbLexical::node_types, -1))?;
     let prosemirror_class = module.define_class("NativeProseMirror", ruby.class_object())?;
     prosemirror_class.define_singleton_method("new", function!(RbProseMirror::native_new, 2))?;
     prosemirror_class.define_method("to_html", method!(RbProseMirror::native_to_html, -1))?;
+    prosemirror_class.define_method("node_types", method!(RbProseMirror::node_types, -1))?;
 
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;

@@ -25,6 +25,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Lexxy schema through this API, byte-identical to the native renderer on
   every fixture. With no callback rules the render path is unchanged, byte
   for byte. See "Custom nodes and marks" in the README.
+- **`Y::Lexical#node_types` / `Y::ProseMirror#node_types` — schema
+  discovery.** Ask a real document which node types it holds and what they
+  look like: counts, attribute names as stored, child types, whether text
+  runs appear, and whether a builtin or one of your rules already handles
+  each ("handled" nil marks what still needs a rule). Editors store names
+  you'd never guess; this is how you find them.
 - `Y::RenderRules.escape_text` / `escape_attr` — the exact escaping the
   native renderers use, for blocks that build markup from stored values
   (ERB's `html_escape` also rewrites apostrophes, which breaks byte parity

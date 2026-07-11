@@ -45,6 +45,7 @@
 
 use crate::render_rules::{
     resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, NodeRule, Rules, Segment,
+    TypeMap,
 };
 use yrs::types::text::YChange;
 use yrs::{
@@ -127,6 +128,101 @@ pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> 
             .into_html()
             .expect("no callback rules registered")
     })
+}
+
+/// The node types a Lexical renderer's built-in arms cover (core Lexical;
+/// inline and decorator types included). Everything else needs a rule.
+pub fn is_builtin(ty: &str) -> bool {
+    matches!(
+        ty,
+        "paragraph"
+            | "heading"
+            | "quote"
+            | "code"
+            | "list"
+            | "listitem"
+            | "table"
+            | "tablerow"
+            | "tablecell"
+            | "link"
+            | "autolink"
+            | "linebreak"
+            | "tab"
+            | "text"
+            | "horizontalrule"
+    )
+}
+
+/// Walk the document and record what each node type actually looks like —
+/// the discovery aid behind `Y::Lexical#node_types`. Facts only: counts,
+/// attribute names (minus `__type`, which is the key), child types, and
+/// whether text runs were seen.
+pub fn collect_node_types<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<TypeMap> {
+    if !is_lexical_shaped(txn, fragment) {
+        return None;
+    }
+    let mut map = TypeMap::new();
+    for node in fragment.children(txn) {
+        match node {
+            XmlOut::Text(t) => observe_text_node(txn, &t, &mut map, 0),
+            XmlOut::Element(e) => observe_element(txn, &e, &mut map),
+            XmlOut::Fragment(_) => {}
+        }
+    }
+    Some(map)
+}
+
+fn observe_text_node<T: ReadTxn>(txn: &T, t: &XmlTextRef, map: &mut TypeMap, depth: usize) {
+    let ty = node_type(txn, t);
+    let info = map.entry(ty.clone()).or_default();
+    info.count += 1;
+    for (key, _) in t.attributes(txn) {
+        if key != "__type" {
+            info.attrs.insert(key.to_string());
+        }
+    }
+    if depth >= MAX_BLOCK_DEPTH {
+        return;
+    }
+    let mut children = Vec::new();
+    for d in t.diff(txn, YChange::identity) {
+        match d.insert {
+            Out::Any(Any::String(_)) => {
+                map.get_mut(&ty).expect("just inserted").text = true;
+            }
+            Out::YXmlText(child) => {
+                let child_ty = node_type(txn, &child);
+                map.get_mut(&ty)
+                    .expect("just inserted")
+                    .children
+                    .insert(child_ty);
+                children.push(child);
+            }
+            Out::YXmlElement(child) => {
+                let child_ty = elem_type(txn, &child);
+                map.get_mut(&ty)
+                    .expect("just inserted")
+                    .children
+                    .insert(child_ty);
+                observe_element(txn, &child, map);
+            }
+            _ => {} // run-metadata maps are formatting, not children
+        }
+    }
+    for child in children {
+        observe_text_node(txn, &child, map, depth + 1);
+    }
+}
+
+fn observe_element<T: ReadTxn>(txn: &T, e: &XmlElementRef, map: &mut TypeMap) {
+    let ty = elem_type(txn, e);
+    let info = map.entry(ty).or_default();
+    info.count += 1;
+    for (key, _) in e.attributes(txn) {
+        if key != "__type" {
+            info.attrs.insert(key.to_string());
+        }
+    }
 }
 
 /// A root is Lexical-shaped when it is empty or at least one child carries the

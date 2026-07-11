@@ -166,6 +166,27 @@ class RenderingRulesTest < Minitest::Test
     end
   end
 
+  # The discovery aid: ask a real document which node types it holds, what
+  # they look like (attrs as stored, child types, text), and which ones
+  # still need a rule ("handled" nil).
+  def test_node_types_reports_the_documents_schema_as_facts
+    types = Y::Lexical.new(lexical_doc).node_types
+
+    assert_equal "builtin", types["paragraph"]["handled"]
+    assert_equal "rule", types["action_text_attachment"]["handled"],
+                 "the Lexxy layer covers attachments"
+    assert_includes types["heading"]["attrs"], "__tag"
+    assert types["paragraph"]["text"]
+
+    pm_types = Y::ProseMirror.new(prosemirror_doc("prosemirror_mention")).node_types
+
+    assert_equal "builtin", pm_types["mention"]["handled"]
+    assert_includes pm_types["mention"]["attrs"], "mentionSuggestionChar"
+    assert_includes pm_types["paragraph"]["children"], "mention"
+
+    assert_nil Y::Lexical.new(Y::Doc.new).node_types("nope")
+  end
+
   def test_rules_hold_up_under_concurrent_renders
     renderer = Y::Lexical.new(
       lexical_doc,

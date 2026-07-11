@@ -269,6 +269,23 @@ emits literal text content. `contains` declares what lives inside the node — `
 the default), `:blocks` (child block nodes — a container), or `:none` (a
 leaf). `void: true` skips the closing tag.
 
+You don't have to guess any of those names or shapes. Editors store types
+and attributes under names you'd never predict (Rhino's strike mark is
+`rhino-strike`; Lexical prefixes its own props `__`), so ask a real
+document instead — make one in your editor using your custom node, then:
+
+```ruby
+Y::ProseMirror.new(doc).node_types
+# => { "callout"   => { "count" => 2, "attrs" => ["kind"],
+#                       "children" => ["paragraph"], "text" => false,
+#                       "handled" => nil },
+#      "paragraph" => { ..., "handled" => "builtin" } }
+```
+
+`handled` nil marks the types that still need a rule; `attrs` are the stored
+names your templates and blocks will read; `children` plus `text` is how you
+pick `contains:` (child block types → `:blocks`; text → `:inline`).
+
 When markup-as-data isn't enough, give the node a block:
 
 ```ruby
