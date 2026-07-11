@@ -181,7 +181,8 @@ jobs:
           # A third front end: Rhino (Tiptap 3, ActionText-compatible), bound
           # with Tiptap's own Collaboration extensions. Two real browsers:
           # concurrent typing converges, remote carets render, undo stays
-          # local, and the ActionText save derives from the CRDT.
+          # local, and the materialized ActionText derives from the CRDT
+          # (freshened on read).
           PORT=3777 node frontend/rhino_e2e.mjs
           kill "$(cat /tmp/puma.pid)" || true
 
