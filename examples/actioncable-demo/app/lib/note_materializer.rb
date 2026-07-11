@@ -8,7 +8,10 @@
 #
 # Caches can be lazy: `fresh` renders ON READ, and only when the store has
 # recorded changes the note hasn't seen (one integer compare against the
-# store's monotonic version). Nothing runs while documents are being edited,
+# store's version — monotonic in VISIBILITY order, which is the property
+# that makes the compare sound; see each store's `version` for how, and
+# why Postgres counts rows instead of taking MAX(id)). Nothing runs while
+# documents are being edited,
 # there is no background machinery, and a reader always gets current
 # content. No browser is involved in the render either way; what persists
 # can only be what the authoritative store says.

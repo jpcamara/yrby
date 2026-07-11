@@ -57,7 +57,13 @@ class DocumentsController < ApplicationController
   #   delay_ms=N     make the next writes take N ms (a slow durable store)
   #   fail_once=1    make the next write raise (store unavailable)
   def audit_control
-    Store.current.reset!(params[:id]) if params[:reset]
+    if params[:reset]
+      Store.current.reset!(params[:id])
+      # Clearing a document's history invalidates its derived view — and the
+      # store version restarts, so a surviving note's stamp would read as
+      # "fresh" against the smaller version forever.
+      Note.where(document_id: params[:id]).destroy_all
+    end
     Fault.set_delay(params[:id], params[:delay_ms].to_f / 1000) if params[:delay_ms]
     Fault.fail_next(params[:id]) if params[:fail_once]
     head :no_content
