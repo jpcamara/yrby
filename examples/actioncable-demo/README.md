@@ -115,7 +115,8 @@ docker compose up --build
 Then open two windows:
 
 - http://localhost:3100/docs/demo — the Tiptap editor
-- http://localhost:3100/docs/demo/lexxy — the Lexxy editor (lexxy-realtime)
+- http://localhost:3100/docs/demo/lexxy — the Lexxy editor (lexxy-realtime),
+  with ActionText materialized from the "root" fragment by `Y::Lexxy`
 - http://localhost:3100/docs/demo/rhino — the Rhino editor (rhino-editor),
   with ActionText materialized server-side from the CRDT by `Y::Tiptap`,
   refreshed on read (see `NoteMaterializer`)

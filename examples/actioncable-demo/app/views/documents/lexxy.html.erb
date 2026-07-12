@@ -16,6 +16,8 @@
   </header>
 
   <lexxy-editor id="editor" name="editor" data-document-id="<%= @document_id %>"></lexxy-editor>
+
+  <%= render "materialized_note", note: @note, renderer: "Y::Lexxy" %>
 </div>
 
 <script src="/lexxy.js" defer></script>

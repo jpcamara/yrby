@@ -1,11 +1,12 @@
 // The Rhino page (Tiptap 3 via rhino-editor, bound with Tiptap's own
 // Collaboration extensions) through REAL Chrome: two browsers on the same
 // document, concurrent typing, byte-for-byte convergence, remote carets,
-// undo staying local, and the materialized ActionText — freshened on read,
-// the server replaying the durable store into a Y::Doc and rendering it
-// with Y::Tiptap, so the persisted rich text is derived from the CRDT, not
-// from any browser's serialized HTML. agent_browsers.mjs covers the
-// Tiptap 2 page the same way; this is the same protocol on a third editor.
+// undo staying local, and the materialized ActionText. That last one is
+// refreshed on read: the server replays the durable store into a Y::Doc
+// and renders it with Y::Tiptap, so the persisted rich text comes from the
+// CRDT and not from any browser's serialized HTML. agent_browsers.mjs
+// covers the Tiptap 2 page the same way; this is the same protocol on a
+// third editor.
 //
 //   PORT=3777 node rhino_e2e.mjs
 //
@@ -68,10 +69,11 @@ check(`all ${PER} of '1' present (got ${countChar(t, "1")})`, countChar(t, "1") 
 check(`all ${PER} of '2' present (got ${countChar(t, "2")})`, countChar(t, "2") === PER)
 check("both browsers byte-identical", t === (await docText(B)))
 
-// 2b) Freshen-on-read materialization: no button, no editor action — a
-// plain HTTP GET of the page makes the server render the store's current
-// state as ActionText (NoteMaterializer.fresh) and must show every typed
-// character. (waitFor covers the last deltas' cable flight to the store.)
+// 2b) Materialization on read: a plain HTTP GET of the page makes the
+// server render the store's current state as ActionText
+// (NoteMaterializer.fresh), with no editor involvement. It must show every
+// typed character. (waitFor covers the last deltas' cable flight to the
+// store.)
 const savedNoteHtml = async () => {
   const res = await fetch(`${BASE}/docs/${ROOM}/rhino`)
   const html = await res.text()
@@ -112,9 +114,9 @@ check(`A's '1's undone (got ${countChar(after, "1")})`, countChar(after, "1") ==
 check(`B's '2's survived A's undo (got ${countChar(after, "2")})`, countChar(after, "2") === PER)
 await waitFor("both browsers agree after undo", async () => (await docText(A)) === (await docText(B)))
 
-// 5) Freshen-on-read tracks the undo: no action beyond reading the page —
-// the persisted ActionText must now hold B's characters and none of A's.
-// (waitFor covers the last delta's cable flight to the store.)
+// 5) The materialized note follows the undo: reading the page again must
+// now show B's characters and none of A's. (waitFor covers the last
+// delta's cable flight to the store.)
 await waitFor("materialized ActionText follows the undo on read", async () => {
   const saved = await savedNoteHtml()
   return countChar(saved, "2") === PER && countChar(saved, "1") === 0

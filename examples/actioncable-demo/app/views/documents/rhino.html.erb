@@ -42,33 +42,7 @@
 
   <rhino-editor id="editor" defer-initialize data-document-id="<%= @document_id %>"></rhino-editor>
 
-  <section class="actiontext-save" style="margin-top:1rem">
-    <%# The Note below is a derived view of the collaborative document for
-        the rest of the app (search, mailers, plain views). The live
-        document is already durable; the note is a cache over the store,
-        refreshed on read. Loading this page re-renders it server-side with
-        Y::Tiptap when the store has changes the note hasn't seen. No
-        editor HTML crosses the wire; the content comes from the
-        authoritative CRDT, not from a browser.
-
-        Reading it is stock ActionText: `@note.content` renders through the
-        ActionText layout partial and sanitizer like any Rails app. The
-        write path is not stock: a normal Rhino app is a Trix replacement
-        where a rich_text_area posts the browser's HTML on submit, and a
-        collaborative document can't trust a submitting browser. %>
-    <% if @note %>
-      <h2 style="margin-top:1rem">Materialized ActionText content</h2>
-      <p style="color:#666;font-size:.85rem">
-        <code>Note#content</code> (an <code>ActionText::RichText</code>),
-        rendered by Rails. Refreshed on read; currently through store
-        version <%= @note.through_version %>. Edit above and reload to see
-        it update.
-      </p>
-      <div id="saved-note" style="border:1px solid #ddd;border-radius:6px;padding:.5rem 1rem">
-        <%= @note.content %>
-      </div>
-    <% end %>
-  </section>
+  <%= render "materialized_note", note: @note, renderer: "Y::Tiptap" %>
 </div>
 
 <script src="/rhino.js" defer></script>
