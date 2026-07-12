@@ -5,7 +5,9 @@
 Collaborative editing for Rails, backed by [y-crdt](https://github.com/y-crdt/y-crdt)
 (the Rust library behind Y.js). Your Rails server speaks the y-websocket sync
 protocol directly, so there's no separate Node process hosting the Y.js
-documents.
+documents. Pronounced "yer-bee".
+
+![One browser watching another type, synced through a Rails server, with a labeled remote caret](docs/images/collab.gif)
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
