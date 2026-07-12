@@ -39,8 +39,22 @@ provider.connect()
 provider.awareness.setLocalStateField("user", user)
 
 // Exposed for the browser console and the e2e harness, same shape as the
-// other editor pages.
-window.__yrb = { provider, ydoc, user, editor: null }
+// other editor pages. encodeState feeds the render-parity check: the doc's
+// full state as base64.
+window.__yrb = {
+  provider,
+  ydoc,
+  user,
+  editor: null,
+  encodeState: () => {
+    const bytes = Y.encodeStateAsUpdate(ydoc)
+    let binary = ""
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    }
+    return btoa(binary)
+  },
+}
 
 statusEl.dataset.state = "connecting"
 statusEl.textContent = `connecting as ${user.name}…`

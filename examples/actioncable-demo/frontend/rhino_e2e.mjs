@@ -12,7 +12,7 @@
 //
 // Needs agent-browser (local install, AB_BIN, or a sibling lexxy-realtime
 // checkout) and a Chromium it can drive.
-import { execFile } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
 import { promisify } from "node:util"
 import { dirname, resolve } from "node:path"
 import { existsSync } from "node:fs"
@@ -122,6 +122,28 @@ await waitFor("materialized ActionText follows the undo on read", async () => {
   return countChar(saved, "2") === PER && countChar(saved, "1") === 0
 })
 check("materialized rich text holds the surviving characters", true)
+
+// 5b) Render parity against the live Tiptap 3 editor: Y::Tiptap must
+// reproduce this editor's own getHTML() from the raw doc bytes — the same
+// check render_e2e.mjs runs against a full-node-set Tiptap 2 document.
+// The doc here is small (plain paragraphs), so this is a v3 smoke check,
+// not the full battery. It runs before the strike phase because
+// render_check uses bare Y::Tiptap, without the rhino-strike mark rule.
+const jsA = async (expr) => {
+  const out = await ab(A, "eval", expr)
+  try { return JSON.parse(out) } catch { return out }
+}
+const v3Html = await jsA(`window.__yrb.editor.getHTML()`)
+const v3State = await jsA(`window.__yrb.encodeState()`)
+const v3Actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb", "prosemirror", "rhino"], {
+  input: Buffer.from(v3State, "base64"),
+  maxBuffer: 64 * 1024 * 1024,
+}).toString()
+check("Y::Tiptap matches the live Tiptap 3 getHTML() byte for byte", v3Actual === v3Html)
+if (v3Actual !== v3Html) {
+  console.log(`  editor: ${JSON.stringify(String(v3Html).slice(0, 160))}`)
+  console.log(`  ruby:   ${JSON.stringify(v3Actual.slice(0, 160))}`)
+}
 
 // 6) A Rhino-specific mark through the render rules: Rhino's strike is its
 // own "rhino-strike" mark serializing <del>; the materializer's mark rule
