@@ -18,12 +18,31 @@
 # `materialize` from the channel's `on_change` instead, debounced. Don't
 # raise there: a raise rejects the user's change.
 class NoteMaterializer
+  # Rhino stores an upload as a previewable-attachment-figure (or
+  # attachment-figure for plain files) inside an attachment-gallery. The
+  # sgid is all ActionText needs on display; it resolves the blob itself.
+  # A node still mid-upload has no sgid yet and renders to nothing.
+  # All of these stored names came from node_types discovery.
+  def self.rhino_attachment(node)
+    sgid = node.attrs["sgid"].to_s
+    return "" if sgid.empty?
+
+    %(<action-text-attachment sgid="#{Y::RenderRules.escape_attr(sgid)}" presentation="gallery"></action-text-attachment>)
+  end
+
   # The Rhino page writes the "rhino" fragment. Rhino replaces Tiptap's
   # Strike with its own "rhino-strike" mark and serializes it as <del>; the
-  # mark rule reproduces that (the stored name came from node_types
-  # discovery).
+  # mark rule reproduces that.
   def self.render_rhino(ydoc)
-    Y::Tiptap.new(ydoc, marks: { "rhino-strike" => { tag: "del" } }).to_html("rhino")
+    Y::Tiptap.new(
+      ydoc,
+      nodes: {
+        "attachment-gallery" => { tag: "div", attrs: { "class" => "attachment-gallery" }, contains: :blocks },
+        "previewable-attachment-figure" => method(:rhino_attachment),
+        "attachment-figure" => method(:rhino_attachment)
+      },
+      marks: { "rhino-strike" => { tag: "del" } }
+    ).to_html("rhino")
   end
 
   # The Lexxy page writes the "root" fragment (Lexical's default root name).

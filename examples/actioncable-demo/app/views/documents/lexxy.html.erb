@@ -15,7 +15,14 @@
     <p id="status" class="status">connecting…</p>
   </header>
 
-  <lexxy-editor id="editor" name="editor" data-document-id="<%= @document_id %>"></lexxy-editor>
+  <%# data-direct-upload-url / data-blob-url-template: the Trix-convention
+      attributes both Lexxy and Rhino read for ActiveStorage direct uploads.
+      Uploads go straight to ActiveStorage; the editor inserts an attachment
+      node (sgid + URL) into the shared doc, and peers render it from the
+      URL like any other content. %>
+  <lexxy-editor id="editor" name="editor" data-document-id="<%= @document_id %>"
+                data-direct-upload-url="<%= rails_direct_uploads_url %>"
+                data-blob-url-template="<%= rails_service_blob_url(":signed_id", ":filename") %>"></lexxy-editor>
 
   <%= render "materialized_note", note: @note, renderer: "Y::Lexxy" %>
 </div>

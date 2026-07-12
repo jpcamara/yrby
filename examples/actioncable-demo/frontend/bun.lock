@@ -11,6 +11,7 @@
         "@codemirror/view": "^6.26.0",
         "@lexical/yjs": "^0.44",
         "@rails/actioncable": "^8.0.0",
+        "@rails/activestorage": "^8.0.0",
         "@tiptap-v3/extension-collaboration": "npm:@tiptap/extension-collaboration@^3.27",
         "@tiptap-v3/extension-collaboration-caret": "npm:@tiptap/extension-collaboration-caret@^3.27",
         "@tiptap/core": "^2.11.0",

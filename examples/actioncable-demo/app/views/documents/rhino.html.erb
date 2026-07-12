@@ -40,7 +40,11 @@
     <p id="status" class="status">connecting…</p>
   </header>
 
-  <rhino-editor id="editor" defer-initialize data-document-id="<%= @document_id %>"></rhino-editor>
+  <%# The upload data attributes follow the same Trix convention as the
+      Lexxy page; see the comment there. %>
+  <rhino-editor id="editor" defer-initialize data-document-id="<%= @document_id %>"
+                data-direct-upload-url="<%= rails_direct_uploads_url %>"
+                data-blob-url-template="<%= rails_service_blob_url(":signed_id", ":filename") %>"></rhino-editor>
 
   <%= render "materialized_note", note: @note, renderer: "Y::Tiptap" %>
 </div>

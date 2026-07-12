@@ -99,18 +99,6 @@ const ENTRIES = [
   { entry: "src/forms.js", name: "forms.js" },           // Y.Map of fields
 ]
 
-// Lexxy dynamically imports @rails/activestorage for attachment uploads, which
-// this collaboration demo doesn't use. Stub it so the bundle is self-contained
-// (the Tiptap entry never imports it, so this is a no-op there).
-const stubActivestorage = {
-  name: "stub-activestorage",
-  setup(build) {
-    build.onResolve({ filter: /^@rails\/activestorage$/ }, () => ({
-      path: resolve(here, "src/stubs/activestorage.js"),
-    }))
-  },
-}
-
 async function buildEntry({ entry, name, plugins }) {
   // An entry that imports CSS emits two entry-category outputs (JS + CSS), so the
   // naming needs an [ext] placeholder to split them -- otherwise both want the
@@ -121,7 +109,7 @@ async function buildEntry({ entry, name, plugins }) {
     outdir: resolve(here, "../public"),
     naming: "[name].[ext]",
     minify: true,
-    plugins: [...(plugins || [dedupeSingletons]), stubActivestorage],
+    plugins: plugins || [dedupeSingletons],
   })
   if (!result.success) {
     for (const log of result.logs) console.error(log)

@@ -1,0 +1,12 @@
+<%# Demo override of the ActiveStorage blob partial ActionText renders for
+    attachments. The Rails default requests a resized representation, which
+    needs the image_processing gem plus a system library (vips or
+    ImageMagick); this demo keeps its dependencies small and serves the
+    original blob. A real app deletes this file and uses the default. %>
+<figure class="attachment attachment--<%= blob.image? ? "preview" : "file" %>">
+  <%= image_tag(blob) if blob.image? %>
+  <figcaption class="attachment__caption">
+    <span class="attachment__name"><%= blob.filename %></span>
+    <span class="attachment__size"><%= number_to_human_size(blob.byte_size) %></span>
+  </figcaption>
+</figure>
