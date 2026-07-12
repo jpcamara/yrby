@@ -4,8 +4,8 @@
 // undo staying local, and the materialized ActionText — freshened on read,
 // the server replaying the durable store into a Y::Doc and rendering it
 // with Y::Tiptap, so the persisted rich text is derived from the CRDT, not
-// from any browser's serialized HTML. Complements agent_browsers.mjs (the
-// Tiptap 2 page) — same protocol, third front end.
+// from any browser's serialized HTML. agent_browsers.mjs covers the
+// Tiptap 2 page the same way; this is the same protocol on a third editor.
 //
 //   PORT=3777 node rhino_e2e.mjs
 //

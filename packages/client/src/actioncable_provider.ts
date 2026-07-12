@@ -10,10 +10,10 @@
 //
 // The constructor does not auto-connect: wire up your editor binding first, then
 // call `connect()`. Watch the connection with `onStatusChange(({ status }) => ...)`
-// or the `status` getter; editors that must not bind before the first sync
-// `await provider.whenSynced` after connect(). On `disconnect()`/`destroy()`, and on browser
-// `pagehide`, the provider broadcasts a presence removal so peers drop our cursor
-// right away instead of waiting for the awareness timeout.
+// or the `status` getter. Editors that must not bind before the first sync
+// can `await provider.whenSynced` after connect(). On `disconnect()`/`destroy()`,
+// and on browser `pagehide`, the provider broadcasts a presence removal so peers
+// drop our cursor right away instead of waiting for the awareness timeout.
 import { YProtocolSession, MessageType, type YProtocolSessionOptions } from "./y_protocol_session.js";
 import { toBase64, fromBase64 } from "./base64.js";
 import { Awareness } from "y-protocols/awareness";
@@ -79,9 +79,10 @@ export class ActionCableProvider {
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #whenSynced: Promise<void> | null = null;
-  // `session.synced` resets on every transport drop (a reconnect re-handshakes);
-  // the FIRST catch-up is a permanent fact, tracked here so `whenSynced` doesn't
-  // depend on when it's first read.
+  // `session.synced` resets on every transport drop (a reconnect
+  // re-handshakes). Whether the first catch-up has ever happened is tracked
+  // separately here, so `whenSynced` does not depend on when it is first
+  // read.
   #everSynced = false;
   #onUnload: (() => void) | null = null;
   #onRestore: ((event: PageTransitionEvent) => void) | null = null;
@@ -115,20 +116,21 @@ export class ActionCableProvider {
   }
 
   /**
-   * Resolves once the document has first caught up with the server — the
-   * bind-after-sync gate every editor integration needs (binding earlier
-   * makes each client seed its own competing top-level node):
+   * Resolves once the document has first caught up with the server. Most
+   * editor bindings seed an empty document when they mount, so binding
+   * before the server's state arrives makes each client insert its own
+   * top-level node. Create the editor after this resolves:
    *
    *   provider.connect();
    *   await provider.whenSynced;
    *   // now hand the doc to the editor binding
    *
-   * Resolves immediately when the first catch-up has already happened —
-   * even if the transport is currently down (`synced` resets while
-   * reconnecting; the first catch-up is a fact that doesn't) — and stays
-   * resolved across later reconnects (watch `onStatusChange` for those).
-   * If the provider is destroyed before the first sync the promise never
-   * settles — the code awaiting it is being torn down with it.
+   * Resolves immediately if the first catch-up has already happened, even
+   * while the transport is down (`synced` is false during a reconnect;
+   * whether the doc has ever synced does not change). It stays resolved
+   * across later reconnects; use `onStatusChange` to track the live
+   * connection. If the provider is destroyed before the first sync, the
+   * promise never settles.
    */
   get whenSynced(): Promise<void> {
     this.#whenSynced ??= this.#everSynced

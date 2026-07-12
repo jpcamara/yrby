@@ -42,11 +42,11 @@ class AuditLog
       end
     end
 
-    # A monotonic version for the document: the log's byte size. Sound
-    # because appends serialize under the per-document lock and O_APPEND —
-    # a write is visible atomically when it happens, in order, so a reader
-    # that saw size S has every byte below S (no allocated-early,
-    # visible-late window like MVCC commits). 0 for an unknown document.
+    # A version for the document: the log's byte size. Appends serialize
+    # under the per-document lock and O_APPEND, so writes become visible in
+    # write order, and a reader that saw size S has every byte below S.
+    # There is no insert-then-commit window like Postgres MVCC. Returns 0
+    # for an unknown document.
     def version(key)
       path = path_for(key)
       File.exist?(path) ? File.size(path) : 0

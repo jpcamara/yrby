@@ -40,13 +40,14 @@ module PgStore
     doc.encode_state_as_update
   end
 
-  # A version for the document that is monotonic in VISIBILITY order: the
-  # count of committed rows. NOT MAX(id) — ids are assigned at INSERT but
-  # rows become visible at COMMIT, out of order: a slow commit with a lower
-  # id landing after a reader stamped a higher MAX would be invisible to
-  # the staleness check forever. A late commit still raises COUNT, so the
-  # next read detects it (see NoteMaterializer). 0 for an unknown document.
-  # (Index-only scan on [doc_key, id].)
+  # A version for the document that is monotonic in visibility order: the
+  # count of committed rows. MAX(id) is not safe here. Ids are assigned at
+  # INSERT but rows become visible at COMMIT, and those orders differ under
+  # concurrency: a slow commit with a lower id can land after a reader has
+  # stamped a higher MAX, and the staleness check would never see it. A
+  # late commit still increases the count, so the next read detects it
+  # (see NoteMaterializer). Returns 0 for an unknown document. The count is
+  # an index-only scan on [doc_key, id].
   def version(key)
     DocumentChange.where(doc_key: key).count
   end

@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-# The ActionText landing spot for a collaborative Rhino document. The rich
-# text is never taken from the client: DocumentsController#rhino_save replays
-# the durable store into a Y::Doc and renders it with Y::Tiptap, so what
-# persists is derived from the authoritative CRDT.
+# The ActionText record for a collaborative Rhino document. The rich text
+# is never taken from a client: NoteMaterializer replays the durable store
+# into a Y::Doc and renders it with Y::Tiptap on read, so what persists
+# comes from the authoritative CRDT. through_version is the store version
+# the content was rendered through.
 class Note < ApplicationRecord
   has_rich_text :content
 end

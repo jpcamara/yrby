@@ -2,13 +2,14 @@
 // ActionText-compatible Tiptap 3 editor, against the SAME DocumentChannel as
 // the Tiptap 2 and Lexxy pages. Nothing on the server changes.
 //
-// This page is the real-app recipe (see "Using this in your own app" in the
-// demo README): the editor's own Collaboration extensions, configured before
-// the editor initializes — no plugin wiring, no undo plumbing. The one
-// demo-ism is the import alias: this app bundles Tiptap 2 (the /docs page)
-// and Tiptap 3 (Rhino) side by side, so the v3 extensions live under an
-// aliased name. In your app they're plain "@tiptap/extension-collaboration"
-// and "@tiptap/extension-collaboration-caret".
+// This page is the integration a real app would write (see "Using this in
+// your own app" in the demo README): the editor's own Collaboration
+// extensions, configured before the editor initializes. The only thing you
+// would not copy is the import alias. This demo bundles Tiptap 2 (the
+// /docs page) and Tiptap 3 (Rhino) side by side, so the v3 extensions are
+// installed under an aliased name; in your app they are plain
+// "@tiptap/extension-collaboration" and
+// "@tiptap/extension-collaboration-caret".
 import "rhino-editor"
 import "rhino-editor/exports/styles/trix.css"
 import * as Y from "yjs"
@@ -44,11 +45,11 @@ window.__yrb = { provider, ydoc, user, editor: null }
 statusEl.dataset.state = "connecting"
 statusEl.textContent = `connecting as ${user.name}…`
 
-// Collaboration is configured BEFORE the editor initializes — the
-// `defer-initialize` attribute holds Rhino back until it's removed. The
-// Collaboration extension owns undo (a Yjs UndoManager scoped to local
-// edits — Mod-z never undoes a remote user's work), so Rhino's built-in
-// UndoRedo turns off, per Tiptap's collaboration docs.
+// Collaboration is configured before the editor initializes; the
+// defer-initialize attribute holds Rhino back until it's removed.
+// Collaboration brings its own undo (a Yjs UndoManager over local edits
+// only, so Mod-z never undoes another user's work), and Tiptap's docs say
+// to disable the built-in UndoRedo when using it.
 //
 // The Rhino page binds its own fragment on the shared doc, like the Lexxy
 // page binds "root": same document id and channel, its own shape.

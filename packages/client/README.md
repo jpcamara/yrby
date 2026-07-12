@@ -66,10 +66,9 @@ provider.onStatusChange(({ status }) => render(status)); // returns an unsubscri
 // provider.destroy()  -> tear down
 ```
 
-Editors that must not bind before the first sync (Tiptap's Collaboration
-extension and most rich-text bindings seed an empty document on mount, so
-binding early makes each client insert its own competing top-level node) gate
-on `whenSynced`:
+Most rich-text bindings seed an empty document when they mount, so binding
+before the server's state arrives makes each client insert its own
+top-level node. Wait for the first sync before creating the editor:
 
 ```js
 provider.connect();
@@ -78,7 +77,7 @@ await provider.whenSynced; // resolves immediately if already synced
 ```
 
 It resolves once, on the first catch-up, and stays resolved across later
-reconnects — `onStatusChange` is the signal for the live connection.
+reconnects. Use `onStatusChange` to track the live connection.
 
 On `disconnect()` / `destroy()` — and on browser `pagehide` — the provider
 broadcasts a presence removal so peers drop your cursor immediately instead of
