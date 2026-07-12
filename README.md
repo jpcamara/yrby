@@ -7,7 +7,7 @@ Collaborative editing for Rails, backed by [y-crdt](https://github.com/y-crdt/y-
 protocol directly, so there's no separate Node process hosting the Y.js
 documents. Pronounced "yer-bee".
 
-![One browser watching another type, synced through a Rails server, with a labeled remote caret](docs/images/collab.gif)
+![Two people typing on separate lines of the same document, each keystroke synced through a Rails server, seen from a third browser with labeled carets](docs/images/collab.gif)
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
