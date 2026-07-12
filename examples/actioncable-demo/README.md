@@ -42,6 +42,7 @@ reachable through several front ends (linked from the nav on each page):
 |------|--------------|---------|
 | `/docs/demo` | `Y.XmlFragment` | Tiptap (rich text) |
 | `/docs/demo/lexxy` | `Y.XmlText` | Lexxy / Lexical |
+| `/docs/demo/rhino` | `Y.XmlFragment` | Rhino (Tiptap 3, its Collaboration extensions) |
 | `/docs/demo/codemirror` | `Y.Text` | CodeMirror 6 (code + cursors) |
 | `/docs/demo/whiteboard` | `Y.Map` of shapes | draggable sticky notes |
 | `/docs/demo/kanban` | `Y.Array` of card `Y.Map`s | add / move / delete |
@@ -50,6 +51,45 @@ reachable through several front ends (linked from the nav on each page):
 Each is a self-contained entry under `frontend/src/`; the only thing that differs
 is the Yjs binding. A two-window agent-browser check for the last four lives in
 `frontend/opaque_demos_e2e.mjs` (run the server with `STORE_KIND=file` first).
+
+### Using this in your own app
+
+You don't need the demo's build setup. Two things keep an integration
+clean. First, only yjs objects cross the yrby-client boundary: a `Y.Doc`
+and `provider.awareness`. Both are peer dependencies, so your app has one
+copy of each. Second, editor-framework objects come from the editor's own
+dependency tree. For a Tiptap-based editor (including Rhino) that means
+the editor's Collaboration extensions:
+
+```js
+import * as Y from "yjs"
+import { createConsumer } from "@rails/actioncable"
+import { ActionCableProvider } from "yrby-client"
+import Collaboration from "@tiptap/extension-collaboration"
+import CollaborationCaret from "@tiptap/extension-collaboration-caret"
+
+const ydoc = new Y.Doc()
+const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChannel", { id })
+provider.connect()
+await provider.whenSynced // bind only after the first catch-up
+// configure the editor with Collaboration({ fragment: ydoc.getXmlFragment("...") })
+// and CollaborationCaret({ provider, user }) — that's the whole integration
+```
+
+The Collaboration extension handles the plugins and the undo wiring; there
+is nothing else to configure. The Rhino page (`frontend/src/rhino.js`) is
+this recipe running in CI. It imports the v3 extensions under an npm alias
+because this demo bundles three editors across two `@tiptap` majors in one
+app, which is also why `frontend/build.mjs` has per-entry module
+resolution. An app with one editor needs neither.
+
+If your ProseMirror editor has no collaboration package, you can register
+the raw y-prosemirror plugins instead: `ySyncPlugin`, `yCursorPlugin`,
+`yUndoPlugin`, and a keymap binding `undo`/`redo`. Pass them at editor
+creation if you can. If you have to add them to an already-initialized
+editor with repeated `registerPlugin` calls, register `yUndoPlugin` last:
+each call recreates the plugin views, and the undo plugin destroys its
+`UndoManager` during view teardown, which leaves undo capturing nothing.
 
 > The default durable store is Postgres, reached over the `/tmp` unix socket — so
 > "Run it" above expects a local Postgres. To avoid that (or a port clash with
@@ -75,7 +115,11 @@ docker compose up --build
 Then open two windows:
 
 - http://localhost:3100/docs/demo — the Tiptap editor
-- http://localhost:3100/docs/demo/lexxy — the Lexxy editor (lexxy-realtime)
+- http://localhost:3100/docs/demo/lexxy — the Lexxy editor (lexxy-realtime),
+  with ActionText materialized from the "root" fragment by `Y::Lexxy`
+- http://localhost:3100/docs/demo/rhino — the Rhino editor (rhino-editor),
+  with ActionText materialized server-side from the CRDT by `Y::Tiptap`,
+  refreshed on read (see `NoteMaterializer`)
 
 The image carries Rust (to compile the native extension) and bun (to build the
 front end); the build context is the **repo root** because the demo uses the gem
@@ -257,6 +301,14 @@ bin/rails db:prepare   # creates yrby_demo_development + document_changes
 
 (`config/database.yml` defaults to the local socket as `$USER`.) `GET
 /docs/:id/audit` returns the stored deltas (base64).
+
+Both stores keep every delta forever, and `replay` applies the full
+history. That is deliberate here: the audit story depends on it (`/audit`
+replays the log and byte-matches the live doc). At scale you would
+checkpoint a snapshot periodically (`Doc#compacted_state_update` is the
+gap-free encoding for this) and replay only the deltas since. Cold loads
+and derived-view renders (see `NoteMaterializer`) then cost O(changes
+since the snapshot) instead of O(all changes).
 
 ## Record Before Distribute
 

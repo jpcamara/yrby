@@ -10,9 +10,10 @@
 //
 // The constructor does not auto-connect: wire up your editor binding first, then
 // call `connect()`. Watch the connection with `onStatusChange(({ status }) => ...)`
-// or the `status` getter. On `disconnect()`/`destroy()`, and on browser
-// `pagehide`, the provider broadcasts a presence removal so peers drop our cursor
-// right away instead of waiting for the awareness timeout.
+// or the `status` getter. Editors that must not bind before the first sync
+// can `await provider.whenSynced` after connect(). On `disconnect()`/`destroy()`,
+// and on browser `pagehide`, the provider broadcasts a presence removal so peers
+// drop our cursor right away instead of waiting for the awareness timeout.
 import { YProtocolSession, MessageType, type YProtocolSessionOptions } from "./y_protocol_session.js";
 import { toBase64, fromBase64 } from "./base64.js";
 import { Awareness } from "y-protocols/awareness";
@@ -77,6 +78,12 @@ export class ActionCableProvider {
   #connected = false;
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
+  #whenSynced: Promise<void> | null = null;
+  // `session.synced` resets on every transport drop (a reconnect
+  // re-handshakes). Whether the first catch-up has ever happened is tracked
+  // separately here, so `whenSynced` does not depend on when it is first
+  // read.
+  #everSynced = false;
   #onUnload: (() => void) | null = null;
   #onRestore: ((event: PageTransitionEvent) => void) | null = null;
   #stashedPresence: Record<string, unknown> | null = null;
@@ -106,6 +113,36 @@ export class ActionCableProvider {
   /** True once the document has caught up with the server (received a SyncStep2). */
   get synced(): boolean {
     return this.session.synced;
+  }
+
+  /**
+   * Resolves once the document has first caught up with the server. Most
+   * editor bindings seed an empty document when they mount, so binding
+   * before the server's state arrives makes each client insert its own
+   * top-level node. Create the editor after this resolves:
+   *
+   *   provider.connect();
+   *   await provider.whenSynced;
+   *   // now hand the doc to the editor binding
+   *
+   * Resolves immediately if the first catch-up has already happened, even
+   * while the transport is down (`synced` is false during a reconnect;
+   * whether the doc has ever synced does not change). It stays resolved
+   * across later reconnects; use `onStatusChange` to track the live
+   * connection. If the provider is destroyed before the first sync, the
+   * promise never settles.
+   */
+  get whenSynced(): Promise<void> {
+    this.#whenSynced ??= this.#everSynced
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          const off = this.onStatusChange(({ status }) => {
+            if (status !== "synced") return;
+            off();
+            resolve();
+          });
+        });
+    return this.#whenSynced;
   }
 
   /** True while there are unacknowledged local document updates in flight. */
@@ -231,6 +268,7 @@ export class ActionCableProvider {
     const next = this.#computeStatus();
     if (next === this.#status) return;
     this.#status = next;
+    if (next === "synced") this.#everSynced = true;
     for (const listener of this.#statusListeners) listener({ status: next });
   }
 

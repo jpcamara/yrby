@@ -11,9 +11,22 @@ class DocumentsController < ApplicationController
 
   # The same document, edited through a Lexxy (Lexical) editor via
   # lexxy-realtime. Same DocumentChannel, same durable store — just a different
-  # front end, to show the yrby protocol is editor-agnostic.
+  # front end, to show the yrby protocol is editor-agnostic. The note is the
+  # document's "root" fragment rendered by Y::Lexxy, refreshed on read (see
+  # NoteMaterializer).
   def lexxy
     @document_id = params[:id]
+    @note = NoteMaterializer.fresh(@document_id, "root")
+  end
+
+  # A third front end: Rhino Editor (Tiptap 3, ActionText-compatible),
+  # bound through Tiptap's own Collaboration extensions, which is the
+  # integration a real app would write. Same DocumentChannel, same durable
+  # store. The note is the document's "rhino" fragment rendered by
+  # Y::Tiptap, refreshed on read (see NoteMaterializer).
+  def rhino
+    @document_id = params[:id]
+    @note = NoteMaterializer.fresh(@document_id, "rhino")
   end
 
   # "Opaque state" demos. Each renders a different kind of collaborative app over
@@ -46,7 +59,13 @@ class DocumentsController < ApplicationController
   #   delay_ms=N     make the next writes take N ms (a slow durable store)
   #   fail_once=1    make the next write raise (store unavailable)
   def audit_control
-    Store.current.reset!(params[:id]) if params[:reset]
+    if params[:reset]
+      Store.current.reset!(params[:id])
+      # Clearing a document's history invalidates its notes, and the store
+      # version restarts, so a surviving stamp would compare as fresh
+      # forever.
+      Note.where(document_id: params[:id]).destroy_all
+    end
     Fault.set_delay(params[:id], params[:delay_ms].to_f / 1000) if params[:delay_ms]
     Fault.fail_next(params[:id]) if params[:fail_once]
     head :no_content

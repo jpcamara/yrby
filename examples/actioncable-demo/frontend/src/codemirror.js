@@ -40,13 +40,14 @@ statusEl.textContent = `connecting as ${user.name}…`
 provider.onStatusChange(({ status }) => {
   statusEl.dataset.state = status === "synced" ? "connected" : "connecting"
   statusEl.textContent = status === "synced" ? `synced, editing as ${user.name}` : `${status}…`
-  if (status === "synced") {
-    setTimeout(() => {
-      if (ytext.length === 0) {
-        ytext.insert(0, "// Collaborative code — open in two windows.\n" +
-          "function greet(name) {\n  return `Hi, ${name}!`\n}\n")
-      }
-    }, 200)
+})
+// Seed the starter snippet only on the FIRST catch-up: whenSynced resolves
+// with the server's state already applied (no settle timeout needed) and
+// doesn't re-fire on reconnects, so a deliberately emptied doc stays empty.
+provider.whenSynced.then(() => {
+  if (ytext.length === 0) {
+    ytext.insert(0, "// Collaborative code — open in two windows.\n" +
+      "function greet(name) {\n  return `Hi, ${name}!`\n}\n")
   }
 })
 provider.connect()

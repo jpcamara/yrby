@@ -122,6 +122,19 @@ const actual = execFileSync("bundle", ["exec", "ruby", "frontend/render_check.rb
 }).toString()
 
 if (actual === editorHtml) {
+  // The lexxy page materializes the "root" fragment to ActionText on read
+  // (see NoteMaterializer): fetching the page must show the document we
+  // just built. Assert on tag markers only — ActionText's display
+  // sanitizer strips class/aria attributes, and this synthetic state's
+  // attachment sgids resolve to missing-attachment placeholders. The
+  // capture runs to </section> because Lexxy content nests divs.
+  const page = await fetch(`${BASE}/docs/${ROOM}/lexxy`).then((r) => r.text())
+  const m = page.match(/<div id="saved-note"[^>]*>([\s\S]*?)<\/section>/)
+  const saved = m ? m[1] : ""
+  for (const marker of ["<h2>", "<hr>", "<pre"]) {
+    if (!saved.includes(marker)) fail(`materialized note is missing ${marker}; head: ${saved.slice(0, 200)}`)
+  }
+  console.log("lexxy materialized note OK: a page read rendered the root fragment to ActionText")
   console.log(`lexxy render e2e OK: Y::Lexxy matches a live Lexxy value (${actual.length} chars)`)
   process.exit(0)
 }

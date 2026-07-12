@@ -1,0 +1,48 @@
+<%= tag.link rel: "stylesheet", href: "/rhino.css" %>
+<style>
+  /* CollaborationCaret's remote carets, styled like the Tiptap page's cursors. */
+  .collaboration-carets__caret {
+    position: relative;
+    border-left: 2px solid;
+    margin-left: -1px;
+    margin-right: -1px;
+    word-break: normal;
+    pointer-events: none;
+  }
+  .collaboration-carets__label {
+    position: absolute;
+    top: -1.3em;
+    left: -2px;
+    font-size: 12px;
+    color: white;
+    padding: 0 4px;
+    border-radius: 3px 3px 3px 0;
+    white-space: nowrap;
+    user-select: none;
+  }
+</style>
+
+<div class="demo">
+  <header>
+    <h1>yrby collaborative editor <small>(Rhino)</small></h1>
+    <%= render "nav" %>
+    <p>
+      Document <code><%= @document_id %></code> —
+      open this page in another window to edit together. Same document and
+      server as the <a href="<%= document_path(@document_id) %>">Tiptap</a> and
+      <a href="<%= document_lexxy_path(@document_id) %>">Lexxy</a> editors; this
+      one is <a href="https://github.com/KonnorRogers/rhino-editor">Rhino</a>
+      (Tiptap 3), bound the way a real app would: Tiptap's own Collaboration
+      extensions, configured before the editor initializes.
+      <a href="<%= document_content_path(@document_id) %>" target="_blank">
+        View server-side state</a> (the raw CRDT, base64, read in Ruby with no JS).
+    </p>
+    <p id="status" class="status">connecting…</p>
+  </header>
+
+  <rhino-editor id="editor" defer-initialize data-document-id="<%= @document_id %>"></rhino-editor>
+
+  <%= render "materialized_note", note: @note, renderer: "Y::Tiptap" %>
+</div>
+
+<script src="/rhino.js" defer></script>

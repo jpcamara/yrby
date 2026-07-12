@@ -28,12 +28,26 @@ const here = dirname(fileURLToPath(import.meta.url))
 // lexxy-realtime package location (e.g. inside Docker, where the dep is a real
 // sibling dir rather than a copy under node_modules).
 const SINGLETONS = ["yjs", "y-protocols", "lib0", "lexical", "@lexical/yjs"]
+
+// The Rhino page needs the prosemirror packages canonicalized too:
+// rhino-editor nests its own @tiptap v3 tree (whose @tiptap/pm nests newer
+// prosemirror-model/view), while y-prosemirror resolves the top-level copies.
+// Two prosemirror-view/model instances break decoration and node identity the
+// same way two yjs copies do. Scoped to the rhino entry only — the Tiptap 2
+// page keeps its own resolution.
+const PROSEMIRROR_SINGLETONS = [
+  "prosemirror-model",
+  "prosemirror-state",
+  "prosemirror-view",
+  "prosemirror-transform",
+  "prosemirror-keymap",
+]
 const canonical = (name) => resolve(here, "node_modules", name)
 
-const dedupeSingletons = {
-  name: "dedupe-crdt-singletons",
+const dedupe = (names) => ({
+  name: "dedupe-singletons",
   setup(build) {
-    for (const name of SINGLETONS) {
+    for (const name of names) {
       // Bare specifier ("yjs") and subpath specifiers ("y-protocols/awareness",
       // "lib0/encoding") both have to land in the one canonical package.
       const filter = new RegExp(`^${name}(/.*)?$`)
@@ -46,6 +60,23 @@ const dedupeSingletons = {
       })
     }
   },
+})
+
+const dedupeSingletons = dedupe(SINGLETONS)
+
+// The demo holds two @tiptap major versions: the Tiptap page's v2 (top-level
+// deps) and rhino-editor's v3 (partly nested under rhino-editor, partly
+// hoisted). A hoisted v3 extension resolving the top-level v2 @tiptap/core
+// fails the build — so for the rhino entry, every `@tiptap/*` import resolves
+// as if imported from rhino-editor's own directory: its nested v3 core/pm
+// win, and hoisted v3 extensions route back to them.
+const tiptapFromRhino = {
+  name: "tiptap-v3-from-rhino",
+  setup(build) {
+    build.onResolve({ filter: /^@tiptap\/.*/ }, (args) => ({
+      path: Bun.resolveSync(args.path, resolve(here, "node_modules/rhino-editor")),
+    }))
+  },
 }
 
 // The Tiptap page (app.js) and the Lexxy page (lexxy.js) are independent
@@ -54,6 +85,13 @@ const dedupeSingletons = {
 const ENTRIES = [
   { entry: "src/app.js", name: "app.js" },
   { entry: "src/lexxy.js", name: "lexxy.js" },
+  // Rhino (Tiptap 3, ActionText-compatible): binds via Tiptap's Collaboration
+  // extensions, so its whole bundle must share one prosemirror instance tree.
+  {
+    entry: "src/rhino.js",
+    name: "rhino.js",
+    plugins: [dedupe([...SINGLETONS, ...PROSEMIRROR_SINGLETONS]), tiptapFromRhino],
+  },
   // "Opaque state" demos: the SAME DocumentChannel syncs any Yjs shape.
   { entry: "src/codemirror.js", name: "codemirror.js" }, // Y.Text + CodeMirror 6
   { entry: "src/whiteboard.js", name: "whiteboard.js" }, // Y.Map of shapes
@@ -73,7 +111,7 @@ const stubActivestorage = {
   },
 }
 
-async function buildEntry({ entry, name }) {
+async function buildEntry({ entry, name, plugins }) {
   // An entry that imports CSS emits two entry-category outputs (JS + CSS), so the
   // naming needs an [ext] placeholder to split them -- otherwise both want the
   // same path. [name] is the source basename, so src/lexxy.js -> lexxy.js and its
@@ -83,7 +121,7 @@ async function buildEntry({ entry, name }) {
     outdir: resolve(here, "../public"),
     naming: "[name].[ext]",
     minify: true,
-    plugins: [dedupeSingletons, stubActivestorage],
+    plugins: [...(plugins || [dedupeSingletons]), stubActivestorage],
   })
   if (!result.success) {
     for (const log of result.logs) console.error(log)

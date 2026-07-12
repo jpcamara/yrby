@@ -76,14 +76,16 @@ provider.awareness.on("update", renderPresence)
 statusEl.textContent = `connecting as ${user.name}…`
 provider.onStatusChange(({ status }) => {
   statusEl.textContent = status === "synced" ? `synced as ${user.name}` : `${status}…`
-  if (status === "synced") setTimeout(() => {
-    if (cards.length) return
-    ydoc.transact(() => {
-      for (const [t, c] of [["Design the API", "todo"], ["Write the gem", "doing"], ["Ship it 🚀", "done"]]) {
-        const m = new Y.Map(); m.set("id", crypto.randomUUID()); m.set("text", t); m.set("column", c); cards.push([m])
-      }
-    })
-  }, 200)
+})
+// Seed the starter cards only on the FIRST catch-up (whenSynced doesn't
+// re-fire on reconnects, so a deliberately emptied board stays empty).
+provider.whenSynced.then(() => {
+  if (cards.length) return
+  ydoc.transact(() => {
+    for (const [t, c] of [["Design the API", "todo"], ["Write the gem", "doing"], ["Ship it 🚀", "done"]]) {
+      const m = new Y.Map(); m.set("id", crypto.randomUUID()); m.set("text", t); m.set("column", c); cards.push([m])
+    }
+  })
 })
 render(); renderPresence()
 provider.connect()

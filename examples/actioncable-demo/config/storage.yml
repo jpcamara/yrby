@@ -1,0 +1,6 @@
+# ActiveStorage is loaded because ActionText requires it (the Rhino page's
+# CRDT-derived save persists to ActionText). The demo never uploads files, so
+# local disk service is plenty.
+local:
+  service: Disk
+  root: <%= Rails.root.join("storage") %>

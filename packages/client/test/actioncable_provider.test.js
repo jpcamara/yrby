@@ -180,6 +180,66 @@ test("a dropped transport (ActionCable will retry) shows as connecting, not disc
   assert.equal(p.status, "connecting", "subscription still set -> retrying, not torn down");
 });
 
+test("whenSynced resolves on the first sync, not before", async (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "ws1" });
+
+  let settled = false;
+  const pending = p.whenSynced.then(() => {
+    settled = true;
+  });
+  p.connect();
+  c.deliverConnected();
+  await Promise.resolve();
+  assert.equal(settled, false, "connected but not synced: still pending");
+
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+  await pending;
+  assert.equal(p.synced, true);
+  assert.equal(p.whenSynced, p.whenSynced, "one shared promise, not one per access");
+});
+
+test("whenSynced first accessed after sync resolves immediately", async (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "ws2" });
+  p.connect();
+  c.deliverConnected();
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+  assert.equal(p.synced, true);
+
+  await p.whenSynced; // no status change will fire; must not hang
+});
+
+test("whenSynced stays resolved across a reconnect", async (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "ws3" });
+  p.connect();
+  c.deliverConnected();
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+  await p.whenSynced;
+
+  // A transport drop must not un-settle the promise: it answers "has this
+  // doc ever caught up"; onStatusChange tracks the live connection.
+  c.deliverDisconnected();
+  assert.equal(p.status, "connecting", "retrying transport");
+  await p.whenSynced;
+});
+
+test("whenSynced first accessed during a disconnect still knows the first sync happened", async (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "ws4" });
+  p.connect();
+  c.deliverConnected();
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+
+  // The session resets `synced` on a transport drop (a reconnect will
+  // re-handshake), so `p.synced` is false here — but the first catch-up is
+  // a fact, and the promise's answer must not depend on when it's first read.
+  c.deliverDisconnected();
+  assert.equal(p.synced, false, "session synced resets while reconnecting");
+  await p.whenSynced; // must resolve immediately, not hang until re-sync
+});
+
 test("the returned unsubscribe stops a status listener", (t) => {
   const c = fakeConsumer();
   const p = makeProvider(t, new Y.Doc(), c, { id: "s3" });

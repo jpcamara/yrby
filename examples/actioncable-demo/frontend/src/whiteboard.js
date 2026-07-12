@@ -79,7 +79,11 @@ provider.awareness.on("update", renderPresence)
 statusEl.textContent = `connecting as ${user.name}…`
 provider.onStatusChange(({ status }) => {
   statusEl.textContent = status === "synced" ? `synced as ${user.name}` : `${status}…`
-  if (status === "synced") setTimeout(() => { if (shapes.size === 0) { addNote(40, 40, "drag me"); addNote(240, 120, "double-click to add") } }, 200)
+})
+// Seed the starter notes only on the FIRST catch-up (whenSynced doesn't
+// re-fire on reconnects, so a deliberately cleared board stays cleared).
+provider.whenSynced.then(() => {
+  if (shapes.size === 0) { addNote(40, 40, "drag me"); addNote(240, 120, "double-click to add") }
 })
 render(); renderPresence()
 provider.connect()

@@ -61,9 +61,23 @@ provider.onStatusChange(({ status }) => render(status)); // returns an unsubscri
 // provider.status     -> the current status (same union as above)
 // provider.awareness  -> the provider's Awareness instance (always a fresh one)
 // provider.synced     -> caught up with the server
+// provider.whenSynced -> Promise for the FIRST catch-up (see below)
 // provider.hasPending -> unacked local edits in flight
 // provider.destroy()  -> tear down
 ```
+
+Most rich-text bindings seed an empty document when they mount, so binding
+before the server's state arrives makes each client insert its own
+top-level node. Wait for the first sync before creating the editor:
+
+```js
+provider.connect();
+await provider.whenSynced; // resolves immediately if already synced
+// now hand the doc to the editor binding
+```
+
+It resolves once, on the first catch-up, and stays resolved across later
+reconnects. Use `onStatusChange` to track the live connection.
 
 On `disconnect()` / `destroy()` — and on browser `pagehide` — the provider
 broadcasts a presence removal so peers drop your cursor immediately instead of

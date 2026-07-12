@@ -129,6 +129,27 @@ The rest of the dev setup, plus the demo, is in [CONTRIBUTING.md](CONTRIBUTING.m
   and the test/load suites.
 - [CHANGELOG.md](CHANGELOG.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Editors
+
+yrby syncs opaque Yjs updates, so it works with any editor that has a Yjs
+binding. The demo app runs four, and CI drives each one in real Chrome:
+concurrent typing with every keystroke accounted for, remote cursors,
+local-only undo, and byte parity between the server-side renderers and the
+editor's own serializer. Each page is a working integration to copy from:
+
+| Editor | Yjs binding | Demo code |
+|---|---|---|
+| [Tiptap](https://tiptap.dev) (v2) | `@tiptap/extension-collaboration` | [`app.js`](examples/actioncable-demo/frontend/src/app.js) |
+| [Lexxy](https://github.com/basecamp/lexxy) (Lexical) | [`lexxy-realtime`](https://www.npmjs.com/package/lexxy-realtime) | [`lexxy.js`](examples/actioncable-demo/frontend/src/lexxy.js) |
+| [Rhino Editor](https://github.com/KonnorRogers/rhino-editor) (Tiptap 3) | `@tiptap/extension-collaboration` + `-caret` | [`rhino.js`](examples/actioncable-demo/frontend/src/rhino.js) |
+| [CodeMirror 6](https://codemirror.net) | `y-codemirror.next` | [`codemirror.js`](examples/actioncable-demo/frontend/src/codemirror.js) |
+
+The demo also syncs plain Yjs shapes with no editor at all — a whiteboard
+on a `Y.Map`, a kanban board on a `Y.Array`, a co-filled form — over the
+same channel. The demo README's "Using this in your own app" section has
+the integration recipe, and its `NoteMaterializer` shows how to render a
+document to ActionText server-side with `Y::Tiptap` or `Y::Lexxy`.
+
 ## Usage
 
 ### Doc (Low-Level Document Sync)
