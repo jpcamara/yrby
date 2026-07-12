@@ -14,3 +14,4 @@
 /public/forms.js
 .DS_Store
 /config/master.key
+/storage/
