@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `Y::Lexxy` emits the attachment tag the node was created with instead of
+  a hardcoded `<action-text-attachment>`. Lexxy makes the tag configurable
+  (`Lexxy.configure`'s `attachmentTagName`, paired with
+  `ActionText::Attachment.tag_name` in Rails), and each attachment node
+  stores its tag, so a custom-tag app's rendered HTML now matches its
+  editor. A stored value that doesn't look like a tag name falls back to
+  the default; documents from before the tag was stored render unchanged.
+
 ## [0.6.0] - 2026-07-11
 
 ### Added
