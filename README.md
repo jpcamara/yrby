@@ -2,12 +2,42 @@
 
 [![CI](https://github.com/jpcamara/yrby/actions/workflows/ci.yml/badge.svg)](https://github.com/jpcamara/yrby/actions/workflows/ci.yml)
 
-Collaborative editing for Rails, backed by [y-crdt](https://github.com/y-crdt/y-crdt)
-(the Rust library behind Y.js). Your Rails server speaks the y-websocket sync
-protocol directly, so there's no separate Node process hosting the Y.js
-documents. Pronounced "yer-bee".
+yrby (pronounced "yer-bee") makes Rails a real Yjs backend. It binds
+[y-crdt](https://github.com/y-crdt/y-crdt), the Rust engine behind Y.js, into
+Ruby, and builds the rest of the stack around it: a sync server for Action
+Cable and AnyCable, a browser provider, and server-side reading and rendering
+of the documents. Real-time collaboration in a Rails app with no Node process
+anywhere in the path.
 
 ![Two people typing on separate lines of the same document, each keystroke synced through a Rails server, seen from a third browser with labeled carets](docs/images/collab.gif)
+
+On the server, `yrby-actioncable` implements the full y-websocket protocol
+(document sync plus presence) as a channel concern. Its delivery contract is
+stricter than the usual Yjs servers: every update is ack-tracked, checked for
+causal gaps, and durably recorded before it is acknowledged or broadcast to
+anyone. Replaying your store always rebuilds the document, across any number
+of processes. ([Delivery guarantees](#delivery-guarantees))
+
+In the browser, `yrby-client`'s `ActionCableProvider` connects anything that
+speaks Yjs. The demo app runs four rich text editors, and CI drives each one
+in real Chrome: Tiptap, [Lexxy](https://www.npmjs.com/package/lexxy-realtime),
+Rhino Editor, and CodeMirror. The same channel also syncs Yjs shapes with no
+editor at all: a whiteboard on a `Y.Map`, a kanban board on a `Y.Array`, a
+co-filled form. ([Editors](#editors))
+
+In Ruby, the documents are readable without a browser. `Doc#read_text` and
+`Doc#read_map` reconstruct contents for search, validation, and exports.
+`Y::Tiptap` and `Y::Lexxy` render a document to HTML byte-identical to the
+editor's own serializer, take rules for your app's custom nodes, and drop
+straight into ActionText. ([Rendering to HTML](#rendering-to-html))
+
+Underneath, the core is built for a production Rails deployment. A `Doc` is
+thread-safe across Puma and ActionCable threads. Native CRDT work runs with
+the GVL released, so it parallelizes on MRI. Incoming frames are validated
+before anything processes them, and multi-process and AnyCable setups are
+tested end to end. ([Thread Safety](#thread-safety))
+
+The whole server side of a collaborative document is one channel:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
@@ -21,31 +51,12 @@ class DocumentChannel < ApplicationCable::Channel
 end
 ```
 
-On the browser, use the `ActionCableProvider` from the 
-[`yrby-client`](https://www.npmjs.com/package/yrby-client) npm package.
-Integrates with any editor that includes Y.js support, such as Tiptap, ProseMirror
-and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
-
-## Usage
-
-Install the gem and npm package:
+Install the gem and the npm package:
 
 ```
 gem install yrby-actioncable # depends on yrby
 npm install yrby-client
 ```
-
-## What you get
-
-- A thread-safe Ruby `Doc` you can share across Ruby threads/fibers, and native CRDT work
-  runs with the GVL released.
-- The y-websocket protocol (document sync plus awareness/presence) as a
-  one-include ActionCable concern.
-- Authoritative record-before-distribute semantics: each document change can be
-  recorded durably before it goes out to anyone.
-- Optional server-side reads: `Doc#read_text` and `Doc#read_map` reconstruct a
-  document's contents in Ruby - no Node process - for search, exports, validation,
-  or server-side rendering.
 
 ## Scope
 
