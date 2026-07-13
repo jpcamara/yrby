@@ -138,3 +138,35 @@ class HtmlTest < Minitest::Test
     refute_includes text, "UNDEFINED"
   end
 end
+
+# Lexxy's attachment tag is configurable (attachmentTagName); the node
+# stores the tag it was created with, and the renderer emits the stored
+# value. The fixture suites above pin the default-tag output.
+class LexxyAttachmentTagTest < Minitest::Test
+  FakeNode = Struct.new(:attrs)
+
+  def test_uses_the_stored_tag_name
+    node = FakeNode.new({ "tagName" => "custom-attachment" })
+
+    assert_equal "custom-attachment", Y::Lexxy.attachment_tag(node)
+  end
+
+  def test_falls_back_when_unset
+    assert_equal "action-text-attachment", Y::Lexxy.attachment_tag(FakeNode.new({}))
+  end
+
+  def test_rejects_a_stored_value_that_is_not_a_tag_name
+    node = FakeNode.new({ "tagName" => 'x onmouseover="' })
+
+    assert_equal "action-text-attachment", Y::Lexxy.attachment_tag(node)
+  end
+
+  def test_upload_and_mention_emit_the_stored_tag
+    node = FakeNode.new({ "tagName" => "my-attachment", "sgid" => "SG1" })
+
+    upload = Y::Lexxy.upload(node)
+    assert_includes upload, '<my-attachment sgid="SG1"'
+    assert upload.end_with?("</my-attachment>")
+    assert Y::Lexxy.mention(node).end_with?("</my-attachment>")
+  end
+end

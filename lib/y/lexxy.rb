@@ -52,24 +52,37 @@ module Y
     # and presence mirror Lexxy's exportDOM (nulls omitted, `previewable`
     # only when true, `presentation="gallery"` always).
     def self.upload(node)
-      out = +"<action-text-attachment"
+      tag = attachment_tag(node)
+      out = +"<#{tag}"
       out << attachment_attr(node, "sgid", "sgid")
       out << %( previewable="true") if node.attrs["previewable"] == true
       [%w[url src], %w[alt altText], %w[caption caption],
        %w[content-type contentType], %w[filename fileName],
        %w[filesize fileSize], %w[width width], %w[height height]]
         .each { |html_name, stored| out << attachment_attr(node, html_name, stored) }
-      %(#{out} presentation="gallery"></action-text-attachment>)
+      %(#{out} presentation="gallery"></#{tag}>)
     end
 
     # A content attachment (mention, embed): `content` carries the escaped
     # inner HTML; `plainText` is not exported.
     def self.mention(node)
-      out = +"<action-text-attachment"
+      tag = attachment_tag(node)
+      out = +"<#{tag}"
       out << attachment_attr(node, "sgid", "sgid")
       out << attachment_attr(node, "content", "innerHtml")
       out << attachment_attr(node, "content-type", "contentType")
-      "#{out}></action-text-attachment>"
+      "#{out}></#{tag}>"
+    end
+
+    # Lexxy's attachment tag is configurable (`Lexxy.configure`'s
+    # attachmentTagName, paired with ActionText::Attachment.tag_name on the
+    # Rails side), and each attachment node stores the tag it was created
+    # with. Emit the stored tag. The value is stored document data, not
+    # markup, so anything that doesn't look like a tag name falls back to
+    # ActionText's default.
+    def self.attachment_tag(node)
+      tag = node.attrs["tagName"].to_s
+      tag.match?(/\A[a-zA-Z][a-zA-Z0-9-]*\z/) ? tag : "action-text-attachment"
     end
 
     # A stored nil (unset) is skipped; a stored empty string still emits.
