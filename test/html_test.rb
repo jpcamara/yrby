@@ -165,6 +165,7 @@ class LexxyAttachmentTagTest < Minitest::Test
     node = FakeNode.new({ "tagName" => "my-attachment", "sgid" => "SG1" })
 
     upload = Y::Lexxy.upload(node)
+
     assert_includes upload, '<my-attachment sgid="SG1"'
     assert upload.end_with?("</my-attachment>")
     assert Y::Lexxy.mention(node).end_with?("</my-attachment>")

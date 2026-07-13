@@ -53,7 +53,7 @@ module Y
     # only when true, `presentation="gallery"` always).
     def self.upload(node)
       tag = attachment_tag(node)
-      out = +"<#{tag}"
+      out = "<#{tag}"
       out << attachment_attr(node, "sgid", "sgid")
       out << %( previewable="true") if node.attrs["previewable"] == true
       [%w[url src], %w[alt altText], %w[caption caption],
@@ -67,7 +67,7 @@ module Y
     # inner HTML; `plainText` is not exported.
     def self.mention(node)
       tag = attachment_tag(node)
-      out = +"<#{tag}"
+      out = "<#{tag}"
       out << attachment_attr(node, "sgid", "sgid")
       out << attachment_attr(node, "content", "innerHtml")
       out << attachment_attr(node, "content-type", "contentType")
