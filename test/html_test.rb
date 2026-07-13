@@ -143,7 +143,7 @@ end
 # stores the tag it was created with, and the renderer emits the stored
 # value. The fixture suites above pin the default-tag output.
 class LexxyAttachmentTagTest < Minitest::Test
-  FakeNode = Struct.new(:attrs)
+  FakeNode = Data.define(:attrs)
 
   def test_uses_the_stored_tag_name
     node = FakeNode.new({ "tagName" => "custom-attachment" })
