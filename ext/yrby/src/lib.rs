@@ -14,9 +14,9 @@ use protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
     update_is_ready,
 };
-pub(crate) use yrby_render_rules as render_rules;
-use yrby_lexical_html as lexical_html;
 use render_rules::{Rules, Segment};
+use yrby_lexical_html as lexical_html;
+pub(crate) use yrby_render_rules as render_rules;
 
 /// Wrapper around yrs Doc.
 ///
