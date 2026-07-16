@@ -6,6 +6,18 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `rails generate yrby:install`: wires a Rails app in one step — a
+  `DocumentChannel` speaking the y-websocket protocol, an
+  ActiveRecord-backed durable store, and its migration. The store is an
+  append-only update log with inline compaction (`compact_every`, default
+  500): rows collapse into one snapshot row so `on_load` replays the
+  compaction window, not the document's full history. The generated files
+  are plain app code, and the store's merge goes through
+  `compacted_state_update` so a gappy recorded update can never be served
+  to peers. Store behavior is pinned by tests against a real database.
+
 ## [0.3.1] - 2026-07-01
 
 ### Removed

@@ -7,6 +7,8 @@ AllCops:
   NewCops: enable
   SuggestExtensions: false
   Exclude:
+    # ERB, not Ruby — the migration template interpolates the AR version.
+    - "lib/generators/yrby/install/templates/**/*"
     - "ext/**/*"          # Rust extension
     - "tmp/**/*"
     - "vendor/**/*"

@@ -459,6 +459,22 @@ Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
 
 ### ActionCable Integration
 
+In a Rails app, the generator wires everything at once:
+
+```bash
+bin/rails generate yrby:install
+bin/rails db:migrate
+```
+
+It creates a `DocumentChannel`, an ActiveRecord-backed store, and the
+store's migration. The store is an append-only update log with inline
+compaction: once `compact_every` rows accumulate for a document they
+collapse into one snapshot row, so `on_load` stays proportional to the
+compaction window instead of the document's full history. The generated
+files are plain app code — rename them, move the compaction into a job,
+or swap the storage entirely; the channel only needs `on_load` and
+`on_change` answered.
+
 `Y::ActionCable::Sync` (from the `yrby-actioncable` gem) is a channel
 concern that implements the full y-websocket protocol (document sync +
 awareness/presence) over ActionCable:

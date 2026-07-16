@@ -1,0 +1,13 @@
+Description:
+    Wires the app for collaborative documents: a DocumentChannel speaking
+    the y-websocket protocol, an ActiveRecord-backed durable store with
+    compaction, and its migration.
+
+Example:
+    bin/rails generate yrby:install
+
+    This will create:
+        app/channels/document_channel.rb
+        app/models/yrby_document_update.rb
+        app/models/yrby_document_store.rb
+        db/migrate/XXXXXXXX_create_yrby_document_updates.rb
