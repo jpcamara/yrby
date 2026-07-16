@@ -1,5 +1,7 @@
 [package]
-name = "yrby-render-rules"
+name = "yrs-render-rules"
+description = "Declarative render rules and segmented HTML output for yrs XML trees"
+repository = "https://github.com/jpcamara/yrby"
 version = "0.1.0"
 edition = "2021"
 authors = ["JP Camara <johnpcamara@gmail.com>"]

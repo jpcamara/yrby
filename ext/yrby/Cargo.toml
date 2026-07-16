@@ -14,8 +14,8 @@ magnus = "0.8"
 rb-sys = "0.9"
 yrs = { version = "0.27", features = ["sync"] }
 serde_json = "1.0"
-yrby-render-rules = { path = "crates/render-rules" }
-yrby-lexical-html = { path = "crates/lexical-html" }
+yrs-render-rules = { path = "crates/render-rules" }
+yrs-lexical-html = { path = "crates/lexical-html" }
 
 [dev-dependencies]
 rb-sys-env = "0.1"

@@ -616,26 +616,9 @@ dependencies = [
  "rb-sys",
  "rb-sys-env 0.1.2",
  "serde_json",
- "yrby-lexical-html",
- "yrby-render-rules",
  "yrs",
-]
-
-[[package]]
-name = "yrby-lexical-html"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "yrby-render-rules",
- "yrs",
-]
-
-[[package]]
-name = "yrby-render-rules"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "yrs",
+ "yrs-lexical-html",
+ "yrs-render-rules",
 ]
 
 [[package]]
@@ -654,6 +637,23 @@ dependencies = [
  "smallstr",
  "smallvec",
  "thiserror",
+]
+
+[[package]]
+name = "yrs-lexical-html"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "yrs",
+ "yrs-render-rules",
+]
+
+[[package]]
+name = "yrs-render-rules"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "yrs",
 ]
 
 [[package]]
