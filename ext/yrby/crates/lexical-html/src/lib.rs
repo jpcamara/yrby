@@ -44,7 +44,7 @@
 //! a built-in. Declarative rules render here; callback rules emit
 //! `Segment::Deferred` for the caller to fill in after the render.
 
-use crate::render_rules::{
+use yrby_render_rules::{
     resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, NodeRule, Rules, Segment,
     TypeMap,
 };
@@ -126,7 +126,7 @@ pub fn render_segments<T: ReadTxn>(
 #[cfg(test)]
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
-        crate::render_rules::flatten(segs)
+        yrby_render_rules::flatten(segs)
             .into_html()
             .expect("no callback rules registered")
     })
@@ -1297,7 +1297,7 @@ mod tests {
         let txn = doc.transact();
         let frag = txn.get_xml_fragment("root").unwrap();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
-        let html = crate::render_rules::flatten(segs).into_html().unwrap();
+        let html = yrby_render_rules::flatten(segs).into_html().unwrap();
         assert_eq!(
             html,
             "<p><a class=\"app-link\" href=\"https://x.example\">site</a>\

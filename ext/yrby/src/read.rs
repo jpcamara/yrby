@@ -352,7 +352,7 @@ mod tests {
         // lexxy-realtime's test server and saving GET /content/:room.
         use yrs::updates::decoder::Decode;
         use yrs::Update;
-        let bytes = include_bytes!("fixtures/lexical_linebreak.bin");
+        let bytes = include_bytes!("../crates/lexical-html/src/fixtures/lexical_linebreak.bin");
         let doc = Doc::new();
         doc.transact_mut()
             .apply_update(Update::decode_v1(bytes).unwrap())
@@ -369,7 +369,7 @@ mod tests {
         // upload's caption as its own line — while the divider stays silent.
         use yrs::updates::decoder::Decode;
         use yrs::{Transact, Update};
-        let bytes = include_bytes!("fixtures/lexxy_full.bin");
+        let bytes = include_bytes!("../crates/lexical-html/src/fixtures/lexxy_full.bin");
         let doc = Doc::new();
         doc.transact_mut()
             .apply_update(Update::decode_v1(bytes).unwrap())
@@ -408,7 +408,7 @@ mod tests {
         // must come through (get_string alone dropped all the nested ones).
         use yrs::updates::decoder::Decode;
         use yrs::{Transact, Update};
-        let bytes = include_bytes!("fixtures/lexical_rich.bin");
+        let bytes = include_bytes!("../crates/lexical-html/src/fixtures/lexical_rich.bin");
         let doc = Doc::new();
         {
             let mut txn = doc.transact_mut();

@@ -5,7 +5,7 @@ require "test_helper"
 # Y::Lexxy: schema-pinned rendering of Lexxy documents (Y::Lexical, its base
 # class, renders core Lexical; Y::Lexxy adds the Lexxy schema as rules). The
 # Doc itself stays schema-agnostic.
-# The reference pair under ext/yrby/src/fixtures was captured from one live
+# The reference pair under ext/yrby/crates/lexical-html/src/fixtures was captured from one live
 # Lexxy editor session: lexxy_full.bin is the synced Yjs state, lexxy_full.html
 # is the editor's own `value` (the HTML a Lexxy form submits to Rails).
 # to_html must reproduce it byte for byte. The native renderer covers core
@@ -13,7 +13,7 @@ require "test_helper"
 # tests exercise the extension path end to end — they are the Lexxy
 # byte-parity guarantee.
 class HtmlTest < Minitest::Test
-  FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
+  FIXTURES = File.expand_path("../ext/yrby/crates/lexical-html/src/fixtures", __dir__)
 
   def lexical_for_fixture
     doc = Y::Doc.new

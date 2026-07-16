@@ -8,17 +8,18 @@ require "test_helper"
 # rule engine itself (precedence, templates, segment shapes) is exercised in
 # the Rust tests; these cover the Ruby-facing surface end to end.
 class RenderingRulesTest < Minitest::Test
-  FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
+  LEXICAL_FIXTURES = File.expand_path("../ext/yrby/crates/lexical-html/src/fixtures", __dir__)
+  PROSEMIRROR_FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
 
   def lexical_doc(name = "lexxy_full")
     doc = Y::Doc.new
-    doc.apply_update(File.binread(File.join(FIXTURES, "#{name}.bin")))
+    doc.apply_update(File.binread(File.join(LEXICAL_FIXTURES, "#{name}.bin")))
     doc
   end
 
   def prosemirror_doc(name = "prosemirror_tiptap")
     doc = Y::Doc.new
-    doc.apply_update(File.binread(File.join(FIXTURES, "#{name}.bin")))
+    doc.apply_update(File.binread(File.join(PROSEMIRROR_FIXTURES, "#{name}.bin")))
     doc
   end
 
@@ -91,7 +92,7 @@ class RenderingRulesTest < Minitest::Test
       prosemirror_doc,
       nodes: {
         "horizontalRule" => lambda { |_node|
-          doc.apply_update(File.binread(File.join(FIXTURES, "lexxy_full.bin")))
+          doc.apply_update(File.binread(File.join(LEXICAL_FIXTURES, "lexxy_full.bin")))
           renderer.to_html # a fresh read transaction on another doc view
           %(<hr data-cb="1">)
         }
