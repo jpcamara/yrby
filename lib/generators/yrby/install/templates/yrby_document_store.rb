@@ -27,8 +27,9 @@ class YrbyDocumentStore
 
     def append(key, update)
       YrbyDocumentUpdate.create!(document_key: key, payload: update)
-      count = YrbyDocumentUpdate.where(document_key: key).count
-      compact!(key) if (count % compact_every).zero?
+      # At-or-over, not an exact multiple: concurrent appends can jump the
+      # count past a multiple and would otherwise skip compaction forever.
+      compact!(key) if YrbyDocumentUpdate.where(document_key: key).count >= compact_every
     end
 
     # Collapse a document's rows into one snapshot row. Safe to run while

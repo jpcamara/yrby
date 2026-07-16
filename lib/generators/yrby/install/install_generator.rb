@@ -31,7 +31,7 @@ module Yrby
 
       def create_migration_file
         migration_template "create_yrby_document_updates.rb",
-                           "db/migrate/create_yrby_document_updates.rb"
+                           File.join(db_migrate_path, "create_yrby_document_updates.rb")
       end
 
       def show_next_steps
@@ -39,9 +39,11 @@ module Yrby
 
           yrby is wired up. Next steps:
 
-            1. bin/rails db:migrate
-            2. npm install yrby-client   (or yarn/bun/pnpm)
-            3. Connect an editor — the client side is a provider plus your
+            1. Authorize document access: implement `authorized?` in
+               app/channels/document_channel.rb (it fails closed until you do).
+            2. bin/rails db:migrate
+            3. npm install yrby-client   (or yarn/bun/pnpm)
+            4. Connect an editor — the client side is a provider plus your
                editor's Yjs binding:
 
                  import { ActionCableProvider } from "yrby-client"

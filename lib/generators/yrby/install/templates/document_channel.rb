@@ -13,6 +13,21 @@ class DocumentChannel < ApplicationCable::Channel
   # or broadcast; raising rejects the change and the client retransmits.
   on_change { |key, update| YrbyDocumentStore.append(key, update) }
 
-  def subscribed = sync_subscribed(params[:id])
+  def subscribed
+    return reject unless authorized?(params[:id])
+
+    sync_subscribed(params[:id])
+  end
+
   def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  # Fails closed: no one collaborates on a document until this says so.
+  # Wire it to your app's auth — e.g. identify current_user on the cable
+  # connection, then check it may read AND write this document (a raising
+  # on_change only covers transient store failures, not access control).
+  def authorized?(_document_key)
+    false
+  end
 end
