@@ -9,7 +9,7 @@ require "test_helper"
 # the Rust tests; these cover the Ruby-facing surface end to end.
 class RenderingRulesTest < Minitest::Test
   LEXICAL_FIXTURES = File.expand_path("../ext/yrby/crates/lexical-html/src/fixtures", __dir__)
-  PROSEMIRROR_FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
+  PROSEMIRROR_FIXTURES = File.expand_path("../ext/yrby/crates/prosemirror-html/src/fixtures", __dir__)
 
   def lexical_doc(name = "lexxy_full")
     doc = Y::Doc.new

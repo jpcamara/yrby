@@ -1,10 +1,11 @@
-# yrs-lexical-html
+# yrs-prosemirror-html
 
-Render a Lexical-shaped [yrs](https://github.com/y-crdt/y-crdt) document to
-HTML — no browser, no Node process, no headless editor. Covers core Lexical:
-paragraphs, headings, quotes, code blocks, lists, tables, links, and the full
-text-format model. Output is pinned byte-for-byte against fixtures captured
-from a live editor.
+Render a ProseMirror-shaped [yrs](https://github.com/y-crdt/y-crdt) document
+to HTML — no browser, no Node process, no headless editor. Covers
+prosemirror-schema-basic plus the prosemirror-tables family, and reads both
+naming styles editors use (Tiptap's `bulletList`/`bold` and
+prosemirror-schema-basic's `bullet_list`/`strong`). Output is pinned
+byte-for-byte against fixtures captured from a live Tiptap editor.
 
 Every example below is compile-checked by `cargo test`.
 
@@ -25,24 +26,25 @@ doc.transact_mut()
     .unwrap();
 
 let txn = doc.transact();
-let fragment = txn.get_xml_fragment("root").expect("Lexical's default root");
-let html = yrs_lexical_html::render(&txn, &fragment);
+let fragment = txn.get_xml_fragment("default").expect("Tiptap's default root");
+let html = yrs_prosemirror_html::render(&txn, &fragment);
 // => Some("<h1>Heading One</h1><p>…</p>") — or None if the fragment
-//    isn't Lexical-shaped (e.g. a ProseMirror document).
+//    isn't ProseMirror-shaped (e.g. a Lexical document).
 ```
 
 An editor may hold several fragments under one doc; pass whichever root name
 your editor binds. `render` returns `None` rather than guessing when the
-fragment's shape isn't Lexical's.
+fragment's shape isn't ProseMirror's.
 
 ## Custom nodes, declaratively
 
-Editors add node types core Lexical never heard of. A declarative rule is
+Editors add node and mark types the base schema never heard of. A
+declarative rule is
 markup as data — tag, attributes, content slot — and renders natively:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_lexical_html::{flatten, render_segments, Rules};
+use yrs_prosemirror_html::{flatten, render_segments, Rules};
 
 let rules = Rules::parse(
     r#"{
@@ -58,8 +60,8 @@ let rules = Rules::parse(
 
 let doc = Doc::new();
 let txn = doc.transact();
-let fragment = txn.get_xml_fragment("root").expect("root");
-let segments = render_segments(&txn, &fragment, &rules).expect("Lexical-shaped");
+let fragment = txn.get_xml_fragment("default").expect("default");
+let segments = render_segments(&txn, &fragment, &rules).expect("ProseMirror-shaped");
 let html = flatten(segments).into_html().expect("no callback rules");
 // A stored <callout kind="warning"> renders as
 // <aside class="callout callout--warning">…</aside>
@@ -69,10 +71,48 @@ Attribute templates concatenate literal parts (`lit`) and stored-attribute
 references (`ref`); an attribute that resolves empty is omitted. `content`
 is `"inline"` (formatted text, the default), `"blocks"` (child block
 nodes), or `"none"` (a leaf); `"void": true` skips the closing tag. A rule
-for a built-in type replaces how that type renders. (There is no marks
-tier here: marks are a ProseMirror concept, and Lexical folds formatting
-into its core text model, rendered natively — see `yrs-prosemirror-html`
-for the marks side.)
+for a built-in type replaces how that type renders.
+
+## Custom marks
+
+ProseMirror splits a document into nodes (the structure: paragraphs, lists,
+tables) and marks (annotations on runs of text: bold, links, comments). The
+split is ProseMirror's — the Lexical crate has no marks tier, because
+Lexical folds formatting into its core text model and renders it natively.
+
+A mark rule registers under `"marks"` and wraps the text runs carrying it:
+
+```rust,no_run
+use yrs::{Doc, Transact, ReadTxn};
+use yrs_prosemirror_html::{flatten, render_segments, Rules};
+
+let rules = Rules::parse(
+    r#"{
+      "marks": {
+        "comment": {
+          "tag": "span",
+          "attrs": [["data-comment-id", [{"ref": "id"}]]]
+        }
+      }
+    }"#,
+).unwrap();
+
+let doc = Doc::new();
+let txn = doc.transact();
+let fragment = txn.get_xml_fragment("default").expect("default");
+let segments = render_segments(&txn, &fragment, &rules).expect("ProseMirror-shaped");
+let html = flatten(segments).into_html().expect("no callback rules");
+// A run stored with the comment mark renders as
+// <span data-comment-id="c42">…</span>, wrapped outside the built-in marks.
+```
+
+The built-in marks nest deterministically (subscript/superscript innermost,
+then highlight, underline, strike, italic, bold, a `textStyle` span, link on
+the outside), and `code` renders alone among the formatting marks, matching
+Tiptap's Code mark. A custom mark wraps outside every built-in; several on
+one run nest alphabetically by name, so output never depends on
+registration order. A rule for a built-in mark name (`"bold"`) replaces its
+markup while the exclusivity behavior holds.
 
 ## Custom nodes, with your own code
 
@@ -84,7 +124,7 @@ children, and you splice the result:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_lexical_html::{render_segments, Rules, Segment};
+use yrs_prosemirror_html::{render_segments, Rules, Segment};
 
 fn splice(segments: Vec<Segment>) -> String {
     segments
@@ -97,7 +137,7 @@ fn splice(segments: Vec<Segment>) -> String {
                     "mention" => {
                         let attrs: serde_json::Value =
                             serde_json::from_str(&attrs_json).unwrap();
-                        let id = attrs["__id"].as_str().unwrap_or("unknown");
+                        let id = attrs["id"].as_str().unwrap_or("unknown");
                         // Look the user up, build trusted markup, escape
                         // anything you interpolate.
                         format!(r#"<a class="mention" href="/users/{id}">@{id}</a>"#)
@@ -113,8 +153,8 @@ let rules = Rules::parse(r#"{"nodes": {"mention": {"callback": true}}}"#).unwrap
 
 let doc = Doc::new();
 let txn = doc.transact();
-let fragment = txn.get_xml_fragment("root").expect("root");
-let segments = render_segments(&txn, &fragment, &rules).expect("Lexical-shaped");
+let fragment = txn.get_xml_fragment("default").expect("default");
+let segments = render_segments(&txn, &fragment, &rules).expect("ProseMirror-shaped");
 let html = splice(segments);
 ```
 
@@ -123,16 +163,16 @@ re-exported here; `yrs-html-core` is an internal implementation crate.)
 
 ## Discovering what a document stores
 
-Editors store types and attributes under names you'd never predict (Lexical
-prefixes its own props `__`). Don't guess — ask a real document:
+Editors store types and attributes under names you'd never predict (Rhino
+Editor's strike mark is `rhino-strike`). Don't guess — ask a real document:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_lexical_html::{collect_node_types, is_builtin};
+use yrs_prosemirror_html::{collect_node_types, is_builtin};
 
 let doc = Doc::new();
 let txn = doc.transact();
-let fragment = txn.get_xml_fragment("root").expect("root");
+let fragment = txn.get_xml_fragment("default").expect("default");
 for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default() {
     println!(
         "{node_type}: {} seen, attrs {:?}, children {:?}, text: {}, built in: {}",
@@ -148,10 +188,10 @@ degrade to readable markup rather than disappearing.
 ## Building and testing
 
 ```bash
-cargo build -p yrs-lexical-html
-cargo test -p yrs-lexical-html
+cargo build -p yrs-prosemirror-html
+cargo test -p yrs-prosemirror-html
 ```
 
 Extracted from (and maintained with) [yrby](https://github.com/jpcamara/yrby),
-the Rails CRDT sync gem, where it backs `Y::Lexical`/`Y::Lexxy`. Depends only
+the Rails CRDT sync gem, where it backs `Y::ProseMirror`/`Y::Tiptap`. Depends only
 on yrs, serde_json, and yrs-html-core. MIT.

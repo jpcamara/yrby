@@ -7,7 +7,6 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
 
-mod prosemirror_html;
 mod protocol;
 mod read;
 use protocol::{
@@ -17,6 +16,7 @@ use protocol::{
 use render_rules::{Rules, Segment};
 pub(crate) use yrs_html_core as render_rules;
 use yrs_lexical_html as lexical_html;
+use yrs_prosemirror_html as prosemirror_html;
 
 /// Wrapper around yrs Doc.
 ///
