@@ -45,6 +45,12 @@ pub struct Emitter {
     frames: Vec<Vec<Segment>>,
 }
 
+impl Default for Emitter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Emitter {
     pub fn new() -> Self {
         Emitter {

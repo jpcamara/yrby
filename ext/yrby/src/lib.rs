@@ -7,16 +7,16 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
 
-mod lexical_html;
 mod prosemirror_html;
 mod protocol;
 mod read;
-mod render_rules;
 use protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
     update_is_ready,
 };
 use render_rules::{Rules, Segment};
+pub(crate) use yrs_html_core as render_rules;
+use yrs_lexical_html as lexical_html;
 
 /// Wrapper around yrs Doc.
 ///

@@ -39,15 +39,19 @@
 //! with the unwrapped span. Case-transform format bits are never rendered
 //! (their text-transform style is outside the sanitize whitelist).
 //!
-//! Custom nodes: rules are registered by `__type` (see `render_rules`) and
+//! Custom nodes: rules are registered by `__type` (see `yrs-html-core`) and
 //! consulted before the built-in arms, so they extend the schema or override
 //! a built-in. Declarative rules render here; callback rules emit
 //! `Segment::Deferred` for the caller to fill in after the render.
 
-use crate::render_rules::{
-    resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, NodeRule, Rules, Segment,
-    TypeMap,
-};
+// README examples are living code: compile-checked on every cargo test.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+mod readme_examples {}
+
+// The full rules surface, re-exported: depend on this crate alone;
+// yrs-html-core is an internal implementation crate.
+pub use yrs_html_core::*;
 use yrs::types::text::YChange;
 use yrs::{
     Any, GetString, Map, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
@@ -121,12 +125,12 @@ pub fn render_segments<T: ReadTxn>(
     Some(em.into_segments())
 }
 
-/// Rule-free rendering to a plain string — the fixture-parity surface most
-/// tests pin. With no callback rules, segments always flatten.
-#[cfg(test)]
+/// Rule-free rendering to a plain string — the simplest way to use this
+/// crate standalone, and the fixture-parity surface the tests pin. With no
+/// callback rules, segments always flatten.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
-        crate::render_rules::flatten(segs)
+        yrs_html_core::flatten(segs)
             .into_html()
             .expect("no callback rules registered")
     })
@@ -1297,7 +1301,7 @@ mod tests {
         let txn = doc.transact();
         let frag = txn.get_xml_fragment("root").unwrap();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
-        let html = crate::render_rules::flatten(segs).into_html().unwrap();
+        let html = yrs_html_core::flatten(segs).into_html().unwrap();
         assert_eq!(
             html,
             "<p><a class=\"app-link\" href=\"https://x.example\">site</a>\

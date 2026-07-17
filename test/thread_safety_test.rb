@@ -109,7 +109,8 @@ class ThreadSafetyTest < Minitest::Test
     # render path under write contention; a future edit that reintroduced a
     # nested transaction would deadlock and time out here.
     doc = Y::Doc.new
-    doc.apply_update(File.binread(File.expand_path("../ext/yrby/src/fixtures/lexxy_full.bin", __dir__)))
+    doc.apply_update(File.binread(File.expand_path("../ext/yrby/crates/lexical-html/src/fixtures/lexxy_full.bin",
+                                                   __dir__)))
     lexical = Y::Lexxy.new(doc)
     updates = [
       YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
