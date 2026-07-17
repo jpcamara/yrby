@@ -1,6 +1,6 @@
 [package]
 name = "yrs-render-rules"
-description = "Declarative render rules and segmented HTML output for yrs XML trees"
+description = "Internal support crate for yrs-lexical-html and yrs-prosemirror-html; depend on those instead"
 repository = "https://github.com/jpcamara/yrby"
 readme = "README.md"
 version = "0.1.0"

@@ -1,8 +1,14 @@
 # yrs-render-rules
 
-The extensibility core shared by [`yrs-lexical-html`](../lexical-html) and
-[`yrs-prosemirror-html`](../prosemirror-html): per-node render rules and
-segmented HTML output for [yrs](https://github.com/y-crdt/y-crdt) XML trees.
+**Internal support crate** for
+[`yrs-lexical-html`](../lexical-html) and
+[`yrs-prosemirror-html`](../prosemirror-html): the per-node render rules and
+segmented HTML output they share.
+
+Don't depend on this crate directly — the renderers re-export its entire
+surface (`Rules`, `Segment`, `flatten`, ...), and this crate makes no API
+stability promises of its own. It exists as a separate package only because
+published crates can't share a path dependency.
 
 Rules come in two tiers. Declarative rules (tag, attributes, text, content
 slot) compile to `NodeRule`/`MarkRule` and render natively, inside the
@@ -11,10 +17,7 @@ document transaction. Callback rules defer to the caller: the renderer emits
 and its already-rendered children, and the caller splices the result in after
 the render returns — application code never runs while the document is
 locked. Rules arrive as one JSON document (`Rules::parse`), so the same
-format serves any binding or caller.
-
-You usually want one of the renderer crates rather than this directly; this
-crate is for building a renderer for another editor's document shape.
+format serves any binding.
 
 ## Building and testing
 
@@ -24,4 +27,4 @@ cargo test -p yrs-render-rules
 ```
 
 Extracted from (and maintained with) [yrby](https://github.com/jpcamara/yrby),
-the Rails CRDT sync gem, but depends only on yrs and serde_json. MIT.
+the Rails CRDT sync gem. MIT.

@@ -44,10 +44,9 @@
 //! a built-in. Declarative rules render here; callback rules emit
 //! `Segment::Deferred` for the caller to fill in after the render.
 
-use yrs_render_rules::{
-    resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, NodeRule, Rules, Segment,
-    TypeMap,
-};
+// The full rules surface, re-exported: depend on this crate alone;
+// yrs-render-rules is an internal implementation crate.
+pub use yrs_render_rules::*;
 use yrs::types::text::YChange;
 use yrs::{
     Any, GetString, Map, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
