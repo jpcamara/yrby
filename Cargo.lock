@@ -617,8 +617,8 @@ dependencies = [
  "rb-sys-env 0.1.2",
  "serde_json",
  "yrs",
+ "yrs-html-core",
  "yrs-lexical-html",
- "yrs-render-rules",
 ]
 
 [[package]]
@@ -640,20 +640,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "yrs-html-core"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "yrs",
+]
+
+[[package]]
 name = "yrs-lexical-html"
 version = "0.1.0"
 dependencies = [
  "serde_json",
  "yrs",
- "yrs-render-rules",
-]
-
-[[package]]
-name = "yrs-render-rules"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "yrs",
+ "yrs-html-core",
 ]
 
 [[package]]

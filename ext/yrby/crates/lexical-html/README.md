@@ -22,7 +22,7 @@ let html = yrs_lexical_html::render(&txn, &fragment);
 ```
 
 An editor's custom node types render through rules (re-exported here;
-`yrs-render-rules` is an internal crate): pass `Rules` to `render_segments`
+`yrs-html-core` is an internal crate): pass `Rules` to `render_segments`
 and splice any deferred segments yourself. `collect_node_types` reports every
 type and attribute a real document stores, so nothing has to be guessed. An
 unknown node keeps its content — text and nested blocks degrade to readable
@@ -37,4 +37,4 @@ cargo test -p yrs-lexical-html
 
 Extracted from (and maintained with) [yrby](https://github.com/jpcamara/yrby),
 the Rails CRDT sync gem, where it backs `Y::Lexical`/`Y::Lexxy`. Depends only
-on yrs, serde_json, and yrs-render-rules. MIT.
+on yrs, serde_json, and yrs-html-core. MIT.

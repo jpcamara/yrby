@@ -15,8 +15,8 @@ use protocol::{
     update_is_ready,
 };
 use render_rules::{Rules, Segment};
+pub(crate) use yrs_html_core as render_rules;
 use yrs_lexical_html as lexical_html;
-pub(crate) use yrs_render_rules as render_rules;
 
 /// Wrapper around yrs Doc.
 ///

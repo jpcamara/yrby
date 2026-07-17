@@ -39,14 +39,14 @@
 //! with the unwrapped span. Case-transform format bits are never rendered
 //! (their text-transform style is outside the sanitize whitelist).
 //!
-//! Custom nodes: rules are registered by `__type` (see `render_rules`) and
+//! Custom nodes: rules are registered by `__type` (see `yrs-html-core`) and
 //! consulted before the built-in arms, so they extend the schema or override
 //! a built-in. Declarative rules render here; callback rules emit
 //! `Segment::Deferred` for the caller to fill in after the render.
 
 // The full rules surface, re-exported: depend on this crate alone;
-// yrs-render-rules is an internal implementation crate.
-pub use yrs_render_rules::*;
+// yrs-html-core is an internal implementation crate.
+pub use yrs_html_core::*;
 use yrs::types::text::YChange;
 use yrs::{
     Any, GetString, Map, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
@@ -125,7 +125,7 @@ pub fn render_segments<T: ReadTxn>(
 /// callback rules, segments always flatten.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
-        yrs_render_rules::flatten(segs)
+        yrs_html_core::flatten(segs)
             .into_html()
             .expect("no callback rules registered")
     })
@@ -1296,7 +1296,7 @@ mod tests {
         let txn = doc.transact();
         let frag = txn.get_xml_fragment("root").unwrap();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
-        let html = yrs_render_rules::flatten(segs).into_html().unwrap();
+        let html = yrs_html_core::flatten(segs).into_html().unwrap();
         assert_eq!(
             html,
             "<p><a class=\"app-link\" href=\"https://x.example\">site</a>\

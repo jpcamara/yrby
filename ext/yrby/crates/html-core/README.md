@@ -1,6 +1,6 @@
-# yrs-render-rules
+# yrs-html-core
 
-**Internal support crate** for
+**Internal core** of
 [`yrs-lexical-html`](../lexical-html) and
 [`yrs-prosemirror-html`](../prosemirror-html): the per-node render rules and
 segmented HTML output they share.
@@ -22,8 +22,8 @@ format serves any binding.
 ## Building and testing
 
 ```bash
-cargo build -p yrs-render-rules
-cargo test -p yrs-render-rules
+cargo build -p yrs-html-core
+cargo test -p yrs-html-core
 ```
 
 Extracted from (and maintained with) [yrby](https://github.com/jpcamara/yrby),

@@ -1,6 +1,6 @@
 [package]
-name = "yrs-render-rules"
-description = "Internal support crate for yrs-lexical-html and yrs-prosemirror-html; depend on those instead"
+name = "yrs-html-core"
+description = "Internal core for the yrs-*-html renderer crates; depend on those instead"
 repository = "https://github.com/jpcamara/yrby"
 readme = "README.md"
 version = "0.1.0"
