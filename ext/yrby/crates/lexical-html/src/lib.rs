@@ -44,6 +44,11 @@
 //! a built-in. Declarative rules render here; callback rules emit
 //! `Segment::Deferred` for the caller to fill in after the render.
 
+// README examples are living code: compile-checked on every cargo test.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+mod readme_examples {}
+
 // The full rules surface, re-exported: depend on this crate alone;
 // yrs-html-core is an internal implementation crate.
 pub use yrs_html_core::*;
