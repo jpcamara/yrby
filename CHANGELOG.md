@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.1] - 2026-08-04
+## [Unreleased]
 
 ### Added
 
@@ -15,6 +15,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (ack-tracked delivery, causal-gap detection, integrated-only serving) lives
   here. Any transport that can reply to one client and relay to the rest can
   carry the same protocol: a raw WebSocket, or REST plus a pub/sub bus.
+
+## [0.6.1] - 2026-08-04
 
 ### Fixed
 
