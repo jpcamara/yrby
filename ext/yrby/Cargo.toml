@@ -16,6 +16,7 @@ yrs = { version = "0.27", features = ["sync"] }
 serde_json = "1.0"
 yrs-html-core = { path = "crates/html-core" }
 yrs-lexical-html = { path = "crates/lexical-html" }
+yrs-prosemirror-html = { path = "crates/prosemirror-html" }
 
 [dev-dependencies]
 rb-sys-env = "0.1"

@@ -36,10 +36,14 @@
 //! Declarative rules render here; callback rules emit `Segment::Deferred` for
 //! the caller to fill in after the render.
 
-use crate::render_rules::{
-    any_attr_string, resolve_parts, xml_attrs_json, xml_ref_attr, Content, Emitter, MarkRule,
-    NodeRule, Rules, Segment, TypeMap,
-};
+// README examples are living code: compile-checked on every cargo test.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+mod readme_examples {}
+
+// The full rules surface, re-exported: depend on this crate alone;
+// yrs-html-core is an internal implementation crate.
+pub use yrs_html_core::*;
 use yrs::types::text::YChange;
 use yrs::types::Attrs;
 use yrs::{
@@ -96,12 +100,12 @@ pub fn render_segments<T: ReadTxn>(
     Some(em.into_segments())
 }
 
-/// Rule-free rendering to a plain string — the fixture-parity surface most
-/// tests pin. With no callback rules, segments always flatten.
-#[cfg(test)]
+/// Rule-free rendering to a plain string — the simplest way to use this
+/// crate standalone, and the fixture-parity surface the tests pin. With no
+/// callback rules, segments always flatten.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
-        crate::render_rules::flatten(segs)
+        yrs_html_core::flatten(segs)
             .into_html()
             .expect("no callback rules registered")
     })
@@ -1232,7 +1236,7 @@ mod tests {
         let txn = doc.transact();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
         assert_eq!(
-            crate::render_rules::flatten(segs).into_html().unwrap(),
+            yrs_html_core::flatten(segs).into_html().unwrap(),
             "<aside class=\"callout callout--warning\"><div class=\"para\">careful</div></aside>"
         );
     }
@@ -1290,7 +1294,7 @@ mod tests {
         }
         let txn = doc.transact();
         let map = collect_node_types(&txn, &frag).unwrap();
-        let json = crate::render_rules::type_map_json(&map, |ty| {
+        let json = yrs_html_core::type_map_json(&map, |ty| {
             if is_builtin(ty) {
                 Some("builtin")
             } else {

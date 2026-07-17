@@ -4,7 +4,7 @@ require "test_helper"
 
 # Y::Tiptap: schema-pinned rendering of Tiptap documents (Y::ProseMirror, its
 # base class, renders core ProseMirror; Y::Tiptap adds Tiptap's extension
-# nodes as rules). The fixtures under ext/yrby/src/fixtures were captured from
+# nodes as rules). The fixtures under ext/yrby/crates/prosemirror-html/src/fixtures were captured from
 # a real Tiptap editor: prosemirror_tiptap.bin is the synced Yjs state,
 # prosemirror_tiptap.html is the editor's own getHTML(). to_html reproduces it
 # byte for byte. The core schema mapping is exercised in the Rust tests; the
@@ -12,7 +12,7 @@ require "test_helper"
 # exercise the extension path end to end — they are the Tiptap byte-parity
 # guarantee.
 class ProseMirrorHtmlTest < Minitest::Test
-  FIXTURES = File.expand_path("../ext/yrby/src/fixtures", __dir__)
+  FIXTURES = File.expand_path("../ext/yrby/crates/prosemirror-html/src/fixtures", __dir__)
 
   def tiptap_for(name)
     doc = Y::Doc.new

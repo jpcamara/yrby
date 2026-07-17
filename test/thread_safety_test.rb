@@ -169,7 +169,8 @@ class ThreadSafetyTest < Minitest::Test
     # render path under write contention; a future edit that reintroduced a
     # nested transaction would deadlock and time out here.
     doc = Y::Doc.new
-    doc.apply_update(File.binread(File.expand_path("../ext/yrby/src/fixtures/prosemirror_tiptap.bin", __dir__)))
+    fixture = "../ext/yrby/crates/prosemirror-html/src/fixtures/prosemirror_tiptap.bin"
+    doc.apply_update(File.binread(File.expand_path(fixture, __dir__)))
     prosemirror = Y::ProseMirror.new(doc)
     updates = [
       YjsFixtures::TwoDocsMerged::DOC1_UPDATE,
