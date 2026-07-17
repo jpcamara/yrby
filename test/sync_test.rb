@@ -103,7 +103,7 @@ class SyncTest < Minitest::Test
 
     response = Base64.strict_decode64(helper.transmits.first["update"])
 
-    assert_equal Y::ActionCable::Sync::MSG_KIND_SYNC_STEP1,
+    assert_equal Y::Sync::Engine::MSG_KIND_SYNC_STEP1,
                  Y.message_kind(response)
   end
 

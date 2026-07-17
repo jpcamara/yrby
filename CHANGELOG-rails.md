@@ -27,6 +27,12 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The gem is now `yrby-rails`** (formerly `yrby-actioncable`) and a Rails
   engine. `yrby-actioncable` stops at 0.3.1; `yrby-rails` starts at 0.4.0.
   `Y::ActionCable` keeps its name as the public channel concern.
+- `Y::ActionCable::Sync` is now a thin adapter over the new transport-neutral
+  `Y::Sync::Engine` (core yrby). Behavior is unchanged — the full protocol test
+  suite passes as-is — but the state machine, reliability, and gap handling now
+  live in the engine, and the concern is just the cable wiring: envelope
+  decode, size cap, and routing the engine's result through `transmit` /
+  `broadcast`. `MSG_KIND_*` constants moved to `Y::Sync::Engine`.
 
 ### Added
 
