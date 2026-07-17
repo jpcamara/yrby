@@ -40,7 +40,7 @@ Gem::Specification.new do |spec|
   # makes the fix self-enforcing rather than dependent on the app updating the
   # core gem. (Earlier floors: 0.3.0 gap-free SyncStep1; 0.2.3 exact
   # delete-bearing update_advances?.)
-  spec.add_dependency "yrby", ">= 0.3.1"
+  spec.add_dependency "yrby", ">= 0.7.0"
   # The concern references ActionCable (channels, streaming, broadcasting) and
   # ActiveSupport (Concern, JSON coder) constants directly. Rails apps already
   # bundle these, but declaring them makes use outside a full Rails bundle fail

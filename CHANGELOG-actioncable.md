@@ -13,7 +13,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   suite passes as-is — but the state machine, reliability, and gap handling now
   live in the engine, and the concern is just the cable wiring: envelope
   decode, size cap, and routing the engine's result through `transmit` /
-  `broadcast`. `MSG_KIND_*` constants moved to `Y::Sync::Engine`.
+  `broadcast`. `MSG_KIND_*` constants moved to `Y::Sync::Engine`. Requires
+  `yrby >= 0.7.0`, which ships the engine.
 
 
 ## [0.3.1] - 2026-07-01
