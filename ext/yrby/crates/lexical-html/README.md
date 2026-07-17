@@ -69,7 +69,10 @@ Attribute templates concatenate literal parts (`lit`) and stored-attribute
 references (`ref`); an attribute that resolves empty is omitted. `content`
 is `"inline"` (formatted text, the default), `"blocks"` (child block
 nodes), or `"none"` (a leaf); `"void": true` skips the closing tag. A rule
-for a built-in type replaces how that type renders.
+for a built-in type replaces how that type renders. (There is no marks
+tier here: marks are a ProseMirror concept, and Lexical folds formatting
+into its core text model, rendered natively — see `yrs-prosemirror-html`
+for the marks side.)
 
 ## Custom nodes, with your own code
 

@@ -73,10 +73,46 @@ is `"inline"` (formatted text, the default), `"blocks"` (child block
 nodes), or `"none"` (a leaf); `"void": true` skips the closing tag. A rule
 for a built-in type replaces how that type renders.
 
-Custom marks work the same way under `"marks"` — `{"marks": {"comment":
-{"tag": "span", "attrs": [["data-comment-id", [{"ref": "id"}]]]}}}` wraps
-outside every built-in mark, and a rule for a built-in mark name replaces
-its tag.
+## Custom marks
+
+ProseMirror splits a document into nodes (the structure: paragraphs, lists,
+tables) and marks (annotations on runs of text: bold, links, comments). The
+split is ProseMirror's — the Lexical crate has no marks tier, because
+Lexical folds formatting into its core text model and renders it natively.
+
+A mark rule registers under `"marks"` and wraps the text runs carrying it:
+
+```rust,no_run
+use yrs::{Doc, Transact, ReadTxn};
+use yrs_prosemirror_html::{flatten, render_segments, Rules};
+
+let rules = Rules::parse(
+    r#"{
+      "marks": {
+        "comment": {
+          "tag": "span",
+          "attrs": [["data-comment-id", [{"ref": "id"}]]]
+        }
+      }
+    }"#,
+).unwrap();
+
+let doc = Doc::new();
+let txn = doc.transact();
+let fragment = txn.get_xml_fragment("default").expect("default");
+let segments = render_segments(&txn, &fragment, &rules).expect("ProseMirror-shaped");
+let html = flatten(segments).into_html().expect("no callback rules");
+// A run stored with the comment mark renders as
+// <span data-comment-id="c42">…</span>, wrapped outside the built-in marks.
+```
+
+The built-in marks nest deterministically (subscript/superscript innermost,
+then highlight, underline, strike, italic, bold, a `textStyle` span, link on
+the outside), and `code` renders alone among the formatting marks, matching
+Tiptap's Code mark. A custom mark wraps outside every built-in; several on
+one run nest alphabetically by name, so output never depends on
+registration order. A rule for a built-in mark name (`"bold"`) replaces its
+markup while the exclusivity behavior holds.
 
 ## Custom nodes, with your own code
 
