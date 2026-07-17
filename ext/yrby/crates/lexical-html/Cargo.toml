@@ -8,9 +8,10 @@ edition = "2024"
 rust-version = "1.85"
 authors = ["JP Camara <johnpcamara@gmail.com>"]
 license = "MIT"
-publish = false
+keywords = ["yjs", "crdt", "lexical", "html", "yrs"]
+categories = ["text-processing", "web-programming"]
 
 [dependencies]
 yrs = { version = "0.27", features = ["sync"] }
 serde_json = "1.0"
-yrs-html-core = { path = "../html-core" }
+yrs-html-core = { path = "../html-core", version = "0.1.0" }
