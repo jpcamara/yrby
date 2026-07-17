@@ -619,6 +619,7 @@ dependencies = [
  "yrs",
  "yrs-html-core",
  "yrs-lexical-html",
+ "yrs-prosemirror-html",
 ]
 
 [[package]]
@@ -649,6 +650,15 @@ dependencies = [
 
 [[package]]
 name = "yrs-lexical-html"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "yrs",
+ "yrs-html-core",
+]
+
+[[package]]
+name = "yrs-prosemirror-html"
 version = "0.1.0"
 dependencies = [
  "serde_json",
