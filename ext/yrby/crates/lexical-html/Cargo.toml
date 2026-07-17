@@ -2,6 +2,7 @@
 name = "yrs-lexical-html"
 description = "Render Lexical-shaped yrs documents to HTML, no browser or Node required"
 repository = "https://github.com/jpcamara/yrby"
+readme = "README.md"
 version = "0.1.0"
 edition = "2021"
 authors = ["JP Camara <johnpcamara@gmail.com>"]

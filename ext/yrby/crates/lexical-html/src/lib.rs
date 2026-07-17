@@ -121,9 +121,9 @@ pub fn render_segments<T: ReadTxn>(
     Some(em.into_segments())
 }
 
-/// Rule-free rendering to a plain string — the fixture-parity surface most
-/// tests pin. With no callback rules, segments always flatten.
-#[cfg(test)]
+/// Rule-free rendering to a plain string — the simplest way to use this
+/// crate standalone, and the fixture-parity surface the tests pin. With no
+/// callback rules, segments always flatten.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
         yrs_render_rules::flatten(segs)
