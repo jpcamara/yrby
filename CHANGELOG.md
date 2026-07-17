@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Y::Sync::Engine`: the y-websocket protocol state machine, extracted from
+  `Y::ActionCable::Sync` as a transport-neutral core. It takes `load` and
+  `change` hooks and turns a decoded frame into a `Result` (reply to the
+  sender, broadcast to peers, ack outcome) — no transport attached. Reliability
+  (ack-tracked delivery, causal-gap detection, integrated-only serving) lives
+  here. Any transport that can reply to one client and relay to the rest can
+  carry the same protocol: a raw WebSocket, or REST plus a pub/sub bus.
+
 ### Fixed
 
 - `Y::Lexxy` emits the attachment tag the node was created with instead of
