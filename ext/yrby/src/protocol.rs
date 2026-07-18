@@ -198,6 +198,45 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     }
 }
 
+/// True if applying `update` would add any content the doc doesn't already hold
+/// — whether that content integrates or parks as a pending struct.
+///
+/// The gap-tolerant sibling of `update_advances_doc`. `update_advances` answers
+/// "does the *integrated* state move forward?", which is false for a second
+/// gappy update on an already-pending doc (the pending flag is already set and
+/// the state vector doesn't move) — so a caller storing gappy updates would
+/// misread that new gap as a duplicate and drop it. This compares the doc's full
+/// lossless encoding (which includes pending) before and after applying, on a
+/// throwaway copy, so a newly-parked pending struct counts as added content.
+/// Pure read; does not mutate `doc`.
+pub(crate) fn update_adds_content_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
+    let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
+
+    // Seed a probe with the doc's current full state (pending included), so we
+    // measure the update's effect without mutating the real doc.
+    let probe = Doc::new();
+    let current = doc
+        .transact()
+        .encode_state_as_update_v1(&yrs::StateVector::default());
+    probe
+        .transact_mut()
+        .apply_update(yrs::Update::decode_v1(&current).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+
+    let before = probe
+        .transact()
+        .encode_state_as_update_v1(&yrs::StateVector::default());
+    probe
+        .transact_mut()
+        .apply_update(update)
+        .map_err(|e| e.to_string())?;
+    let after = probe
+        .transact()
+        .encode_state_as_update_v1(&yrs::StateVector::default());
+
+    Ok(before != after)
+}
+
 /// True if the doc holds un-integrable pending structs or a pending delete set:
 /// blocks that couldn't integrate because a causally-prior update is missing. A
 /// pure read; does not mutate.
@@ -908,5 +947,76 @@ mod tests {
             has_pending(&doc),
             "non-destructive: source keeps its pending"
         );
+    }
+
+    #[test]
+    fn update_adds_content_sees_a_second_gap_on_an_already_pending_doc() {
+        // The case update_advances_doc gets wrong: a doc already holds a pending
+        // struct, and a *second, distinct* gappy update arrives. Its content is
+        // new, but the integrated state vector doesn't move and the pending flag
+        // is already set — so update_advances_doc reports "no advance", which a
+        // gap-storing caller would misread as a duplicate and drop.
+        let (_first, dependent) = gap_pair();
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(yrs::Update::decode_v1(&dependent).unwrap())
+            .unwrap();
+        assert!(has_pending(&doc), "the doc already holds a pending struct");
+
+        let second_gap = independent_gappy_insert(); // a distinct client's gappy delta
+
+        assert!(
+            !update_advances_doc(&doc, &second_gap).unwrap(),
+            "update_advances is fooled: it reports no advance for the second gap"
+        );
+        assert!(
+            update_adds_content_doc(&doc, &second_gap).unwrap(),
+            "update_adds_content sees the second gap as new content to store"
+        );
+    }
+
+    #[test]
+    fn update_adds_content_is_false_for_a_duplicate() {
+        // A true duplicate — integrated or still-pending — adds nothing.
+        let (first, dependent) = gap_pair();
+
+        let integrated = Doc::new();
+        integrated
+            .transact_mut()
+            .apply_update(yrs::Update::decode_v1(&first).unwrap())
+            .unwrap();
+        assert!(
+            !update_adds_content_doc(&integrated, &first).unwrap(),
+            "re-applying integrated content adds nothing"
+        );
+
+        let pending = Doc::new();
+        pending
+            .transact_mut()
+            .apply_update(yrs::Update::decode_v1(&dependent).unwrap())
+            .unwrap();
+        assert!(
+            !update_adds_content_doc(&pending, &dependent).unwrap(),
+            "re-applying an already-pending gap adds nothing"
+        );
+    }
+
+    #[test]
+    fn update_adds_content_does_not_mutate_the_doc() {
+        let (_first, dependent) = gap_pair();
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(yrs::Update::decode_v1(&dependent).unwrap())
+            .unwrap();
+        let before = doc
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+
+        update_adds_content_doc(&doc, &independent_gappy_insert()).unwrap();
+
+        let after = doc
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+        assert_eq!(before, after, "the probe must not touch the real doc");
     }
 }

@@ -10,8 +10,8 @@ use yrs::{Doc, GetString, ReadTxn, Transact};
 mod protocol;
 mod read;
 use protocol::{
-    classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
-    update_is_ready,
+    classify_message, has_pending, integrated_update, merged_doc_update, update_adds_content_doc,
+    update_advances_doc, update_is_ready,
 };
 use render_rules::{Rules, Segment};
 pub(crate) use yrs_html_core as render_rules;
@@ -270,6 +270,18 @@ impl RbDoc {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
         nogvl(move || update_advances_doc(doc, &update_bytes)).map_err(yrb_error)
+    }
+
+    /// True if applying `update` would add any content the doc doesn't already
+    /// hold, whether it integrates or parks as a pending struct. Unlike
+    /// `update_advances?`, this stays correct when the doc already holds pending
+    /// (a second gap counts as new content), so a caller that stores gappy
+    /// updates can use it to tell a fresh gap from a duplicate retry. See
+    /// `update_adds_content_doc`. Pure read; does not mutate.
+    fn update_adds_content(&self, update: RString) -> Result<bool, Error> {
+        let update_bytes = copy_bytes(update);
+        let doc = &self.0;
+        nogvl(move || update_adds_content_doc(doc, &update_bytes)).map_err(yrb_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
@@ -634,6 +646,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
     doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
+    doc_class.define_method(
+        "update_adds_content?",
+        method!(RbDoc::update_adds_content, 1),
+    )?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
     doc_class.define_method(
         "handle_sync_message",
