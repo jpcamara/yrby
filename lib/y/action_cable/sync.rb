@@ -38,14 +38,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # The concern is store-backed and fail-closed: every document update is
   # validated against `on_load`, recorded through `on_change`, then broadcast.
   # No authoritative document state is kept in ActionCable process memory.
+  #
+  # The protocol state machine lives in Y::Sync::Engine; this concern is the
+  # ActionCable adapter over it — it decodes the cable envelope, calls the
+  # engine, and routes the result back through `transmit` and
+  # `ActionCable.server.broadcast`.
   module Sync
-    # Frame kinds we act on, from Y.message_kind. Its other codes (0 for a
-    # drop: malformed/truncated/multi-message/unknown, and 4 for an awareness
-    # query) fall through to a no-op in the dispatch below.
-    MSG_KIND_SYNC_STEP1 = 1
-    MSG_KIND_UPDATE = 2
-    MSG_KIND_AWARENESS = 3
-
     # Default incoming-frame size cap (decoded bytes). Generous enough for a
     # large initial SyncStep2, small enough to bound a single message's
     # allocation/parse cost. Override per channel with `max_frame_bytes`.
@@ -104,7 +102,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # client path to ephemeral presence rather than the durable document stream.
       stream_from sync_stream_name
       stream_from sync_awareness_stream_name, whisper: true if respond_to?(:whispers_to)
-      sync_transmit(sync_load_doc.sync_step1)
+      sync_transmit(sync_engine.sync_step1(@sync_key))
     end
 
     # Call from `receive`. Applies the client's message, replies directly
@@ -156,12 +154,16 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     private
 
-    # Ask this connection's client to resync: re-send SyncStep1 carrying the
-    # server's current (gap-free) state vector. The client replies SyncStep2
-    # with everything the server is missing, delivered as one causally-complete
-    # delta, which heals the gap that triggered the resync.
-    def sync_request_resync(doc)
-      sync_transmit(doc.sync_step1)
+    # The transport-neutral protocol core. Built with hooks that run on_load /
+    # on_change in THIS channel instance's context (instance_exec), so on_change
+    # can reach current_user, params, and the channel's own methods — the same
+    # binding the old inline recorder had. Memoized per instance; the engine is
+    # stateless, so a fresh one per AnyCable-rebuilt channel costs nothing.
+    def sync_engine
+      @sync_engine ||= Y::Sync::Engine.new(
+        load: ->(key) { instance_exec(key, &self.class.on_load) },
+        change: ->(key, update) { instance_exec(key, update, &self.class.on_change) }
+      )
     end
 
     # Reliable delivery: acknowledge an accepted update back to the sending
@@ -254,65 +256,18 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
             "doesn't keep the channel instance alive across actions (e.g. AnyCable)."
     end
 
-    # Stateless per message: any process can handle any document. A client's
-    # SyncStep1 is answered from the store, document changes are recorded durably
-    # before relay and then broadcast, and awareness is relayed best-effort.
-    # Echoing back to the sender is harmless, since the CRDT apply is idempotent.
-    #
-    # Returns an outcome symbol for the reliable-delivery ack: :recorded when a
-    # document update was durably recorded and relayed, :gap when it was
-    # rejected for a resync, :noop for everything else.
+    # Hand one decoded frame to the engine and route its Result onto the cable:
+    # a direct reply to the sender (a SyncStep2 or a resync request), a
+    # broadcast to the other subscribers, or both/neither. Returns the engine's
+    # ack outcome for sync_send_ack.
     def sync_handle_frame(encoded, bytes)
       sync_validate_required_hooks!
       sync_validate_key!
 
-      case Y.message_kind(bytes)
-      when MSG_KIND_SYNC_STEP1
-        result = sync_load_doc.handle_sync_message(bytes)
-        sync_transmit(result[2])
-        :noop
-      when MSG_KIND_UPDATE
-        update = Y.update_from_message(bytes)
-        return :noop unless update
-
-        # Rebuild from the store (O(history) per update; snapshot in on_load if
-        # that cost bites).
-        doc = sync_load_doc
-
-        # Don't record a causally-incomplete update; resync instead so the gap
-        # heals as one complete delta.
-        unless doc.update_ready?(update)
-          sync_request_resync(doc)
-          return :gap
-        end
-
-        # A lost-ack retry: already recorded, so skip on_change — but DO
-        # re-broadcast. If the first attempt died between record and broadcast,
-        # this retry is the only path left to the live subscribers. Duplicate
-        # broadcasts are free (CRDT apply is idempotent).
-        unless doc.update_advances?(update)
-          sync_distribute(encoded)
-          return :applied
-        end
-
-        sync_record_change(update) # record before relay
-        sync_distribute(encoded)
-        :recorded
-      when MSG_KIND_AWARENESS
-        sync_distribute(encoded)
-        :noop
-      else
-        :noop
-      end
-    end
-
-    # Build a fresh document from the durable store (on_load). Callers validate
-    # the hooks first, so on_load is present; a nil state means a fresh document.
-    def sync_load_doc
-      doc = Y::Doc.new
-      state = instance_exec(@sync_key, &self.class.on_load)
-      doc.apply_update(state) if state
-      doc
+      result = sync_engine.handle(@sync_key, encoded, bytes)
+      sync_transmit(result.reply) if result.reply
+      sync_distribute(result.broadcast) if result.broadcast
+      result.ack
     end
 
     def sync_stream_name
@@ -321,13 +276,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     def sync_awareness_stream_name
       "#{sync_stream_name}:awareness"
-    end
-
-    # Invoke the on_change recorder in this channel instance's context
-    # (instance_exec) so it can reach the channel's own methods. Mirrors how
-    # sync_load_doc fetches and runs on_load.
-    def sync_record_change(update)
-      instance_exec(@sync_key, update, &self.class.on_change)
     end
   end
 end
