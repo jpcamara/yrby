@@ -6,6 +6,18 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `accept_causal_gaps` channel option (default `false`, preserving current
+  behavior). When enabled, a causally-gapped update is recorded immediately as a
+  pending struct and acked, instead of being rejected for a resync; it heals when
+  its missing dependency arrives. Serving stays gap-free in both modes. Accept
+  mode requires a lossless store (`on_load` must preserve pending; compaction
+  must be guarded with `doc.pending?`) and shifts an open gap from a loud resync
+  storm to a silent pending struct, so each recorded gap is logged at `info` and
+  pending depth should be monitored. See the "Accepting causal gaps" section of
+  the README. Proposal — off by default.
+
 ## [0.3.1] - 2026-07-01
 
 ### Removed

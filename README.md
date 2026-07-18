@@ -507,10 +507,14 @@ servers:
 - **The document always converges.** CRDT updates are commutative and
   idempotent, so out-of-order, duplicate, or concurrent delivery all converge to
   the same correct document. This needs no coordination and holds everywhere.
-- **The durable log never goes gappy.** An update is recorded only once its
-  causal dependencies are already in the store (checked against `on_load`); a
-  causally-incomplete update triggers a resync instead, so the log always
-  rebuilds cleanly.
+- **By default, the durable log never goes gappy.** An update is recorded only
+  once its causal dependencies are already in the store (checked against
+  `on_load`); a causally-incomplete update triggers a resync instead, so the log
+  always rebuilds cleanly. Set `accept_causal_gaps true` to instead record a
+  gappy update immediately as a pending struct that heals when its dependency
+  arrives — faster healing, and a received edit is durable even if its sender
+  dies before a resync would complete, at the cost of a lossless store contract
+  and different observability. See [Accepting causal gaps](#accepting-causal-gaps).
 - **`on_change` is at-least-once, and the durable guarantee is that replaying the
   log reconstructs the document.** Every update triggers `on_change` before it's acked or
   broadcast (record-before-distribute). If exactly-once updates matter for you, **you
@@ -535,6 +539,54 @@ servers:
   id. Size the cap for your largest expected payload, and reject
   genuinely-too-big content upstream rather than relying on the cap to reject it
   gracefully.
+
+#### Accepting causal gaps
+
+By default a causally-incomplete update is rejected and the sender is asked to
+resync, so the durable log never holds pending content. `accept_causal_gaps true`
+flips that: the gappy update is recorded immediately as a pending struct and
+acked, and it heals when its missing dependency arrives (via that dependency's
+own reliable-delivery retransmit). No resync round trip, and a received edit is
+durable even if the sender disconnects before a resync would have completed.
+
+```ruby
+class DocumentChannel < ApplicationCable::Channel
+  include Y::ActionCable::Sync
+
+  accept_causal_gaps true
+  # ...
+end
+```
+
+Serving is gap-free in **both** modes: `handle_sync_message` and
+`compacted_state_update` exclude pending, so a peer never receives un-integrable
+content. Accept mode only changes what the server *stores*, not what it *serves*.
+
+Two things change, and you must handle both:
+
+- **Your store must be lossless.** `on_load` has to return state that preserves
+  pending — `encode_state_as_update` (lossless), or a replayed raw append log.
+  Any compaction must **not** run `compacted_state_update` while `doc.pending?`,
+  because that strips the pending struct and loses the gap. Guard compaction with
+  `doc.pending?`:
+
+  ```ruby
+  def compact(doc)
+    return if doc.pending? # a gap is open; compacting now would drop it
+    replace_log_with(doc.compacted_state_update)
+  end
+  ```
+
+- **An unhealed gap is silent, not loud.** In reject mode an open gap surfaces as
+  resync traffic. In accept mode it sits as pending and is simply never served,
+  so monitor pending depth in your store. The concern logs each recorded gap at
+  `info` (`[yrby] recorded causally-gapped update ...`, with the document key and
+  `sync_log_context`) to keep unhealed gaps findable.
+
+Accept mode does an extra full-state encode per gappy update to tell a new gap
+from a duplicate retry (the cheap `update_advances?` probe can't distinguish them
+once a doc already holds pending). That cost falls only on gapped updates, which
+should be rare on an ordered transport.
 
 #### Multi-process deployments
 
