@@ -636,6 +636,27 @@ class SyncTest < Minitest::Test
     assert_equal [YjsFixtures::CausalChain::U3], store,
                  "a retry of an already-pending gap is not re-recorded (sync_adds_content?)"
     assert_equal 2, broadcasts.length, "but it is re-broadcast (crash-window heal)"
+    assert_empty acks_in(transmits),
+                 "and the still-gappy retry is NOT acked — the sender must keep retransmitting"
+  end
+
+  def test_accept_strict_does_not_observe_a_gap_when_recording_fails
+    # on_change raises (store down) -> the update is rejected. on_gap must NOT
+    # fire and no gap must be logged: nothing was persisted, so a metric or log
+    # claiming a durable gap would be false, and would re-inflate on every retry.
+    logged = []
+    gaps = []
+    helper = policy_helper(:accept_strict, recorder: ->(_k, _u) { raise "store unavailable" })
+    helper.logger = capturing_logger(logged)
+    helper.class.on_gap { |key| gaps << key }
+
+    assert_raises(RuntimeError) do
+      helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+    end
+
+    assert_empty gaps, "on_gap did not fire for a gap that was never persisted"
+    refute(logged.any? { |_lvl, msg| msg.include?("causal gap") },
+           "no durable-looking gap was logged when the record failed")
   end
 
   def test_accept_observes_a_gap_via_log_and_hook
