@@ -463,22 +463,28 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # as a duplicate), so use sync_adds_content? there.
       adds_content = ready ? doc.update_advances?(update) : sync_adds_content?(doc, update)
 
-      # A lost-ack retry / duplicate: already recorded, so skip on_change — but DO
-      # re-broadcast. If the first attempt died between record and broadcast, this
-      # retry is the only path left to the live subscribers. Duplicate broadcasts
-      # are free (CRDT apply is idempotent).
+      # A duplicate we've already recorded: skip on_change — but DO re-broadcast.
+      # If the first attempt died between record and broadcast, this retry is the
+      # only path left to the live subscribers. Duplicate broadcasts are free
+      # (CRDT apply is idempotent). Ack a *ready* duplicate (a genuine
+      # already-integrated retry), but NOT a still-gappy one: acking a
+      # still-pending retry would tell the sender to stop retransmitting before
+      # the update integrates, defeating :accept_strict's self-signaling — so a
+      # gappy duplicate stays unacked, exactly like the fresh gap below.
       unless adds_content
         sync_distribute(encoded)
-        return :applied
+        return ready ? :applied : :recorded_pending
       end
 
       return sync_record_ready(update, encoded) if ready
 
       # :accept_strict gappy: record and relay, but do NOT ack. The sender keeps
       # retransmitting until the update integrates, so the gap self-signals as
-      # retry traffic and heals when its dependency lands.
-      sync_observe_gap
+      # retry traffic and heals when its dependency lands. Observe only AFTER the
+      # gap is durably recorded, so a failed on_change (which raises and rejects
+      # the update) never logs or metrics a persistence that didn't happen.
       sync_record_change(update) # record before relay
+      sync_observe_gap
       sync_distribute(encoded)
       :recorded_pending
     end
