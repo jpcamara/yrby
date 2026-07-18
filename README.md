@@ -172,6 +172,11 @@ doc.compacted_state_update        # => full update, gap-free (excludes pending)
 # Applying updates
 doc.apply_update(update_bytes)    # apply raw V1 update
 doc.pending?                      # => true if holding un-integrable pending structs
+doc.update_ready?(update)         # => true if update would integrate cleanly (no gap)
+doc.update_advances?(update)      # => true if update moves integrated state forward
+doc.update_adds_content?(update)  # => true if update adds any content (integrated OR
+                                  #    pending); correct even when the doc already
+                                  #    holds pending, unlike update_advances?
 
 # Sync protocol
 doc.sync_step1                    # => SyncStep1 message (this doc's state vector)
@@ -510,11 +515,12 @@ servers:
 - **By default, the durable log never goes gappy.** An update is recorded only
   once its causal dependencies are already in the store (checked against
   `on_load`); a causally-incomplete update triggers a resync instead, so the log
-  always rebuilds cleanly. Set `accept_causal_gaps true` to instead record a
-  gappy update immediately as a pending struct that heals when its dependency
-  arrives — faster healing, and a received edit is durable even if its sender
-  dies before a resync would complete, at the cost of a lossless store contract
-  and different observability. See [Accepting causal gaps](#accepting-causal-gaps).
+  always rebuilds cleanly. Set `causal_gap_policy` to `:accept` or
+  `:accept_strict` to instead record a gappy update immediately as a pending
+  struct that heals when its dependency arrives — faster healing, and a received
+  edit is durable even if its sender dies before a resync would complete, at the
+  cost of a lossless store contract and different observability. See
+  [Accepting causal gaps](#accepting-causal-gaps).
 - **`on_change` is at-least-once, and the durable guarantee is that replaying the
   log reconstructs the document.** Every update triggers `on_change` before it's acked or
   broadcast (record-before-distribute). If exactly-once updates matter for you, **you
@@ -542,51 +548,108 @@ servers:
 
 #### Accepting causal gaps
 
-By default a causally-incomplete update is rejected and the sender is asked to
-resync, so the durable log never holds pending content. `accept_causal_gaps true`
-flips that: the gappy update is recorded immediately as a pending struct and
-acked, and it heals when its missing dependency arrives (via that dependency's
-own reliable-delivery retransmit). No resync round trip, and a received edit is
-durable even if the sender disconnects before a resync would have completed.
+By default (`causal_gap_policy :reject`) a causally-incomplete update is rejected
+and the sender is asked to resync, so the durable log never holds pending
+content. Two other policies instead take custody of a gappy update the moment it
+arrives — it parks as a pending struct and heals when its missing dependency
+lands — trading the resync round trip for a lossless store contract and quieter
+failure.
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable::Sync
 
-  accept_causal_gaps true
+  causal_gap_policy :accept   # :reject (default) | :accept_strict | :accept
   # ...
 end
 ```
 
-Serving is gap-free in **both** modes: `handle_sync_message` and
+| Policy | Records a gap? | Acks a gap? | Write path | Open gap surfaces as |
+|---|---|---|---|---|
+| `:reject` (default) | no | no (resyncs) | rebuild + gap check | resync traffic (loud) |
+| `:accept_strict` | yes | not until it integrates | rebuild + gap check | the sender's retransmits (loud-ish) |
+| `:accept` | yes | immediately (ack-on-durable) | append + relay + ack (no rebuild) | nothing — see repair + `on_gap` (quiet) |
+
+**Serving is gap-free under every policy.** `handle_sync_message` and
 `compacted_state_update` exclude pending, so a peer never receives un-integrable
-content. Accept mode only changes what the server *stores*, not what it *serves*.
+content. The policy changes only what the server *stores* and *acks*, never what
+it *serves*.
 
-Two things change, and you must handle both:
+`:accept` inverts the write path: it does not rebuild the document to check for a
+gap, it just appends, relays, and acks. That makes it the cheapest option
+(O(1)-ish per update instead of O(history)), at the cost of delegating dedup to
+the store. `:accept_strict` keeps the rebuild so it can withhold the ack until an
+update integrates, which keeps an open gap self-signaling through the sender's
+retransmits.
 
-- **Your store must be lossless.** `on_load` has to return state that preserves
-  pending — `encode_state_as_update` (lossless), or a replayed raw append log.
-  Any compaction must **not** run `compacted_state_update` while `doc.pending?`,
-  because that strips the pending struct and loses the gap. Guard compaction with
-  `doc.pending?`:
+Both accept modes require two things:
 
-  ```ruby
-  def compact(doc)
-    return if doc.pending? # a gap is open; compacting now would drop it
-    replace_log_with(doc.compacted_state_update)
+**1. A lossless, idempotent store.** `on_load` must return state that preserves
+pending — `encode_state_as_update` (lossless), or a replayed raw append log.
+Compaction must **not** run `compacted_state_update` while `doc.pending?`, since
+that strips the pending struct and loses the gap. And because `:accept` doesn't
+rebuild the doc to dedup a lost-ack retry, the store must be idempotent (key by
+content hash). A reference durable-ingress store:
+
+```ruby
+class DocumentStore
+  # append is idempotent: a re-delivered update is a no-op.
+  def append(key, update)
+    Revision.upsert({ doc_key: key, update_hash: Digest::SHA256.hexdigest(update), update: update },
+                    unique_by: %i[doc_key update_hash])
   end
-  ```
 
-- **An unhealed gap is silent, not loud.** In reject mode an open gap surfaces as
-  resync traffic. In accept mode it sits as pending and is simply never served,
-  so monitor pending depth in your store. The concern logs each recorded gap at
-  `info` (`[yrby] recorded causally-gapped update ...`, with the document key and
-  `sync_log_context`) to keep unhealed gaps findable.
+  # load is lossless: replay the raw log so a pending struct is preserved and
+  # heals when its dependency arrives.
+  def load(key)
+    updates = Revision.where(doc_key: key).order(:id).pluck(:update)
+    return nil if updates.empty?
 
-Accept mode does an extra full-state encode per gappy update to tell a new gap
-from a duplicate retry (the cheap `update_advances?` probe can't distinguish them
-once a doc already holds pending). That cost falls only on gapped updates, which
-should be rare on an ordered transport.
+    doc = Y::Doc.new
+    updates.each { |u| doc.apply_update(u) }
+    doc.encode_state_as_update # lossless: keeps pending
+  end
+
+  # optional compaction: only when there is no open gap, or you would drop it.
+  def compact(key)
+    doc = Y::Doc.new
+    Revision.where(doc_key: key).order(:id).pluck(:update).each { |u| doc.apply_update(u) }
+    return if doc.pending? # a gap is open; compacting now would drop it
+    # ... replace the log with a single revision holding doc.compacted_state_update ...
+  end
+end
+```
+
+**2. Observability, because an accepted gap is quiet.** In `:reject` an open gap
+is a loud resync storm. In accept modes it sits as pending and is simply never
+served, so you replace that signal two ways:
+
+- **The repair loop.** When a client joins (or sends a SyncStep1) and a gap is
+  open, the server solicits the missing dependency from that client by sending
+  its SyncStep1. Any live client that has the missing update heals the gap on
+  contact — no separate strike subsystem. A *truly* unhealable gap (no live
+  client has the dependency, e.g. it was lost from the store) will not heal this
+  way; that is what the hook below is for.
+- **The `on_gap` hook.** Fires with the document key whenever a gap is observed
+  (at record time in `:accept_strict`, and at join/serve time whenever a loaded
+  doc is still pending). Use it to emit a metric — a pending-document count, or
+  the age of the oldest open gap — so an unhealed gap is visible. A gap is also
+  logged at `info`. Errors in the hook are swallowed so observability can never
+  break frame handling.
+
+```ruby
+class DocumentChannel < ApplicationCable::Channel
+  include Y::ActionCable::Sync
+
+  causal_gap_policy :accept
+  on_gap { |key| StatsD.increment("yrby.gap", tags: ["doc:#{key}"]) }
+end
+```
+
+To tell a fresh gap from a duplicate retry, `:accept_strict` uses
+`Doc#update_adds_content?` (the cheap `update_advances?` can't distinguish them
+once a doc already holds pending); on an older core without that method it falls
+back to a full-state comparison.
 
 #### Multi-process deployments
 
