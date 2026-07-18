@@ -61,7 +61,7 @@ and `Doc#read_map` reconstruct it server-side, in Ruby.
 The surface is intentionally small, but the focus is durability, resiliency, delivery
 guarantees, correctness, and thread safety.
 
-Towards that goal, `yrby` adds capabilities that stand out even in the Yjs ecosystem:
+Towards that goal, `yrby` adds opinionated defaults on top of normal Yjs syncing:
 
 - Built-in update acknowledgement: the `ActionCableProvider` in `yrby-client` will continue to
   send updates until an ack is received from the server. [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
