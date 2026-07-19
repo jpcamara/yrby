@@ -511,6 +511,21 @@ servers:
   causal dependencies are already in the store (checked against `on_load`); a
   causally-incomplete update triggers a resync instead, so the log always
   rebuilds cleanly.
+- **An unhealable gap is dropped, not resynced forever.** A resync heals a gap
+  whose missing dependency is still in flight. But a *permanently*-orphaned update
+  (its dependency is gone for good) stays gappy through every resync, and a client
+  retransmitting it would loop endlessly (server resyncs → client resends →
+  repeat). After `gap_strike_limit` rejections of the same update on one
+  connection (default 3, minimum 2), the channel settles it with
+  `{ "ack" => id, "dropped" => true }` and drops it instead of resyncing again —
+  breaking the loop while never dropping a *healable* gap (those heal within a
+  resync or two, and healing frees the strike). The `dropped` flag lets the
+  client surface the loss (`yrby-client` reports it via `onError`) instead of
+  silently showing synced. Set `gap_strike_limit nil` to disable. Works on both
+  transports: plain ActionCable keeps strikes on the channel instance; under
+  AnyCable (fresh instance per RPC command) they persist through
+  anycable-rails' `state_attr_accessor` (istate), declared automatically when
+  anycable-rails is loaded.
 - **`on_change` is at-least-once, and the durable guarantee is that replaying the
   log reconstructs the document.** Every update triggers `on_change` before it's acked or
   broadcast (record-before-distribute). If exactly-once updates matter for you, **you

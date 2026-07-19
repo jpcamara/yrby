@@ -2,6 +2,7 @@
 
 require "y"
 require "base64"
+require "digest"
 
 module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # y-websocket protocol over ActionCable.
@@ -51,8 +52,31 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # allocation/parse cost. Override per channel with `max_frame_bytes`.
     DEFAULT_MAX_FRAME_BYTES = 8 * 1024 * 1024
 
+    # After this many times the *same* update is rejected as a causal gap on one
+    # connection, stop resyncing and instead settle it (ack) + drop it. A gap
+    # that survives repeated resyncs is unhealable — its missing dependency is
+    # gone for good (a permanently-orphaned pending struct) — and resyncing it
+    # forever just amplifies the client's retransmit loop. A healable gap heals
+    # within a resync or two, well under this. Override with `gap_strike_limit`;
+    # set to nil to disable (always resync). See `sync_gap_strike`.
+    DEFAULT_GAP_STRIKE_LIMIT = 3
+
+    # Cap on distinct gappy updates tracked per connection, so a client can't
+    # grow the strike table without bound by sending endless distinct gaps.
+    GAP_STRIKE_MAX_KEYS = 64
+
     def self.included(base)
       base.extend(ClassMethods)
+      # Durable strike state under AnyCable. Each AnyCable RPC command gets a
+      # fresh channel instance, so a plain ivar resets every message and the
+      # unhealable-gap drop would never trip. anycable-rails' state_attr_accessor
+      # persists the value into the subscription's istate, which anycable-go
+      # round-trips on every command — so strikes accumulate there too. On plain
+      # ActionCable (anycable-rails loaded but not serving) the accessor behaves
+      # like attr_accessor; without anycable-rails we fall back to an ivar.
+      # NOTE: anycable-rails must be loaded before the channel class is defined
+      # for this declaration to take effect (standard Bundler.require order).
+      base.state_attr_accessor :yrby_gap_strikes if base.respond_to?(:state_attr_accessor)
     end
 
     module ClassMethods
@@ -90,6 +114,24 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         return @max_frame_bytes if defined?(@max_frame_bytes)
 
         superclass.respond_to?(:max_frame_bytes) ? superclass.max_frame_bytes : DEFAULT_MAX_FRAME_BYTES
+      end
+
+      # Number of times the same update may be rejected as a gap on one
+      # connection before it is settled + dropped instead of resynced again.
+      # Defaults to DEFAULT_GAP_STRIKE_LIMIT; set to nil to always resync.
+      # A limit below 2 is rejected: strike 1 must send a resync (the heal
+      # attempt) before any drop, or a first-sight healable gap would be
+      # settled with no recovery ever attempted.
+      def gap_strike_limit(limit = :__unset__)
+        # Combined reader/writer; the sentinel keeps nil a real value (disables the drop).
+        unless limit == :__unset__
+          raise ArgumentError, "gap_strike_limit must be nil or >= 2 (got #{limit.inspect})" if limit && limit < 2
+
+          @gap_strike_limit = limit
+        end
+        return @gap_strike_limit if defined?(@gap_strike_limit)
+
+        superclass.respond_to?(:gap_strike_limit) ? superclass.gap_strike_limit : DEFAULT_GAP_STRIKE_LIMIT
       end
     end
 
@@ -172,11 +214,87 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # is already present in the durable store.
     def sync_send_ack(id, outcome)
       return if id.nil?
-      return unless %i[recorded applied].include?(outcome)
+      # :dropped_unhealable settles a permanently-orphaned retry so the client
+      # stops retransmitting it (it was never going to integrate anywhere). The
+      # envelope carries "dropped" so the client can tell "durably recorded"
+      # from "abandoned" and surface it, instead of silently reporting synced
+      # over lost data. Clients that don't know the key ignore it.
+      return unless %i[recorded applied dropped_unhealable].include?(outcome)
 
       # The braces are required: a bare hash would bind to transmit's `via:`
       # keyword instead of its positional data argument.
-      transmit({ "ack" => id })
+      if outcome == :dropped_unhealable
+        transmit({ "ack" => id, "dropped" => true })
+      else
+        transmit({ "ack" => id })
+      end
+    end
+
+    # Count consecutive gap rejections of `update` on this connection, returning
+    # the new count. Keyed by update content (SHA-256) so independent gaps track
+    # separately — a slow-to-heal legit gap must not push an unrelated one toward
+    # the drop.
+    #
+    # Where the state lives:
+    # - Plain ActionCable reuses the channel instance across a connection's
+    #   messages, so an ivar accumulates (guarded by a mutex: ActionCable
+    #   dispatches messages to a worker pool, so two receives on one instance
+    #   can run concurrently).
+    # - Under AnyCable each RPC command gets a fresh instance, so the table is
+    #   persisted via anycable-rails' `state_attr_accessor` (istate), which
+    #   anycable-go round-trips on every command. See `self.included`.
+    def sync_gap_strike(update)
+      key = Digest::SHA256.hexdigest(update)
+      sync_gap_strike_mutex.synchronize do
+        strikes = sync_read_gap_strikes
+        # Bound the table so endless *distinct* gaps can't grow it without
+        # limit. Evict a single lowest-count entry, and only when inserting a
+        # genuinely new key: clearing wholesale would let a client cycling 64
+        # distinct gaps reset every tracked strike (defense bypass) and would
+        # starve a legitimate hot key.
+        if !strikes.key?(key) && strikes.size >= GAP_STRIKE_MAX_KEYS
+          strikes.delete(strikes.min_by { |_, count| count }.first)
+        end
+        strikes[key] = strikes.fetch(key, 0) + 1
+        sync_write_gap_strikes(strikes)
+        strikes[key]
+      end
+    end
+
+    # A gap that finally records has healed: free its strike slot so it can't
+    # bias a future eviction and the table reflects only live gaps.
+    def sync_clear_gap_strike(update)
+      sync_gap_strike_mutex.synchronize do
+        strikes = sync_read_gap_strikes
+        next_key = Digest::SHA256.hexdigest(update)
+        if strikes.key?(next_key)
+          strikes.delete(next_key)
+          sync_write_gap_strikes(strikes)
+        end
+      end
+    end
+
+    def sync_gap_strike_mutex
+      @sync_gap_strike_mutex ||= Mutex.new
+    end
+
+    # Strike-table storage: istate-backed under AnyCable (survives the
+    # per-command fresh instance), plain ivar otherwise. Values round-trip JSON
+    # under AnyCable, so the table is a plain Hash of hex-digest => Integer.
+    def sync_read_gap_strikes
+      if respond_to?(:yrby_gap_strikes)
+        (yrby_gap_strikes || {}).to_h { |k, v| [k.to_s, v.to_i] }
+      else
+        @gap_strikes || {}
+      end
+    end
+
+    def sync_write_gap_strikes(strikes)
+      if respond_to?(:yrby_gap_strikes=)
+        self.yrby_gap_strikes = strikes
+      else
+        @gap_strikes = strikes
+      end
     end
 
     # Single broadcast point so relay semantics live in one place and tests can
@@ -261,7 +379,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     #
     # Returns an outcome symbol for the reliable-delivery ack: :recorded when a
     # document update was durably recorded and relayed, :gap when it was
-    # rejected for a resync, :noop for everything else.
+    # rejected for a resync, :dropped_unhealable when a repeatedly-gapped update
+    # is settled + dropped, :noop for everything else.
     def sync_handle_frame(encoded, bytes)
       sync_validate_required_hooks!
       sync_validate_key!
@@ -272,38 +391,56 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         sync_transmit(result[2])
         :noop
       when MSG_KIND_UPDATE
-        update = Y.update_from_message(bytes)
-        return :noop unless update
-
-        # Rebuild from the store (O(history) per update; snapshot in on_load if
-        # that cost bites).
-        doc = sync_load_doc
-
-        # Don't record a causally-incomplete update; resync instead so the gap
-        # heals as one complete delta.
-        unless doc.update_ready?(update)
-          sync_request_resync(doc)
-          return :gap
-        end
-
-        # A lost-ack retry: already recorded, so skip on_change — but DO
-        # re-broadcast. If the first attempt died between record and broadcast,
-        # this retry is the only path left to the live subscribers. Duplicate
-        # broadcasts are free (CRDT apply is idempotent).
-        unless doc.update_advances?(update)
-          sync_distribute(encoded)
-          return :applied
-        end
-
-        sync_record_change(update) # record before relay
-        sync_distribute(encoded)
-        :recorded
+        sync_handle_update(encoded, bytes)
       when MSG_KIND_AWARENESS
         sync_distribute(encoded)
         :noop
       else
         :noop
       end
+    end
+
+    # The document-update arm of sync_handle_frame: gate on causal readiness
+    # (with the unhealable-gap strike defense), skip-but-rebroadcast retries,
+    # and record-before-distribute for genuinely new content.
+    def sync_handle_update(encoded, bytes)
+      update = Y.update_from_message(bytes)
+      return :noop unless update
+
+      # Rebuild from the store (O(history) per update; snapshot in on_load if
+      # that cost bites).
+      doc = sync_load_doc
+
+      # Don't record a causally-incomplete update; resync so the gap heals as
+      # one complete delta. But a gap that survives repeated resyncs is
+      # unhealable (its missing dependency is gone for good) — resyncing it
+      # forever just feeds the client's retransmit loop. After
+      # `gap_strike_limit` rejections of the same update, settle it (ack via
+      # the :dropped_unhealable outcome) and drop it instead.
+      unless doc.update_ready?(update)
+        limit = self.class.gap_strike_limit
+        if limit && sync_gap_strike(update) >= limit
+          sync_log_drop(:info, "dropping unhealable gappy update after #{limit} strikes")
+          return :dropped_unhealable
+        end
+        sync_request_resync(doc)
+        return :gap
+      end
+
+      # A lost-ack retry: already recorded, so skip on_change — but DO
+      # re-broadcast. If the first attempt died between record and broadcast,
+      # this retry is the only path left to the live subscribers. Duplicate
+      # broadcasts are free (CRDT apply is idempotent).
+      unless doc.update_advances?(update)
+        sync_clear_gap_strike(update) # a formerly-gappy update that healed
+        sync_distribute(encoded)
+        return :applied
+      end
+
+      sync_record_change(update) # record before relay
+      sync_clear_gap_strike(update) # a gap that finally recorded has healed
+      sync_distribute(encoded)
+      :recorded
     end
 
     # Build a fresh document from the durable store (on_load). Callers validate
