@@ -5,6 +5,15 @@ documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Log each causal-gap resync at `info` (`[yrby] causal-gap resync ...`, with the
+  document key and `sync_log_context`). The reject path was otherwise silent, so
+  there was no way to see how often clients force a resync. Override
+  `sync_log_gap_resync` to change the level or silence it.
+
 ## [0.5.0] - 2026-08-05
 
 ### Added
