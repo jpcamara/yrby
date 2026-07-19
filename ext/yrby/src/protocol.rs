@@ -135,6 +135,27 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     let has_deletes = !update.delete_set().is_empty();
 
+    // A merged update can hide an internal gap behind a Skip block, and
+    // blocks past the gap can still integrate (yrs plants a Skip hole in the
+    // store) when their origins don't need the missing range. That moves
+    // neither the doc's public state vector (yrs caps it at the first hole)
+    // nor pending — invisible to every comparison below, so genuinely novel
+    // content would report "doesn't advance": applied, acked, but never
+    // recorded or broadcast. The update's own state_vector() caps at its
+    // first Skip the same way, so any insertion past a non-zero cap reveals
+    // such a gap: conservatively report it as advancing (record it; a
+    // duplicate in the log is harmless, dropped content is not). Standard
+    // Yjs providers never emit these frames — a client's own updates and
+    // diffs are gap-free — so this guards crafted or pathologically merged
+    // input, not a hot path.
+    let capped = update.state_vector();
+    for (client, ranges) in update.insertions(true).iter() {
+        let cap = capped.get(client);
+        if cap > 0 && ranges.iter().any(|range| range.end > cap) {
+            return Ok(true);
+        }
+    }
+
     // Fast path: blocks beyond the doc's state vector are content the doc
     // lacks — the update advances, no probe needed. The common case (a novel
     // edit) exits here; only retries and ambiguous diffs pay for the probe.
@@ -660,6 +681,48 @@ mod tests {
         assert!(
             update_advances_doc(&server, &a_delta).unwrap(),
             "a parked update is not a duplicate"
+        );
+    }
+
+    #[test]
+    fn a_gappy_update_with_novel_post_hole_content_advances() {
+        // A merged update hiding an internal gap behind a Skip, whose
+        // post-hole blocks integrate anyway (their origins don't need the
+        // missing range). Integration plants a Skip hole, so neither the
+        // public state vector nor pending moves — before the hidden-gap
+        // check, the probe comparison reported genuinely novel content as
+        // "doesn't advance": update_ready? accepted it, the doc applied it,
+        // but it was never recorded or broadcast. Unreachable through
+        // standard Yjs providers (a client's own updates and diffs are
+        // gap-free) — this is a crafted/hostile frame shape.
+        let a = Doc::new();
+        let t1 = a.get_or_insert_text("one");
+        t1.insert(&mut a.transact_mut(), 0, "first");
+        let u1 = a
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+        t1.insert(&mut a.transact_mut(), 5, " second"); // the future hole
+        let sv2 = a.transact().state_vector();
+        // Novel content on a DIFFERENT root: no dependency on the hole.
+        let t3 = a.get_or_insert_text("two");
+        t3.insert(&mut a.transact_mut(), 0, "third");
+        let u3 = a.transact().encode_state_as_update_v1(&sv2);
+
+        let server = Doc::new();
+        server
+            .transact_mut()
+            .apply_update(yrs::Update::decode_v1(&u1).unwrap())
+            .unwrap();
+        // The crafted frame: u1 + u3 merged, u2's range an internal Skip.
+        let gappy = yrs::merge_updates_v1([&u1, &u3]).unwrap();
+
+        assert!(
+            update_is_ready(&server, &gappy).unwrap(),
+            "sanity: the sync flow would accept and apply this frame"
+        );
+        assert!(
+            update_advances_doc(&server, &gappy).unwrap(),
+            "novel content hiding behind a Skip must be recorded, not dropped"
         );
     }
 
