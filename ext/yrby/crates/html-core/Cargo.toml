@@ -8,7 +8,8 @@ edition = "2024"
 rust-version = "1.85"
 authors = ["JP Camara <johnpcamara@gmail.com>"]
 license = "MIT"
-publish = false
+keywords = ["yjs", "crdt", "yrs", "html", "rendering"]
+categories = ["text-processing", "web-programming"]
 
 [dependencies]
 yrs = { version = "0.27", features = ["sync"] }
