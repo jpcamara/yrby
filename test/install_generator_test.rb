@@ -66,4 +66,13 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     end
     assert_no_file "app/models/yrby_document_update.rb"
   end
+
+  def test_namespaced_model_name_is_rejected
+    # Thor reports the error itself rather than raising through start.
+    error = capture(:stderr) { run_generator ["Admin::DocumentRevision"] }
+
+    assert_match(/top-level model name/, error)
+    assert_no_file "app/channels/document_channel.rb"
+    assert_no_file "app/models/admin/document_revision.rb"
+  end
 end

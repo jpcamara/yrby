@@ -25,6 +25,19 @@ module Yrby
       argument :model_name, type: :string, default: "YrbyDocumentUpdate",
                             banner: "UpdateModelName"
 
+      # A namespaced name (Admin::DocumentRevision) would generate a model
+      # whose inferred table (document_revisions) misses the migration's
+      # table (admin_document_revisions) unless the app defines a
+      # table_name_prefix; reject it rather than generate a broken pair.
+      def reject_namespaced_model_name
+        return unless model_name.include?("::") || model_name.include?("/")
+
+        raise Thor::Error,
+              "yrby:install takes a top-level model name (got #{model_name.inspect}); " \
+              "namespaced models need a table_name_prefix, so generate with a " \
+              "top-level name and move/reshape the code afterwards."
+      end
+
       def create_channel
         template "document_channel.rb", "app/channels/document_channel.rb"
       end
