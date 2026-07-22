@@ -115,4 +115,30 @@ class GeneratedStoreTest < Minitest::Test
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "b").count
     assert_equal "from doc1", read_back("a")
   end
+
+  def test_compaction_skips_a_document_with_a_pending_gap
+    # A stored gappy update (its dependency never recorded), redelivered
+    # once (at-least-once delivery): the snapshot would exclude the pending
+    # struct, so compacting would delete the only copy of a gap that could
+    # still heal. Compaction must leave the rows alone.
+    YrbyDocumentStore.append("k", YjsFixtures::Gap::DEPENDENT)
+    YrbyDocumentStore.append("k", YjsFixtures::Gap::DEPENDENT)
+
+    YrbyDocumentStore.compact!("k")
+
+    assert_equal 2, YrbyDocumentUpdate.where(document_key: "k").count,
+                 "rows survive while a gap is open"
+
+    # The gap heals (its dependency arrives) and compaction resumes,
+    # preserving the healed content.
+    YrbyDocumentStore.append("k", YjsFixtures::Gap::FIRST)
+    YrbyDocumentStore.compact!("k")
+
+    assert_equal 1, YrbyDocumentUpdate.where(document_key: "k").count,
+                 "compaction resumes once the gap heals"
+    healed = Y::Doc.new
+    healed.apply_update(YrbyDocumentStore.load("k"))
+
+    assert_equal "ab", healed.read_text("notepad"), "the healed gap survived compaction"
+  end
 end

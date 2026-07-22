@@ -37,13 +37,21 @@ class YrbyDocumentStore
     # landing mid-compaction survives. Two racing compactions leave two
     # equivalent snapshots, which is harmless — merging is idempotent, and
     # the next compaction collapses them.
+    #
+    # Skipped while the document holds a pending (causally-gapped) update:
+    # the snapshot excludes pending, so compacting now would delete the only
+    # copy of a gap that could still heal. The default sync channel never
+    # records gaps, so this only engages on legacy rows or an accept-gaps
+    # channel — compaction resumes once the gap heals or the log is repaired.
     def compact!(key)
       rows = YrbyDocumentUpdate.where(document_key: key).order(:id).pluck(:id, :payload)
       return if rows.size < 2
 
-      snapshot = merge(rows.map(&:last))
+      doc = build_doc(rows.map(&:last))
+      return if doc.pending?
+
       YrbyDocumentUpdate.transaction do
-        YrbyDocumentUpdate.create!(document_key: key, payload: snapshot)
+        YrbyDocumentUpdate.create!(document_key: key, payload: doc.compacted_state_update)
         YrbyDocumentUpdate.where(id: rows.map(&:first)).delete_all
       end
     end
@@ -54,9 +62,13 @@ class YrbyDocumentStore
     # update recorded during a network wobble can never poison what gets
     # served to peers — pending structs must not cross the sync boundary.
     def merge(payloads)
+      build_doc(payloads).compacted_state_update
+    end
+
+    def build_doc(payloads)
       doc = Y::Doc.new
       payloads.each { |payload| doc.apply_update(payload) }
-      doc.compacted_state_update
+      doc
     end
   end
 end
