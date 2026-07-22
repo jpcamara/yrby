@@ -20,8 +20,8 @@ module Yrby
       # The update-log model's class name; the table, the store class, and the
       # migration all derive from it, so the storage carries your naming:
       #
-      #   bin/rails g yrby:install                    # YrbyDocumentUpdate + YrbyDocumentStore
-      #   bin/rails g yrby:install DocumentRevision   # DocumentRevision + DocumentRevisionStore
+      #   bin/rails g yrby:install                    # YrbyDocumentUpdate / yrby_document_updates
+      #   bin/rails g yrby:install DocumentRevision   # DocumentRevision / document_revisions
       argument :model_name, type: :string, default: "YrbyDocumentUpdate",
                             banner: "UpdateModelName"
 
@@ -44,10 +44,6 @@ module Yrby
 
       def create_model
         template "yrby_document_update.rb", "app/models/#{model_file_name}.rb"
-      end
-
-      def create_store
-        template "yrby_document_store.rb", "app/models/#{store_file_name}.rb"
       end
 
       def create_migration_file
@@ -83,23 +79,12 @@ module Yrby
         model_name.camelize
       end
 
-      # A trailing "Update" folds into the store name so the default pair
-      # reads naturally: YrbyDocumentUpdate -> YrbyDocumentStore,
-      # DocumentRevision -> DocumentRevisionStore.
-      def store_class_name
-        "#{model_class_name.sub(/Update\z/, "")}Store"
-      end
-
       def table_name
         model_class_name.tableize.tr("/", "_")
       end
 
       def model_file_name
         model_class_name.underscore
-      end
-
-      def store_file_name
-        store_class_name.underscore
       end
 
       def migration_version

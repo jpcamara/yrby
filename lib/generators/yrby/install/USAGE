@@ -1,11 +1,12 @@
 Description:
     Wires the app for collaborative documents: a DocumentChannel speaking
-    the y-websocket protocol, an ActiveRecord-backed durable store with
-    compaction, and its migration.
+    the y-websocket protocol, an update-log model backed by
+    Y::ActionCable::UpdateLog (append-only rows with compaction), and its
+    migration.
 
-The optional argument names the update-log model; the table, the store
-class, and the migration derive from it, so nothing forces the yrby
-prefix on your schema:
+The optional argument names the update-log model; the table and the
+migration derive from it, so nothing forces the yrby prefix on your
+schema:
 
 Example:
     bin/rails generate yrby:install
@@ -14,5 +15,4 @@ Example:
     This will create:
         app/channels/document_channel.rb
         app/models/yrby_document_update.rb
-        app/models/yrby_document_store.rb
         db/migrate/XXXXXXXX_create_yrby_document_updates.rb

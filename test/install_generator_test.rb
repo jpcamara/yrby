@@ -15,8 +15,8 @@ class InstallGeneratorTest < Rails::Generators::TestCase
 
     assert_file "app/channels/document_channel.rb" do |channel|
       assert_match(/include Y::ActionCable::Sync/, channel)
-      assert_match(/on_load { \|key\| YrbyDocumentStore\.load\(key\) }/, channel)
-      assert_match(/on_change { \|key, update\| YrbyDocumentStore\.append\(key, update\) }/, channel)
+      assert_match(/on_load { \|key\| YrbyDocumentUpdate\.load\(key\) }/, channel)
+      assert_match(/on_change { \|key, update\| YrbyDocumentUpdate\.append\(key, update\) }/, channel)
       assert_match(/sync_subscribed\(params\[:id\]\)/, channel)
       assert_match(/sync_receive\(data, params\[:id\]\)/, channel)
       assert_match(/return reject unless authorized\?\(params\[:id\]\)/, channel,
@@ -27,13 +27,11 @@ class InstallGeneratorTest < Rails::Generators::TestCase
   def test_generates_the_store_and_model
     run_generator
 
-    assert_file "app/models/yrby_document_update.rb", /class YrbyDocumentUpdate < ApplicationRecord/
-    assert_file "app/models/yrby_document_store.rb" do |store|
-      assert_match(/def load\(key\)/, store)
-      assert_match(/def append\(key, update\)/, store)
-      assert_match(/def compact!\(key\)/, store)
-      assert_match(/compacted_state_update/, store)
+    assert_file "app/models/yrby_document_update.rb" do |model|
+      assert_match(/class YrbyDocumentUpdate < ApplicationRecord/, model)
+      assert_match(/include Y::ActionCable::UpdateLog/, model)
     end
+    assert_no_file "app/models/yrby_document_store.rb"
   end
 
   def test_generates_a_migration_stamped_with_the_active_record_version
@@ -50,15 +48,14 @@ class InstallGeneratorTest < Rails::Generators::TestCase
   def test_custom_model_name_carries_through_every_generated_file
     run_generator ["DocumentRevision"]
 
-    assert_file "app/models/document_revision.rb", /class DocumentRevision < ApplicationRecord/
-    assert_file "app/models/document_revision_store.rb" do |store|
-      assert_match(/class DocumentRevisionStore/, store)
-      assert_match(/DocumentRevision\.where/, store)
-      assert_no_match(/YrbyDocument/, store)
+    assert_file "app/models/document_revision.rb" do |model|
+      assert_match(/class DocumentRevision < ApplicationRecord/, model)
+      assert_match(/include Y::ActionCable::UpdateLog/, model)
+      assert_no_match(/YrbyDocument/, model)
     end
     assert_file "app/channels/document_channel.rb" do |channel|
-      assert_match(/DocumentRevisionStore/, channel)
-      assert_no_match(/YrbyDocumentStore/, channel)
+      assert_match(/DocumentRevision\.load/, channel)
+      assert_no_match(/YrbyDocument/, channel)
     end
     assert_migration "db/migrate/create_document_revisions.rb" do |migration|
       assert_match(/class CreateDocumentRevisions/, migration)

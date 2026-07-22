@@ -7,11 +7,11 @@ class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable::Sync
 
   # Rebuild a document from durable storage (nil means a brand-new doc).
-  on_load { |key| <%= store_class_name %>.load(key) }
+  on_load { |key| <%= model_class_name %>.load(key) }
 
   # Record each CRDT delta durably. Runs before the change is acknowledged
   # or broadcast; raising rejects the change and the client retransmits.
-  on_change { |key, update| <%= store_class_name %>.append(key, update) }
+  on_change { |key, update| <%= model_class_name %>.append(key, update) }
 
   def subscribed
     return reject unless authorized?(params[:id])

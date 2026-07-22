@@ -4,9 +4,9 @@ require "test_helper"
 require_relative "fixtures/yjs_fixtures"
 require "active_record"
 
-# The generated store is app code, but its compaction logic is the blessed
-# answer to "doesn't on_load replay the whole history?" — so its behavior is
-# pinned here against a real database, not just asserted as template text.
+# Y::ActionCable::UpdateLog is the blessed answer to "doesn't on_load replay
+# the whole history?" — its behavior is pinned here against a real database,
+# included into a model exactly the way the install generator generates it.
 ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
 ActiveRecord::Schema.verbose = false
 ActiveRecord::Schema.define do
@@ -17,23 +17,14 @@ ActiveRecord::Schema.define do
   end
 end
 
-ApplicationRecord = Class.new(ActiveRecord::Base) { self.abstract_class = true }
+require "y/action_cable"
 
-# The templates are ERB (the install generator takes a model name); render
-# them with the default names before loading, exactly as `yrby:install`
-# with no argument would.
-require "erb"
-DefaultNames = Struct.new(:model_class_name, :store_class_name) do
-  def render(template_path)
-    ERB.new(File.read(template_path)).result(binding)
-  end
+class YrbyDocumentUpdate < ActiveRecord::Base
+  self.table_name = "yrby_document_updates"
+  include Y::ActionCable::UpdateLog
 end
-generated = File.expand_path("../lib/generators/yrby/install/templates", __dir__)
-names = DefaultNames.new("YrbyDocumentUpdate", "YrbyDocumentStore")
-eval names.render(File.join(generated, "yrby_document_update.rb")) # rubocop:disable Security/Eval
-eval names.render(File.join(generated, "yrby_document_store.rb")) # rubocop:disable Security/Eval
 
-class GeneratedStoreTest < Minitest::Test
+class UpdateLogTest < Minitest::Test
   # Two concurrent clients editing the same Y.Text field, captured from real
   # Y.js. Their merge must contain both writes regardless of row order.
   CLIENT_ONE = YjsFixtures::TwoDocsMerged::DOC1_UPDATE
@@ -41,28 +32,28 @@ class GeneratedStoreTest < Minitest::Test
 
   def setup
     YrbyDocumentUpdate.delete_all
-    YrbyDocumentStore.compact_every = 500
+    YrbyDocumentUpdate.compact_every = 500
   end
 
   def read_back(key)
     doc = Y::Doc.new
-    doc.apply_update(YrbyDocumentStore.load(key))
+    doc.apply_update(YrbyDocumentUpdate.load(key))
     doc.read_text("content")
   end
 
   def test_load_returns_nil_for_an_unknown_document
-    assert_nil YrbyDocumentStore.load("nope")
+    assert_nil YrbyDocumentUpdate.load("nope")
   end
 
   def test_append_then_load_round_trips
-    YrbyDocumentStore.append("k", CLIENT_ONE)
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
 
     assert_equal "from doc1", read_back("k")
   end
 
   def test_load_merges_concurrent_updates
-    YrbyDocumentStore.append("k", CLIENT_ONE)
-    YrbyDocumentStore.append("k", CLIENT_TWO)
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
+    YrbyDocumentUpdate.append("k", CLIENT_TWO)
 
     merged = read_back("k")
 
@@ -71,33 +62,33 @@ class GeneratedStoreTest < Minitest::Test
   end
 
   def test_compact_collapses_rows_and_preserves_state
-    YrbyDocumentStore.append("k", CLIENT_ONE)
-    YrbyDocumentStore.append("k", CLIENT_TWO)
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
+    YrbyDocumentUpdate.append("k", CLIENT_TWO)
     before = read_back("k")
 
-    YrbyDocumentStore.compact!("k")
+    YrbyDocumentUpdate.compact!("k")
 
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "k").count
     assert_equal before, read_back("k")
   end
 
   def test_append_triggers_compaction_at_the_threshold
-    YrbyDocumentStore.compact_every = 2
-    YrbyDocumentStore.append("k", CLIENT_ONE)
+    YrbyDocumentUpdate.compact_every = 2
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
 
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "k").count, "below threshold: no compaction"
 
-    YrbyDocumentStore.append("k", CLIENT_TWO)
+    YrbyDocumentUpdate.append("k", CLIENT_TWO)
 
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "k").count, "threshold append compacts"
     assert_includes read_back("k"), "from doc2"
   end
 
   def test_compact_is_a_noop_below_two_rows
-    YrbyDocumentStore.append("k", CLIENT_ONE)
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
     snapshot_id = YrbyDocumentUpdate.last.id
 
-    YrbyDocumentStore.compact!("k")
+    YrbyDocumentUpdate.compact!("k")
 
     assert_equal [snapshot_id], YrbyDocumentUpdate.where(document_key: "k").pluck(:id)
   end
@@ -105,21 +96,21 @@ class GeneratedStoreTest < Minitest::Test
   def test_redelivered_update_compacts_away
     # At-least-once delivery means the same update can be recorded twice;
     # CRDT idempotence makes the duplicate a no-op in the merged state.
-    YrbyDocumentStore.append("k", CLIENT_ONE)
-    YrbyDocumentStore.append("k", CLIENT_ONE)
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
 
-    YrbyDocumentStore.compact!("k")
+    YrbyDocumentUpdate.compact!("k")
 
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "k").count
     assert_equal "from doc1", read_back("k")
   end
 
   def test_compaction_scopes_to_one_document
-    YrbyDocumentStore.append("a", CLIENT_ONE)
-    YrbyDocumentStore.append("b", CLIENT_ONE)
-    YrbyDocumentStore.append("b", CLIENT_TWO)
+    YrbyDocumentUpdate.append("a", CLIENT_ONE)
+    YrbyDocumentUpdate.append("b", CLIENT_ONE)
+    YrbyDocumentUpdate.append("b", CLIENT_TWO)
 
-    YrbyDocumentStore.compact!("b")
+    YrbyDocumentUpdate.compact!("b")
 
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "a").count
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "b").count
@@ -131,23 +122,23 @@ class GeneratedStoreTest < Minitest::Test
     # once (at-least-once delivery): the snapshot would exclude the pending
     # struct, so compacting would delete the only copy of a gap that could
     # still heal. Compaction must leave the rows alone.
-    YrbyDocumentStore.append("k", YjsFixtures::Gap::DEPENDENT)
-    YrbyDocumentStore.append("k", YjsFixtures::Gap::DEPENDENT)
+    YrbyDocumentUpdate.append("k", YjsFixtures::Gap::DEPENDENT)
+    YrbyDocumentUpdate.append("k", YjsFixtures::Gap::DEPENDENT)
 
-    YrbyDocumentStore.compact!("k")
+    YrbyDocumentUpdate.compact!("k")
 
     assert_equal 2, YrbyDocumentUpdate.where(document_key: "k").count,
                  "rows survive while a gap is open"
 
     # The gap heals (its dependency arrives) and compaction resumes,
     # preserving the healed content.
-    YrbyDocumentStore.append("k", YjsFixtures::Gap::FIRST)
-    YrbyDocumentStore.compact!("k")
+    YrbyDocumentUpdate.append("k", YjsFixtures::Gap::FIRST)
+    YrbyDocumentUpdate.compact!("k")
 
     assert_equal 1, YrbyDocumentUpdate.where(document_key: "k").count,
                  "compaction resumes once the gap heals"
     healed = Y::Doc.new
-    healed.apply_update(YrbyDocumentStore.load("k"))
+    healed.apply_update(YrbyDocumentUpdate.load("k"))
 
     assert_equal "ab", healed.read_text("notepad"), "the healed gap survived compaction"
   end
