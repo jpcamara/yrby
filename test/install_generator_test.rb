@@ -14,7 +14,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     run_generator
 
     assert_file "app/channels/document_channel.rb" do |channel|
-      assert_match(/include Y::ActionCable::Sync/, channel)
+      assert_match(/include Y::ActionCable\b/, channel)
       assert_match(/on_load { \|key\| YrbyDocumentUpdate\.load\(key\) }/, channel)
       assert_match(/on_change { \|key, update\| YrbyDocumentUpdate\.append\(key, update\) }/, channel)
       assert_match(/sync_subscribed\(params\[:id\]\)/, channel)

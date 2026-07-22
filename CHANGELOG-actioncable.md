@@ -17,6 +17,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   be served to peers, and compaction skips a document holding a pending
   (causally-gapped) update rather than deleting the only healable copy.
   Behavior is pinned by tests against a real database.
+- `include Y::ActionCable` as the channel integration: the namespace
+  module forwards to `Y::ActionCable::Sync`, which remains the module's
+  home and keeps working as a spelling. One include, no suffix.
 - `rails generate yrby:install [ModelName]`: wires a Rails app in one
   step — a `DocumentChannel` speaking the y-websocket protocol, an
   update-log model (`include Y::UpdateLog`), and its migration. The
