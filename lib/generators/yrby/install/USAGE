@@ -3,8 +3,13 @@ Description:
     the y-websocket protocol, an ActiveRecord-backed durable store with
     compaction, and its migration.
 
+The optional argument names the update-log model; the table, the store
+class, and the migration derive from it, so nothing forces the yrby
+prefix on your schema:
+
 Example:
     bin/rails generate yrby:install
+    bin/rails generate yrby:install DocumentRevision
 
     This will create:
         app/channels/document_channel.rb

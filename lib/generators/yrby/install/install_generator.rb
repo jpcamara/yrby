@@ -17,21 +17,29 @@ module Yrby
 
       source_root File.expand_path("templates", __dir__)
 
+      # The update-log model's class name; the table, the store class, and the
+      # migration all derive from it, so the storage carries your naming:
+      #
+      #   bin/rails g yrby:install                    # YrbyDocumentUpdate + YrbyDocumentStore
+      #   bin/rails g yrby:install DocumentRevision   # DocumentRevision + DocumentRevisionStore
+      argument :model_name, type: :string, default: "YrbyDocumentUpdate",
+                            banner: "UpdateModelName"
+
       def create_channel
         template "document_channel.rb", "app/channels/document_channel.rb"
       end
 
       def create_model
-        template "yrby_document_update.rb", "app/models/yrby_document_update.rb"
+        template "yrby_document_update.rb", "app/models/#{model_file_name}.rb"
       end
 
       def create_store
-        template "yrby_document_store.rb", "app/models/yrby_document_store.rb"
+        template "yrby_document_store.rb", "app/models/#{store_file_name}.rb"
       end
 
       def create_migration_file
         migration_template "create_yrby_document_updates.rb",
-                           File.join(db_migrate_path, "create_yrby_document_updates.rb")
+                           File.join(db_migrate_path, "create_#{table_name}.rb")
       end
 
       def show_next_steps
@@ -57,6 +65,29 @@ module Yrby
       end
 
       private
+
+      def model_class_name
+        model_name.camelize
+      end
+
+      # A trailing "Update" folds into the store name so the default pair
+      # reads naturally: YrbyDocumentUpdate -> YrbyDocumentStore,
+      # DocumentRevision -> DocumentRevisionStore.
+      def store_class_name
+        "#{model_class_name.sub(/Update\z/, "")}Store"
+      end
+
+      def table_name
+        model_class_name.tableize.tr("/", "_")
+      end
+
+      def model_file_name
+        model_class_name.underscore
+      end
+
+      def store_file_name
+        store_class_name.underscore
+      end
 
       def migration_version
         "[#{ActiveRecord::VERSION::MAJOR}.#{ActiveRecord::VERSION::MINOR}]"

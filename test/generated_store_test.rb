@@ -19,9 +19,19 @@ end
 
 ApplicationRecord = Class.new(ActiveRecord::Base) { self.abstract_class = true }
 
+# The templates are ERB (the install generator takes a model name); render
+# them with the default names before loading, exactly as `yrby:install`
+# with no argument would.
+require "erb"
+DefaultNames = Struct.new(:model_class_name, :store_class_name) do
+  def render(template_path)
+    ERB.new(File.read(template_path)).result(binding)
+  end
+end
 generated = File.expand_path("../lib/generators/yrby/install/templates", __dir__)
-load File.join(generated, "yrby_document_update.rb")
-load File.join(generated, "yrby_document_store.rb")
+names = DefaultNames.new("YrbyDocumentUpdate", "YrbyDocumentStore")
+eval names.render(File.join(generated, "yrby_document_update.rb")) # rubocop:disable Security/Eval
+eval names.render(File.join(generated, "yrby_document_store.rb")) # rubocop:disable Security/Eval
 
 class GeneratedStoreTest < Minitest::Test
   # Two concurrent clients editing the same Y.Text field, captured from real

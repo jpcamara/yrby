@@ -6,7 +6,7 @@
 # keeps loads fast by collapsing the log into one snapshot row once
 # `compact_every` updates accumulate — without it, every load replays the
 # document's full history.
-class YrbyDocumentStore
+class <%= store_class_name %>
   class << self
     # How many rows a document may accumulate before an append triggers
     # compaction inline. Raise it (or call compact! from a job instead) if
@@ -19,17 +19,17 @@ class YrbyDocumentStore
 
     # The merged state of a document, or nil if nothing was ever recorded.
     def load(key)
-      payloads = YrbyDocumentUpdate.where(document_key: key).order(:id).pluck(:payload)
+      payloads = <%= model_class_name %>.where(document_key: key).order(:id).pluck(:payload)
       return nil if payloads.empty?
 
       merge(payloads)
     end
 
     def append(key, update)
-      YrbyDocumentUpdate.create!(document_key: key, payload: update)
+      <%= model_class_name %>.create!(document_key: key, payload: update)
       # At-or-over, not an exact multiple: concurrent appends can jump the
       # count past a multiple and would otherwise skip compaction forever.
-      compact!(key) if YrbyDocumentUpdate.where(document_key: key).count >= compact_every
+      compact!(key) if <%= model_class_name %>.where(document_key: key).count >= compact_every
     end
 
     # Collapse a document's rows into one snapshot row. Safe to run while
@@ -44,15 +44,15 @@ class YrbyDocumentStore
     # records gaps, so this only engages on legacy rows or an accept-gaps
     # channel — compaction resumes once the gap heals or the log is repaired.
     def compact!(key)
-      rows = YrbyDocumentUpdate.where(document_key: key).order(:id).pluck(:id, :payload)
+      rows = <%= model_class_name %>.where(document_key: key).order(:id).pluck(:id, :payload)
       return if rows.size < 2
 
       doc = build_doc(rows.map(&:last))
       return if doc.pending?
 
-      YrbyDocumentUpdate.transaction do
-        YrbyDocumentUpdate.create!(document_key: key, payload: doc.compacted_state_update)
-        YrbyDocumentUpdate.where(id: rows.map(&:first)).delete_all
+      <%= model_class_name %>.transaction do
+        <%= model_class_name %>.create!(document_key: key, payload: doc.compacted_state_update)
+        <%= model_class_name %>.where(id: rows.map(&:first)).delete_all
       end
     end
 

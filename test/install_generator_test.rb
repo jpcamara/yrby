@@ -46,4 +46,24 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_match(/t\.string :document_key, null: false, index: true/, migration)
     end
   end
+
+  def test_custom_model_name_carries_through_every_generated_file
+    run_generator ["DocumentRevision"]
+
+    assert_file "app/models/document_revision.rb", /class DocumentRevision < ApplicationRecord/
+    assert_file "app/models/document_revision_store.rb" do |store|
+      assert_match(/class DocumentRevisionStore/, store)
+      assert_match(/DocumentRevision\.where/, store)
+      assert_no_match(/YrbyDocument/, store)
+    end
+    assert_file "app/channels/document_channel.rb" do |channel|
+      assert_match(/DocumentRevisionStore/, channel)
+      assert_no_match(/YrbyDocumentStore/, channel)
+    end
+    assert_migration "db/migrate/create_document_revisions.rb" do |migration|
+      assert_match(/class CreateDocumentRevisions/, migration)
+      assert_match(/:document_revisions/, migration)
+    end
+    assert_no_file "app/models/yrby_document_update.rb"
+  end
 end
