@@ -21,6 +21,7 @@ Gem::Specification.new do |spec|
     "lib/yrby-actioncable.rb",
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
+    "lib/y/update_log.rb",
     "lib/generators/**/*",
     "LICENSE",
     "README.md",

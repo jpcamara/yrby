@@ -4,7 +4,7 @@ require "test_helper"
 require_relative "fixtures/yjs_fixtures"
 require "active_record"
 
-# Y::ActionCable::UpdateLog is the blessed answer to "doesn't on_load replay
+# Y::UpdateLog is the blessed answer to "doesn't on_load replay
 # the whole history?" — its behavior is pinned here against a real database,
 # included into a model exactly the way the install generator generates it.
 ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
@@ -21,7 +21,7 @@ require "y/action_cable"
 
 class YrbyDocumentUpdate < ActiveRecord::Base
   self.table_name = "yrby_document_updates"
-  include Y::ActionCable::UpdateLog
+  include Y::UpdateLog
 end
 
 class UpdateLogTest < Minitest::Test

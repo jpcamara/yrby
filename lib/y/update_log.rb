@@ -2,14 +2,14 @@
 
 require "y"
 
-module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
+module Y
   # Durable storage for collaborative documents as an append-only update log
   # with compaction, implemented on whatever ActiveRecord model includes it.
   # The model needs two columns: a binary `payload` and an indexed string
   # `document_key` (`rails g yrby:install` creates the migration).
   #
   #   class YrbyDocumentUpdate < ApplicationRecord
-  #     include Y::ActionCable::UpdateLog
+  #     include Y::UpdateLog
   #   end
   #
   #   YrbyDocumentUpdate.load(key)          # merged state, or nil

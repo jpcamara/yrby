@@ -29,7 +29,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
 
     assert_file "app/models/yrby_document_update.rb" do |model|
       assert_match(/class YrbyDocumentUpdate < ApplicationRecord/, model)
-      assert_match(/include Y::ActionCable::UpdateLog/, model)
+      assert_match(/include Y::UpdateLog/, model)
     end
     assert_no_file "app/models/yrby_document_store.rb"
   end
@@ -50,7 +50,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
 
     assert_file "app/models/document_revision.rb" do |model|
       assert_match(/class DocumentRevision < ApplicationRecord/, model)
-      assert_match(/include Y::ActionCable::UpdateLog/, model)
+      assert_match(/include Y::UpdateLog/, model)
       assert_no_match(/YrbyDocument/, model)
     end
     assert_file "app/channels/document_channel.rb" do |channel|
