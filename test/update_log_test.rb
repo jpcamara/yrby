@@ -105,6 +105,20 @@ class UpdateLogTest < Minitest::Test
     assert_equal "from doc1", read_back("k")
   end
 
+  def test_latest_change_at_tracks_the_newest_row
+    assert_nil YrbyDocumentUpdate.latest_change_at("nope")
+
+    YrbyDocumentUpdate.append("k", CLIENT_ONE)
+    first = YrbyDocumentUpdate.latest_change_at("k")
+
+    refute_nil first
+
+    YrbyDocumentUpdate.append("k", CLIENT_TWO)
+
+    assert_operator YrbyDocumentUpdate.latest_change_at("k"), :>=, first
+    assert_nil YrbyDocumentUpdate.latest_change_at("other"), "scoped per document"
+  end
+
   def test_compaction_scopes_to_one_document
     YrbyDocumentUpdate.append("a", CLIENT_ONE)
     YrbyDocumentUpdate.append("b", CLIENT_ONE)

@@ -43,6 +43,15 @@ module Y
         build_doc(payloads).compacted_state_update
       end
 
+      # When the document last changed — the newest recorded row's timestamp,
+      # or nil for an unknown document. A cheap staleness signal for readers
+      # that project the document into another form (rendered HTML, search
+      # text): compare against the projection's own timestamp and rebuild only
+      # when the log is newer.
+      def latest_change_at(key)
+        where(document_key: key).maximum(:created_at)
+      end
+
       def append(key, update)
         create!(document_key: key, payload: update)
         # At-or-over, not an exact multiple: concurrent appends can jump the
