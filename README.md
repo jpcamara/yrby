@@ -479,7 +479,10 @@ The model is two lines — all storage behavior comes from `Y::UpdateLog`
 (shipped in the `yrby-actioncable` gem), an append-only update log with
 inline compaction: once `compact_every` rows accumulate for a document
 they collapse into one snapshot row, so `on_load` stays proportional to
-the compaction window instead of the document's full history. Compaction
+the compaction window instead of the document's full history.
+`latest_change_at(key)` reports when a document last changed, so readers
+projecting it into another form (rendered HTML, search text) can rebuild
+only when the log is newer. Compaction
 is transactional, tolerates concurrent appends, and skips a document
 holding a pending (causally-gapped) update rather than deleting the only
 healable copy.
