@@ -35,9 +35,16 @@ module Y
         @compact_every ||= 500
       end
 
+      # The column the log is keyed by. Override when the including model
+      # keys its rows differently — e.g. `def self.key_column = :document_id`
+      # for a log whose rows belong_to a parent document record.
+      def key_column
+        :document_key
+      end
+
       # The merged state of a document, or nil if nothing was ever recorded.
       def load(key)
-        payloads = where(document_key: key).order(:id).pluck(:payload)
+        payloads = where(key_column => key).order(:id).pluck(:payload)
         return nil if payloads.empty?
 
         build_doc(payloads).compacted_state_update
@@ -49,14 +56,14 @@ module Y
       # text): compare against the projection's own timestamp and rebuild only
       # when the log is newer.
       def latest_change_at(key)
-        where(document_key: key).maximum(:created_at)
+        where(key_column => key).maximum(:created_at)
       end
 
       def append(key, update)
-        create!(document_key: key, payload: update)
+        create!(key_column => key, payload: update)
         # At-or-over, not an exact multiple: concurrent appends can jump the
         # count past a multiple and would otherwise skip compaction forever.
-        compact!(key) if where(document_key: key).count >= compact_every
+        compact!(key) if where(key_column => key).count >= compact_every
       end
 
       # Collapse a document's rows into one snapshot row. Safe to run while
@@ -71,14 +78,14 @@ module Y
       # gaps, so this only engages on legacy rows — compaction resumes once
       # the gap heals or the log is repaired.
       def compact!(key)
-        rows = where(document_key: key).order(:id).pluck(:id, :payload)
+        rows = where(key_column => key).order(:id).pluck(:id, :payload)
         return if rows.size < 2
 
         doc = build_doc(rows.map(&:last))
         return if doc.pending?
 
         transaction do
-          create!(document_key: key, payload: doc.compacted_state_update)
+          create!(key_column => key, payload: doc.compacted_state_update)
           where(id: rows.map(&:first)).delete_all
         end
       end

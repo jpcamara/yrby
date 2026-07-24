@@ -105,6 +105,36 @@ class UpdateLogTest < Minitest::Test
     assert_equal "from doc1", read_back("k")
   end
 
+  def test_key_column_is_overridable
+    parent_keyed = Class.new(ActiveRecord::Base) do
+      self.table_name = "parent_keyed_updates"
+      include Y::UpdateLog
+
+      def self.key_column = :parent_id
+      def self.name = "ParentKeyedUpdate"
+    end
+    ActiveRecord::Schema.define do
+      create_table :parent_keyed_updates, force: true do |t|
+        t.binary :payload, null: false
+        t.integer :parent_id, null: false, index: true
+        t.datetime :created_at, null: false
+      end
+    end
+
+    parent_keyed.append(7, CLIENT_ONE)
+    parent_keyed.append(7, CLIENT_TWO)
+
+    doc = Y::Doc.new
+    doc.apply_update(parent_keyed.load(7))
+
+    assert_equal "from doc1from doc2", doc.read_text("content")
+    parent_keyed.compact!(7)
+
+    assert_equal 1, parent_keyed.where(parent_id: 7).count
+    refute_nil parent_keyed.latest_change_at(7)
+    assert_nil parent_keyed.latest_change_at(8)
+  end
+
   def test_latest_change_at_tracks_the_newest_row
     assert_nil YrbyDocumentUpdate.latest_change_at("nope")
 

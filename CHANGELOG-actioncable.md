@@ -20,6 +20,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `include Y::ActionCable` as the channel integration: the namespace
   module forwards to `Y::ActionCable::Sync`, which remains the module's
   home and keeps working as a spelling. One include, no suffix.
+- `Y::UpdateLog.key_column`: override which column keys the log (default
+  `:document_key`) — e.g. `:document_id` for a log whose rows belong to a
+  parent document record.
 - `rails generate yrby:install [ModelName]`: wires a Rails app in one
   step — a `DocumentChannel` speaking the y-websocket protocol, an
   update-log model (`include Y::UpdateLog`), and its migration. The
