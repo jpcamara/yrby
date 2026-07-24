@@ -8,13 +8,13 @@ class CreateYrbyTables < ActiveRecord::Migration<%= migration_version %>
     # projections — the log version they were last built from.
     create_table :yrby_documents do |t|
       t.string :key, null: false, index: { unique: true }
-      t.references :record, polymorphic: true, null: true
+      t.references :record, polymorphic: true, null: true, index: false
       t.string :name
       t.datetime :materialized_at
       t.timestamps
       t.index %i[record_type record_id name], unique: true,
                                               where: "record_type IS NOT NULL",
-                                              name: "index_yrby_documents_on_record"
+                                              name: "index_yrby_documents_on_record_and_name"
     end
 
     # The CRDT update log: one delta (or compacted snapshot) per row.
