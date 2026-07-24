@@ -1,10 +1,49 @@
-# Changelog — yrby-actioncable
+# Changelog — yrby-rails
 
-All notable changes to the `yrby-actioncable` gem are documented here. The
+All notable changes to the `yrby-rails` gem (formerly `yrby-actioncable`) are
+documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed
+
+- **The gem is now `yrby-rails`** (formerly `yrby-actioncable`) and a Rails
+  engine. The old name stops at 0.3.1; this line continues as 0.4.0.
+  `Y::ActionCable` keeps its name — it accurately names the ActionCable
+  adapter; the gem name now names the layer.
+
+### Added
+
+- Engine-owned document models, the way Action Text owns
+  `ActionText::RichText`: `Y::Document` (the identity a transport key points
+  at — unique `key`, optional polymorphic `record` + `name` for binding to a
+  Rails model, `materialized_at` for projections, destroys its log with it)
+  and `Y::DocumentUpdate` (the `Y::UpdateLog` rows, keyed by `document_id`).
+  `Y::Document.load_state(key)` / `.append(key, update)` are the store calls
+  the generated channel uses. `rails g yrby:tables` creates the two tables
+  (invoked by `yrby:install`; usable directly by gems building on the same
+  storage).
+
+- `Y::UpdateLog`: durable storage for collaborative documents as a module
+  any ActiveRecord model with `payload`/`document_key` columns includes.
+  An append-only update log with inline compaction (`compact_every`,
+  default 500): rows collapse into one snapshot row so `on_load` replays
+  the compaction window, not the document's full history. Merges go
+  through `compacted_state_update` so a gappy recorded update can never
+  be served to peers, and compaction skips a document holding a pending
+  (causally-gapped) update rather than deleting the only healable copy.
+  Behavior is pinned by tests against a real database.
+- `include Y::ActionCable` as the channel integration: the namespace
+  module forwards to `Y::ActionCable::Sync`, which remains the module's
+  home and keeps working as a spelling. One include, no suffix.
+- `Y::UpdateLog.key_column`: override which column keys the log (default
+  `:document_key`) — e.g. `:document_id` for a log whose rows belong to a
+  parent document record.
+- `rails generate yrby:install`: a `DocumentChannel` speaking the
+  y-websocket protocol over the gem-owned storage, plus the storage
+  migration.
 
 ## [0.3.1] - 2026-07-01
 

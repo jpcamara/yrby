@@ -17,7 +17,7 @@ class PackagingTest < Minitest::Test
   def test_core_gem_excludes_the_actioncable_and_decoder_gems_files
     files = load_spec("yrby.gemspec").files
 
-    assert_empty files.grep(/action_cable|actioncable/), "actioncable files ship in yrby-actioncable"
+    assert_empty files.grep(/action_cable|actioncable|yrby-rails|update_log/), "Rails-layer files ship in yrby-rails"
     assert_empty files.grep(/decoder/), "decoder files ship in yrby-decoder"
   end
 
@@ -31,7 +31,7 @@ class PackagingTest < Minitest::Test
   end
 
   def test_no_gem_packages_tests_or_artifacts
-    %w[yrby.gemspec yrby-actioncable.gemspec yrby-decoder.gemspec].each do |gemspec|
+    %w[yrby.gemspec yrby-rails.gemspec yrby-decoder.gemspec].each do |gemspec|
       files = load_spec(gemspec).files
 
       assert_empty files.grep(%r{^(test|bench|examples|pkg|target|tmp)/}),

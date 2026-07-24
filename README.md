@@ -11,10 +11,10 @@ documents. Pronounced "yer-bee".
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include Y::ActionCable::Sync
+  include Y::ActionCable
 
-  on_load   { |key|         MyStore.load(key) }
-  on_change { |key, update| MyStore.append(key, update) }
+  on_load   { |key|         YrbyDocumentUpdate.load(key) }
+  on_change { |key, update| YrbyDocumentUpdate.append(key, update) }
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
@@ -103,8 +103,9 @@ Issues and PRs are welcome.
 # Core CRDT + protocol primitives:
 gem "yrby"
 
-# For the Rails/ActionCable server concern (Y::ActionCable::Sync):
-gem "yrby-actioncable"
+# For the Rails side (the sync channel, document models, the generator).
+# Formerly yrby-actioncable; that name stops at 0.3.1.
+gem "yrby-rails"
 ```
 
 Requires Ruby 3.4 or newer. The release workflow builds precompiled gems for
@@ -459,17 +460,47 @@ Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
 
 ### ActionCable Integration
 
-`Y::ActionCable::Sync` (from the `yrby-actioncable` gem) is a channel
-concern that implements the full y-websocket protocol (document sync +
-awareness/presence) over ActionCable:
+In a Rails app, the generator wires everything at once:
+
+```bash
+bin/rails generate yrby:install
+bin/rails db:migrate
+```
+
+It creates a `DocumentChannel` and the storage migration. The models ship
+in the gem, the way Action Text owns `ActionText::RichText`:
+
+- **`Y::Document`** — the identity a transport key points at: a unique
+  `key`, an optional polymorphic `record` + `name` (bind a document to a
+  Rails model and it destroys its log with the record; key-only documents
+  leave them nil), and `materialized_at` for projections.
+  `Y::Document.load_state(key)` / `.append(key, update)` are the store
+  calls the generated channel uses.
+- **`Y::DocumentUpdate`** — the log rows, powered by `Y::UpdateLog`: an
+  append-only update log with inline compaction (once `compact_every`
+  rows accumulate they collapse into one snapshot row, so loads stay
+  proportional to the compaction window). `latest_change_at` reports when
+  a document last changed, so projections rebuild only when the log is
+  newer. Compaction is transactional, tolerates concurrent appends, and
+  skips a document holding a pending (causally-gapped) update rather than
+  deleting the only healable copy.
+
+Storage is still swappable — the channel only needs `on_load` and
+`on_change` answered; `Y::UpdateLog` (and its `key_column` override) is
+available for keying a log your own way.
+
+`include Y::ActionCable` (from the `yrby-actioncable` gem) is the channel
+integration: the full y-websocket protocol (document sync +
+awareness/presence) over ActionCable. (`include Y::ActionCable::Sync` is
+the same module and keeps working.)
 
 ```ruby
 # app/channels/document_channel.rb
 class DocumentChannel < ApplicationCable::Channel
-  include Y::ActionCable::Sync
+  include Y::ActionCable
 
-  on_load { |key| MyStore.load(key) }                 # source of truth
-  on_change { |key, update| MyStore.append(key, update) } # durable record
+  on_load { |key| YrbyDocumentUpdate.load(key) }                 # source of truth
+  on_change { |key, update| YrbyDocumentUpdate.append(key, update) } # durable record
 
   def subscribed
     sync_subscribed params[:id]
@@ -573,7 +604,7 @@ It is up to you to durably record it:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
-  include Y::ActionCable::Sync
+  include Y::ActionCable
 
   # ...
 
