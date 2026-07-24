@@ -3,7 +3,7 @@
 source "https://rubygems.org"
 
 gemspec name: "yrby"
-gemspec name: "yrby-actioncable"
+gemspec name: "yrby-rails"
 gemspec name: "yrby-decoder"
 
 gem "rake-compiler"

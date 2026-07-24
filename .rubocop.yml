@@ -9,6 +9,7 @@ AllCops:
   Exclude:
     # ERB, not Ruby — the migration template interpolates the AR version.
     - "lib/generators/yrby/install/templates/**/*"
+    - "lib/generators/yrby/tables/templates/**/*"
     - "ext/**/*"          # Rust extension
     - "tmp/**/*"
     - "vendor/**/*"
@@ -66,5 +67,11 @@ Gemspec/DevelopmentDependencies:
 Naming/FileName:
   Exclude:
     - "lib/yrby.rb"
-    - "lib/yrby-actioncable.rb"
+    - "lib/yrby-rails.rb"
     - "lib/yrby-decoder.rb"
+
+Style/ClassAndModuleChildren:
+  Exclude:
+    # Compact style keeps ::ActionCable/::Rails resolvable inside Y:: code
+    # (matches lib/y/action_cable/sync.rb) and is Zeitwerk-required in app/.
+    - "app/**/*"

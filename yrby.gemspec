@@ -12,12 +12,12 @@ Gem::Specification.new do |spec|
   spec.description = "yrby is a thread-safe Ruby binding over the Rust y-crdt (yrs) library: CRDT documents, " \
                      "awareness/presence, and the y-websocket sync protocol primitives, with the GVL released " \
                      "during native work so documents sync in parallel. The ActionCable/Rails integration lives " \
-                     "in the companion yrby-actioncable gem."
+                     "in the companion yrby-rails gem."
   spec.homepage = "https://github.com/jpcamara/yrby"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
 
-  # The actioncable and decoder files ship in their own gems (yrby-actioncable,
+  # The Rails and decoder files ship in their own gems (yrby-rails,
   # yrby-decoder) — exclude them here so the core gem can't shadow those gems
   # on the load path. Cargo.lock IS shipped so source builds compile the exact
   # crate graph CI tested.
@@ -29,8 +29,8 @@ Gem::Specification.new do |spec|
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
-  ] - Dir["lib/yrby-actioncable.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*",
-          "lib/y/update_log.rb",
+  ] - Dir["lib/yrby-rails.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*",
+          "lib/y/update_log.rb", "lib/yrby/**/*", "app/**/*",
           "lib/yrby-decoder.rb", "lib/y/decoder.rb", "lib/y/decoder/**/*"]
 
   spec.require_paths = ["lib"]

@@ -103,8 +103,9 @@ Issues and PRs are welcome.
 # Core CRDT + protocol primitives:
 gem "yrby"
 
-# For the Rails side (the ActionCable channel, Y::UpdateLog storage, the generator):
-gem "yrby-actioncable"
+# For the Rails side (the sync channel, document models, the generator).
+# Formerly yrby-actioncable; that name stops at 0.3.1.
+gem "yrby-rails"
 ```
 
 Requires Ruby 3.4 or newer. The release workflow builds precompiled gems for
@@ -466,37 +467,27 @@ bin/rails generate yrby:install
 bin/rails db:migrate
 ```
 
-It creates a `DocumentChannel`, an update-log model, and the model's
-migration. The optional argument names the model, and the table and
-migration derive from it, so nothing forces the yrby prefix on your
-schema:
+It creates a `DocumentChannel` and the storage migration. The models ship
+in the gem, the way Action Text owns `ActionText::RichText`:
 
-```bash
-bin/rails generate yrby:install DocumentRevision   # DocumentRevision / document_revisions
-```
+- **`Y::Document`** — the identity a transport key points at: a unique
+  `key`, an optional polymorphic `record` + `name` (bind a document to a
+  Rails model and it destroys its log with the record; key-only documents
+  leave them nil), and `materialized_at` for projections.
+  `Y::Document.load_state(key)` / `.append(key, update)` are the store
+  calls the generated channel uses.
+- **`Y::DocumentUpdate`** — the log rows, powered by `Y::UpdateLog`: an
+  append-only update log with inline compaction (once `compact_every`
+  rows accumulate they collapse into one snapshot row, so loads stay
+  proportional to the compaction window). `latest_change_at` reports when
+  a document last changed, so projections rebuild only when the log is
+  newer. Compaction is transactional, tolerates concurrent appends, and
+  skips a document holding a pending (causally-gapped) update rather than
+  deleting the only healable copy.
 
-The model is two lines — all storage behavior comes from `Y::UpdateLog`
-(shipped in the `yrby-actioncable` gem), an append-only update log with
-inline compaction: once `compact_every` rows accumulate for a document
-they collapse into one snapshot row, so `on_load` stays proportional to
-the compaction window instead of the document's full history.
-`latest_change_at(key)` reports when a document last changed, so readers
-projecting it into another form (rendered HTML, search text) can rebuild
-only when the log is newer. Compaction
-is transactional, tolerates concurrent appends, and skips a document
-holding a pending (causally-gapped) update rather than deleting the only
-healable copy.
-
-```ruby
-class YrbyDocumentUpdate < ApplicationRecord
-  include Y::UpdateLog
-end
-```
-
-The generated files are plain app code — rename them, tune
-`compact_every` (or raise it and run `compact!` from your own job), or
-swap the storage entirely; the channel only needs `on_load` and
-`on_change` answered.
+Storage is still swappable — the channel only needs `on_load` and
+`on_change` answered; `Y::UpdateLog` (and its `key_column` override) is
+available for keying a log your own way.
 
 `include Y::ActionCable` (from the `yrby-actioncable` gem) is the channel
 integration: the full y-websocket protocol (document sync +

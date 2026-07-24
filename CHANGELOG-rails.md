@@ -1,12 +1,30 @@
-# Changelog — yrby-actioncable
+# Changelog — yrby-rails
 
-All notable changes to the `yrby-actioncable` gem are documented here. The
+All notable changes to the `yrby-rails` gem (formerly `yrby-actioncable`) are
+documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The gem is now `yrby-rails`** (formerly `yrby-actioncable`) and a Rails
+  engine. The old name stops at 0.3.1; this line continues as 0.4.0.
+  `Y::ActionCable` keeps its name — it accurately names the ActionCable
+  adapter; the gem name now names the layer.
+
 ### Added
+
+- Engine-owned document models, the way Action Text owns
+  `ActionText::RichText`: `Y::Document` (the identity a transport key points
+  at — unique `key`, optional polymorphic `record` + `name` for binding to a
+  Rails model, `materialized_at` for projections, destroys its log with it)
+  and `Y::DocumentUpdate` (the `Y::UpdateLog` rows, keyed by `document_id`).
+  `Y::Document.load_state(key)` / `.append(key, update)` are the store calls
+  the generated channel uses. `rails g yrby:tables` creates the two tables
+  (invoked by `yrby:install`; usable directly by gems building on the same
+  storage).
 
 - `Y::UpdateLog`: durable storage for collaborative documents as a module
   any ActiveRecord model with `payload`/`document_key` columns includes.
@@ -23,12 +41,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Y::UpdateLog.key_column`: override which column keys the log (default
   `:document_key`) — e.g. `:document_id` for a log whose rows belong to a
   parent document record.
-- `rails generate yrby:install [ModelName]`: wires a Rails app in one
-  step — a `DocumentChannel` speaking the y-websocket protocol, an
-  update-log model (`include Y::UpdateLog`), and its migration. The
-  optional argument names the model, and the table and migration derive
-  from it; namespaced names are rejected (the inferred table would miss
-  the generated migration's table).
+- `rails generate yrby:install`: a `DocumentChannel` speaking the
+  y-websocket protocol over the gem-owned storage, plus the storage
+  migration.
 
 ## [0.3.1] - 2026-07-01
 
