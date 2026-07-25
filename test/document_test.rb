@@ -15,9 +15,14 @@ class DocumentTest < Minitest::Test
   CLIENT_ONE = YjsFixtures::TwoDocsMerged::DOC1_UPDATE
   CLIENT_TWO = YjsFixtures::TwoDocsMerged::DOC2_UPDATE
 
+  class Page < ActiveRecord::Base
+    self.table_name = "pages"
+  end
+
   def setup
     Y::DocumentUpdate.delete_all
     Y::Document.delete_all
+    Page.delete_all
   end
 
   def test_append_creates_the_document_and_load_state_round_trips
@@ -57,6 +62,37 @@ class DocumentTest < Minitest::Test
     Y::Document.append("room-1", CLIENT_ONE)
 
     assert_nil Y::Document.find_by(key: "room-1").record_type, "key-only documents carry no record"
+  end
+
+  def test_for_binds_a_record_and_derives_the_key
+    page = Page.create!
+    document = Y::Document.for(page, :body)
+
+    assert_equal page, document.record
+    assert_equal "body", document.name
+    # Derived from the polymorphic record_type, namespaces flattened.
+    assert_equal "document_test_page/#{page.id}/body", document.key
+  end
+
+  def test_for_converges_on_one_row_per_record_and_name
+    page = Page.create!
+
+    document = Y::Document.for(page, :body)
+
+    assert_equal document, Y::Document.for(page, :body)
+    refute_equal document, Y::Document.for(page, :summary), "each attribute gets its own document"
+    refute_equal document, Y::Document.for(Page.create!, :body), "each record gets its own document"
+  end
+
+  def test_a_supplied_key_is_never_overwritten
+    page = Page.create!
+    document = Y::Document.create!(record: page, name: "body", key: "custom")
+
+    assert_equal "custom", document.key
+  end
+
+  def test_key_only_documents_must_supply_a_key
+    assert_raises(ActiveRecord::RecordInvalid) { Y::Document.create!(name: "body") }
   end
 
   def test_update_log_is_keyed_by_document_id

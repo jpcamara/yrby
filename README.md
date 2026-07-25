@@ -474,8 +474,10 @@ in the gem, the way Action Text owns `ActionText::RichText`:
   `key`, an optional polymorphic `record` + `name` (bind a document to a
   Rails model and it destroys its log with the record; key-only documents
   leave them nil), and `materialized_at` for projections.
-  `Y::Document.load_state(key)` / `.append(key, update)` are the store
-  calls the generated channel uses.
+  `Y::Document.for(record, name)` finds or creates a record's document,
+  deriving a readable key (`post/1/body`) from the record;
+  `.load_state(key)` / `.append(key, update)` are the store calls the
+  generated channel uses.
 - **`Y::DocumentUpdate`** — the log rows, powered by `Y::UpdateLog`: an
   append-only update log with inline compaction (once `compact_every`
   rows accumulate they collapse into one snapshot row, so loads stay

@@ -21,8 +21,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   at — unique `key`, optional polymorphic `record` + `name` for binding to a
   Rails model, `materialized_at` for projections, destroys its log with it)
   and `Y::DocumentUpdate` (the `Y::UpdateLog` rows, keyed by `document_id`).
-  `Y::Document.load_state(key)` / `.append(key, update)` are the store calls
-  the generated channel uses. `rails g yrby:tables` creates the two tables
+  `Y::Document.for(record, name)` finds or creates a record's document and
+  derives its key (`post/1/body`); `.load_state(key)` / `.append(key,
+  update)` are the store calls the generated channel uses. `rails g yrby:tables` creates the two tables
   (invoked by `yrby:install`; usable directly by gems building on the same
   storage).
 
