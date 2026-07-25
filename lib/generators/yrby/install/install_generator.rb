@@ -6,9 +6,9 @@ require "generators/yrby/tables/tables_generator"
 module Yrby
   module Generators
     # `bin/rails generate yrby:install` — a DocumentChannel speaking the
-    # y-websocket protocol over the gem-owned document storage, plus the
-    # storage migration (via yrby:tables). The models (Y::Document,
-    # Y::DocumentUpdate) ship in the gem, the way ActionText::RichText does.
+    # y-websocket protocol over the gem's document storage, plus the storage
+    # migration (via yrby:tables). The models ship in the gem; only the
+    # migration lands in the app.
     class InstallGenerator < Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
 
@@ -23,7 +23,7 @@ module Yrby
       def show_next_steps
         say <<~NEXT
 
-          yrby is wired up. Next steps:
+          Next steps:
 
             1. Authorize document access: implement `authorized?` in
                app/channels/document_channel.rb (it fails closed until you do).

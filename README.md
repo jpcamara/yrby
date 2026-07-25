@@ -460,20 +460,20 @@ Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
 
 ### ActionCable Integration
 
-In a Rails app, the generator wires everything at once:
+In a Rails app, one generator creates the channel and the migration:
 
 ```bash
 bin/rails generate yrby:install
 bin/rails db:migrate
 ```
 
-It creates a `DocumentChannel` and the storage migration. The models ship
-in the gem, the way Action Text owns `ActionText::RichText`:
+The models ship in the gem, the way Action Text owns
+`ActionText::RichText`:
 
-- **`Y::Document`** — the identity a transport key points at: a unique
-  `key`, an optional polymorphic `record` + `name` (bind a document to a
-  Rails model and it destroys its log with the record; key-only documents
-  leave them nil), and `materialized_at` for projections.
+- **`Y::Document`** — one row per document: a unique `key`, an optional
+  polymorphic `record` + `name` (bind a document to a Rails model and it
+  destroys its log with the record; key-only documents leave them nil),
+  and `materialized_at` for projections.
   `Y::Document.for(record, name)` finds or creates a record's document,
   deriving a readable key (`post/1/body`) from the record;
   `.load_state(key)` / `.append(key, update)` are the store calls the
@@ -487,11 +487,10 @@ in the gem, the way Action Text owns `ActionText::RichText`:
   skips a document holding a pending (causally-gapped) update rather than
   deleting the only healable copy.
 
-Storage is still swappable — the channel only needs `on_load` and
-`on_change` answered; `Y::UpdateLog` (and its `key_column` override) is
-available for keying a log your own way.
+Storage is swappable: the channel only needs `on_load` and `on_change`,
+and `Y::UpdateLog` (with its `key_column` override) works on any table.
 
-`include Y::ActionCable` (from the `yrby-actioncable` gem) is the channel
+`include Y::ActionCable` (from the `yrby-rails` gem) is the channel
 integration: the full y-websocket protocol (document sync +
 awareness/presence) over ActionCable. (`include Y::ActionCable::Sync` is
 the same module and keeps working.)

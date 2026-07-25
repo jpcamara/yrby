@@ -1,13 +1,12 @@
 # frozen_string_literal: true
 
-# A collaborative document: the identity a transport key points at, and the
-# owner of its update log. Shaped like ActionText::RichText — an OPTIONAL
-# polymorphic record + name binds a document to a Rails model (yrby-rails
-# consumers such as lexxy-realtime use this); key-only documents (a room
-# name, a UUID) leave them nil and live by `key` alone.
+# One row per collaborative document. `key` addresses it on the transport;
+# the update log holds its edits. An optional polymorphic record + name
+# binds it to a Rails model, like ActionText::RichText; key-only documents
+# (a room name, a UUID) leave both nil.
 #
-# materialized_at is for projections (rendered HTML, search text): the log
-# version the projection was last built from, stamped by whatever builds it.
+# materialized_at: when a projection (rendered HTML, search text) was last
+# built from the log. Stamped by whatever builds the projection.
 class Y::Document < ActiveRecord::Base
   self.table_name = "yrby_documents"
 
@@ -39,12 +38,10 @@ class Y::Document < ActiveRecord::Base
 
   private
 
-  # Record-bound documents get a readable derived key (post/1/body); the
-  # polymorphic record_type already holds the base_class name, so STI
-  # subclasses derive the shared key for free. Namespaces keep their slash
-  # (admin/post/1/body) — flattening would collide Admin::Post with
-  # AdminPost. Key-only documents supply their own key, so this never
-  # fires for them.
+  # Derives post/1/body from the polymorphic record_type — the base_class
+  # name, so STI subclasses share a key. Namespaces keep their slash
+  # (admin/post/1/body); flattening would collide Admin::Post with
+  # AdminPost. Key-only documents supply their own key.
   def assign_default_key
     self.key ||= record_type && "#{record_type.underscore}/#{record_id}/#{name}"
   end

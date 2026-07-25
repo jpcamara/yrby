@@ -4,9 +4,8 @@ require "rails/engine"
 require "action_dispatch" # Engine::Configuration references it at subclass definition
 
 module Yrby
-  # The Rails engine: autoloads the gem-owned models (Y::Document,
-  # Y::DocumentUpdate) from app/models, the way Action Text owns
-  # ActionText::RichText.
+  # The Rails engine. Autoloads the gem's models (Y::Document,
+  # Y::DocumentUpdate) from app/models.
   class Engine < ::Rails::Engine
   end
 end

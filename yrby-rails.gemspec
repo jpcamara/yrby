@@ -9,11 +9,10 @@ Gem::Specification.new do |spec|
   spec.email = ["johnpcamara@gmail.com"]
 
   spec.summary = "The Rails integration for yrby: sync channel, document models, and install generator"
-  spec.description = "yrby-rails (formerly yrby-actioncable) is the Rails layer over the yrby y-crdt " \
-                     "bindings: the y-websocket sync channel concern (include Y::ActionCable) for " \
-                     "ActionCable/AnyCable, engine-owned document storage (Y::Document + Y::DocumentUpdate " \
-                     "with compaction), and an install generator — so a Rails app is the collaboration " \
-                     "server for Y.js editors with no Node sidecar."
+  spec.description = "The Rails integration for yrby (formerly yrby-actioncable): a y-websocket sync " \
+                     "channel for Action Cable and AnyCable (include Y::ActionCable), engine-owned " \
+                     "document storage with compaction (Y::Document, Y::DocumentUpdate), and an " \
+                     "install generator. A Rails app serves Y.js editors with no Node sidecar."
   spec.homepage = "https://github.com/jpcamara/yrby"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"

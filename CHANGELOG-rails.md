@@ -10,17 +10,15 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **The gem is now `yrby-rails`** (formerly `yrby-actioncable`) and a Rails
-  engine. The old name stops at 0.3.1; this line continues as 0.4.0.
-  `Y::ActionCable` keeps its name — it accurately names the ActionCable
-  adapter; the gem name now names the layer.
+  engine. `yrby-actioncable` stops at 0.3.1; `yrby-rails` starts at 0.4.0.
+  `Y::ActionCable` keeps its name; it names the ActionCable adapter.
 
 ### Added
 
-- Engine-owned document models, the way Action Text owns
-  `ActionText::RichText`: `Y::Document` (the identity a transport key points
-  at — unique `key`, optional polymorphic `record` + `name` for binding to a
-  Rails model, `materialized_at` for projections, destroys its log with it)
-  and `Y::DocumentUpdate` (the `Y::UpdateLog` rows, keyed by `document_id`).
+- Engine-owned document models: `Y::Document` (unique `key`, optional
+  polymorphic `record` + `name` for binding to a Rails model,
+  `materialized_at` for projections, destroys its log with it) and
+  `Y::DocumentUpdate` (the `Y::UpdateLog` rows, keyed by `document_id`).
   `Y::Document.for(record, name)` finds or creates a record's document and
   derives its key (`post/1/body`); `.load_state(key)` / `.append(key,
   update)` are the store calls the generated channel uses. `rails g yrby:tables` creates the two tables

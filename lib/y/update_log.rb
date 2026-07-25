@@ -95,10 +95,9 @@ module Y
 
       private
 
-      # `compacted_state_update` (used by load and compact!) is gap-free, so a
-      # gappy update recorded during a network wobble can never poison what
-      # gets served to peers — pending structs must not cross the sync
-      # boundary.
+      # `compacted_state_update` (used by load and compact!) is gap-free, so
+      # a gappy update recorded during a network wobble is never served to
+      # peers.
       def build_doc(payloads)
         doc = Y::Doc.new
         payloads.each { |payload| doc.apply_update(payload) }
