@@ -23,10 +23,11 @@ class CreateYrbyTables < ActiveRecord::Migration<%= migration_version %>
     # The CRDT update log: one delta (or compacted snapshot) per row.
     create_table :yrby_document_updates do |t|
       t.references :document, null: false, foreign_key: { to_table: :yrby_documents }
-      # Mediumblob (~16 MB cap) on MySQL — one byte over selects longblob.
-      # A no-op hint on PostgreSQL/SQLite. A delta is tiny; snapshots grow
-      # with document size.
-      t.binary :payload, null: false, limit: 16.megabytes - 1
+      # Longblob on MySQL (a no-op hint on PostgreSQL/SQLite): a delta is
+      # tiny, but a compacted snapshot is the WHOLE document — a 16 MB
+      # mediumblob cap would make compaction raise on a large document and
+      # wedge its appends.
+      t.binary :payload, null: false, limit: 4.gigabytes - 1
       t.datetime :created_at, null: false
     end
   end

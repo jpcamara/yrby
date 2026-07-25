@@ -36,7 +36,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_match("materialized_at", migration)
       assert_match(":yrby_document_updates", migration)
       assert_match("t.references :document", migration)
-      assert_match(/t\.binary :payload, null: false, limit: 16\.megabytes - 1/, migration)
+      assert_match(/t\.binary :payload, null: false, limit: 4\.gigabytes - 1/, migration)
     end
   end
 end

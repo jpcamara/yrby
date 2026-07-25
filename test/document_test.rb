@@ -70,8 +70,8 @@ class DocumentTest < Minitest::Test
 
     assert_equal page, document.record
     assert_equal "body", document.name
-    # Derived from the polymorphic record_type, namespaces flattened.
-    assert_equal "document_test_page/#{page.id}/body", document.key
+    # Derived from the polymorphic record_type; namespaces keep their slash.
+    assert_equal "document_test/page/#{page.id}/body", document.key
   end
 
   def test_for_converges_on_one_row_per_record_and_name

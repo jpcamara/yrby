@@ -41,9 +41,11 @@ class Y::Document < ActiveRecord::Base
 
   # Record-bound documents get a readable derived key (post/1/body); the
   # polymorphic record_type already holds the base_class name, so STI
-  # subclasses derive the shared key for free. Key-only documents supply
-  # their own key, so this never fires for them.
+  # subclasses derive the shared key for free. Namespaces keep their slash
+  # (admin/post/1/body) — flattening would collide Admin::Post with
+  # AdminPost. Key-only documents supply their own key, so this never
+  # fires for them.
   def assign_default_key
-    self.key ||= record_type && "#{record_type.underscore.tr("/", "_")}/#{record_id}/#{name}"
+    self.key ||= record_type && "#{record_type.underscore}/#{record_id}/#{name}"
   end
 end
