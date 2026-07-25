@@ -4,7 +4,7 @@
 # runs exercise exactly the same scenarios — no drift between modes.
 #
 # These drive the yrby native extension through the full ActionCable /
-# yrby-actioncable / store path: record-before-distribute, exactly-once
+# yrby-rails / store path: record-before-distribute, exactly-once
 # under contention, reliable retransmit, and a fuzz barrage. Running the same
 # slice under Falcon proves the extension holds up inside the fiber scheduler.
 #

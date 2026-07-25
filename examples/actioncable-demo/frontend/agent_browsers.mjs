@@ -2,7 +2,7 @@
 // sessions, typing into the SAME document at the same time. Each browser types
 // its own digit so every keystroke is accountable. Proves the full stack under
 // concurrent real-browser editing: Tiptap -> yrby-client provider ->
-// ActionCable/yrby-actioncable -> store, converging byte-for-byte with no
+// ActionCable/yrby-rails -> store, converging byte-for-byte with no
 // lost keystrokes.
 //
 //   PORT=3777 node agent_browsers.mjs        # 4 browsers (default)
