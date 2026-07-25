@@ -64,6 +64,19 @@ class UpdateLogTest < Minitest::Test
     assert_equal before, read_back("k")
   end
 
+  def test_compaction_does_not_move_latest_change_at
+    ModuleKeyedUpdate.append("k", CLIENT_ONE)
+    ModuleKeyedUpdate.append("k", CLIENT_TWO)
+    # Age the rows so a fresh-stamped snapshot would be visibly newer.
+    ModuleKeyedUpdate.update_all(created_at: 1.hour.ago)
+    before = ModuleKeyedUpdate.latest_change_at("k")
+
+    ModuleKeyedUpdate.compact!("k")
+
+    assert_equal before, ModuleKeyedUpdate.latest_change_at("k"),
+                 "compaction is not a content change; projections stamped before it stay fresh"
+  end
+
   def test_append_triggers_compaction_at_the_threshold
     ModuleKeyedUpdate.compact_every = 2
     ModuleKeyedUpdate.append("k", CLIENT_ONE)

@@ -78,14 +78,17 @@ module Y
       # gaps, so this only engages on legacy rows — compaction resumes once
       # the gap heals or the log is repaired.
       def compact!(key)
-        rows = where(key_column => key).order(:id).pluck(:id, :payload)
+        rows = where(key_column => key).order(:id).pluck(:id, :payload, :created_at)
         return if rows.size < 2
 
-        doc = build_doc(rows.map(&:last))
+        doc = build_doc(rows.map { |_, payload, _| payload })
         return if doc.pending?
 
         transaction do
-          create!(key_column => key, payload: doc.compacted_state_update)
+          # The snapshot keeps the newest compacted row's created_at:
+          # compaction isn't a content change, so latest_change_at must not
+          # move — a projection stamped before it is still fresh.
+          create!(key_column => key, payload: doc.compacted_state_update, created_at: rows.map(&:last).max)
           where(id: rows.map(&:first)).delete_all
         end
       end
