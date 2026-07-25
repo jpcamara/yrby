@@ -4,9 +4,9 @@ require "test_helper"
 require_relative "fixtures/yjs_fixtures"
 require "active_record"
 
-# Y::UpdateLog is the blessed answer to "doesn't on_load replay
-# the whole history?" — its behavior is pinned here against a real database,
-# included into a model exactly the way the install generator generates it.
+# Y::UpdateLog's behavior, pinned against a real database on models that
+# override key_column (the default-keyed path runs in document_test through
+# Y::DocumentUpdate).
 require_relative "support/active_record"
 
 require "y/action_cable"
@@ -14,6 +14,8 @@ require "y/action_cable"
 class ModuleKeyedUpdate < ActiveRecord::Base
   self.table_name = "module_keyed_updates"
   include Y::UpdateLog
+
+  def self.key_column = :document_key
 end
 
 class UpdateLogTest < Minitest::Test

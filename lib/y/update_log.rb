@@ -4,16 +4,17 @@ require "y"
 
 module Y
   # Durable storage for collaborative documents as an append-only update log
-  # with compaction, implemented on whatever ActiveRecord model includes it.
-  # The model needs two columns: a binary `payload` and an indexed string
-  # `document_key` (`rails g yrby:tables` creates the migration).
+  # with compaction. Y::DocumentUpdate — the gem's model, table from
+  # `rails g yrby:tables` — includes it. To store the log elsewhere, include
+  # it in any model with a binary `payload` column and an indexed key column:
   #
-  #   class YrbyDocumentUpdate < ApplicationRecord
+  #   class RoomUpdate < ApplicationRecord
   #     include Y::UpdateLog
+  #     def self.key_column = :room_key   # default :document_id
   #   end
   #
-  #   YrbyDocumentUpdate.load(key)          # merged state, or nil
-  #   YrbyDocumentUpdate.append(key, bytes) # record one delta
+  #   RoomUpdate.load(key)          # merged state, or nil
+  #   RoomUpdate.append(key, bytes) # record one delta
   #
   # Appends are cheap and safe under concurrency (CRDT updates merge
   # commutatively, so row order never matters). Compaction keeps loads fast by
@@ -35,11 +36,10 @@ module Y
         @compact_every ||= 500
       end
 
-      # The column the log is keyed by. Override when the including model
-      # keys its rows differently — e.g. `def self.key_column = :document_id`
-      # for a log whose rows belong_to a parent document record.
+      # The column the log is keyed by: Y::DocumentUpdate's belongs_to key.
+      # Override for a table keyed some other way (a room name, a UUID).
       def key_column
-        :document_key
+        :document_id
       end
 
       # The merged state of a document, or nil if nothing was ever recorded.

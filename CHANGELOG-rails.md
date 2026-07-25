@@ -26,7 +26,7 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   storage).
 
 - `Y::UpdateLog`: durable storage for collaborative documents as a module
-  any ActiveRecord model with `payload`/`document_key` columns includes.
+  any ActiveRecord model with a binary `payload` and a key column includes.
   An append-only update log with inline compaction (`compact_every`,
   default 500): rows collapse into one snapshot row so `on_load` replays
   the compaction window, not the document's full history. Merges go
@@ -41,8 +41,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   module forwards to `Y::ActionCable::Sync`, which remains the module's
   home and keeps working as a spelling. One include, no suffix.
 - `Y::UpdateLog.key_column`: override which column keys the log (default
-  `:document_key`) — e.g. `:document_id` for a log whose rows belong to a
-  parent document record.
+  `:document_id`, Y::DocumentUpdate's belongs_to key) for a table keyed
+  some other way, e.g. a room name.
 - `rails generate yrby:install`: a `DocumentChannel` speaking the
   y-websocket protocol over the gem-owned storage, plus the storage
   migration.
