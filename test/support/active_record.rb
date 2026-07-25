@@ -45,7 +45,7 @@ unless defined?(YRBY_AR_BOOTED)
 
     # A host-app model for the record-binding tests (Y::Document.for).
     create_table :pages do |t|
-      t.timestamps
+      t.string :title
     end
   end
 end
