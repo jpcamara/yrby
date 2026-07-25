@@ -35,6 +35,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `compacted_state_update` so a gappy recorded update can never
   be served to peers, and compaction skips a document holding a pending
   (causally-gapped) update rather than deleting the only healable copy.
+  `latest_change_at` reports when content last changed — compaction
+  preserves it (the snapshot keeps the newest compacted row's timestamp),
+  so projections stamped before a compaction stay fresh.
   Behavior is pinned by tests against a real database.
 - `include Y::ActionCable` as the channel integration: the namespace
   module forwards to `Y::ActionCable::Sync`, which remains the module's

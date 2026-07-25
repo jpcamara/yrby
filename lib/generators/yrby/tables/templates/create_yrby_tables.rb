@@ -12,6 +12,9 @@ class CreateYrbyTables < ActiveRecord::Migration<%= migration_version %>
       t.string :name
       t.datetime :materialized_at
       t.timestamps
+      # Partial on PostgreSQL/SQLite; MySQL drops the WHERE (Rails omits it
+      # for adapters without partial indexes) but stays correct — MySQL
+      # unique indexes never collide NULL rows, so key-only documents pass.
       t.index %i[record_type record_id name], unique: true,
                                               where: "record_type IS NOT NULL",
                                               name: "index_yrby_documents_on_record_and_name"

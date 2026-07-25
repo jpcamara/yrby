@@ -47,7 +47,7 @@ namespace :release do
 
       2) yrby-rails #{cable}  — gem, pure Ruby; one gem, no precompilation
          a. bump lib/y/action_cable/version.rb + CHANGELOG-rails.md, commit
-         b. rake actioncable:build
+         b. rake rails_gem:build
          c. gem push pkg/yrby-rails-#{cable}.gem
 
       3) yrby-client #{npm}  — npm package (client SDK: provider + sync engine + reliable delivery)
