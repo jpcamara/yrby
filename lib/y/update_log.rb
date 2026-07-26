@@ -44,7 +44,7 @@ module Y
 
       # The merged state of a document, or nil if nothing was ever recorded.
       def load(key)
-        payloads = where(key_column => key).order(:id).pluck(:payload)
+        payloads = where(key_column => key).pluck(:payload)
         return nil if payloads.empty?
 
         build_doc(payloads).compacted_state_update
@@ -78,7 +78,7 @@ module Y
       # gaps, so this only engages on legacy rows — compaction resumes once
       # the gap heals or the log is repaired.
       def compact!(key)
-        rows = where(key_column => key).order(:id).pluck(:id, :payload, :created_at)
+        rows = where(key_column => key).pluck(:id, :payload, :created_at)
         return if rows.size < 2
 
         doc = build_doc(rows.map { |_, payload, _| payload })
