@@ -24,10 +24,10 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # Fails closed: no one collaborates on a document until this says so.
-  # Wire it to your app's auth: identify current_user on the cable
-  # connection, then check they may read and write this document. A raising
-  # on_change covers store failures, not access control.
+  # Everyone is denied until you fill this in. Wire it to your app's auth:
+  # identify current_user on the cable connection, then check they may read
+  # and write this document. A raising on_change covers store failures, not
+  # access control.
   def authorized?(_document_key)
     false
   end

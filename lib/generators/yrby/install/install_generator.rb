@@ -26,7 +26,7 @@ module Yrby
           Next steps:
 
             1. Authorize document access: implement `authorized?` in
-               app/channels/document_channel.rb (it fails closed until you do).
+               app/channels/document_channel.rb (it denies everyone until you do).
             2. bin/rails db:migrate
             3. Install the yrby-client npm package and connect an editor:
 

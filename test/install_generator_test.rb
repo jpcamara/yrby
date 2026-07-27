@@ -19,7 +19,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_match("Y::Document.load_state(key)", channel)
       assert_match("Y::Document.append(key, update)", channel)
       assert_match(/def authorized\?/, channel)
-      assert_match(/false/, channel, "authorization fails closed")
+      assert_match(/false/, channel, "authorization denies everyone by default")
     end
     assert_no_file "app/models/yrby_document_update.rb" # models ship in the gem
   end
