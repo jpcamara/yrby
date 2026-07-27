@@ -6,8 +6,6 @@ gemspec name: "yrby"
 gemspec name: "yrby-rails"
 gemspec name: "yrby-decoder"
 
-gem "rake-compiler"
-gem "rb_sys"
 
 # Fiber scheduler used by test/fiber_scheduler_test.rb to drive the native
 # extension inside an Async reactor (the server shape under Falcon).
