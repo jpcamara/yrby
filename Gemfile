@@ -13,10 +13,8 @@ gem "rb_sys"
 # extension inside an Async reactor (the server shape under Falcon).
 gem "async"
 
-# Generator + generated-store tests only (the gems themselves never depend
-# on Rails beyond actioncable).
-gem "activerecord", require: false
-gem "railties", require: false
+# Test-only: the store and generator tests run on SQLite (activerecord and
+# railties come in through the yrby-rails gemspec).
 gem "sqlite3", require: false
 
 gem "rubocop", require: false

@@ -72,6 +72,5 @@ Naming/FileName:
 
 Style/ClassAndModuleChildren:
   Exclude:
-    # Compact style keeps ::ActionCable/::Rails resolvable inside Y:: code
-    # (matches lib/y/action_cable/sync.rb) and is Zeitwerk-required in app/.
+    # Compact style (class Y::Document), matching lib/y/action_cable/sync.rb.
     - "app/**/*"
