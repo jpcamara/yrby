@@ -18,10 +18,14 @@ class Y::Document < ActiveRecord::Base
 
   class << self
     # The document bound to a record's attribute, created on first use.
-    # Concurrent callers converge on one row via the (record, name) unique
-    # index; the loser re-finds the winner's row, key included.
+    # Find first: create_or_find_by! is insert-first, and after the first
+    # call the row exists, so the common path would be a doomed INSERT and a
+    # rescue. Concurrent creators still converge on one row via the
+    # (record, name) unique index; the loser re-finds the winner's row, key
+    # included.
     def for(record, name)
-      create_or_find_by!(record: record, name: name.to_s)
+      find_by(record: record, name: name.to_s) ||
+        create_or_find_by!(record: record, name: name.to_s)
     end
 
     # The store contract for a sync channel, keyed by the transport key.
@@ -30,8 +34,9 @@ class Y::Document < ActiveRecord::Base
       document && Y::DocumentUpdate.load(document.id)
     end
 
+    # Find first, as in .for — this runs on every recorded change.
     def append(key, update)
-      document = create_or_find_by!(key: key)
+      document = find_by(key: key) || create_or_find_by!(key: key)
       Y::DocumentUpdate.append(document.id, update)
     end
   end
@@ -41,8 +46,10 @@ class Y::Document < ActiveRecord::Base
   # Derives post/1/body from the polymorphic record_type — the base_class
   # name, so STI subclasses share a key. Namespaces keep their slash
   # (admin/post/1/body); flattening would collide Admin::Post with
-  # AdminPost. Key-only documents supply their own key.
+  # AdminPost. Key-only documents supply their own key. record_id is nil
+  # until an unsaved record autosaves — after validation — so it guards too,
+  # or the key would derive malformed ("page//body").
   def assign_default_key
-    self.key ||= record_type && "#{record_type.underscore}/#{record_id}/#{name}"
+    self.key ||= record_type && record_id && "#{record_type.underscore}/#{record_id}/#{name}"
   end
 end

@@ -95,6 +95,10 @@ class DocumentTest < Minitest::Test
     assert_raises(ActiveRecord::RecordInvalid) { Y::Document.create!(name: "body") }
   end
 
+  def test_an_unsaved_record_cannot_derive_a_key
+    assert_raises(ActiveRecord::RecordInvalid) { Y::Document.create!(record: Page.new, name: "body") }
+  end
+
   def test_update_log_is_keyed_by_document_id
     assert_equal :document_id, Y::DocumentUpdate.key_column
     assert_includes Y::DocumentUpdate.included_modules, Y::UpdateLog
