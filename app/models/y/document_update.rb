@@ -4,7 +4,7 @@
 # All log behavior — load/append, inline compaction, the pending-gap guard,
 # latest_change_at — is Y::UpdateLog.
 class Y::DocumentUpdate < ActiveRecord::Base
-  self.table_name = "yrby_document_updates"
+  self.table_name = "y_document_updates"
 
   belongs_to :document, class_name: "Y::Document"
 

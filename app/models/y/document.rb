@@ -8,7 +8,7 @@
 # materialized_at: when a projection (rendered HTML, search text) was last
 # built from the log. Stamped by whatever builds the projection.
 class Y::Document < ActiveRecord::Base
-  self.table_name = "yrby_documents"
+  self.table_name = "y_documents"
 
   belongs_to :record, polymorphic: true, optional: true
   has_many :updates, class_name: "Y::DocumentUpdate", dependent: :delete_all

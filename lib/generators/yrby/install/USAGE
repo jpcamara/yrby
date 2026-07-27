@@ -8,4 +8,4 @@ Example:
 
     This will create:
         app/channels/document_channel.rb
-        db/migrate/XXXXXXXX_create_yrby_tables.rb
+        db/migrate/XXXXXXXX_create_y_tables.rb

@@ -14,8 +14,8 @@ module Yrby
       source_root File.expand_path("templates", __dir__)
 
       def create_migration_file
-        migration_template "create_yrby_tables.rb",
-                           File.join(db_migrate_path, "create_yrby_tables.rb")
+        migration_template "create_y_tables.rb",
+                           File.join(db_migrate_path, "create_y_tables.rb")
       end
 
       private
