@@ -487,6 +487,10 @@ The models ship in the gem, the way Action Text owns
   skips a document holding a pending (causally-gapped) update rather than
   deleting the only healable copy.
 
+The migration creates `y_documents` and `y_document_updates`. To rename
+them, edit the generated migration and point `Y::Document.table_name` /
+`Y::DocumentUpdate.table_name` at the new names in an initializer.
+
 Storage is swappable: the channel only needs `on_load` and `on_change`,
 and `Y::UpdateLog` (with its `key_column` override) works on any table.
 
@@ -504,12 +508,19 @@ class DocumentChannel < ApplicationCable::Channel
   on_change { |key, update| Y::Document.append(key, update) } # record, then broadcast
 
   def subscribed
+    return reject unless authorized?(params[:id])
+
     sync_subscribed params[:id]
   end
 
   def receive(data)
     sync_receive(data, params[:id])
   end
+
+  private
+
+  # Everyone is denied until you wire this to your app's auth.
+  def authorized?(_document_key) = false
 end
 ```
 

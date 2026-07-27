@@ -21,9 +21,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Y::DocumentUpdate` (the `Y::UpdateLog` rows, keyed by `document_id`).
   `Y::Document.for(record, name)` finds or creates a record's document and
   derives its key (`post/1/body`); `.load_state(key)` / `.append(key,
-  update)` are the store calls the generated channel uses. `rails g yrby:tables` creates the two tables
-  (invoked by `yrby:install`; usable directly by gems building on the same
-  storage).
+  update)` are the store calls the generated channel uses.
+  `rails g yrby:tables` creates the two tables (`y_documents` +
+  `y_document_updates`; invoked by `yrby:install`, usable directly by gems
+  building on the same storage).
 
 - `Y::UpdateLog`: durable storage for collaborative documents as a module
   any ActiveRecord model with a binary `payload` and a key column includes.
