@@ -13,8 +13,8 @@ documents. Pronounced "yer-bee".
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
 
-  on_load   { |key|         YrbyDocumentUpdate.load(key) }
-  on_change { |key, update| YrbyDocumentUpdate.append(key, update) }
+  on_load   { |key|         Y::Document.load_state(key) }
+  on_change { |key, update| Y::Document.append(key, update) }
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
@@ -500,8 +500,8 @@ the same module and keeps working.)
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
 
-  on_load { |key| YrbyDocumentUpdate.load(key) }                 # source of truth
-  on_change { |key, update| YrbyDocumentUpdate.append(key, update) } # durable record
+  on_load { |key| Y::Document.load_state(key) }          # rebuild from storage
+  on_change { |key, update| Y::Document.append(key, update) } # record, then broadcast
 
   def subscribed
     sync_subscribed params[:id]
