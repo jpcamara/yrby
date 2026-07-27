@@ -12,8 +12,9 @@ class CreateYTables < ActiveRecord::Migration<%= migration_version %>
       t.string :name
       t.datetime :materialized_at
       t.timestamps
-      # Partial on PostgreSQL/SQLite. MySQL drops the WHERE, but its unique
-      # indexes allow repeated NULLs, so key-only documents still coexist.
+      # Unique indexes treat NULLs as distinct on every database, so key-only
+      # documents (all three columns nil) coexist with or without the WHERE.
+      # The predicate keeps them out of the index; MySQL drops it, harmlessly.
       t.index %i[record_type record_id name], unique: true,
                                               where: "record_type IS NOT NULL",
                                               name: "index_y_documents_on_record_and_name"
