@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "y"
-require "y/action_cable/version"
 
 module Y
   # ActionCable integration for yrby.
