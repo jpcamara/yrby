@@ -156,6 +156,11 @@ class RenderingRulesTest < Minitest::Test
     assert_includes html, "attachment-gallery--3", "untouched Lexxy rules still apply"
   end
 
+  def test_pending_upload_nodes_render_to_nothing
+    assert_equal "", Y::Lexxy::NODES["action_text_attachment_upload"].call(nil),
+                 "an in-flight upload placeholder must not reach materialized output"
+  end
+
   def test_the_block_form_registers_declarative_callback_and_mark_rules
     html = Y::ProseMirror.new(prosemirror_doc) do |rules|
       rules.node "blockquote", tag: "aside", attrs: { "class" => "quote" }, contains: :blocks

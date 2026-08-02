@@ -85,6 +85,13 @@ module Y
       tag.match?(/\A[a-zA-Z][a-zA-Z0-9-]*\z/) ? tag : "action-text-attachment"
     end
 
+    # An in-flight upload placeholder. Only the uploader's browser can
+    # complete it, so it is never finished content -- materialized output
+    # (Action Text bodies, search text) must not carry it.
+    def self.pending_upload(_node)
+      ""
+    end
+
     # A stored nil (unset) is skipped; a stored empty string still emits.
     def self.attachment_attr(node, html_name, stored)
       return "" if node.attrs[stored].nil?
@@ -103,6 +110,7 @@ module Y
       "tablecell" => { contains: :blocks, render: method(:table_cell) },
       "listitem" => { contains: :blocks, render: method(:list_item) },
       "action_text_attachment" => method(:upload),
+      "action_text_attachment_upload" => method(:pending_upload),
       "custom_action_text_attachment" => method(:mention)
     }.freeze
 
