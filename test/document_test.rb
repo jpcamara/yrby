@@ -127,34 +127,6 @@ class DocumentTest < Minitest::Test
     assert_equal 0, document.updates.count, "at-or-over fires past the multiple"
   end
 
-  def test_append_increments_changes_count_and_compaction_does_not
-    document = Y::Document.locate!("room-1")
-    document.append(CLIENT_ONE)
-    document.append(CLIENT_TWO)
-
-    assert_equal 2, document.reload.changes_count
-
-    document.compact!
-
-    assert_equal 2, document.reload.changes_count,
-                 "compaction is not a content change; consumed-count watermarks stay valid"
-  end
-
-  def test_append_moves_changed_at_and_compact_does_not
-    document = Y::Document.locate!("room-1")
-    document.append(CLIENT_ONE)
-
-    assert_predicate document.reload.changed_at, :present?, "append stamps changed_at"
-
-    document.update!(changed_at: 1.hour.ago)
-    stamped = document.changed_at
-
-    document.compact!
-
-    assert_equal stamped, document.reload.changed_at,
-                 "compacting is not a content change; projections stamped before it stay fresh"
-  end
-
   # -- causal gaps -----------------------------------------------------------
 
   def test_a_gapped_batch_is_quarantined_not_compacted_and_not_destroyed

@@ -5,9 +5,8 @@ class CreateYTables < ActiveRecord::Migration<%= migration_version %>
     # One row per collaborative document, addressed by key. The optional
     # polymorphic record + name bind it to a model; key-only documents leave
     # them nil. state holds the merged snapshot (the update rows are only
-    # the uncompacted tail). changed_at: when content last changed.
-    # materialized_at: when a projection (rendered HTML, search text) was
-    # last built; consumers compare it against changed_at.
+    # the uncompacted tail). The document keeps no projection state:
+    # consumers that render it into another form do so at write time.
     create_table :y_documents do |t|
       t.string :key, null: false, index: { unique: true }
       t.references :record, polymorphic: true, null: true, index: false
@@ -16,15 +15,6 @@ class CreateYTables < ActiveRecord::Migration<%= migration_version %>
       # PostgreSQL/SQLite; a 16 MB cap would make compacting fail on a large
       # document and block appends.
       t.binary :state, limit: 4.gigabytes - 1
-      # changes_count is the freshness signal: bumped with relative SQL per
-      # append, so it is exact in commit order even when appends run inside
-      # slow transactions — wall-clock stamps are not. A projection records
-      # the count it consumed in materialized_changes_count; the timestamps
-      # are for humans and logs.
-      t.bigint :changes_count, null: false, default: 0
-      t.bigint :materialized_changes_count
-      t.datetime :changed_at
-      t.datetime :materialized_at
       t.timestamps
       # Unique indexes treat NULLs as distinct on every database, so key-only
       # documents (all three columns nil) coexist with or without the WHERE.

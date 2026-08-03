@@ -7,15 +7,10 @@
 # binds it to a Rails model, like ActionText::RichText; key-only documents
 # (a room name, a UUID) leave both nil.
 #
-# changes_count is the freshness signal: bumped with relative SQL on every
-# append (exact in commit order, which wall-clock stamps are not) and never
-# moved by compaction — compaction is a representation change, not a
-# content change. A projection records the count it consumed in
-# materialized_changes_count and is stale while changes_count is greater.
-# One projection gets this hosted watermark — the bound record's attribute,
-# which has no schema of its own; any other projection stores its own
-# consumed count beside its own output and compares against changes_count.
-# changed_at/materialized_at are informational timestamps for humans.
+# The document keeps no projection state. Consumers that render it into
+# another form (rendered HTML, search text) do so at write time, in the
+# channel's on_change — a projection updated on every recorded change is
+# never stale and needs no freshness bookkeeping.
 class Y::Document < ActiveRecord::Base
   self.table_name = "y_documents"
 
@@ -82,9 +77,6 @@ class Y::Document < ActiveRecord::Base
   # threshold forever.
   def append(bytes)
     updates.create!(payload: bytes)
-    # Relative SQL: the increment serializes on the row, so the counter is
-    # exact in commit order even for appends inside slow transactions.
-    self.class.update_counters(id, changes_count: 1, touch: :changed_at)
     compact! if updates.where(pending: false).count >= compact_every
   end
 
