@@ -12,10 +12,12 @@ gem "puma", ">= 5.0"
 gem "falcon", ">= 0.47"
 # Redis adapter lets multiple server processes share Action Cable broadcasts
 # (used by the multi-process test; production-shaped).
-# Action Cable's redis pubsub adapter requires redis < 6 (as of Rails
-# 8.1.3.1); redis 6.0.0 (July 2026) satisfies our floor, boots fine, then
-# fails the lazy adapter load on the first cable subscription — every
-# WebSocket dies at subscribe while the HTTP health check stays green.
+# Mirrors Action Cable's own constraint: its redis adapter hard-codes
+# `gem "redis", ">= 4", "< 6"` at runtime, where bundler can't see it —
+# without this line, redis 6.0.0 resolves, the server boots, and every
+# WebSocket then dies at subscribe on the lazy adapter load. Rails main
+# has moved the adapter to redis-client; drop this gem entirely when the
+# demo runs a release with that change.
 gem "redis", ">= 4.0.1", "< 6"
 
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
