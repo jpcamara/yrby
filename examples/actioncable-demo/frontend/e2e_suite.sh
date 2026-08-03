@@ -14,7 +14,14 @@ set -euo pipefail
 PORT="${PORT:-3777}"
 cd "$(dirname "$0")"
 
+# Each script gets its own deadline (coreutils timeout; absent on stock
+# macOS, where we run unbounded). A wedged script then fails loudly with
+# partial output naming itself, instead of hanging the whole suite — the
+# Aug 2026 CI wedge produced six-hour silent hangs with no culprit named.
+DEADLINE=""
+command -v timeout >/dev/null && DEADLINE="timeout 300"
+
 for t in audit_scenarios audit reliable reliable_provider reliable_stress chaos; do
   echo "--- $t.mjs (PORT=$PORT) ---"
-  PORT="$PORT" bun "$t.mjs"
+  PORT="$PORT" $DEADLINE bun "$t.mjs"
 done
