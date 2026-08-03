@@ -28,9 +28,9 @@ const check = (label, ok) => {
   if (!ok) failures++
 }
 const health = async () =>
-  (await fetch(`http://localhost:${PORT}/docs/demo`)).status === 200
+  (await fetch(`http://127.0.0.1:${PORT}/docs/demo`)).status === 200
 const auditCount = async (room) =>
-  (await (await fetch(`http://localhost:${PORT}/docs/${room}/audit`)).json()).count
+  (await (await fetch(`http://127.0.0.1:${PORT}/docs/${room}/audit`)).json()).count
 
 class Client {
   constructor(room) {
@@ -44,7 +44,7 @@ class Client {
       syncProtocol.writeUpdate(enc, u)
       this.send(enc)
     })
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (e) => this._msg(JSON.parse(e.data))
   }
   _msg(m) {
@@ -96,7 +96,7 @@ class Vandal {
     this.room = room
     this.identifier = JSON.stringify({ channel: "DocumentChannel", id: room })
     this.ready = new Promise((r) => (this._ready = r))
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (e) => {
       const m = JSON.parse(e.data)
       if (m.type === "welcome") {
@@ -144,7 +144,7 @@ class Vandal {
 
 const room = `chaos-${PID}`
 const room2 = `bystander-${PID}`
-await fetch(`http://localhost:${PORT}/docs/${room}/audit/control?reset=1`, { method: "POST" })
+await fetch(`http://127.0.0.1:${PORT}/docs/${room}/audit/control?reset=1`, { method: "POST" })
 
 const a = new Client(room)
 const b = new Client(room)
@@ -189,7 +189,7 @@ check("the bystander room was completely unaffected", byGood)
 // edits (fewer, fatter rows that still replay to the full document). Garbage,
 // by contrast, is rejected before recording, so it can only ever ADD rows —
 // hence count <= EDITS * 2 catches any garbage that slipped through.
-const recovered = await serverText(`http://localhost:${PORT}`, room)
+const recovered = await serverText(`http://127.0.0.1:${PORT}`, room)
 let everyEditDurable = true
 for (let i = 1; i <= EDITS; i++) {
   if (!recovered.includes(`A-${i}`) || !recovered.includes(`B-${i}`)) everyEditDurable = false

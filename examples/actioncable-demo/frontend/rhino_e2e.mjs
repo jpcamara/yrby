@@ -24,7 +24,7 @@ const LOCAL_AB = resolve(here, "node_modules/.bin/agent-browser")
 const AB =
   process.env.AB_BIN ||
   (existsSync(LOCAL_AB) ? LOCAL_AB : `${process.env.HOME}/Projects/lexxy-realtime/node_modules/.bin/agent-browser`)
-const BASE = `http://localhost:${process.env.PORT || 3777}`
+const BASE = `http://127.0.0.1:${process.env.PORT || 3777}`
 const ROOM = process.env.ROOM || `rhino-${Date.now()}`
 const SESSIONS = ["rhinoA", "rhinoB"]
 const [A, B] = SESSIONS

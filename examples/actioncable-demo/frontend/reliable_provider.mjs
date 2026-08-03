@@ -19,7 +19,7 @@ import { ActionCableProvider } from "yrby-client"
 
 const PORT = process.env.PORT || 3777
 const ROOM = `relprov-${process.pid}`
-const URL = `ws://localhost:${PORT}/cable`
+const URL = `ws://127.0.0.1:${PORT}/cable`
 
 // Minimal ActionCable consumer over a raw WebSocket, with a network blackhole.
 function rawConsumer(url) {

@@ -64,7 +64,7 @@ class StressClient {
       this.send(enc)
     })
 
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (event) => this.onMessage(JSON.parse(event.data))
     this.ws.onerror = (e) => {
       if (!this.closed) throw new Error(`${this.name}: websocket error ${e.message || e}`)
@@ -172,7 +172,7 @@ class StressClient {
 
   async reconnect() {
     this.subscribed = new Promise((resolve) => (this._onSubscribed = resolve))
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (event) => this.onMessage(JSON.parse(event.data))
     this.ws.onerror = (e) => {
       if (!this.closed) throw new Error(`${this.name}: websocket error ${e.message || e}`)
@@ -229,7 +229,7 @@ let pollErrors = 0
 const pollers = rooms.flatMap((room) =>
   Array.from({ length: POLLERS }, async () => {
     while (polling) {
-      const res = await fetch(`http://localhost:${PORT}/docs/${room}/content`)
+      const res = await fetch(`http://127.0.0.1:${PORT}/docs/${room}/content`)
       // 422 "no content yet" is legal in the opening instants; 5xx never is.
       if (res.status >= 500) pollErrors++
       await res.text()
@@ -344,7 +344,7 @@ for (const room of rooms) {
   }
 
   // The server's CRDT state sees the same converged content.
-  const serverDocText = await serverText(`http://localhost:${PORT}`, room)
+  const serverDocText = await serverText(`http://127.0.0.1:${PORT}`, room)
   const extractedLength = serverDocText.length
   if (extractedLength !== expectedChars) {
     throw new Error(

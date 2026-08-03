@@ -37,7 +37,7 @@ class TestClient {
       this.send(enc)
     })
 
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (event) => this.onMessage(JSON.parse(event.data))
   }
 
@@ -177,11 +177,11 @@ await waitFor("docs converge byte-for-byte", () => {
 })
 
 // Server-side view of the live document (the server's CRDT state).
-const { status, doc } = await serverDoc(`http://localhost:${PORT}`, ROOM)
+const { status, doc } = await serverDoc(`http://127.0.0.1:${PORT}`, ROOM)
 if (status !== 200 || !doc) {
   throw new Error(`content endpoint failed: ${status}`)
 }
-const serverContent = await serverText(`http://localhost:${PORT}`, ROOM)
+const serverContent = await serverText(`http://127.0.0.1:${PORT}`, ROOM)
 if (!serverContent.includes("Hello from Alice") || !serverContent.includes("Hi from Bob")) {
   throw new Error(`server content missing edits: ${serverContent}`)
 }

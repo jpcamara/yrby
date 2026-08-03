@@ -34,7 +34,7 @@ class Client {
       syncProtocol.writeUpdate(enc, u)
       this._send(enc)
     })
-    this.ws = new WebSocket(`ws://localhost:${WS_PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (e) => this._msg(JSON.parse(e.data))
     this.ws.onerror = () => {}
   }
@@ -101,7 +101,7 @@ const t0 = clients[0].text()
 check(`every token present across clients (${tokens.length})`, tokens.every((t) => t0.includes(t)))
 
 // The store (Puma /content, a separate process from the RPC server) agrees.
-const srv = await serverText(`http://localhost:${HTTP_PORT}`, ROOM)
+const srv = await serverText(`http://127.0.0.1:${HTTP_PORT}`, ROOM)
 check("Puma /content reflects every edit (cross-process via store)", tokens.every((t) => srv.includes(t)))
 
 clients.forEach((c) => c.ws.close())

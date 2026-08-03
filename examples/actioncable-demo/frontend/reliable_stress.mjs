@@ -29,8 +29,8 @@ import { ActionCableProvider } from "yrby-client"
 import { serverText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777
-const BASE = `http://localhost:${PORT}`
-const URL = `ws://localhost:${PORT}/cable`
+const BASE = `http://127.0.0.1:${PORT}`
+const URL = `ws://127.0.0.1:${PORT}/cable`
 const ROOM = `relstress-${process.pid}`
 
 const CLIENTS = Number(process.env.CLIENTS || 6)
