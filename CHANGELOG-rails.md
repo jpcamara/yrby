@@ -17,8 +17,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Engine-owned document models: `Y::Document` (unique `key`, optional
   polymorphic `record` + `name` for binding to a Rails model, the merged
-  `state` snapshot, `changed_at`/`materialized_at` for projection
-  freshness, destroys its tail with it) and `Y::DocumentUpdate` (the
+  `state` snapshot, `changes_count`/`materialized_changes_count` for
+  commit-order-exact projection freshness, destroys its tail with it) and `Y::DocumentUpdate` (the
   uncompacted tail — one delta per row, compacted into `state` and deleted at
   the compaction threshold). Loading is one row read plus a short, bounded tail,
   whatever the document's history; a document with an empty tail serves

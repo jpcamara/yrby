@@ -473,10 +473,10 @@ The models ship in the gem, the way Action Text owns
 - **`Y::Document`** — one row per document: a unique `key`, an optional
   polymorphic `record` + `name` (bind a document to a Rails model and it
   destroys its history with the record; key-only documents leave them
-  nil), the merged `state` snapshot, and `changed_at`/`materialized_at`
-  for projection freshness (`changed_at` moves on content changes only;
-  stamp `materialized_at` when you rebuild a projection, compare the two
-  to know it's stale). `Y::Document.for(record, name)` finds or creates a
+  nil), the merged `state` snapshot, and `changes_count` for projection
+  freshness (bumped per append with relative SQL, so it is exact in commit
+  order; compaction leaves it alone — record the count you consumed when
+  you rebuild a projection and compare). `Y::Document.for(record, name)` finds or creates a
   record's document, deriving a readable key (`post/1/body`) — and adopts
   a key-only row already holding that key, so a channel writing first and
   a binding created later converge on one document.
