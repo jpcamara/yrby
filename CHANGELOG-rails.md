@@ -19,8 +19,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   polymorphic `record` + `name` for binding to a Rails model, the merged
   `state` snapshot, `changed_at`/`materialized_at` for projection
   freshness, destroys its tail with it) and `Y::DocumentUpdate` (the
-  uncompacted tail — one delta per row, folded into `state` and deleted at
-  the fold threshold). Loading is one row read plus a short, bounded tail,
+  uncompacted tail — one delta per row, compacted into `state` and deleted at
+  the compaction threshold). Loading is one row read plus a short, bounded tail,
   whatever the document's history; a document with an empty tail serves
   `state` verbatim. `Y::Document.for(record, name)` finds or creates a
   record's document, derives its key (`post/1/body`), and adopts a
@@ -30,9 +30,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated channel uses; `locate`/`locate!` find by key. Folding
   serializes on a per-document row lock, never blocks appends, and leaves
   `changed_at` alone — compaction is not a content change. Causally-gapped
-  updates are quarantined (`pending`), excluded from the fold trigger,
-  never folded into state and never deleted while unhealed; a healed gap
-  serves immediately and folds away on the next pass.
+  updates are quarantined (`pending`), excluded from the compaction trigger,
+  never compacted into state and never deleted while unhealed; a healed gap
+  serves immediately and compacts away on the next pass.
   `rails g yrby:tables` creates the two tables (`y_documents` +
   `y_document_updates`; invoked by `yrby:install`, usable directly by gems
   building on the same storage).

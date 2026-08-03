@@ -483,12 +483,12 @@ The models ship in the gem, the way Action Text owns
   `.load_state(key)` / `.append(key, update)` are the store calls the
   generated channel uses.
 - **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
-  folded into `state` and deleted once the tail reaches `fold_every`
+  compacted into `state` and deleted once the tail reaches `compact_every`
   (default 64). Loading is one row read plus that short tail, whatever
   the document's history; an empty tail serves `state` verbatim. Folding
   serializes on a per-document row lock, never blocks appends, and skips
   causally-gapped rows — they're quarantined until they heal rather than
-  folded into state or deleted.
+  compacted into state or deleted.
 
 The migration creates `y_documents` and `y_document_updates`. To rename
 them, edit the generated migration and point `Y::Document.table_name` /

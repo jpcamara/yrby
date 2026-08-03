@@ -8,7 +8,7 @@ require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 
 # Y::Document owns the storage design: state is the merged snapshot, the
-# update rows are only the uncompacted tail, and folding moves one into the
+# update rows are only the uncompacted tail, and compacting moves one into the
 # other. Exercised against a real database, exactly as the generated channel
 # uses it (load_state/append by key) and as bound models use it (.for).
 class DocumentTest < Minitest::Test
@@ -23,7 +23,7 @@ class DocumentTest < Minitest::Test
     Y::DocumentUpdate.delete_all
     Y::Document.delete_all
     Page.delete_all
-    Y::Document.fold_every = 64
+    Y::Document.compact_every = 64
   end
 
   def read_back(key, text: "content")
@@ -58,7 +58,7 @@ class DocumentTest < Minitest::Test
   def test_load_state_returns_the_snapshot_verbatim_when_the_tail_is_empty
     document = Y::Document.locate!("room-1")
     document.append(CLIENT_ONE)
-    document.fold!
+    document.compact!
 
     assert_equal 0, document.updates.count
     assert_equal document.reload.state, document.load_state, "no rebuild on the fast path"
@@ -86,40 +86,40 @@ class DocumentTest < Minitest::Test
     assert_equal 0, Y::DocumentUpdate.count
   end
 
-  # -- folding ---------------------------------------------------------------
+  # -- compacting ---------------------------------------------------------------
 
-  def test_fold_absorbs_the_tail_into_state_and_content_is_identical
+  def test_compact_absorbs_the_tail_into_state_and_content_is_identical
     document = Y::Document.locate!("room-1")
     document.append(CLIENT_ONE)
     document.append(CLIENT_TWO)
     before = read_back("room-1")
 
-    document.fold!
+    document.compact!
 
     assert_equal 0, document.updates.count, "tail deleted"
     assert_predicate document.reload.state, :present?, "state absorbed the tail"
     assert_equal before, read_back("room-1")
   end
 
-  def test_append_folds_at_or_over_the_threshold
-    Y::Document.fold_every = 2
+  def test_append_compacts_at_or_over_the_threshold
+    Y::Document.compact_every = 2
     document = Y::Document.locate!("room-1")
 
     document.append(CLIENT_ONE)
 
-    assert_equal 1, document.updates.count, "below threshold: no fold"
+    assert_equal 1, document.updates.count, "below threshold: no compact"
 
     document.append(CLIENT_TWO)
 
-    assert_equal 0, document.updates.count, "threshold append folds"
+    assert_equal 0, document.updates.count, "threshold append compacts"
     assert_equal "from doc1from doc2", read_back("room-1")
   end
 
-  def test_a_jumped_threshold_still_folds
-    Y::Document.fold_every = 2
+  def test_a_jumped_threshold_still_compacts
+    Y::Document.compact_every = 2
     document = Y::Document.locate!("room-1")
     # Simulate concurrent appends jumping past the multiple: three rows land
-    # before any fold runs.
+    # before any compaction runs.
     3.times { document.updates.create!(payload: CLIENT_ONE) }
 
     document.append(CLIENT_TWO)
@@ -127,7 +127,7 @@ class DocumentTest < Minitest::Test
     assert_equal 0, document.updates.count, "at-or-over fires past the multiple"
   end
 
-  def test_append_moves_changed_at_and_fold_does_not
+  def test_append_moves_changed_at_and_compact_does_not
     document = Y::Document.locate!("room-1")
     document.append(CLIENT_ONE)
 
@@ -136,39 +136,39 @@ class DocumentTest < Minitest::Test
     document.update!(changed_at: 1.hour.ago)
     stamped = document.changed_at
 
-    document.fold!
+    document.compact!
 
     assert_equal stamped, document.reload.changed_at,
-                 "folding is not a content change; projections stamped before it stay fresh"
+                 "compacting is not a content change; projections stamped before it stay fresh"
   end
 
   # -- causal gaps -----------------------------------------------------------
 
-  def test_a_gapped_batch_is_quarantined_not_folded_and_not_destroyed
+  def test_a_gapped_batch_is_quarantined_not_compacted_and_not_destroyed
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
 
-    document.fold!
+    document.compact!
 
     assert_equal 1, document.updates.where(pending: true).count, "the gap is quarantined"
-    assert_nil document.reload.state, "a gap is never folded into state"
+    assert_nil document.reload.state, "a gap is never compacted into state"
   end
 
-  def test_clean_rows_fold_even_while_a_gap_is_quarantined
+  def test_clean_rows_compact_even_while_a_gap_is_quarantined
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
-    document.fold!
+    document.compact!
     document.append(CLIENT_TWO)
 
-    document.fold!
+    document.compact!
 
     assert_equal [true], document.updates.pluck(:pending),
-                 "the clean row folded; only the gap remains, quarantined"
+                 "the clean row compacted; only the gap remains, quarantined"
     assert_equal "from doc2", read_back("room-1")
   end
 
-  def test_quarantined_rows_do_not_count_toward_the_fold_trigger
-    Y::Document.fold_every = 2
+  def test_quarantined_rows_do_not_count_toward_the_compact_trigger
+    Y::Document.compact_every = 2
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
     document.append(YjsFixtures::Gap::DEPENDENT_OTHER)
@@ -179,18 +179,18 @@ class DocumentTest < Minitest::Test
                  "one clean row is below the threshold; quarantined rows don't trigger"
   end
 
-  def test_a_healed_gap_is_served_immediately_and_folds_clean
+  def test_a_healed_gap_is_served_immediately_and_compacts_clean
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
-    document.fold!
+    document.compact!
 
     document.append(YjsFixtures::Gap::FIRST)
 
-    assert_equal "ab", read_back("room-1", text: "notepad"), "healed content serves before any fold"
+    assert_equal "ab", read_back("room-1", text: "notepad"), "healed content serves before any compaction"
 
-    document.fold!
+    document.compact!
 
-    assert_equal 0, document.updates.count, "the healed batch folded, quarantine included"
+    assert_equal 0, document.updates.count, "the healed batch compacted, quarantine included"
     assert_equal "ab", read_back("room-1", text: "notepad")
   end
 

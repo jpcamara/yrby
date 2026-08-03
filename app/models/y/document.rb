@@ -7,7 +7,7 @@
 # binds it to a Rails model, like ActionText::RichText; key-only documents
 # (a room name, a UUID) leave both nil.
 #
-# changed_at: when content last changed (folding is a representation change
+# changed_at: when content last changed (compacting is a representation change
 # and does not move it). materialized_at: when a projection (rendered HTML,
 # search text) was last built from the document, stamped by whatever builds
 # the projection. A projection is stale when changed_at is newer.
@@ -26,10 +26,10 @@ class Y::Document < ActiveRecord::Base
   validates :record_id, presence: true, if: :record_type
   before_validation :assign_default_key, on: :create
 
-  # How long the tail may grow before an append folds it into state. Small,
+  # How long the tail may grow before an append compacts it into state. Small,
   # because loads read state directly: the threshold tunes write
   # amplification against tail length, not load latency.
-  class_attribute :fold_every, instance_writer: false, default: 64
+  class_attribute :compact_every, instance_writer: false, default: 64
 
   class << self
     def locate(key) = find_by(key: key)
@@ -71,21 +71,21 @@ class Y::Document < ActiveRecord::Base
     end
   end
 
-  # Record one delta. The tail count that triggers folding is at-or-over,
+  # Record one delta. The tail count that triggers compacting is at-or-over,
   # not an exact multiple (concurrent appends can jump past a multiple), and
   # counts only clean rows, so a quarantined gap can't hold it over the
   # threshold forever.
   def append(bytes)
     updates.create!(payload: bytes)
     touch(:changed_at)
-    fold! if updates.where(pending: false).count >= fold_every
+    compact! if updates.where(pending: false).count >= compact_every
   end
 
   # The merged document: state plus the whole tail. Quarantined rows are
   # applied too — the output goes through compacted_state_update, which is
   # gap-free by construction, so an unhealed gap contributes nothing while a
   # gap healed by a newer tail row is served immediately instead of waiting
-  # for the next fold.
+  # for the next compaction.
   def load_state
     tail = updates.pluck(:payload)
     return state if tail.empty?
@@ -96,24 +96,24 @@ class Y::Document < ActiveRecord::Base
     doc.compacted_state_update
   end
 
-  # Fold the tail into state. The row lock serializes racing folds; appends
+  # Compact the tail into state. The row lock serializes racing compacts; appends
   # only insert child rows (plus a changed_at touch that briefly queues
-  # behind the lock), and a delta landing mid-fold isn't in `rows`, so it
-  # survives the delete and folds next time.
+  # behind the lock), and a delta landing mid-compaction isn't in `rows`, so it
+  # survives the delete and compacts next time.
   #
-  # A causally-gapped batch is never folded whole and never deleted — state
+  # A causally-gapped batch is never compacted whole and never deleted — state
   # would silently exclude the gap, destroying the only healable copy. Two
-  # stages bound the damage: if the clean rows alone fold cleanly, they fold
+  # stages bound the damage: if the clean rows alone compact cleanly, they compact
   # and only the gap stays quarantined; rows that causally build on
   # quarantined content quarantine with it.
-  def fold!
+  def compact!
     with_lock do
       rows = updates.pluck(:id, :payload, :pending)
       next if rows.empty?
 
-      unless fold_rows(rows)
+      unless compact_rows(rows)
         clean = rows.reject { |_, _, pending| pending }
-        remainder = fold_rows(clean) ? rows - clean : rows
+        remainder = compact_rows(clean) ? rows - clean : rows
         updates.where(id: remainder.map(&:first)).update_all(pending: true)
       end
     end
@@ -121,11 +121,11 @@ class Y::Document < ActiveRecord::Base
 
   private
 
-  # Fold state + the given rows if the merge is gap-free: writes state,
+  # Compact state + the given rows if the merge is gap-free: writes state,
   # deletes the rows, returns true. Leaves everything untouched and returns
-  # false on a gap. changed_at is deliberately not moved — folding is not a
+  # false on a gap. changed_at is deliberately not moved — compacting is not a
   # content change, and projections stamped before it stay fresh.
-  def fold_rows(rows) # rubocop:disable Naming/PredicateMethod -- folds AND reports
+  def compact_rows(rows) # rubocop:disable Naming/PredicateMethod -- compacts AND reports
     return true if rows.empty?
 
     doc = Y::Doc.new
