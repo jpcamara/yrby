@@ -8,6 +8,14 @@ module Yrby
     # `bin/rails generate yrby:tables` — the migration for the gem-owned
     # document models (Y::Document + Y::DocumentUpdate). Invoked by
     # yrby:install, and by other gems building on the same storage.
+    #
+    # Template notes (kept here, not in the emitted migration): state is
+    # 4.gigabytes - 1 (longblob on MySQL — a compacted snapshot is the whole
+    # document; a 16 MB cap would break compaction) and payload is
+    # 16.megabytes - 1 (a delta is one edit batch — a big paste exceeds the
+    # 64 KB default blob). The partial unique index's WHERE is an index-size
+    # choice, not correctness: unique indexes treat NULLs as distinct on
+    # every supported database, and MySQL drops the predicate harmlessly.
     class TablesGenerator < ::Rails::Generators::Base
       include ActiveRecord::Generators::Migration
 
