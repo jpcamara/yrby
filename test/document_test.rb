@@ -144,7 +144,7 @@ class DocumentTest < Minitest::Test
     document = Y::Document.locate!("room-1")
     document.append(CLIENT_ONE)
 
-    assert_predicate document.changed_at, :present?, "append stamps changed_at"
+    assert_predicate document.reload.changed_at, :present?, "append stamps changed_at"
 
     document.update!(changed_at: 1.hour.ago)
     stamped = document.changed_at
