@@ -19,8 +19,11 @@ class Y::Document < ActiveRecord::Base
 
   validates :key, presence: true
   # The legal shapes are exactly two — key-only, or key + record + name.
+  # Column checks, not the association: reading `record` constantizes
+  # record_type, which must not be a validity requirement.
   validates :name, presence: true, if: :record_type
-  validates :record, presence: true, if: :name
+  validates :record_type, presence: true, if: :name
+  validates :record_id, presence: true, if: :record_type
   before_validation :assign_default_key, on: :create
 
   # How long the tail may grow before an append folds it into state. Small,
