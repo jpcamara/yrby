@@ -7,10 +7,15 @@
 # binds it to a Rails model, like ActionText::RichText; key-only documents
 # (a room name, a UUID) leave both nil.
 #
-# changed_at: when content last changed (compacting is a representation change
-# and does not move it). materialized_at: when a projection (rendered HTML,
-# search text) was last built from the document, stamped by whatever builds
-# the projection. A projection is stale when changed_at is newer.
+# changes_count is the freshness signal: bumped with relative SQL on every
+# append (exact in commit order, which wall-clock stamps are not) and never
+# moved by compaction — compaction is a representation change, not a
+# content change. A projection records the count it consumed in
+# materialized_changes_count and is stale while changes_count is greater.
+# One projection gets this hosted watermark — the bound record's attribute,
+# which has no schema of its own; any other projection stores its own
+# consumed count beside its own output and compares against changes_count.
+# changed_at/materialized_at are informational timestamps for humans.
 class Y::Document < ActiveRecord::Base
   self.table_name = "y_documents"
 
@@ -77,7 +82,9 @@ class Y::Document < ActiveRecord::Base
   # threshold forever.
   def append(bytes)
     updates.create!(payload: bytes)
-    touch(:changed_at)
+    # Relative SQL: the increment serializes on the row, so the counter is
+    # exact in commit order even for appends inside slow transactions.
+    self.class.update_counters(id, changes_count: 1, touch: :changed_at)
     compact! if updates.where(pending: false).count >= compact_every
   end
 

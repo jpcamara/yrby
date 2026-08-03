@@ -127,6 +127,19 @@ class DocumentTest < Minitest::Test
     assert_equal 0, document.updates.count, "at-or-over fires past the multiple"
   end
 
+  def test_append_increments_changes_count_and_compaction_does_not
+    document = Y::Document.locate!("room-1")
+    document.append(CLIENT_ONE)
+    document.append(CLIENT_TWO)
+
+    assert_equal 2, document.reload.changes_count
+
+    document.compact!
+
+    assert_equal 2, document.reload.changes_count,
+                 "compaction is not a content change; consumed-count watermarks stay valid"
+  end
+
   def test_append_moves_changed_at_and_compact_does_not
     document = Y::Document.locate!("room-1")
     document.append(CLIENT_ONE)

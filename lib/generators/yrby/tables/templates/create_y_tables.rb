@@ -16,6 +16,13 @@ class CreateYTables < ActiveRecord::Migration<%= migration_version %>
       # PostgreSQL/SQLite; a 16 MB cap would make compacting fail on a large
       # document and block appends.
       t.binary :state, limit: 4.gigabytes - 1
+      # changes_count is the freshness signal: bumped with relative SQL per
+      # append, so it is exact in commit order even when appends run inside
+      # slow transactions — wall-clock stamps are not. A projection records
+      # the count it consumed in materialized_changes_count; the timestamps
+      # are for humans and logs.
+      t.bigint :changes_count, null: false, default: 0
+      t.bigint :materialized_changes_count
       t.datetime :changed_at
       t.datetime :materialized_at
       t.timestamps

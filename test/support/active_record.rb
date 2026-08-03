@@ -17,6 +17,8 @@ unless defined?(YRBY_AR_BOOTED)
       t.references :record, polymorphic: true, null: true, index: false
       t.string :name
       t.binary :state
+      t.bigint :changes_count, null: false, default: 0
+      t.bigint :materialized_changes_count
       t.datetime :changed_at
       t.datetime :materialized_at
       t.timestamps
