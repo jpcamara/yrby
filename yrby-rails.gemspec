@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "lib/yrby/version"
+require_relative "lib/yrby/rails/version"
 
 Gem::Specification.new do |spec|
   spec.name = "yrby-rails"
-  spec.version = Yrby::VERSION
+  spec.version = Yrby::Rails::VERSION
   spec.authors = ["JP Camara"]
   spec.email = ["johnpcamara@gmail.com"]
 

@@ -18,10 +18,10 @@ end
 
 desc "Build the yrby-rails gem into pkg/"
 task "rails_gem:build" do
-  require_relative "lib/yrby/version"
+  require_relative "lib/yrby/rails/version"
   mkdir_p "pkg"
   sh "gem build yrby-rails.gemspec --output " \
-     "pkg/yrby-rails-#{Yrby::VERSION}.gem"
+     "pkg/yrby-rails-#{Yrby::Rails::VERSION}.gem"
 end
 
 namespace :release do
@@ -29,9 +29,9 @@ namespace :release do
   task :steps do
     require "json"
     require_relative "lib/y/version"
-    require_relative "lib/yrby/version"
+    require_relative "lib/yrby/rails/version"
     core = Y::VERSION
-    cable = Yrby::VERSION
+    cable = Yrby::Rails::VERSION
     npm = JSON.parse(File.read("packages/client/package.json"))["version"]
     puts <<~STEPS
       This repo ships THREE publishable packages, versioned independently. Release the
@@ -46,7 +46,7 @@ namespace :release do
          e. for g in pkg/yrby-#{core}*.gem; do gem push "$g" || break; done   # 9 gems (gem push takes ONE at a time)
 
       2) yrby-rails #{cable}  — gem, pure Ruby; one gem, no precompilation
-         a. bump lib/yrby/version.rb + CHANGELOG-rails.md, commit
+         a. bump lib/yrby/rails/version.rb + CHANGELOG-rails.md, commit
          b. rake rails_gem:build
          c. gem push pkg/yrby-rails-#{cable}.gem
 
