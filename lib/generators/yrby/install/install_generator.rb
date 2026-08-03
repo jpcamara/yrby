@@ -9,7 +9,7 @@ module Yrby
     # y-websocket protocol over the gem's document storage, plus the storage
     # migration (via yrby:tables). The models ship in the gem; only the
     # migration lands in the app.
-    class InstallGenerator < Rails::Generators::Base
+    class InstallGenerator < ::Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
 
       def create_channel

@@ -8,7 +8,7 @@ module Yrby
     # `bin/rails generate yrby:tables` — the migration for the gem-owned
     # document models (Y::Document + Y::DocumentUpdate). Invoked by
     # yrby:install, and by other gems building on the same storage.
-    class TablesGenerator < Rails::Generators::Base
+    class TablesGenerator < ::Rails::Generators::Base
       include ActiveRecord::Generators::Migration
 
       source_root File.expand_path("templates", __dir__)
