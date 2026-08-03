@@ -22,7 +22,6 @@ Gem::Specification.new do |spec|
     "lib/yrby/**/*.rb",
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
-    "lib/y/update_log.rb",
     "app/**/*.rb",
     "lib/generators/**/*",
     "LICENSE",

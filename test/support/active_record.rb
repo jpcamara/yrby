@@ -11,25 +11,13 @@ unless defined?(YRBY_AR_BOOTED)
   ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
   ActiveRecord::Schema.verbose = false
   ActiveRecord::Schema.define do
-    # For the Y::UpdateLog module tests: the default key column...
-    create_table :module_keyed_updates do |t|
-      t.binary :payload, null: false
-      t.string :document_key, null: false, index: true
-      t.datetime :created_at, null: false
-    end
-
-    # ...and an overridden one.
-    create_table :parent_keyed_updates do |t|
-      t.binary :payload, null: false
-      t.integer :parent_id, null: false, index: true
-      t.datetime :created_at, null: false
-    end
-
     # The gem-owned models, as yrby:tables migrates them.
     create_table :y_documents do |t|
       t.string :key, null: false, index: { unique: true }
       t.references :record, polymorphic: true, null: true, index: false
       t.string :name
+      t.binary :state
+      t.datetime :changed_at
       t.datetime :materialized_at
       t.timestamps
       t.index %i[record_type record_id name], unique: true,
@@ -40,6 +28,7 @@ unless defined?(YRBY_AR_BOOTED)
     create_table :y_document_updates do |t|
       t.references :document, null: false
       t.binary :payload, null: false
+      t.boolean :pending, null: false, default: false
       t.datetime :created_at, null: false
     end
 

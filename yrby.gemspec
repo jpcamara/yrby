@@ -30,7 +30,7 @@ Gem::Specification.new do |spec|
     "README.md",
     "CHANGELOG.md"
   ] - Dir["lib/yrby-rails.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*",
-          "lib/y/update_log.rb", "lib/yrby/**/*", "app/**/*",
+          "lib/yrby/**/*", "app/**/*",
           "lib/yrby-decoder.rb", "lib/y/decoder.rb", "lib/y/decoder/**/*"]
 
   spec.require_paths = ["lib"]

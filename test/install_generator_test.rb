@@ -33,10 +33,13 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_match(":y_documents", migration)
       assert_match("t.string :key, null: false, index: { unique: true }", migration)
       assert_match("t.references :record, polymorphic: true, null: true", migration)
+      assert_match(/t\.binary :state, limit: 4\.gigabytes - 1/, migration)
+      assert_match("changed_at", migration)
       assert_match("materialized_at", migration)
       assert_match(":y_document_updates", migration)
       assert_match("t.references :document", migration)
-      assert_match(/t\.binary :payload, null: false, limit: 4\.gigabytes - 1/, migration)
+      assert_match(/t\.binary :payload, null: false, limit: 16\.megabytes - 1/, migration)
+      assert_match("t.boolean :pending, null: false, default: false", migration)
     end
   end
 end

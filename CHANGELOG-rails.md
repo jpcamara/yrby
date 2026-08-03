@@ -16,34 +16,30 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Engine-owned document models: `Y::Document` (unique `key`, optional
-  polymorphic `record` + `name` for binding to a Rails model,
-  `materialized_at` for projections, destroys its log with it) and
-  `Y::DocumentUpdate` (the `Y::UpdateLog` rows, keyed by `document_id`).
-  `Y::Document.for(record, name)` finds or creates a record's document and
-  derives its key (`post/1/body`); `.load_state(key)` / `.append(key,
-  update)` are the store calls the generated channel uses.
+  polymorphic `record` + `name` for binding to a Rails model, the merged
+  `state` snapshot, `changed_at`/`materialized_at` for projection
+  freshness, destroys its tail with it) and `Y::DocumentUpdate` (the
+  uncompacted tail — one delta per row, folded into `state` and deleted at
+  the fold threshold). Loading is one row read plus a short, bounded tail,
+  whatever the document's history; a document with an empty tail serves
+  `state` verbatim. `Y::Document.for(record, name)` finds or creates a
+  record's document, derives its key (`post/1/body`), and adopts a
+  key-only row already holding that key — the transport and the binding
+  can each arrive first, and they converge instead of colliding.
+  `.load_state(key)` / `.append(key, update)` are the store calls the
+  generated channel uses; `locate`/`locate!` find by key. Folding
+  serializes on a per-document row lock, never blocks appends, and leaves
+  `changed_at` alone — compaction is not a content change. Causally-gapped
+  updates are quarantined (`pending`), excluded from the fold trigger,
+  never folded into state and never deleted while unhealed; a healed gap
+  serves immediately and folds away on the next pass.
   `rails g yrby:tables` creates the two tables (`y_documents` +
   `y_document_updates`; invoked by `yrby:install`, usable directly by gems
   building on the same storage).
 
-- `Y::UpdateLog`: durable storage for collaborative documents as a module
-  any ActiveRecord model with a binary `payload` and a key column includes.
-  An append-only update log with inline compaction (`compact_every`,
-  default 500): rows collapse into one snapshot row so `on_load` replays
-  the compaction window, not the document's full history. Merges go
-  through `compacted_state_update` so a gappy recorded update can never
-  be served to peers, and compaction skips a document holding a pending
-  (causally-gapped) update rather than deleting the only healable copy.
-  `latest_change_at` reports when content last changed — compaction
-  preserves it (the snapshot keeps the newest compacted row's timestamp),
-  so projections stamped before a compaction stay fresh.
-  Behavior is pinned by tests against a real database.
 - `include Y::ActionCable` as the channel integration: the namespace
   module forwards to `Y::ActionCable::Sync`, which remains the module's
   home and keeps working as a spelling. One include, no suffix.
-- `Y::UpdateLog.key_column`: override which column keys the log (default
-  `:document_id`, Y::DocumentUpdate's belongs_to key) for a table keyed
-  some other way, e.g. a room name.
 - `rails generate yrby:install`: a `DocumentChannel` speaking the
   y-websocket protocol over the gem-owned storage, plus the storage
   migration.

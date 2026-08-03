@@ -21,4 +21,3 @@ module Y
 end
 
 require "y/action_cable/sync"
-require "y/update_log"

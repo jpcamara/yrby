@@ -472,20 +472,23 @@ The models ship in the gem, the way Action Text owns
 
 - **`Y::Document`** — one row per document: a unique `key`, an optional
   polymorphic `record` + `name` (bind a document to a Rails model and it
-  destroys its log with the record; key-only documents leave them nil),
-  and `materialized_at` for projections.
-  `Y::Document.for(record, name)` finds or creates a record's document,
-  deriving a readable key (`post/1/body`) from the record;
+  destroys its history with the record; key-only documents leave them
+  nil), the merged `state` snapshot, and `changed_at`/`materialized_at`
+  for projection freshness (`changed_at` moves on content changes only;
+  stamp `materialized_at` when you rebuild a projection, compare the two
+  to know it's stale). `Y::Document.for(record, name)` finds or creates a
+  record's document, deriving a readable key (`post/1/body`) — and adopts
+  a key-only row already holding that key, so a channel writing first and
+  a binding created later converge on one document.
   `.load_state(key)` / `.append(key, update)` are the store calls the
   generated channel uses.
-- **`Y::DocumentUpdate`** — the log rows, powered by `Y::UpdateLog`: an
-  append-only update log with inline compaction (once `compact_every`
-  rows accumulate they collapse into one snapshot row, so loads stay
-  proportional to the compaction window). `latest_change_at` reports when
-  a document last changed, so projections rebuild only when the log is
-  newer. Compaction is transactional, tolerates concurrent appends, and
-  skips a document holding a pending (causally-gapped) update rather than
-  deleting the only healable copy.
+- **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
+  folded into `state` and deleted once the tail reaches `fold_every`
+  (default 64). Loading is one row read plus that short tail, whatever
+  the document's history; an empty tail serves `state` verbatim. Folding
+  serializes on a per-document row lock, never blocks appends, and skips
+  causally-gapped rows — they're quarantined until they heal rather than
+  folded into state or deleted.
 
 The migration creates `y_documents` and `y_document_updates`. To rename
 them, edit the generated migration and point `Y::Document.table_name` /
