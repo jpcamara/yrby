@@ -470,17 +470,19 @@ bin/rails db:migrate
 The models ship in the gem, the way Action Text owns
 `ActionText::RichText`:
 
-- **`Y::Document`** — one row per document: a unique `key`, an optional
-  polymorphic `record` + `name` (bind a document to a Rails model and it
-  destroys its history with the record; key-only documents leave them
-  nil), and the merged `state` snapshot. The document carries no
-  projection state — consumers that render it into another form do so at
-  write time, in the channel. `Y::Document.for(record, name)` finds or creates a
-  record's document, deriving a readable key (`post/1/body`) — and adopts
+- **`Y::Document`** — one row per document, with two identities: `key` is
+  the wire (what a channel addresses — one opaque string, unique,
+  sometimes app-supplied, never parsed), and `record` + `name` is Rails
+  (which model attribute it backs — one document per attribute per
+  record, the ActionText::RichText scheme; destroying the record destroys
+  the document). Key-only documents leave the binding nil. Either
+  identity can arrive first: `Y::Document.for(record, name)` finds or
+  creates the binding, derives a readable key (`post/1/body`), and adopts
   a key-only row already holding that key, so a channel writing first and
-  a binding created later converge on one document.
-  `.load_state(key)` / `.append(key, update)` are the store calls the
-  generated channel uses.
+  a binding created later converge on one document. It also holds the
+  merged `state` snapshot, and no projection state — consumers render at
+  write time, in the channel. `.load_state(key)` / `.append(key, update)`
+  are the store calls the generated channel uses.
 - **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
   compacted into `state` and deleted once the tail reaches `compact_every`
   (default 64). Loading is one row read plus that short tail, whatever

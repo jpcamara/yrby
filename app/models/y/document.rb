@@ -1,16 +1,25 @@
 # frozen_string_literal: true
 
-# One row per collaborative document. `key` addresses it on the transport;
-# `state` holds the merged snapshot, and the update rows are only the
-# uncompacted tail — so loading is one row read plus a short, bounded tail,
-# whatever the document's history. An optional polymorphic record + name
-# binds it to a Rails model, like ActionText::RichText; key-only documents
-# (a room name, a UUID) leave both nil.
+# One row per collaborative document, with two identities:
 #
-# The document keeps no projection state. Consumers that render it into
-# another form (rendered HTML, search text) do so at write time, in the
-# channel's on_change — a projection updated on every recorded change is
-# never stale and needs no freshness bookkeeping.
+#   key             the wire. What a channel addresses: one opaque string,
+#                   required, unique — and sometimes app-supplied
+#                   ("room-42"), so nothing ever parses meaning out of it.
+#   record + name   Rails. Which model attribute this document backs —
+#                   optional, one document per attribute per record,
+#                   the same scheme as ActionText::RichText.
+#
+# When a binding exists and no key was supplied, the key derives as
+# post/1/body — a readability courtesy, not a contract. Either identity can
+# arrive first (a channel can write under a key before any binding exists);
+# `.for` adopts a key-only row bearing the derived key, so the two converge
+# on one row instead of colliding.
+#
+# `state` holds the merged snapshot; the update rows are only the
+# uncompacted tail, so loading is one row read plus a short, bounded tail,
+# whatever the document's history. The document keeps no projection state:
+# consumers that render it into another form (rendered HTML, search text)
+# do so at write time, in the channel's on_change.
 class Y::Document < ActiveRecord::Base
   self.table_name = "y_documents"
 
