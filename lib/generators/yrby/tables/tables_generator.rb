@@ -17,7 +17,10 @@ module Yrby
     # The partial unique index's WHERE only keeps
     # key-only rows out of the index: uniqueness holds without it, since
     # unique indexes treat NULLs as distinct on every supported database,
-    # and MySQL drops the predicate harmlessly.
+    # and MySQL drops the predicate harmlessly. y_document_updates indexes
+    # (document_id, pending) instead of bare document_id: the prefix
+    # serves the tail and foreign-key lookups, and the pair serves the
+    # clean-row count every append runs.
     class TablesGenerator < ::Rails::Generators::Base
       include ActiveRecord::Generators::Migration
 

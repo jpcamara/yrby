@@ -64,6 +64,22 @@ class DocumentTest < Minitest::Test
     assert_equal document.reload.state, document.load_state, "no rebuild on the fast path"
   end
 
+  def test_load_state_survives_a_compaction_between_the_state_and_tail_reads
+    document = Y::Document.locate!("room-1")
+    document.append(CLIENT_ONE)
+    # A reader loads the row (snapshot still nil), then a compaction commits
+    # before the reader assembles. The old state-then-tail read order paired
+    # the stale in-memory snapshot with the now-empty tail and served
+    # nothing; tail-then-fresh-snapshot cannot omit a committed change.
+    reader = Y::Document.locate("room-1")
+    Y::Document.locate("room-1").compact!
+
+    doc = Y::Doc.new
+    doc.apply_update(reader.load_state)
+
+    assert_equal "from doc1", doc.read_text("content")
+  end
+
   def test_documents_are_scoped_by_key
     Y::Document.append("a", CLIENT_ONE)
     Y::Document.append("b", CLIENT_TWO)
@@ -215,6 +231,30 @@ class DocumentTest < Minitest::Test
     assert_equal "from doc1", read_back(document.key), "the orphan's content survives adoption"
   end
 
+  def test_for_retries_past_a_channel_creating_the_key_only_row_mid_call
+    page = Page.create!
+    key = "document_test/page/#{page.id}/body"
+    original = Y::Document.method(:adopt)
+    raced = false
+    racing_adopt = lambda do |record, name|
+      if raced
+        original.call(record, name)
+      else
+        # The channel wins the race after adopt looked and before the
+        # bound insert lands: the insert collides on the key index and
+        # create_or_find_by!'s record+name retry misses the key-only row.
+        raced = true
+        Y::Document.create!(key: key)
+        nil
+      end
+    end
+
+    document = Y::Document.stub(:adopt, racing_adopt) { Y::Document.for(page, :body) }
+
+    assert_equal page, document.record
+    assert_equal 1, Y::Document.count, "adopted on the retry, not duplicated"
+  end
+
   def test_a_supplied_key_is_never_overwritten
     page = Page.create!
     document = Y::Document.create!(record: page, name: "body", key: "custom")
@@ -231,6 +271,7 @@ class DocumentTest < Minitest::Test
 
     assert_raises(ActiveRecord::RecordInvalid) { Y::Document.create!(key: "k1", record: page) }
     assert_raises(ActiveRecord::RecordInvalid) { Y::Document.create!(key: "k2", name: "body") }
+    assert_raises(ActiveRecord::RecordInvalid) { Y::Document.create!(key: "k3", record_id: page.id) }
   end
 
   def test_an_unsaved_record_cannot_derive_a_key
