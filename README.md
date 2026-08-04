@@ -485,8 +485,8 @@ The models ship in the gem, the way Action Text owns
   are the store calls the generated channel uses.
 - **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
   compacted into `state` and deleted once the tail reaches `compact_every`
-  (default 64). Loading is one row read plus that short tail, whatever
-  the document's history; an empty tail serves `state` verbatim. Compaction
+  (default 64). Loading reads the snapshot plus the current tail; an
+  empty tail returns `state` directly. Compaction
   serializes on a per-document row lock, never blocks appends, and skips
   causally-gapped rows — they're quarantined until they heal rather than
   compacted into state or deleted.

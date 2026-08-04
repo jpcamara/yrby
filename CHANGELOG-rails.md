@@ -15,30 +15,28 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Engine-owned document models: `Y::Document` (unique `key`, optional
-  polymorphic `record` + `name` for binding to a Rails model, the merged
-  `state` snapshot, destroys its tail with it — and no projection state:
-  consumers render at write time, in the channel) and `Y::DocumentUpdate` (the
-  uncompacted tail — one delta per row, compacted into `state` and deleted at
-  the compaction threshold). Loading is one row read plus a short, bounded tail,
-  whatever the document's history; a document with an empty tail serves
-  `state` verbatim. `Y::Document.for(record, name)` finds or creates a
-  record's document, derives its key (`post/1/body`), and adopts a
-  key-only row already holding that key — the transport and the binding
-  can each arrive first, and they converge instead of colliding.
-  `.load_state(key)` / `.append(key, update)` are the store calls the
-  generated channel uses; `locate`/`locate!` find by key. Compaction
-  serializes on a per-document row lock and never blocks appends. Causally-gapped
-  updates are quarantined (`pending`), excluded from the compaction trigger,
-  never compacted into state and never deleted while unhealed; a healed gap
-  serves immediately and compacts away on the next pass.
-  `rails g yrby:tables` creates the two tables (`y_documents` +
-  `y_document_updates`; invoked by `yrby:install`, usable directly by gems
-  building on the same storage).
+- `Y::Document`, engine-owned: a unique transport `key`, an optional
+  polymorphic `record` + `name` binding, and the compacted `state`
+  snapshot. It carries no projection state; consumers render at write
+  time, in the channel. `load_state(key)` / `append(key, update)` are the
+  store calls the generated channel uses; `locate`/`locate!` find by key.
+- `Y::DocumentUpdate`, engine-owned: the uncompacted tail, one delta per
+  row, compacted into `state` and deleted at the threshold. A load reads
+  the snapshot plus the current tail. Compaction serializes on a
+  per-document row lock and never blocks appends. Causally-gapped updates
+  are quarantined (`pending`), excluded from the compaction trigger, and
+  kept until they heal; a healed gap serves immediately and compacts away
+  on the next pass.
+- `Y::Document.for(record, name)` finds or creates a record's document,
+  derives its key (`post/1/body`), and adopts a key-only row already
+  holding that key, so a channel writing first and a binding created
+  later end up on one row.
+- `rails g yrby:tables` creates both tables. It is invoked by
+  `yrby:install` and usable directly by gems building on the same
+  storage.
 
-- `include Y::ActionCable` as the channel integration: the namespace
-  module forwards to `Y::ActionCable::Sync`, which remains the module's
-  home and keeps working as a spelling. One include, no suffix.
+- `include Y::ActionCable` now includes `Y::ActionCable::Sync` for you;
+  the long spelling keeps working.
 - `rails generate yrby:install`: a `DocumentChannel` speaking the
   y-websocket protocol over the gem-owned storage, plus the storage
   migration.

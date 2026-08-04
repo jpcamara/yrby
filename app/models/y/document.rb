@@ -11,14 +11,14 @@
 #                   ActionText::RichText.
 #
 # When a binding exists and no key was supplied, the key derives as
-# post/1/body — a readability courtesy, not a contract. Either identity can
-# arrive first (a channel can write under a key before any binding exists);
-# `.for` adopts a key-only row bearing the derived key, so the two converge
-# on one row instead of colliding.
+# post/1/body. That format is only a readable default — keys can be
+# supplied, so nothing depends on it. Either identity can arrive first (a
+# channel can write under a key before any binding exists); `.for` adopts a
+# key-only row bearing the derived key, so both end up on one row.
 #
 # `state` holds the merged snapshot; the update rows are only the
-# uncompacted tail, so loading is one row read plus a short, bounded tail,
-# whatever the document's history. The document keeps no projection state:
+# uncompacted tail, so a load reads one row plus a short, bounded tail no
+# matter how long the document has lived. The document keeps no projection state:
 # consumers that render it into another form (rendered HTML, search text)
 # do so at write time, in the channel's on_change.
 class Y::Document < ActiveRecord::Base
