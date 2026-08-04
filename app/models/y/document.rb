@@ -5,9 +5,10 @@
 #   key             the wire. What a channel addresses: one opaque string,
 #                   required, unique — and sometimes app-supplied
 #                   ("room-42"), so nothing ever parses meaning out of it.
-#   record + name   Rails. Which model attribute this document backs —
-#                   optional, one document per attribute per record,
-#                   the same scheme as ActionText::RichText.
+#   record + name   Rails. Which model attribute this document backs
+#                   (name is the attribute name: "body") — optional, one
+#                   document per attribute per record, the same scheme as
+#                   ActionText::RichText.
 #
 # When a binding exists and no key was supplied, the key derives as
 # post/1/body — a readability courtesy, not a contract. Either identity can

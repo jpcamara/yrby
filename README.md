@@ -473,9 +473,9 @@ The models ship in the gem, the way Action Text owns
 - **`Y::Document`** — one row per document, with two identities: `key` is
   the wire (what a channel addresses — one opaque string, unique,
   sometimes app-supplied, never parsed), and `record` + `name` is Rails
-  (which model attribute it backs — one document per attribute per
-  record, the ActionText::RichText scheme; destroying the record destroys
-  the document). Key-only documents leave the binding nil. Either
+  (which model attribute it backs; `name` is the attribute name, `"body"`
+  — one document per attribute per record, the ActionText::RichText
+  scheme; destroying the record destroys the document). Key-only documents leave the binding nil. Either
   identity can arrive first: `Y::Document.for(record, name)` finds or
   creates the binding, derives a readable key (`post/1/body`), and adopts
   a key-only row already holding that key, so a channel writing first and
