@@ -470,26 +470,27 @@ bin/rails db:migrate
 The models ship in the gem, the way Action Text owns
 `ActionText::RichText`:
 
-- **`Y::Document`** — one row per document, with two identities: `key` is
-  the wire (what a channel addresses — one opaque string, unique,
-  sometimes app-supplied, never parsed), and `record` + `name` is Rails
-  (which model attribute it backs; `name` is the attribute name, `"body"`
-  — one document per attribute per record, the ActionText::RichText
-  scheme; destroying the record destroys the document). Key-only
-  documents leave the binding nil. Either identity can arrive first: `Y::Document.for(record, name)` finds or
+- **`Y::Document`** — one row per document, addressed two ways: by `key`
+  (what a channel addresses — one opaque, unique string, sometimes
+  app-supplied, never parsed) and, optionally, by polymorphic `record` +
+  `name` (which model attribute it backs; `name` is the attribute name,
+  `"body"` — one document per attribute per record, the
+  ActionText::RichText scheme). Key-only documents leave the binding nil.
+  Either side can arrive first: `Y::Document.for(record, name)` finds or
   creates the binding, derives a readable key (`post/1/body`), and adopts
   a key-only row already holding that key, so a channel writing first and
-  a binding created later converge on one document. It also holds the
-  merged `state` snapshot, and no projection state — consumers render at
-  write time, in the channel. `.load_state(key)` / `.append(key, update)`
-  are the store calls the generated channel uses.
+  a binding created later converge on one document. The row also holds
+  the merged `state` snapshot — CRDT state only; derived data (rendered
+  HTML, search text) is the application's job, typically in the channel's
+  on_change. `.load_state(key)` / `.append(key, update)` are the store
+  calls the generated channel uses.
 - **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
   compacted into `state` and deleted once the tail reaches `compact_every`
   (default 64). Loading reads the snapshot plus the current tail; an
-  empty tail returns `state` directly. Compaction
-  serializes on a per-document row lock, never blocks appends, and skips
-  causally-gapped rows — they're quarantined until they heal rather than
-  compacted into state or deleted.
+  empty tail returns `state` directly. Compaction serializes on a
+  per-document row lock and skips causally-gapped rows — they're
+  quarantined until they heal rather than compacted into state or
+  deleted. Destroying a document deletes its updates with it.
 
 The migration creates `y_documents` and `y_document_updates`. To rename
 them, edit the generated migration and point `Y::Document.table_name` /
@@ -499,9 +500,9 @@ Storage is swappable: the channel only needs `on_load` and `on_change`
 answered, and they can point at anything.
 
 `include Y::ActionCable` (from the `yrby-rails` gem) is the channel
-integration: the full y-websocket protocol (document sync +
-awareness/presence) over ActionCable. (`include Y::ActionCable::Sync` is
-the same module and keeps working.)
+integration: the y-websocket protocol (document sync +
+awareness/presence) over ActionCable. (`include Y::ActionCable::Sync`
+keeps working and has the same effect.)
 
 ```ruby
 # app/channels/document_channel.rb

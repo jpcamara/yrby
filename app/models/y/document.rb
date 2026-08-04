@@ -1,26 +1,25 @@
 # frozen_string_literal: true
 
-# One row per collaborative document, with two identities:
+# One row per collaborative document, addressed two ways:
 #
-#   key             the wire. What a channel addresses: one opaque string,
-#                   required, unique — and sometimes app-supplied
-#                   ("room-42"), so nothing ever parses meaning out of it.
-#   record + name   Rails. Which model attribute this document backs
-#                   (name is the attribute name: "body") — optional, one
+#   key             what a channel addresses: one opaque, unique string.
+#                   Apps can supply their own ("room-42"), so nothing
+#                   parses meaning out of a key.
+#   record + name   which model attribute the document backs, where name
+#                   is the attribute name ("body") — optional, one
 #                   document per attribute per record, the same scheme as
 #                   ActionText::RichText.
 #
 # When a binding exists and no key was supplied, the key derives as
-# post/1/body — a readable default, nothing more. Either identity can
-# arrive first (a channel can write under a key before any binding
-# exists); `.for` adopts a key-only row bearing the derived key, so both
-# end up on one row.
+# post/1/body. Either side can arrive first — a channel can write under a
+# key before any binding exists — so `.for` adopts a key-only row whose
+# key matches the derived one, converging both on one row.
 #
-# `state` holds the merged snapshot; the update rows are only the
-# uncompacted tail, so a load reads one row plus a short, bounded tail no
-# matter how long the document has lived. There is no projection state:
-# consumers that render it into another form (rendered HTML, search text)
-# do so at write time, in the channel's on_change.
+# `state` holds the merged snapshot; the update rows are the uncompacted
+# tail, so a load reads the snapshot plus whatever the tail currently
+# holds. The models store CRDT state only: derived data (rendered HTML,
+# search text) is the application's job, typically done in the channel's
+# on_change.
 class Y::Document < ActiveRecord::Base
   self.table_name = "y_documents"
 
@@ -28,17 +27,17 @@ class Y::Document < ActiveRecord::Base
   has_many :updates, class_name: "Y::DocumentUpdate", dependent: :delete_all
 
   validates :key, presence: true
-  # The legal shapes are exactly two — key-only, or key + record + name.
-  # Column checks, not the association: reading `record` constantizes
-  # record_type, which must not be a validity requirement.
+  # A bound row carries record + name. Checked on the columns, not the
+  # association: reading `record` constantizes record_type, which must not
+  # be a validity requirement.
   validates :name, presence: true, if: :record_type
   validates :record_type, presence: true, if: :name
   validates :record_id, presence: true, if: :record_type
   before_validation :assign_default_key, on: :create
 
-  # How long the tail may grow before an append compacts it into state. Small,
-  # because loads read state directly: the threshold tunes write
-  # amplification against tail length, not load latency.
+  # How long the tail may grow before an append compacts it into state.
+  # Lower values compact more often; higher values leave more tail rows
+  # for each load to merge.
   class_attribute :compact_every, instance_writer: false, default: 64
 
   class << self
@@ -81,10 +80,10 @@ class Y::Document < ActiveRecord::Base
     end
   end
 
-  # Record one delta. The tail count that triggers compaction is at-or-over
-  # rather than an exact multiple (concurrent appends can jump past one), and
-  # counts only clean rows, so a quarantined gap can't hold it over the
-  # threshold forever.
+  # Record one delta. The trigger is at-or-over rather than an exact
+  # multiple (concurrent appends can jump past one) and counts only clean
+  # rows: pending rows never satisfy it, so a quarantined gap doesn't
+  # retrigger compaction on every append.
   def append(bytes)
     updates.create!(payload: bytes)
     compact! if updates.where(pending: false).count >= compact_every
@@ -106,15 +105,14 @@ class Y::Document < ActiveRecord::Base
   end
 
   # Compact the tail into state. The row lock serializes racing
-  # compactions; appends only insert child rows and are never blocked, and
-  # a delta landing mid-compaction isn't in `rows`, so it survives the
-  # delete and compacts next time.
+  # compactions; a delta landing mid-compaction isn't in `rows`, so it
+  # survives the delete and compacts next time.
   #
   # A causally-gapped batch is never compacted whole and never deleted:
   # state would silently exclude the gap, destroying the only healable
-  # copy. Two stages bound the damage. If the clean rows alone merge
-  # gap-free, they compact and only the gap stays quarantined; rows that
-  # causally build on quarantined content quarantine with it.
+  # copy. If the clean rows alone merge gap-free, they compact and only
+  # the gap is quarantined (marked pending); rows that causally build on
+  # quarantined content quarantine with it.
   def compact!
     with_lock do
       rows = updates.pluck(:id, :payload, :pending)

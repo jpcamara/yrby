@@ -38,18 +38,12 @@ Gem::Specification.new do |spec|
   spec.add_dependency "activerecord", ">= 7.1"
   spec.add_dependency "base64", "~> 0.2"
   spec.add_dependency "railties", ">= 7.1"
-  # Floor raised to 0.3.1, whose update_ready? is exact (trial-integration, not
-  # just per-client clocks). The channel gates recording and the retry-vs-gap
-  # decision on it; with an older core a cross-client-origin gap passed the ready
-  # check and the advances? probe then acked-and-dropped real content. The floor
-  # makes the fix self-enforcing rather than dependent on the app updating the
-  # core gem. (Earlier floors: 0.3.0 gap-free SyncStep1; 0.2.3 exact
-  # delete-bearing update_advances?.)
+  # 0.3.1's update_ready? is exact for cross-client gaps; the channel gates
+  # recording on it, and an older core could ack-and-drop real content.
   spec.add_dependency "yrby", ">= 0.3.1"
-  # The concern references ActionCable (channels, streaming, broadcasting) and
-  # ActiveSupport (Concern, JSON coder) constants directly. Rails apps already
-  # bundle these, but declaring them makes use outside a full Rails bundle fail
-  # at install time with a clear message instead of at runtime with a NameError.
+  # The concern calls ActionCable.server directly, and railties doesn't
+  # depend on actioncable, so declare it. activesupport comes along with
+  # activerecord either way; listed because the gem uses it directly.
   spec.add_dependency "actioncable", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
 
