@@ -473,10 +473,9 @@ The models ship in the gem, the way Action Text owns
 - **`Y::Document`** — one row per document: a unique `key`, an optional
   polymorphic `record` + `name` (bind a document to a Rails model and it
   destroys its history with the record; key-only documents leave them
-  nil), the merged `state` snapshot, and `changes_count` for projection
-  freshness (bumped per append with relative SQL, so it is exact in commit
-  order; compaction leaves it alone — record the count you consumed when
-  you rebuild a projection and compare). `Y::Document.for(record, name)` finds or creates a
+  nil), and the merged `state` snapshot. The document carries no
+  projection state — consumers that render it into another form do so at
+  write time, in the channel. `Y::Document.for(record, name)` finds or creates a
   record's document, deriving a readable key (`post/1/body`) — and adopts
   a key-only row already holding that key, so a channel writing first and
   a binding created later converge on one document.
@@ -485,7 +484,7 @@ The models ship in the gem, the way Action Text owns
 - **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
   compacted into `state` and deleted once the tail reaches `compact_every`
   (default 64). Loading is one row read plus that short tail, whatever
-  the document's history; an empty tail serves `state` verbatim. Folding
+  the document's history; an empty tail serves `state` verbatim. Compaction
   serializes on a per-document row lock, never blocks appends, and skips
   causally-gapped rows — they're quarantined until they heal rather than
   compacted into state or deleted.

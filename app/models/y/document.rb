@@ -95,10 +95,10 @@ class Y::Document < ActiveRecord::Base
     doc.compacted_state_update
   end
 
-  # Compact the tail into state. The row lock serializes racing compacts; appends
-  # only insert child rows (plus a changed_at touch that briefly queues
-  # behind the lock), and a delta landing mid-compaction isn't in `rows`, so it
-  # survives the delete and compacts next time.
+  # Compact the tail into state. The row lock serializes racing
+  # compactions; appends only insert child rows and are never blocked, and
+  # a delta landing mid-compaction isn't in `rows`, so it survives the
+  # delete and compacts next time.
   #
   # A causally-gapped batch is never compacted whole and never deleted — state
   # would silently exclude the gap, destroying the only healable copy. Two
@@ -122,8 +122,7 @@ class Y::Document < ActiveRecord::Base
 
   # Compact state + the given rows if the merge is gap-free: writes state,
   # deletes the rows, returns true. Leaves everything untouched and returns
-  # false on a gap. changed_at is deliberately not moved — compacting is not a
-  # content change, and projections stamped before it stay fresh.
+  # false on a gap.
   def compact_rows(rows) # rubocop:disable Naming/PredicateMethod -- compacts AND reports
     return true if rows.empty?
 

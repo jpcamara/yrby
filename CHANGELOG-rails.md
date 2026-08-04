@@ -17,8 +17,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Engine-owned document models: `Y::Document` (unique `key`, optional
   polymorphic `record` + `name` for binding to a Rails model, the merged
-  `state` snapshot, `changes_count`/`materialized_changes_count` for
-  commit-order-exact projection freshness, destroys its tail with it) and `Y::DocumentUpdate` (the
+  `state` snapshot, destroys its tail with it — and no projection state:
+  consumers render at write time, in the channel) and `Y::DocumentUpdate` (the
   uncompacted tail — one delta per row, compacted into `state` and deleted at
   the compaction threshold). Loading is one row read plus a short, bounded tail,
   whatever the document's history; a document with an empty tail serves
@@ -27,9 +27,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   key-only row already holding that key — the transport and the binding
   can each arrive first, and they converge instead of colliding.
   `.load_state(key)` / `.append(key, update)` are the store calls the
-  generated channel uses; `locate`/`locate!` find by key. Folding
-  serializes on a per-document row lock, never blocks appends, and leaves
-  `changed_at` alone — compaction is not a content change. Causally-gapped
+  generated channel uses; `locate`/`locate!` find by key. Compaction
+  serializes on a per-document row lock and never blocks appends. Causally-gapped
   updates are quarantined (`pending`), excluded from the compaction trigger,
   never compacted into state and never deleted while unhealed; a healed gap
   serves immediately and compacts away on the next pass.
