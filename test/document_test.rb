@@ -8,7 +8,7 @@ require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 
 # Y::Document owns the storage design: state is the merged snapshot, the
-# update rows are only the uncompacted tail, and compacting moves one into the
+# update rows are only the uncompacted tail, and compaction moves one into the
 # other. Exercised against a real database, exactly as the generated channel
 # uses it (load_state/append by key) and as bound models use it (.for).
 class DocumentTest < Minitest::Test

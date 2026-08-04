@@ -475,8 +475,8 @@ The models ship in the gem, the way Action Text owns
   sometimes app-supplied, never parsed), and `record` + `name` is Rails
   (which model attribute it backs; `name` is the attribute name, `"body"`
   — one document per attribute per record, the ActionText::RichText
-  scheme; destroying the record destroys the document). Key-only documents leave the binding nil. Either
-  identity can arrive first: `Y::Document.for(record, name)` finds or
+  scheme; destroying the record destroys the document). Key-only
+  documents leave the binding nil. Either identity can arrive first: `Y::Document.for(record, name)` finds or
   creates the binding, derives a readable key (`post/1/body`), and adopts
   a key-only row already holding that key, so a channel writing first and
   a binding created later converge on one document. It also holds the
@@ -495,8 +495,8 @@ The migration creates `y_documents` and `y_document_updates`. To rename
 them, edit the generated migration and point `Y::Document.table_name` /
 `Y::DocumentUpdate.table_name` at the new names in an initializer.
 
-Storage is swappable: the channel only needs `on_load` and `on_change`,
-and `Y::UpdateLog` (with its `key_column` override) works on any table.
+Storage is swappable: the channel only needs `on_load` and `on_change`
+answered, and they can point at anything.
 
 `include Y::ActionCable` (from the `yrby-rails` gem) is the channel
 integration: the full y-websocket protocol (document sync +

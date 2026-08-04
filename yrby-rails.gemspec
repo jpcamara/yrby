@@ -39,7 +39,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "base64", "~> 0.2"
   spec.add_dependency "railties", ">= 7.1"
   # Floor raised to 0.3.1, whose update_ready? is exact (trial-integration, not
-  # just per-client clocks). The channel gates recording AND the retry-vs-gap
+  # just per-client clocks). The channel gates recording and the retry-vs-gap
   # decision on it; with an older core a cross-client-origin gap passed the ready
   # check and the advances? probe then acked-and-dropped real content. The floor
   # makes the fix self-enforcing rather than dependent on the app updating the

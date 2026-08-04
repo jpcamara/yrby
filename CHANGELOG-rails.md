@@ -34,7 +34,6 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rails g yrby:tables` creates both tables. It is invoked by
   `yrby:install` and usable directly by gems building on the same
   storage.
-
 - `include Y::ActionCable` now includes `Y::ActionCable::Sync` for you;
   the long spelling keeps working.
 - `rails generate yrby:install`: a `DocumentChannel` speaking the

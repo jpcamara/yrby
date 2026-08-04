@@ -11,14 +11,14 @@
 #                   ActionText::RichText.
 #
 # When a binding exists and no key was supplied, the key derives as
-# post/1/body. That format is only a readable default — keys can be
-# supplied, so nothing depends on it. Either identity can arrive first (a
-# channel can write under a key before any binding exists); `.for` adopts a
-# key-only row bearing the derived key, so both end up on one row.
+# post/1/body — a readable default, nothing more. Either identity can
+# arrive first (a channel can write under a key before any binding
+# exists); `.for` adopts a key-only row bearing the derived key, so both
+# end up on one row.
 #
 # `state` holds the merged snapshot; the update rows are only the
 # uncompacted tail, so a load reads one row plus a short, bounded tail no
-# matter how long the document has lived. The document keeps no projection state:
+# matter how long the document has lived. There is no projection state:
 # consumers that render it into another form (rendered HTML, search text)
 # do so at write time, in the channel's on_change.
 class Y::Document < ActiveRecord::Base
@@ -81,8 +81,8 @@ class Y::Document < ActiveRecord::Base
     end
   end
 
-  # Record one delta. The tail count that triggers compacting is at-or-over,
-  # not an exact multiple (concurrent appends can jump past a multiple), and
+  # Record one delta. The tail count that triggers compaction is at-or-over
+  # rather than an exact multiple (concurrent appends can jump past one), and
   # counts only clean rows, so a quarantined gap can't hold it over the
   # threshold forever.
   def append(bytes)
@@ -110,11 +110,11 @@ class Y::Document < ActiveRecord::Base
   # a delta landing mid-compaction isn't in `rows`, so it survives the
   # delete and compacts next time.
   #
-  # A causally-gapped batch is never compacted whole and never deleted — state
-  # would silently exclude the gap, destroying the only healable copy. Two
-  # stages bound the damage: if the clean rows alone compact cleanly, they compact
-  # and only the gap stays quarantined; rows that causally build on
-  # quarantined content quarantine with it.
+  # A causally-gapped batch is never compacted whole and never deleted:
+  # state would silently exclude the gap, destroying the only healable
+  # copy. Two stages bound the damage. If the clean rows alone merge
+  # gap-free, they compact and only the gap stays quarantined; rows that
+  # causally build on quarantined content quarantine with it.
   def compact!
     with_lock do
       rows = updates.pluck(:id, :payload, :pending)

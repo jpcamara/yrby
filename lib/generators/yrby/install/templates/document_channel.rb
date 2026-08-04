@@ -2,12 +2,13 @@
 
 # Collaborative documents over Action Cable: one channel speaking the
 # y-websocket protocol (sync plus presence). Storage is Y::Document +
-# Y::DocumentUpdate; documents are created on first change and destroy
-# their log with them. Point on_load/on_change elsewhere to swap storage.
+# Y::DocumentUpdate; a document is created on its first change and its
+# history goes with it when it is destroyed. Point on_load/on_change
+# elsewhere to swap storage.
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
 
-  # Rebuild a document from durable storage (nil means a brand-new doc).
+  # Rebuild a document from durable storage (nil means a brand-new document).
   on_load { |key| Y::Document.load_state(key) }
 
   # Record each CRDT delta durably. Runs before the change is acknowledged
@@ -26,8 +27,8 @@ class DocumentChannel < ApplicationCable::Channel
 
   # Everyone is denied until you fill this in. Wire it to your app's auth:
   # identify current_user on the cable connection, then check they may read
-  # and write this document. A raising on_change covers store failures, not
-  # access control.
+  # and write this document. Don't lean on on_change raising for access
+  # control — that path exists for store failures.
   def authorized?(_document_key)
     false
   end
