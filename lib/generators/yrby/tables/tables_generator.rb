@@ -12,8 +12,9 @@ module Yrby
     # Template notes (kept here, not in the emitted migration): state is
     # 4.gigabytes - 1 (longblob on MySQL — a compacted snapshot is the whole
     # document; a 16 MB cap would break compaction) and payload is
-    # 16.megabytes - 1 (a delta is one edit batch — a big paste exceeds the
-    # 64 KB default blob). The partial unique index's WHERE only keeps
+    # 16.megabytes - 1 (one update can carry a big paste or a client's
+    # accumulated offline edits — the 64 KB default blob is too small).
+    # The partial unique index's WHERE only keeps
     # key-only rows out of the index: uniqueness holds without it, since
     # unique indexes treat NULLs as distinct on every supported database,
     # and MySQL drops the predicate harmlessly.

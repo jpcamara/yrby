@@ -12,7 +12,8 @@ class DocumentChannel < ApplicationCable::Channel
   on_load { |key| Y::Document.load_state(key) }
 
   # Record each CRDT delta durably. Runs before the change is acknowledged
-  # or broadcast; raising rejects the change and the client retransmits.
+  # or broadcast; if this raises, the change is neither acked nor relayed,
+  # and yrby-client retries it.
   on_change { |key, update| Y::Document.append(key, update) }
 
   def subscribed

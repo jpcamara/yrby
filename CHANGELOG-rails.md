@@ -11,19 +11,20 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The gem is now `yrby-rails`** (formerly `yrby-actioncable`) and a Rails
   engine. `yrby-actioncable` stops at 0.3.1; `yrby-rails` starts at 0.4.0.
-  `Y::ActionCable` keeps its name; it names the ActionCable adapter.
+  `Y::ActionCable` keeps its name as the public channel concern.
 
 ### Added
 
 - `Y::Document`, engine-owned: a unique transport `key`, an optional
   polymorphic `record` + `name` binding, and the compacted `state`
-  snapshot. It carries no projection state; consumers render at write
-  time, in the channel. `load_state(key)` / `append(key, update)` are the
-  store calls the generated channel uses; `locate`/`locate!` find by key.
+  snapshot. It stores CRDT state only; derived data (rendered HTML,
+  search text) is the application's job. `load_state(key)` /
+  `append(key, update)` are the store calls the generated channel uses;
+  `locate`/`locate!` find by key.
 - `Y::DocumentUpdate`, engine-owned: the uncompacted tail, one delta per
   row, compacted into `state` and deleted at the threshold. A load reads
   the snapshot plus the current tail. Compaction serializes on a
-  per-document row lock and never blocks appends. Causally-gapped updates
+  per-document row lock. Causally-gapped updates
   are quarantined (`pending`), excluded from the compaction trigger, and
   kept until they heal; a healed gap serves immediately and compacts away
   on the next pass.
