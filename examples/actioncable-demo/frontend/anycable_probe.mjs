@@ -40,7 +40,7 @@ class Client {
       syncProtocol.writeUpdate(enc, u)
       this._send(enc)
     })
-    this.ws = new WebSocket(`ws://localhost:${WS_PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (e) => this._msg(JSON.parse(e.data))
     this.ws.onerror = () => {}
   }
@@ -103,7 +103,7 @@ await sleep(1200)
 console.log(`\nLIVENESS  B received A's edit:        ${b.text().includes("hello-from-A")}`)
 console.log(`ECHO      A got its own edit back:     ${a.echoed > 0} (count ${a.echoed})`)
 
-const { status, doc } = await serverDoc(`http://localhost:${HTTP_PORT}`, ROOM)
+const { status, doc } = await serverDoc(`http://127.0.0.1:${HTTP_PORT}`, ROOM)
 const serverView = doc ? doc.getXmlFragment("default").toString() : `status ${status}`
 console.log(`SERVER    Puma /content (different process than RPC): ${status} ${serverView.slice(0, 120)}`)
 

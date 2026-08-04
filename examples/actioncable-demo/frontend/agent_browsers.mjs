@@ -2,7 +2,7 @@
 // sessions, typing into the SAME document at the same time. Each browser types
 // its own digit so every keystroke is accountable. Proves the full stack under
 // concurrent real-browser editing: Tiptap -> yrby-client provider ->
-// ActionCable/yrby-actioncable -> store, converging byte-for-byte with no
+// ActionCable/yrby-rails -> store, converging byte-for-byte with no
 // lost keystrokes.
 //
 //   PORT=3777 node agent_browsers.mjs        # 4 browsers (default)
@@ -25,7 +25,7 @@ const LOCAL_AB = resolve(here, "node_modules/.bin/agent-browser")
 const AB =
   process.env.AB_BIN ||
   (existsSync(LOCAL_AB) ? LOCAL_AB : `${process.env.HOME}/Projects/lexxy-realtime/node_modules/.bin/agent-browser`)
-const BASE = `http://localhost:${process.env.PORT || 3777}`
+const BASE = `http://127.0.0.1:${process.env.PORT || 3777}`
 const ROOM = process.env.ROOM || `agent-${Date.now()}`
 const N = Number(process.env.BROWSERS || 4)
 const PER = Number(process.env.PER || 20)

@@ -9,6 +9,7 @@ jobs:
   gem:
     name: Gem (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -46,6 +47,7 @@ jobs:
   eslint:
     name: Demo JS (ESLint)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: examples/actioncable-demo/frontend
@@ -58,6 +60,7 @@ jobs:
   client:
     name: yrby-client (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       matrix:
         node: ["20", "22"]
@@ -75,6 +78,7 @@ jobs:
   demo:
     name: Demo e2e (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -227,3 +231,7 @@ jobs:
           WS_PORT=8080 HTTP_PORT=3797 bun anycable_guarantee.mjs
           PORT=8080 bun reliable_provider.mjs
           kill $(cat /tmp/anycable.pid) || true
+      - name: Server log on failure
+        if: failure()
+        run: /usr/bin/tail -120 /tmp/e2e-server.log || true
+

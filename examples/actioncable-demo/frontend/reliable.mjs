@@ -47,7 +47,7 @@ class ReliableClient {
     })
 
     this.timer = setInterval(() => this.retransmit(), retransmitMs)
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (event) => this.onMessage(JSON.parse(event.data))
   }
 

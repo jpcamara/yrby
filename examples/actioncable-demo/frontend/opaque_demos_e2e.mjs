@@ -9,7 +9,7 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const here = dirname(fileURLToPath(import.meta.url))
-const BASE = process.env.BASE || "http://localhost:9600"
+const BASE = process.env.BASE || "http://127.0.0.1:9600"
 const AB = process.env.AB_BIN || resolve(here, "node_modules/.bin/agent-browser")
 const TAG = `${Date.now()}`.slice(-6)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

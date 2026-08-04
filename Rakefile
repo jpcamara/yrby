@@ -5,9 +5,9 @@ require "rake/testtask"
 require "rake/extensiontask"
 require "rb_sys/extensiontask"
 
-# This repo ships two gems (core `yrby` + `yrby-actioncable`), so the
+# This repo ships multiple gems (core `yrby` + `yrby-rails`), so the
 # default bundler/gem_tasks can't auto-pick a gemspec. Scope build/release/install
-# to the core gem; the pure-Ruby actioncable gem builds via `rake actioncable:build`.
+# to the core gem; the pure-Ruby rails gem builds via `rake rails_gem:build`.
 Bundler::GemHelper.install_tasks(name: "yrby")
 
 Rake::TestTask.new(:test) do |t|
@@ -16,12 +16,12 @@ Rake::TestTask.new(:test) do |t|
   t.test_files = FileList["test/**/*_test.rb"]
 end
 
-desc "Build the yrby-actioncable gem into pkg/"
-task "actioncable:build" do
-  require_relative "lib/y/action_cable/version"
+desc "Build the yrby-rails gem into pkg/"
+task "rails_gem:build" do
+  require_relative "lib/yrby/rails/version"
   mkdir_p "pkg"
-  sh "gem build yrby-actioncable.gemspec --output " \
-     "pkg/yrby-actioncable-#{Y::ActionCable::VERSION}.gem"
+  sh "gem build yrby-rails.gemspec --output " \
+     "pkg/yrby-rails-#{Yrby::Rails::VERSION}.gem"
 end
 
 namespace :release do
@@ -29,9 +29,9 @@ namespace :release do
   task :steps do
     require "json"
     require_relative "lib/y/version"
-    require_relative "lib/y/action_cable/version"
+    require_relative "lib/yrby/rails/version"
     core = Y::VERSION
-    cable = Y::ActionCable::VERSION
+    cable = Yrby::Rails::VERSION
     npm = JSON.parse(File.read("packages/client/package.json"))["version"]
     puts <<~STEPS
       This repo ships THREE publishable packages, versioned independently. Release the
@@ -45,10 +45,10 @@ namespace :release do
          d. gh run download <run-id> --dir tmp/ ; cp tmp/**/*.gem pkg/
          e. for g in pkg/yrby-#{core}*.gem; do gem push "$g" || break; done   # 9 gems (gem push takes ONE at a time)
 
-      2) yrby-actioncable #{cable}  — gem, pure Ruby; one gem, no precompilation
-         a. bump lib/y/action_cable/version.rb + CHANGELOG-actioncable.md, commit
-         b. rake actioncable:build
-         c. gem push pkg/yrby-actioncable-#{cable}.gem
+      2) yrby-rails #{cable}  — gem, pure Ruby; one gem, no precompilation
+         a. bump lib/yrby/rails/version.rb + CHANGELOG-rails.md, commit
+         b. rake rails_gem:build
+         c. gem push pkg/yrby-rails-#{cable}.gem
 
       3) yrby-client #{npm}  — npm package (client SDK: provider + sync engine + reliable delivery)
          a. bump packages/client/package.json version, commit

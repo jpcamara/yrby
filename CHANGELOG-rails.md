@@ -1,10 +1,45 @@
-# Changelog — yrby-actioncable
+# Changelog — yrby-rails
 
-All notable changes to the `yrby-actioncable` gem are documented here. The
+All notable changes to the `yrby-rails` gem (formerly `yrby-actioncable`) are
+documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed
+
+- **The gem is now `yrby-rails`** (formerly `yrby-actioncable`) and a Rails
+  engine. `yrby-actioncable` stops at 0.3.1; `yrby-rails` starts at 0.4.0.
+  `Y::ActionCable` keeps its name as the public channel concern.
+
+### Added
+
+- `Y::Document`, engine-owned: a unique transport `key`, an optional
+  polymorphic `record` + `name` binding, and the compacted `state`
+  snapshot. It stores CRDT state only; derived data (rendered HTML,
+  search text) is the application's job. `load_state(key)` /
+  `append(key, update)` are the store calls the generated channel uses;
+  `locate`/`locate!` find by key.
+- `Y::DocumentUpdate`, engine-owned: the uncompacted tail, one delta per
+  row, compacted into `state` and deleted at the threshold. A load reads
+  the snapshot plus the current tail. Compaction serializes on a
+  per-document row lock. Causally-gapped updates
+  are quarantined (`pending`), excluded from the compaction trigger, and
+  kept until they heal; a healed gap serves immediately and compacts away
+  on the next pass.
+- `Y::Document.for(record, name)` finds or creates a record's document,
+  derives its key (`post/1/body`), and adopts a key-only row already
+  holding that key, so a channel writing first and a binding created
+  later end up on one row.
+- `rails g yrby:tables` creates both tables. It is invoked by
+  `yrby:install` and usable directly by gems building on the same
+  storage.
+- `include Y::ActionCable` now includes `Y::ActionCable::Sync` for you;
+  the long spelling keeps working.
+- `rails generate yrby:install`: a `DocumentChannel` speaking the
+  y-websocket protocol over the gem-owned storage, plus the storage
+  migration.
 
 ## [0.3.1] - 2026-07-01
 

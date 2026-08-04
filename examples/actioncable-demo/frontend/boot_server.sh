@@ -43,7 +43,7 @@ case "$SERVER" in
     # --count forks that many worker processes, each running its own fiber
     # reactor. Plain http (not falcon's default https) so the ws:// harness
     # connects. Killing the controller pid tears down every forked worker.
-    bundle exec falcon serve --bind "http://localhost:$PORT" --count "$WORKERS" > "$LOG" 2>&1 &
+    bundle exec falcon serve --bind "http://127.0.0.1:$PORT" --count "$WORKERS" > "$LOG" 2>&1 &
     ;;
   *)
     echo "boot_server.sh: unknown SERVER=$SERVER (want puma|falcon)" >&2
@@ -57,7 +57,7 @@ esac
 echo $! > "$PIDFILE"
 
 for _ in $(seq 1 60); do
-  if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/docs/demo")" = "200" ]; then
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/docs/demo")" = "200" ]; then
     echo "boot_server.sh: $SERVER healthy on $PORT, $WORKERS worker(s) (pid $(cat "$PIDFILE"))"
     exit 0
   fi

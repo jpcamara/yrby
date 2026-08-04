@@ -36,7 +36,7 @@ class Client {
       this.send(enc)
     })
 
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (event) => this.onMessage(JSON.parse(event.data))
   }
 
@@ -98,7 +98,7 @@ for (let i = 1; i <= EDITS; i++) {
 await sleep(400) // let the server drain
 
 // Fetch the audit log and replay it with no live server help.
-const auditRes = await fetch(`http://localhost:${PORT}/docs/${ROOM}/audit`)
+const auditRes = await fetch(`http://127.0.0.1:${PORT}/docs/${ROOM}/audit`)
 const audit = await auditRes.json()
 // Each edit is its own transaction, but the reliable-delivery queue coalesces
 // updates that are still pending together (at-least-once delivery merges the
@@ -116,7 +116,7 @@ for (const entry of audit.updates) Y.applyUpdate(replay, fromBase64(entry))
 console.log("ok: replayed the audit log into a fresh document")
 
 // Compare the replay to the server's live document (read from its raw state).
-const liveText = await serverText(`http://localhost:${PORT}`, ROOM)
+const liveText = await serverText(`http://127.0.0.1:${PORT}`, ROOM)
 
 for (let i = 1; i <= EDITS; i++) {
   if (!liveText.includes(`change number ${i}`)) {

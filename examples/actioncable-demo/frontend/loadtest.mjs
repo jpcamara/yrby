@@ -59,7 +59,7 @@ class LoadClient {
       syncProtocol.writeUpdate(e, u)
       this._send(e)
     })
-    this.ws = new WebSocket(`ws://localhost:${this.wsPort}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${this.wsPort}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (ev) => this._msg(JSON.parse(ev.data))
     this.ws.onerror = () => { metrics.errors++ }
   }
@@ -105,14 +105,14 @@ const pct = (arr, p) => {
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]
 }
 const auditCount = async (room) => {
-  try { return (await (await fetch(`http://localhost:${HTTP_PORT}/docs/${room}/audit`)).json()).count }
+  try { return (await (await fetch(`http://127.0.0.1:${HTTP_PORT}/docs/${room}/audit`)).json()).count }
   catch { return 0 }
 }
 // Memory mode has no audit log, so count applied paragraphs from the server's
 // CRDT state.
 const serverParagraphs = async (room) => {
   try {
-    const { doc } = await serverDoc(`http://localhost:${HTTP_PORT}`, room)
+    const { doc } = await serverDoc(`http://127.0.0.1:${HTTP_PORT}`, room)
     if (!doc) return 0
     return [...doc.getXmlFragment("default").toArray()].filter((p) => p.length).length
   } catch { return 0 }

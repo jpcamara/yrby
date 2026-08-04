@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "y"
-require "y/action_cable/version"
 
 module Y
   # ActionCable integration for yrby.
@@ -12,6 +11,12 @@ module Y
   # with no Node sidecar. The CRDT documents, awareness, and protocol primitives
   # themselves come from the core `yrby` gem.
   module ActionCable
+    # `include Y::ActionCable` forwards to `Y::ActionCable::Sync`, the
+    # module's home. Both spellings work; the short one reads better in a
+    # channel.
+    def self.included(base)
+      base.include(Sync)
+    end
   end
 end
 

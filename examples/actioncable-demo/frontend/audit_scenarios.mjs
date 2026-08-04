@@ -24,7 +24,7 @@ import * as decoding from "lib0/decoding"
 import { serverText as readServerText } from "./server_read.mjs"
 
 const PORT = process.env.PORT || 3777
-const BASE = `http://localhost:${PORT}`
+const BASE = `http://127.0.0.1:${PORT}`
 const MSG_SYNC = 0
 
 const toBase64 = (bytes) => Buffer.from(bytes).toString("base64")
@@ -49,7 +49,7 @@ class Client {
 
   _connect() {
     this.doc.on("update", this._localUpdate)
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (event) => this._onMessage(JSON.parse(event.data))
   }
 

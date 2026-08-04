@@ -10,7 +10,7 @@ import { serverText } from "./server_read.mjs"
 
 const WS_PORT = process.env.WS_PORT || 8080
 const HTTP_PORT = process.env.HTTP_PORT || 3777
-const BASE = `http://localhost:${HTTP_PORT}`
+const BASE = `http://127.0.0.1:${HTTP_PORT}`
 const MSG_SYNC = 0
 const toB64 = (b) => Buffer.from(b).toString("base64")
 const fromB64 = (s) => new Uint8Array(Buffer.from(s, "base64"))
@@ -31,7 +31,7 @@ class Client {
       syncProtocol.writeUpdate(enc, u)
       this._send(enc)
     })
-    this.ws = new WebSocket(`ws://localhost:${WS_PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (e) => this._msg(JSON.parse(e.data))
     this.ws.onerror = () => {}
   }

@@ -47,7 +47,7 @@ class Client {
       syncProtocol.writeUpdate(enc, u)
       this._send(enc)
     })
-    this.ws = new WebSocket(`ws://localhost:${port}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${port}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (e) => this._msg(JSON.parse(e.data))
   }
   _msg(m) {
@@ -105,9 +105,9 @@ class Client {
   state() { return Y.encodeStateAsUpdate(this.doc) }
 }
 
-const serverText = (port, room = ROOM) => serverTextRead(`http://localhost:${port}`, room)
+const serverText = (port, room = ROOM) => serverTextRead(`http://127.0.0.1:${port}`, room)
 const auditLog = async (port) =>
-  (await fetch(`http://localhost:${port}/docs/${ROOM}/audit`)).json()
+  (await fetch(`http://127.0.0.1:${port}/docs/${ROOM}/audit`)).json()
 const sameBytes = (a, b) => a.length === b.length && a.every((x, i) => x === b[i])
 
 // --- Scenario ---------------------------------------------------------------
@@ -184,7 +184,7 @@ check(
 
 const replay = new Y.Doc()
 for (const entry of auditA.updates) Y.applyUpdate(replay, fromB64(entry))
-const { doc: live } = await serverDoc(`http://localhost:${portA}`, ROOM)
+const { doc: live } = await serverDoc(`http://127.0.0.1:${portA}`, ROOM)
 check(
   "the shared audit log alone replays to the converged document",
   sameBytes(Y.encodeStateAsUpdate(replay), Y.encodeStateAsUpdate(live))

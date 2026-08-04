@@ -38,7 +38,7 @@ class Client {
       syncProtocol.writeUpdate(enc, update)
       this._send(enc)
     })
-    this.ws = new WebSocket(`ws://localhost:${PORT}/cable`, ["actioncable-v1-json"])
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/cable`, ["actioncable-v1-json"])
     this.ws.onmessage = (e) => this._msg(JSON.parse(e.data))
   }
   _msg(m) {
@@ -86,7 +86,7 @@ class Client {
   }
 }
 
-const auditCount = async () => (await (await fetch(`http://localhost:${PORT}/docs/${ROOM}/audit`)).json()).count
+const auditCount = async () => (await (await fetch(`http://127.0.0.1:${PORT}/docs/${ROOM}/audit`)).json()).count
 
 if (PHASE === "write") {
   const c = new Client(ROOM)
@@ -125,7 +125,7 @@ for (let i = 1; i <= EDITS; i++) {
   }
 }
 
-const liveText = await serverText(`http://localhost:${PORT}`, ROOM)
+const liveText = await serverText(`http://127.0.0.1:${PORT}`, ROOM)
 const liveMissing = []
 for (let i = 1; i <= EDITS; i++) if (!liveText.includes(`edit-${i}`)) liveMissing.push(i)
 
