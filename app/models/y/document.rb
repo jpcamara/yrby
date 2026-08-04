@@ -31,7 +31,7 @@ class Y::Document < ActiveRecord::Base
   # association: reading `record` constantizes record_type, which must not
   # be a validity requirement.
   validates :name, presence: true, if: :record_type
-  validates :record_type, presence: true, if: :name
+  validates :record_type, presence: true, if: -> { name || record_id }
   validates :record_id, presence: true, if: :record_type
   before_validation :assign_default_key, on: :create
 
@@ -52,17 +52,33 @@ class Y::Document < ActiveRecord::Base
     # if a channel already appended under the key this binding derives, a
     # key-only row exists whose key is taken — claiming it converges the two
     # identities where a plain insert would collide on the key index.
+    #
+    # The insert can still lose a race it can't see: a channel creates the
+    # key-only row after adopt looked and before the insert lands, so
+    # create_or_find_by! collides on the key index — and its internal
+    # retry, which looks up by record + name, misses the key-only row and
+    # raises RecordNotFound. One more pass adopts the row that won.
     def for(record, name)
-      find_by(record: record, name: name.to_s) ||
-        adopt(record, name) ||
-        create_or_find_by!(record: record, name: name.to_s)
+      attempts = 0
+      begin
+        find_by(record: record, name: name.to_s) ||
+          adopt(record, name) ||
+          create_or_find_by!(record: record, name: name.to_s)
+      rescue ActiveRecord::RecordNotFound
+        raise if (attempts += 1) > 1
+
+        retry
+      end
     end
 
     # The store contract for a sync channel, keyed by the transport key.
-    def load_state(key) = locate(key)&.load_state
+    # Both skip the state blob (select(:id)): append never reads it, and
+    # load_state re-reads it fresh after the tail (see below), so neither
+    # should drag a potentially large snapshot over the wire per call.
+    def load_state(key) = select(:id).find_by(key: key)&.load_state
 
     def append(key, update)
-      locate!(key).append(update)
+      (select(:id).find_by(key: key) || create_or_find_by!(key: key)).append(update)
     end
 
     private
@@ -76,7 +92,10 @@ class Y::Document < ActiveRecord::Base
     end
 
     def derived_key(record, name)
-      "#{record.class.base_class.name.underscore}/#{record.id}/#{name}"
+      # polymorphic_name is what Rails writes to record_type, so adoption
+      # and assign_default_key derive the same string under any setting of
+      # store_full_class_name.
+      "#{record.class.polymorphic_name.underscore}/#{record.id}/#{name}"
     end
   end
 
@@ -89,17 +108,23 @@ class Y::Document < ActiveRecord::Base
     compact! if updates.where(pending: false).count >= compact_every
   end
 
-  # The merged document: state plus the whole tail. Quarantined rows are
-  # applied too — the output goes through compacted_state_update, which is
-  # gap-free by construction, so an unhealed gap contributes nothing while a
-  # gap healed by a newer tail row is served immediately instead of waiting
+  # The merged document: state plus the whole tail. The tail is read first
+  # and the snapshot re-read after it, both straight from the database: a
+  # compaction committing between the two reads then hands us rows already
+  # folded into the fresh snapshot — an idempotent double-apply — where
+  # the reverse order could pair a pre-compaction snapshot with an empty
+  # tail and omit committed changes. Quarantined rows are applied too —
+  # the output goes through compacted_state_update, which is gap-free by
+  # construction, so an unhealed gap contributes nothing while a gap
+  # healed by a newer tail row is served immediately instead of waiting
   # for the next compaction.
   def load_state
-    tail = updates.pluck(:payload)
-    return state if tail.empty?
+    tail = Y::DocumentUpdate.where(document_id: id).pluck(:payload)
+    snapshot = self.class.where(id: id).pick(:state)
+    return snapshot if tail.empty?
 
     doc = Y::Doc.new
-    doc.apply_update(state) if state
+    doc.apply_update(snapshot) if snapshot
     tail.each { |payload| doc.apply_update(payload) }
     doc.compacted_state_update
   end
@@ -144,8 +169,9 @@ class Y::Document < ActiveRecord::Base
     true
   end
 
-  # Derives post/1/body from the polymorphic record_type — the base_class
-  # name, so STI subclasses share a key. Namespaces keep their slash
+  # Derives post/1/body from the polymorphic record_type — Rails stores
+  # the polymorphic_name there, which is base_class-derived, so STI
+  # subclasses share a key. Namespaces keep their slash
   # (admin/post/1/body); flattening would collide Admin::Post with
   # AdminPost. record_id is nil for an unsaved record at validation time
   # (autosave runs after), so it guards too. Key-only documents supply
