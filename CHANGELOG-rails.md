@@ -5,6 +5,21 @@ documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Y::EncryptedDocument` / `Y::EncryptedDocumentUpdate`: document storage
+  encrypted with Active Record encryption (`state` and update payloads),
+  on the same tables — the class you access through decides the
+  cryptography, the way `ActionText::EncryptedRichText` does. Point a
+  channel's `on_load`/`on_change` (or a record association) at
+  `Y::EncryptedDocument` and configure the app's encryption keys. Keep
+  one access path per document: rows written encrypted read back as
+  ciphertext through the plain classes. Ciphertext is larger than the
+  plaintext, so the effective payload cap is roughly three quarters of
+  the column limit.
+
 ## [0.4.0] - 2026-08-04
 
 ### Changed

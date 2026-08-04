@@ -9,6 +9,12 @@ unless defined?(YRBY_AR_BOOTED)
   require "active_record"
 
   ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
+  # Test-only keys so the encrypted model variants can round-trip.
+  ActiveRecord::Encryption.configure(
+    primary_key: "test-primary-key" * 2,
+    deterministic_key: "test-deterministic-key" * 2,
+    key_derivation_salt: "test-key-derivation-salt" * 2
+  )
   ActiveRecord::Schema.verbose = false
   ActiveRecord::Schema.define do
     # The gem-owned models, as yrby:tables migrates them.

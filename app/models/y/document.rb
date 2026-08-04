@@ -119,7 +119,12 @@ class Y::Document < ActiveRecord::Base
   # healed by a newer tail row is served immediately instead of waiting
   # for the next compaction.
   def load_state
-    tail = Y::DocumentUpdate.where(document_id: id).pluck(:payload)
+    # The tail class comes from the association reflection (not the
+    # association itself, whose cache could serve a stale tail) so a
+    # subclass swapping in encrypted rows reads them through the class
+    # that can decrypt them.
+    tail = self.class.reflect_on_association(:updates).klass
+               .where(document_id: id).pluck(:payload)
     snapshot = self.class.where(id: id).pick(:state)
     return snapshot if tail.empty?
 
