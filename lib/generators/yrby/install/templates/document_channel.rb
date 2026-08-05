@@ -29,7 +29,7 @@ class DocumentChannel < ApplicationCable::Channel
   # Everyone is denied until you fill this in. Wire it to your app's auth:
   # identify current_user on the cable connection, then check they may read
   # and write this document. Don't lean on on_change raising for access
-  # control — that path exists for store failures.
+  # control; that path exists for store failures.
   def authorized?(_document_key)
     false
   end

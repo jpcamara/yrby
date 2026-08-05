@@ -2,7 +2,7 @@
 
 # A document whose stored bytes are encrypted with Active Record encryption
 # (state here, update payloads via Y::EncryptedDocumentUpdate). Same tables
-# as Y::Document — the class you access through decides the cryptography,
+# as Y::Document; the class you access through decides the cryptography,
 # the way ActionText::EncryptedRichText does for rich text. Keep one access
 # path per document: rows written encrypted read back as ciphertext through
 # the plain classes.

@@ -6,13 +6,13 @@
 #                   Apps can supply their own ("room-42"), so nothing
 #                   parses meaning out of a key.
 #   record + name   which model attribute the document backs, where name
-#                   is the attribute name ("body") — optional, one
+#                   is the attribute name ("body"). Optional, one
 #                   document per attribute per record, the same scheme as
 #                   ActionText::RichText.
 #
 # When a binding exists and no key was supplied, the key derives as
-# post/1/body. Either side can arrive first — a channel can write under a
-# key before any binding exists — so `.for` adopts a key-only row whose
+# post/1/body. Either side can arrive first (a channel can write under a
+# key before any binding exists), so `.for` adopts a key-only row whose
 # key matches the derived one, converging both on one row.
 #
 # `state` holds the merged snapshot; the update rows are the uncompacted
@@ -50,12 +50,12 @@ class Y::Document < ActiveRecord::Base
     # The document bound to a record's attribute, created on first use.
     # Find first (after the first call, every call is a read), then adopt:
     # if a channel already appended under the key this binding derives, a
-    # key-only row exists whose key is taken — claiming it converges the two
+    # key-only row exists whose key is taken; claiming it converges the two
     # identities where a plain insert would collide on the key index.
     #
     # The insert can still lose a race it can't see: a channel creates the
     # key-only row after adopt looked and before the insert lands, so
-    # create_or_find_by! collides on the key index — and its internal
+    # create_or_find_by! collides on the key index, and its internal
     # retry, which looks up by record + name, misses the key-only row and
     # raises RecordNotFound. One more pass adopts the row that won.
     def for(record, name)
@@ -111,9 +111,9 @@ class Y::Document < ActiveRecord::Base
   # The merged document: state plus the whole tail. The tail is read first
   # and the snapshot re-read after it, both straight from the database: a
   # compaction committing between the two reads then hands us rows already
-  # folded into the fresh snapshot — an idempotent double-apply — where
+  # folded into the fresh snapshot, an idempotent double-apply, where
   # the reverse order could pair a pre-compaction snapshot with an empty
-  # tail and omit committed changes. Quarantined rows are applied too —
+  # tail and omit committed changes. Quarantined rows are applied too:
   # the output goes through compacted_state_update, which is gap-free by
   # construction, so an unhealed gap contributes nothing while a gap
   # healed by a newer tail row is served immediately instead of waiting
@@ -169,7 +169,7 @@ class Y::Document < ActiveRecord::Base
     true
   end
 
-  # Derives post/1/body from the polymorphic record_type — Rails stores
+  # Derives post/1/body from the polymorphic record_type. Rails stores
   # the polymorphic_name there, which is base_class-derived, so STI
   # subclasses share a key. Namespaces keep their slash
   # (admin/post/1/body); flattening would collide Admin::Post with
