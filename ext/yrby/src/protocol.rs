@@ -139,14 +139,14 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     // blocks past the gap can still integrate (yrs plants a Skip hole in the
     // store) when their origins don't need the missing range. That moves
     // neither the doc's public state vector (yrs caps it at the first hole)
-    // nor pending — invisible to every comparison below, so genuinely novel
+    // nor pending: invisible to every comparison below, so genuinely novel
     // content would report "doesn't advance": applied, acked, but never
     // recorded or broadcast. The update's own state_vector() caps at its
     // first Skip the same way, so any insertion past a non-zero cap reveals
     // such a gap: conservatively report it as advancing (record it; a
     // duplicate in the log is harmless, dropped content is not). Standard
-    // Yjs providers never emit these frames — a client's own updates and
-    // diffs are gap-free — so this guards crafted or pathologically merged
+    // Yjs providers never emit these frames (a client's own updates and
+    // diffs are gap-free), so this guards crafted or pathologically merged
     // input, not a hot path.
     let capped = update.state_vector();
     for (client, ranges) in update.insertions(true).iter() {
@@ -689,12 +689,12 @@ mod tests {
         // A merged update hiding an internal gap behind a Skip, whose
         // post-hole blocks integrate anyway (their origins don't need the
         // missing range). Integration plants a Skip hole, so neither the
-        // public state vector nor pending moves — before the hidden-gap
+        // public state vector nor pending moves, before the hidden-gap
         // check, the probe comparison reported genuinely novel content as
         // "doesn't advance": update_ready? accepted it, the doc applied it,
         // but it was never recorded or broadcast. Unreachable through
         // standard Yjs providers (a client's own updates and diffs are
-        // gap-free) — this is a crafted/hostile frame shape.
+        // gap-free); this is a crafted/hostile frame shape.
         let a = Doc::new();
         let t1 = a.get_or_insert_text("one");
         t1.insert(&mut a.transact_mut(), 0, "first");
