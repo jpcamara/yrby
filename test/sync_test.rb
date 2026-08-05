@@ -479,8 +479,8 @@ class SyncTest < Minitest::Test
     recorder = appending_recorder(store)
     msg = update_message(YjsFixtures::ConcurrentClients::FIVE.first)
 
-    32.times.map { Thread.new { helper_for(store: store, recorder: recorder).sync_receive(msg, key) } }
-            .each(&:join)
+    threads = 32.times.map { Thread.new { helper_for(store: store, recorder: recorder).sync_receive(msg, key) } }
+    threads.each(&:join)
 
     refute_empty store, "at-least-once: the update is recorded"
 
