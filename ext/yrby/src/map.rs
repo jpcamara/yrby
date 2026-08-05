@@ -7,7 +7,7 @@
 //! `nogvl` block); the closure works purely on `Send` data.
 //!
 //! A map is addressed by its root name plus a path of keys, and re-resolved per
-//! operation — so we never cache a raw yrs branch pointer that could dangle when
+//! operation, so we never cache a raw yrs branch pointer that could dangle when
 //! the tree is mutated (possibly on another thread). If the path no longer points
 //! at a map, reads return empty and writes are a no-op error.
 
@@ -166,7 +166,7 @@ impl RbMap {
 
     // --- reads ---
 
-    /// `map[key]` — a snapshot Ruby value (primitives; nested map/array become a
+    /// `map[key]`: a snapshot Ruby value (primitives; nested map/array become a
     /// deep `Hash`/`Array`). Use `get_map` for a live nested handle.
     fn get(&self, key: Value) -> Result<Value, Error> {
         let key = key_to_string(key)?;
@@ -253,7 +253,7 @@ impl RbMap {
         h.as_value()
     }
 
-    /// `each { |key, value| }` — yields a snapshot of each entry (read under
+    /// `each { |key, value| }`: yields a snapshot of each entry (read under
     /// `nogvl`, yielded with the GVL held so the block can call back into Ruby).
     fn each(&self) -> Result<(), Error> {
         let ruby = Ruby::get().unwrap();
@@ -266,7 +266,7 @@ impl RbMap {
 
     // --- writes ---
 
-    /// `map[key] = value` — store a value. Ruby `Hash` creates a live nested map;
+    /// `map[key] = value`: store a value. Ruby `Hash` creates a live nested map;
     /// `Array` an embedded array; primitives their `Any` counterpart. Returns the
     /// value assigned (so `map[k] = v` yields `v`, as Ruby expects).
     fn set(&self, key: Value, value: Value) -> Result<Value, Error> {

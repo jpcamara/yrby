@@ -202,7 +202,7 @@ handle (below).
 
 ### Y::Map (live shared maps)
 
-`Doc#get_map` returns a live handle to a `Y.Map` root — reading it reflects the
+`Doc#get_map` returns a live handle to a `Y.Map` root: reading it reflects the
 current document, and writing it mutates the CRDT (so the change syncs to every
 peer). Handles carry the same thread-safety guarantees as `Doc`: every operation
 runs with the GVL released and holds no lock across the boundary.
@@ -210,13 +210,13 @@ runs with the GVL released and holds no lock across the boundary.
 ```ruby
 map = doc.get_map("state")   # root map, created if absent
 
-# Write — primitives, arrays, and (nested) hashes
+# Write: primitives, arrays, and (nested) hashes
 map["title"]  = "Dashboard"
 map["count"]  = 3
 map["tags"]   = %w[a b c]
 map["user"]   = { "name" => "Ada", "role" => "eng" }  # nested Y.Map
 
-# Read — a snapshot value (nested map/array come back as Hash/Array)
+# Read: a snapshot value (nested map/array come back as Hash/Array)
 map["title"]           # => "Dashboard"
 map.to_h               # => { "title" => "Dashboard", "count" => 3, ... }
 map.keys               # => ["title", "count", "tags", "user"]
@@ -224,7 +224,7 @@ map.size               # => 4
 map.key?("title")      # => true
 map.each { |k, v| ... }
 
-# A live handle to a nested map — mutating it mutates the document
+# A live handle to a nested map; mutating it mutates the document
 user = map.get_map("user")   # => Y::Map (or nil if absent / not a map)
 user["name"] = "Grace"       # doc now has state.user.name == "Grace"
 
