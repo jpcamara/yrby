@@ -96,23 +96,23 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # take custody of a causally-incomplete update.
       CAUSAL_GAP_POLICIES = %i[reject accept_strict accept].freeze
 
-      # How to handle a causally-incomplete ("gappy") update — one whose
+      # How to handle a causally-incomplete ("gappy") update, one whose
       # causally-prior update the store hasn't seen. Defaults to :reject.
       #
-      # :reject (default) — Don't record it. Ask the sender to resync so the gap
+      # :reject (default): Don't record it. Ask the sender to resync so the gap
       #   heals as one complete delta. The durable log never holds pending
       #   content, and an open gap surfaces loudly as resync traffic. This is the
       #   original behavior; it rebuilds the doc from the store on every update to
       #   detect the gap.
       #
-      # :accept_strict — Record the gappy update immediately (as a pending
+      # :accept_strict: Record the gappy update immediately (as a pending
       #   struct) but do NOT ack it until it integrates. The sender keeps
       #   retransmitting it, so an unhealed gap still self-signals as retry
       #   traffic, while the edit is durable the moment it arrives. Rebuilds the
       #   doc to decide readiness, like :reject.
       #
-      # :accept — Record and ack the gappy update immediately (ack-on-durable).
-      #   This inverts the write path: it does NOT rebuild the doc — it appends,
+      # :accept: Record and ack the gappy update immediately (ack-on-durable).
+      #   This inverts the write path: it does not rebuild the doc. It appends,
       #   relays, and acks, delegating dedup to the store's idempotency (see
       #   on_change). Fastest and cheapest, but an unhealed gap is silent (it
       #   sits as pending, never served), so lean on the repair loop (a joiner is
@@ -126,7 +126,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       #
       # Both accept modes require a LOSSLESS store: on_load must return state that
       # preserves pending (encode_state_as_update, or a replayed raw append log),
-      # and any compaction must be guarded with `doc.pending?` —
+      # and any compaction must be guarded with `doc.pending?`;
       # compacted_state_update strips pending and would drop an open gap.
       def causal_gap_policy(value = :__unset__)
         unless value == :__unset__
@@ -142,7 +142,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
 
       # Optional observability hook, fired when the server observes a causal gap
-      # (a pending struct) in an accept mode — at record time in :accept_strict,
+      # (a pending struct) in an accept mode: at record time in :accept_strict,
       # and at join/serve time whenever a loaded doc is still pending. Called with
       # (key) in the channel instance's context (instance_exec). Use it to emit a
       # metric (pending-document count, gap age) so an unhealed gap is visible;
@@ -172,7 +172,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # The opening handshake is also the gap-repair prompt: sending our SyncStep1
       # asks the joining client for everything beyond our integrated state, which
       # is exactly the missing dependency an accept-mode gap is waiting on. If a
-      # live client has it, the join heals the gap. We only surface it (on_gap) —
+      # live client has it, the join heals the gap. We only surface it (on_gap);
       # the handshake below already does the soliciting.
       doc = sync_load_doc
       sync_transmit(doc.sync_step1)
@@ -301,7 +301,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # served state until its missing dependency arrives and heals it. In :reject a
     # gap surfaced loudly as a resync storm; in accept modes it's quiet, so make it
     # findable: log at info, and fire the on_gap hook so the app can emit a metric
-    # (pending-document count, gap age). Errors in the hook are swallowed —
+    # (pending-document count, gap age). Errors in the hook are swallowed;
     # observability must never break frame handling.
     def sync_observe_gap
       logger.info do
@@ -324,7 +324,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # everything beyond our integrated state). This is the repair loop for an
     # unhealed gap: any client that has the missing update heals it on contact.
     # A truly-unhealable gap (no live client has the dependency) will not heal
-    # here — it needs operator action, which is what on_gap surfaces.
+    # here; it needs operator action, which is what on_gap surfaces.
     def sync_solicit_repair(doc)
       return if self.class.causal_gap_policy == :reject
       return unless doc.pending?
@@ -433,7 +433,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
-    # :accept — ack-on-durable, inverted write path. No doc rebuild and no gap
+    # :accept: ack-on-durable, inverted write path. No doc rebuild and no gap
     # check: record (the store dedups by idempotency), relay, ack. An open gap
     # heals via the join handshake (sync_solicit_repair) and is surfaced by on_gap
     # at serve time, not here.
@@ -443,7 +443,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       :recorded
     end
 
-    # :reject and :accept_strict — rebuild from the store to decide readiness.
+    # :reject and :accept_strict: rebuild from the store to decide readiness.
     # (O(history) per update; snapshot in on_load if that cost bites.)
     def sync_gated_update(update, encoded)
       doc = sync_load_doc
@@ -463,13 +463,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # as a duplicate), so use sync_adds_content? there.
       adds_content = ready ? doc.update_advances?(update) : sync_adds_content?(doc, update)
 
-      # A duplicate we've already recorded: skip on_change — but DO re-broadcast.
+      # A duplicate we've already recorded: skip on_change, but re-broadcast.
       # If the first attempt died between record and broadcast, this retry is the
       # only path left to the live subscribers. Duplicate broadcasts are free
       # (CRDT apply is idempotent). Ack a *ready* duplicate (a genuine
       # already-integrated retry), but NOT a still-gappy one: acking a
       # still-pending retry would tell the sender to stop retransmitting before
-      # the update integrates, defeating :accept_strict's self-signaling — so a
+      # the update integrates, defeating :accept_strict's self-signaling, so a
       # gappy duplicate stays unacked, exactly like the fresh gap below.
       unless adds_content
         sync_distribute(encoded)

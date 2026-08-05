@@ -572,7 +572,7 @@ servers:
   `on_load`); a causally-incomplete update triggers a resync instead, so the log
   always rebuilds cleanly. Set `causal_gap_policy` to `:accept` or
   `:accept_strict` to instead record a gappy update immediately as a pending
-  struct that heals when its dependency arrives — faster healing, and a received
+  struct that heals when its dependency arrives: faster healing, and a received
   edit is durable even if its sender dies before a resync would complete, at the
   cost of a lossless store contract and different observability. See
   [Accepting causal gaps](#accepting-causal-gaps).
@@ -606,8 +606,8 @@ servers:
 By default (`causal_gap_policy :reject`) a causally-incomplete update is rejected
 and the sender is asked to resync, so the durable log never holds pending
 content. Two other policies instead take custody of a gappy update the moment it
-arrives — it parks as a pending struct and heals when its missing dependency
-lands — trading the resync round trip for a lossless store contract and quieter
+arrives; it parks as a pending struct and heals when its missing dependency
+lands, trading the resync round trip for a lossless store contract and quieter
 failure.
 
 ```ruby
@@ -623,7 +623,7 @@ end
 |---|---|---|---|---|
 | `:reject` (default) | no | no (resyncs) | rebuild + gap check | resync traffic (loud) |
 | `:accept_strict` | yes | not until it integrates | rebuild + gap check | the sender's retransmits (loud-ish) |
-| `:accept` | yes | immediately (ack-on-durable) | append + relay + ack (no rebuild) | nothing — see repair + `on_gap` (quiet) |
+| `:accept` | yes | immediately (ack-on-durable) | append + relay + ack (no rebuild) | nothing; see repair + `on_gap` (quiet) |
 
 **Serving is gap-free under every policy.** `handle_sync_message` and
 `compacted_state_update` exclude pending, so a peer never receives un-integrable
@@ -640,7 +640,7 @@ retransmits.
 Both accept modes require two things:
 
 **1. A lossless, idempotent store.** `on_load` must return state that preserves
-pending — `encode_state_as_update` (lossless), or a replayed raw append log.
+pending: `encode_state_as_update` (lossless), or a replayed raw append log.
 Compaction must **not** run `compacted_state_update` while `doc.pending?`, since
 that strips the pending struct and loses the gap. And because `:accept` doesn't
 rebuild the doc to dedup a lost-ack retry, the store must be idempotent (key by
@@ -682,13 +682,13 @@ served, so you replace that signal two ways:
 - **The repair loop.** When a client joins (or sends a SyncStep1) and a gap is
   open, the server solicits the missing dependency from that client by sending
   its SyncStep1. Any live client that has the missing update heals the gap on
-  contact — no separate strike subsystem. A *truly* unhealable gap (no live
+  contact, with no separate strike subsystem. A *truly* unhealable gap (no live
   client has the dependency, e.g. it was lost from the store) will not heal this
   way; that is what the hook below is for.
 - **The `on_gap` hook.** Fires with the document key whenever a gap is observed
   (at record time in `:accept_strict`, and at join/serve time whenever a loaded
-  doc is still pending). Use it to emit a metric — a pending-document count, or
-  the age of the oldest open gap — so an unhealed gap is visible. A gap is also
+  doc is still pending). Use it to emit a metric (a pending-document count, or
+  the age of the oldest open gap) so an unhealed gap is visible. A gap is also
   logged at `info`. Errors in the hook are swallowed so observability can never
   break frame handling.
 
