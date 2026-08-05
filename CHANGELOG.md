@@ -20,7 +20,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Handles carry the same thread-safety guarantees as `Doc`: every operation opens
   its own transaction inside `nogvl` (GVL released) and holds no lock across the
   boundary. A handle is addressed by root name plus a path of keys and re-resolves
-  per operation — it never caches a raw yrs branch pointer that could dangle when
+  per operation; it never caches a raw yrs branch pointer that could dangle when
   the tree is mutated (possibly on another thread), so a nested handle keeps
   working even as sibling keys change around it. `Y::Map` is asserted `Send + Sync`
   at compile time alongside `Doc`.
