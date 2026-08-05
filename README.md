@@ -572,7 +572,7 @@ servers:
   retransmitting it would loop endlessly (server resyncs → client resends →
   repeat). After `gap_strike_limit` rejections of the same update on one
   connection (default 3, minimum 2), the channel settles it with
-  `{ "ack" => id, "dropped" => true }` and drops it instead of resyncing again —
+  `{ "ack" => id, "dropped" => true }` and drops it instead of resyncing again;
   breaking the loop while never dropping a *healable* gap (those heal within a
   resync or two, and healing frees the strike). The `dropped` flag lets the
   client surface the loss (`yrby-client` reports it via `onError`) instead of

@@ -245,7 +245,7 @@ class SyncTest < Minitest::Test
     helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts) # default limit 3
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U1, id: 1), "doc-key")
 
-    # U3 needs the missing U2 — gappy every time.
+    # U3 needs the missing U2: gappy every time.
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 2), "doc-key") # strike 1 -> resync
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 3), "doc-key") # strike 2 -> resync
     resyncs_before = transmits.count { |t| t.is_a?(Hash) && t.key?("update") }
@@ -290,7 +290,7 @@ class SyncTest < Minitest::Test
   end
 
   def test_dropped_ack_carries_the_dropped_flag_but_a_recorded_ack_does_not
-    # The client must be able to tell "durably recorded" from "abandoned" —
+    # The client must be able to tell "durably recorded" from "abandoned";
     # otherwise it prunes the batch and reports synced over silently-lost data.
     transmits = []
     helper = helper_for(store: [YjsFixtures::CausalChain::U1], transmits: transmits)
@@ -362,7 +362,7 @@ class SyncTest < Minitest::Test
   # subscription's istate (a string=>string hash round-tripped through
   # anycable-go) survives. Mimic anycable-rails' state_attr_accessor faithfully:
   # a class-level macro defining accessors that JSON-round-trip through a shared
-  # istate hash — declared BEFORE the concern is included, as in a real app.
+  # istate hash, declared before the concern is included, as in a real app.
   module FakeAnyCableState
     def state_attr_accessor(*names)
       names.each do |name|
@@ -407,7 +407,7 @@ class SyncTest < Minitest::Test
   end
 
   def test_anycable_strikes_survive_fresh_instances_via_istate
-    # Each message is handled by a FRESH instance sharing only istate — the drop
+    # Each message is handled by a fresh instance sharing only istate; the drop
     # must still trip on the third rejection of the same update.
     istate = {}
     store = []

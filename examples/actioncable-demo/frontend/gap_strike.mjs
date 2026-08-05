@@ -2,14 +2,14 @@
 // update whose causal dependency is gone for good (cross-client origins the
 // server never saw and the client can't supply). The server must resync it
 // twice (the heal attempts), then settle it on the third strike with
-// `{ ack, dropped: true }` — and never record it. A healable gap (dependency
+// `{ ack, dropped: true }`, and never record it. A healable gap (dependency
 // arrives) must still record normally with a plain ack.
 //
-// Runs against BOTH stacks — the wire protocol is identical:
+// Runs against both stacks; the wire protocol is identical:
 //   Plain ActionCable:  WS_PORT=3777 HTTP_PORT=3777 bun gap_strike.mjs
 //   AnyCable:           WS_PORT=8080 HTTP_PORT=3797 bun gap_strike.mjs
 // (Under AnyCable the strike table survives the per-command fresh channel
-// instance via anycable-rails istate — that's the part this proves.)
+// instance via anycable-rails istate; that's the part this proves.)
 import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
@@ -29,7 +29,7 @@ const check = (label, ok) => {
 
 // A cross-client-origin gap: client 3 creates "abc"; client 1 applies it and
 // types between client 3's characters. On a server that never saw client 3's
-// content, client 1's delta is causally incomplete — and our poisoned client
+// content, client 1's delta is causally incomplete, and our poisoned client
 // never answers the resync (its copy of the dependency is gone), so the gap is
 // unhealable.
 const buildGap = () => {
