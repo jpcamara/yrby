@@ -54,8 +54,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # After this many times the *same* update is rejected as a causal gap on one
     # connection, stop resyncing and instead settle it (ack) + drop it. A gap
-    # that survives repeated resyncs is unhealable — its missing dependency is
-    # gone for good (a permanently-orphaned pending struct) — and resyncing it
+    # that survives repeated resyncs is unhealable (its missing dependency is
+    # gone for good, a permanently-orphaned pending struct), and resyncing it
     # forever just amplifies the client's retransmit loop. A healable gap heals
     # within a resync or two, well under this. Override with `gap_strike_limit`;
     # set to nil to disable (always resync). See `sync_gap_strike`.
@@ -71,7 +71,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # fresh channel instance, so a plain ivar resets every message and the
       # unhealable-gap drop would never trip. anycable-rails' state_attr_accessor
       # persists the value into the subscription's istate, which anycable-go
-      # round-trips on every command — so strikes accumulate there too. On plain
+      # round-trips on every command, so strikes accumulate there too. On plain
       # ActionCable (anycable-rails loaded but not serving) the accessor behaves
       # like attr_accessor; without anycable-rails we fall back to an ivar.
       # NOTE: anycable-rails must be loaded before the channel class is defined
@@ -232,7 +232,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # Count consecutive gap rejections of `update` on this connection, returning
     # the new count. Keyed by update content (SHA-256) so independent gaps track
-    # separately — a slow-to-heal legit gap must not push an unrelated one toward
+    # separately: a slow-to-heal legit gap must not push an unrelated one toward
     # the drop.
     #
     # Where the state lives:
@@ -413,7 +413,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       # Don't record a causally-incomplete update; resync so the gap heals as
       # one complete delta. But a gap that survives repeated resyncs is
-      # unhealable (its missing dependency is gone for good) — resyncing it
+      # unhealable (its missing dependency is gone for good); resyncing it
       # forever just feeds the client's retransmit loop. After
       # `gap_strike_limit` rejections of the same update, settle it (ack via
       # the :dropped_unhealable outcome) and drop it instead.
@@ -427,7 +427,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         return :gap
       end
 
-      # A lost-ack retry: already recorded, so skip on_change — but DO
+      # A lost-ack retry: already recorded, so skip on_change, but do
       # re-broadcast. If the first attempt died between record and broadcast,
       # this retry is the only path left to the live subscribers. Duplicate
       # broadcasts are free (CRDT apply is idempotent).

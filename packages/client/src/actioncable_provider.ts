@@ -187,7 +187,7 @@ export class ActionCableProvider {
       {
         received(message: CableMessage) {
           // Reliable-delivery ack: confirm + prune the local queue. `dropped`
-          // marks a settle-without-record (unhealable gap) — the session prunes
+          // marks a settle-without-record (unhealable gap); the session prunes
           // either way but surfaces the drop via onError("ack-dropped").
           if (message && message.ack !== undefined) {
             provider.session.ack(message.ack, message.dropped === true);

@@ -151,7 +151,7 @@ export class YProtocolSession {
    * A reliable-delivery `{ ack: id }` envelope arrived. `dropped` is set when
    * the server settled the update WITHOUT recording it (rejected as an
    * unhealable causal gap after repeated resyncs). The queue is pruned either
-   * way — retransmitting an unhealable update would loop forever — but a
+   * way (retransmitting an unhealable update would loop forever), but a
    * dropped settle is surfaced via onError ("ack-dropped") so the app can warn
    * or reload instead of silently reporting synced over lost data.
    */
