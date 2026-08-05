@@ -5,7 +5,7 @@ module Y
     # The transport-neutral yrby sync core: the y-websocket protocol state
     # machine, with no transport attached.
     #
-    # `Y::ActionCable::Sync` is a thin adapter over this — it decodes the cable
+    # `Y::ActionCable::Sync` is a thin adapter over this: it decodes the cable
     # envelope, calls {#handle}, and routes the {Result} back through
     # `transmit` / `ActionCable.server.broadcast`. Those routing calls are the
     # only thing that ties collaboration to ActionCable. Any transport that can
@@ -15,7 +15,7 @@ module Y
     #
     # The engine holds no per-connection or per-document state. Every call
     # rebuilds the document from the store through the `load` hook, so one
-    # engine is safe to share across connections, requests, and threads — the
+    # engine is safe to share across connections, requests, and threads; the
     # same statelessness that lets any process serve any document.
     #
     #   engine = Y::Sync::Engine.new(
@@ -24,7 +24,7 @@ module Y
     #   )
     #
     # Reliability (ack-tracked delivery, causal-gap detection, integrated-only
-    # serving) lives here, because it is the yrs calls themselves —
+    # serving) lives here, because it is the yrs calls themselves;
     # `update_ready?`, `update_advances?`, `handle_sync_message`,
     # `compacted_state_update`.
     class Engine
@@ -56,9 +56,9 @@ module Y
         end
       end
 
-      # `load`   — called with (key); returns a binary Y.js update to rebuild
+      # `load`:   called with (key); returns a binary Y.js update to rebuild
       #            the document, or nil for a fresh one.
-      # `change` — called with (key, update) to record a delta durably. Runs
+      # `change`: called with (key, update) to record a delta durably. Runs
       #            before the update is acked or relayed; if it raises, the
       #            change is rejected (neither happens) and the raise
       #            propagates to the caller.
@@ -120,7 +120,7 @@ module Y
         # gap heals as one complete delta.
         return Result.new(reply: doc.sync_step1, broadcast: nil, ack: :gap) unless doc.update_ready?(update)
 
-        # A lost-ack retry: already recorded, so skip `change` — but DO
+        # A lost-ack retry: already recorded, so skip `change`, but do
         # re-relay. If the first attempt died between record and broadcast,
         # this retry is the only path left to the live subscribers. Duplicate
         # relays are free (CRDT apply is idempotent).
