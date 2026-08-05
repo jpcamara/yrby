@@ -653,8 +653,8 @@ end to end that the log alone rebuilds the document.
 #### Ephemeral documents (no database)
 
 `on_load` and `on_change` are plain blocks, and nothing requires them to touch
-a database. For documents that don't need to outlive their session — a
-scratchpad, live form state, a draft you only persist on submit — the store
+a database. For documents that don't need to outlive their session (a
+scratchpad, live form state, a draft you only persist on submit) the store
 can be connection state that travels with each request:
 
 ```ruby
@@ -693,7 +693,7 @@ The store is per connection, which shapes what this fits. A single writer gets
 the full delivery contract with no database anywhere. With several people
 editing at once, one client's update can depend on another client's edits that
 its own connection state has never seen; the gap check refuses the update and
-starts a resync, and the client — which always holds the full document —
+starts a resync, and the client, which always holds the full document,
 sends the missing state back. The document still converges, but heavy
 concurrent editing pays resync round trips that a shared store doesn't. Keep
 the payload in mind too: on AnyCable the blob travels with every message, so
