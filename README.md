@@ -492,6 +492,13 @@ The models ship in the gem, the way Action Text owns
   quarantined until they heal rather than compacted into state or
   deleted. Destroying a document deletes its updates with it.
 
+Encrypted storage: `Y::EncryptedDocument` stores `state` and update
+payloads through Active Record encryption on the same tables, the way
+`ActionText::EncryptedRichText` does — point the channel's
+`on_load`/`on_change` at it instead and configure your app's encryption
+keys. Use one access path per document: rows written encrypted read back
+as ciphertext through the plain classes.
+
 The migration creates `y_documents` and `y_document_updates`. To rename
 them, edit the generated migration and point `Y::Document.table_name` /
 `Y::DocumentUpdate.table_name` at the new names in an initializer.
