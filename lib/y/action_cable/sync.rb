@@ -40,7 +40,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # No authoritative document state is kept in ActionCable process memory.
   #
   # The protocol state machine lives in Y::Sync::Engine; this concern is the
-  # ActionCable adapter over it — it decodes the cable envelope, calls the
+  # ActionCable adapter over it: it decodes the cable envelope, calls the
   # engine, and routes the result back through `transmit` and
   # `ActionCable.server.broadcast`.
   module Sync
@@ -156,7 +156,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # The transport-neutral protocol core. Built with hooks that run on_load /
     # on_change in THIS channel instance's context (instance_exec), so on_change
-    # can reach current_user, params, and the channel's own methods — the same
+    # can reach current_user, params, and the channel's own methods, the same
     # binding the old inline recorder had. Memoized per instance; the engine is
     # stateless, so a fresh one per AnyCable-rebuilt channel costs nothing.
     def sync_engine

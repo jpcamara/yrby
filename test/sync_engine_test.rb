@@ -8,7 +8,7 @@ require "base64"
 # adapter over it (see sync_test.rb); these pin the protocol core directly, so
 # a second adapter (a REST + pub/sub binding, say) inherits the same
 # guarantees. Every update here is a real Yjs delta captured from Y.js, since
-# a Doc is read-only from Ruby — the client produces updates, the engine
+# a Doc is read-only from Ruby; the client produces updates, the engine
 # relays/records/reads them opaquely.
 class SyncEngineTest < Minitest::Test
   HELLO = YjsFixtures::TextHelloWorld::UPDATE  # "hello world" on "content"
@@ -122,7 +122,7 @@ class SyncEngineTest < Minitest::Test
   def test_incoming_sync_step1_gets_a_reply_not_a_broadcast
     engine, = build_engine(store: [DOC1])
 
-    # A client's SyncStep1 (its empty state vector) — answered with a SyncStep2.
+    # A client's SyncStep1 (its empty state vector), answered with a SyncStep2.
     step1 = Y::Doc.new.sync_step1
     result = engine.handle("doc", Base64.strict_encode64(step1), step1)
 
