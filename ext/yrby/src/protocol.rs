@@ -199,12 +199,12 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
 }
 
 /// True if applying `update` would add any content the doc doesn't already hold
-/// — whether that content integrates or parks as a pending struct.
+/// whether that content integrates or parks as a pending struct.
 ///
 /// The gap-tolerant sibling of `update_advances_doc`. `update_advances` answers
 /// "does the *integrated* state move forward?", which is false for a second
 /// gappy update on an already-pending doc (the pending flag is already set and
-/// the state vector doesn't move) — so a caller storing gappy updates would
+/// the state vector doesn't move), so a caller storing gappy updates would
 /// misread that new gap as a duplicate and drop it. This compares the doc's full
 /// lossless encoding (which includes pending) before and after applying, on a
 /// throwaway copy, so a newly-parked pending struct counts as added content.
@@ -954,7 +954,7 @@ mod tests {
         // The case update_advances_doc gets wrong: a doc already holds a pending
         // struct, and a *second, distinct* gappy update arrives. Its content is
         // new, but the integrated state vector doesn't move and the pending flag
-        // is already set — so update_advances_doc reports "no advance", which a
+        // is already set, so update_advances_doc reports "no advance", which a
         // gap-storing caller would misread as a duplicate and drop.
         let (_first, dependent) = gap_pair();
         let doc = Doc::new();
@@ -977,7 +977,7 @@ mod tests {
 
     #[test]
     fn update_adds_content_is_false_for_a_duplicate() {
-        // A true duplicate — integrated or still-pending — adds nothing.
+        // A true duplicate, integrated or still-pending, adds nothing.
         let (first, dependent) = gap_pair();
 
         let integrated = Doc::new();

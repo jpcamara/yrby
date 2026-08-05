@@ -456,7 +456,7 @@ class SyncTest < Minitest::Test
   # inverted write path that doesn't rebuild the doc; dedup is delegated to the
   # store. :accept_strict records it but withholds the ack until it integrates.
   # Serving stays gap-free under every policy. These tests rely on the loader
-  # being lossless (doc_state uses encode_state_as_update, which keeps pending) —
+  # being lossless (doc_state uses encode_state_as_update, which keeps pending);
   # the store contract accept modes require.
   def policy_helper(policy, **)
     helper = helper_for(**)
@@ -542,8 +542,8 @@ class SyncTest < Minitest::Test
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
     transmits.clear
 
-    # A joining client asks for state. It must receive integrated-only state —
-    # the pending U3 is never served — so it is not left holding a pending struct.
+    # A joining client asks for state. It must receive integrated-only state;
+    # the pending U3 is never served, so it is not left holding a pending struct.
     client = Y::Doc.new
     helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
@@ -637,7 +637,7 @@ class SyncTest < Minitest::Test
                  "a retry of an already-pending gap is not re-recorded (sync_adds_content?)"
     assert_equal 2, broadcasts.length, "but it is re-broadcast (crash-window heal)"
     assert_empty acks_in(transmits),
-                 "and the still-gappy retry is NOT acked — the sender must keep retransmitting"
+                 "and the still-gappy retry is not acked; the sender must keep retransmitting"
   end
 
   def test_accept_strict_does_not_observe_a_gap_when_recording_fails
