@@ -43,6 +43,8 @@ class ReadmeExamplesTest < Minitest::Test
     module ApplicationCable
       class Channel
         def self.identifier = nil
+        # anycable-rails macro; an ordinary accessor on plain Action Cable.
+        def self.state_attr_accessor(*names) = attr_accessor(*names)
         def params = {}
         def reject = nil
       end
