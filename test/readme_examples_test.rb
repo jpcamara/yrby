@@ -24,7 +24,7 @@ class ReadmeExamplesTest < Minitest::Test
 
   FIXTURES = File.expand_path("../ext/yrby/crates/lexical-html/src/fixtures", __dir__)
 
-  PRELUDE = <<~RUBY
+  PRELUDE = <<~RUBY.freeze
     doc = Y::Doc.new
     doc.apply_update(File.binread(File.join(#{FIXTURES.inspect}, "lexxy_full.bin")))
     ydoc = doc
