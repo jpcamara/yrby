@@ -16,11 +16,10 @@ require_relative "../app/models/y/encrypted_document_update"
 class ReadmeExamplesTest < Minitest::Test
   README = File.expand_path("../README.md", __dir__)
 
-  # Configuration fragments and intentionally illustrative blocks.
-  SKIP = [
-    /\A# Gemfile/,
-    /\Agem "/
-  ].freeze
+  # Gemfile fragments: every non-blank line is a comment or a gem call.
+  def gemfile_fragment?(block)
+    block.lines.map(&:strip).reject(&:empty?).all? { |l| l.start_with?("#", "gem \"") }
+  end
 
   FIXTURES = File.expand_path("../ext/yrby/crates/lexical-html/src/fixtures", __dir__)
 
@@ -58,7 +57,7 @@ class ReadmeExamplesTest < Minitest::Test
   def test_readme_ruby_examples
     executed = 0
     File.read(README).scan(/^```ruby\n(.*?)^```/m).map(&:first).each_with_index do |block, i|
-      next if SKIP.any? { |pattern| block.match?(pattern) }
+      next if gemfile_fragment?(block)
 
       executed += 1
       container = Module.new
