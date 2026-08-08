@@ -658,10 +658,31 @@ can be connection state that travels with each request:
 
 ```ruby
 class ScratchpadChannel < ApplicationCable::Channel
-  include Y::ActionCable::Sync
+  include Y::ActionCable
 
-  # From anycable-rails. On AnyCable the value rides every RPC round trip;
-  # on Action Cable it's an ordinary accessor on the long-lived channel.
+  on_load { |key| @doc_state }
+
+  on_change do |key, update|
+    doc = Y::Doc.new
+    doc.apply_update(@doc_state) if @doc_state
+    doc.apply_update(update)
+    @doc_state = doc.compacted_state_update
+  end
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
+end
+```
+
+On AnyCable the channel object doesn't survive between messages, so an
+instance variable won't hold. Declare the store as channel state instead
+(`state_attr_accessor` comes from anycable-rails) and Base64 it, because that
+state is serialized as JSON into each RPC exchange with `anycable-go`:
+
+```ruby
+class ScratchpadChannel < ApplicationCable::Channel
+  include Y::ActionCable
+
   state_attr_accessor :doc_state
 
   on_load { |key| doc_state && Base64.strict_decode64(doc_state) }
@@ -679,13 +700,10 @@ end
 ```
 
 Both hooks run in the channel instance (`instance_exec`), so they can use
-anything the channel can. `state_attr_accessor` is what makes this work on
-AnyCable: channel objects there don't persist between messages, but declared
-state is serialized into each RPC exchange with `anycable-go`, so the store
-follows the client no matter which RPC worker handles the next message. On
-plain Action Cable the channel instance lives as long as the connection, and
-the same accessor is just an instance variable. The Base64 wrapping is because
-AnyCable state must serialize as JSON; the merge into
+anything the channel can, and `sync_receive` rebuilds the document from
+`on_load` on every update, which is what lets the store live on the
+connection. On Action Cable the channel instance lasts as long as the
+connection, so an instance variable is the whole store. Merging into
 `compacted_state_update` keeps it one blob instead of a growing update log.
 
 The store is per connection, which shapes what this fits. A single writer gets
@@ -694,9 +712,9 @@ editing at once, one client's update can depend on another client's edits that
 its own connection state has never seen; the gap check refuses the update and
 starts a resync, and the client, which always holds the full document,
 sends the missing state back. The document still converges, but heavy
-concurrent editing pays resync round trips that a shared store doesn't. Keep
-the payload in mind too: on AnyCable the blob travels with every message, so
-this suits small documents, not long manuscripts.
+concurrent editing pays resync round trips that a shared store doesn't. On
+AnyCable, keep the payload in mind too: the blob travels with every message,
+so that variant suits small documents, not long manuscripts.
 
 Durability is the connection plus the browsers. A reconnecting client re-seeds
 an empty server through the ordinary sync handshake, so the document survives
