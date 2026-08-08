@@ -222,7 +222,7 @@ map.to_h               # => { "title" => "Dashboard", "count" => 3, ... }
 map.keys               # => ["title", "count", "tags", "user"]
 map.size               # => 4
 map.key?("title")      # => true
-map.each { |k, v| ... }
+map.each { |k, v| puts "#{k}: #{v}" }
 
 # A live handle to a nested map; mutating it mutates the document
 user = map.get_map("user")   # => Y::Map (or nil if absent / not a map)
