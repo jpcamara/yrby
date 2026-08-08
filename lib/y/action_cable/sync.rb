@@ -16,7 +16,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   #
   # Example:
   #   class DocumentChannel < ApplicationCable::Channel
-  #     include Y::ActionCable::Sync
+  #     include Y::ActionCable
   #
   #     on_load { |key| Document.find_by(key: key)&.content }
   #     # on_change runs in the channel instance's context, so instance methods
