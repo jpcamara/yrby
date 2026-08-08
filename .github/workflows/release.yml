@@ -56,7 +56,12 @@ jobs:
 
           if [ -s "$notes" ]; then
             gh release create "$TAG" --title "$pkg $ver" --notes-file "$notes" $prerelease
+          elif [ -n "$changelog" ]; then
+            # A package with a changelog and no section for this version means
+            # the release prep is incomplete (usually [Unreleased] never got
+            # renamed). Fail rather than ship a commit list as the notes.
+            echo "::error::$changelog has no '## [$ver]' section for $pkg $ver"
+            exit 1
           else
-            echo "No changelog section for $pkg $ver; using generated notes."
             gh release create "$TAG" --title "$pkg $ver" --generate-notes $prerelease
           fi

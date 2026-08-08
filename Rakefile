@@ -62,7 +62,7 @@ namespace :release do
          b. git tag yrby-client-v#{npm} && git push origin "yrby-client-v#{npm}"
          c. cd packages/client && npm publish
 
-      The actioncable gem pins a minimum `yrby` (a floor, so it tolerates
+      The rails gem pins a minimum `yrby` (a floor, so it tolerates
       newer core releases); only raise it when it needs a newer core API.
     STEPS
   end
