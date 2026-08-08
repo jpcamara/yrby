@@ -211,6 +211,22 @@ class SyncTest < Minitest::Test
     assert_operator transmits.length, :>, 1, "gapped update should trigger a SyncStep1 resync"
   end
 
+  def test_gap_resync_is_logged
+    logged = []
+    helper = helper_for
+    helper.logger = capturing_logger(logged)
+    helper.define_singleton_method(:sync_log_context) { "user=42" }
+
+    # A gapped update (U3 with no U1/U2 in the store) forces a resync.
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+
+    resync = logged.find { |lvl, msg| lvl == :info && msg.include?("causal-gap resync") }
+
+    assert resync, "each forced resync is logged at info so its frequency is observable"
+    assert_includes resync.last, "doc-key", "the log names the document"
+    assert_includes resync.last, "user=42", "and includes sync_log_context"
+  end
+
   def test_gap_heals_after_client_resyncs
     store = []
     helper = helper_for(store: store)
