@@ -508,8 +508,7 @@ answered, and they can point at anything.
 
 `include Y::ActionCable` (from the `yrby-rails` gem) is the channel
 integration: the y-websocket protocol (document sync +
-awareness/presence) over ActionCable. (`include Y::ActionCable::Sync`
-keeps working and has the same effect.)
+awareness/presence) over ActionCable.
 
 ```ruby
 # app/channels/document_channel.rb
