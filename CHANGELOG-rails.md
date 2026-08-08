@@ -1,4 +1,4 @@
-# Changelog — yrby-rails
+# Changelog: yrby-rails
 
 All notable changes to the `yrby-rails` gem (formerly `yrby-actioncable`) are
 documented here. The
@@ -9,6 +9,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Log each causal-gap resync at `info` (`[yrby] causal-gap resync ...`, with the
+  document key and `sync_log_context`). The reject path was otherwise silent, so
+  there was no way to see how often clients force a resync. Override
+  `sync_log_gap_resync` to change the level or silence it.
 - `causal_gap_policy` channel option (default `:reject`, preserving current
   behavior) with three settings for how a causally-gapped update is handled:
   - `:reject`: the current behavior. Don't record it, ask the sender to resync.
@@ -43,7 +47,7 @@ opt in. See the "Accepting causal gaps" section of the README.
 
 - `Y::EncryptedDocument` / `Y::EncryptedDocumentUpdate`: document storage
   encrypted with Active Record encryption (`state` and update payloads),
-  on the same tables — the class you access through decides the
+  on the same tables; the class you access through decides the
   cryptography, the way `ActionText::EncryptedRichText` does. Point a
   channel's `on_load`/`on_change` (or a record association) at
   `Y::EncryptedDocument` and configure the app's encryption keys. Keep
@@ -111,7 +115,7 @@ Fixes from a full source review:
 - **A lost-ack retry now re-broadcasts.** If the original attempt recorded the
   update and then crashed (or the pub/sub broadcast failed) before
   distributing, the retry was previously settled as `:applied` without
-  re-broadcasting — live subscribers stayed stale until their next full resync,
+  re-broadcasting; live subscribers stayed stale until their next full resync,
   and nothing else could reach them. The retry now re-broadcasts before acking;
   idempotent CRDT apply makes the duplicate free for every receiver.
 - **A missing document key now fails closed.** Under a transport that doesn't
@@ -132,10 +136,10 @@ Fixes from a full source review:
 ### Changed
 - Raised the `yrby` floor to `>= 0.3.0`. That release makes
   `Doc#handle_sync_message` answer `SyncStep1` with integrated-only (gap-free)
-  state — it no longer serves un-integrable pending structs, which previously
+  state: it no longer serves un-integrable pending structs, which previously
   poisoned peers and drove endless resync traffic. The sync channel serves its
   SyncStep2 response through that method, so with an older core a poisoned server
-  store would still hand the gap to clients. No code change here — pinning the
+  store would still hand the gap to clients. No code change here; pinning the
   floor makes gap-free serving self-enforcing instead of dependent on the app
   updating the core gem.
 
@@ -147,7 +151,7 @@ Fixes from a full source review:
   record-before-distribute on `update_advances?` (`return :applied unless
   doc.update_advances?(update)`), so with an older core a lost-ack retry of a
   deletion the server had already integrated was re-recorded and re-broadcast
-  each time. No code change here — pinning the floor just makes the gem's
+  each time. No code change here; pinning the floor just makes the gem's
   exactly-once durable-recording guarantee self-enforcing instead of dependent on
   the app updating the core gem.
 
@@ -155,7 +159,7 @@ Fixes from a full source review:
 
 ### Changed
 - **Internal:** ActionCable stream-name prefix `y_ruby:` → `yrby:`.
-  Server-internal (broadcast + `stream_from` both use it) — no public API or
+  Server-internal (broadcast + `stream_from` both use it), no public API or
   client-facing wire change. Depends on `yrby >= 0.2.1`.
 
 ## [0.2.0] - 2026-06-28
