@@ -147,8 +147,8 @@ editor's own serializer. Each page is a working integration to copy from:
 | [Rhino Editor](https://github.com/KonnorRogers/rhino-editor) (Tiptap 3) | `@tiptap/extension-collaboration` + `-caret` | [`rhino.js`](examples/actioncable-demo/frontend/src/rhino.js) |
 | [CodeMirror 6](https://codemirror.net) | `y-codemirror.next` | [`codemirror.js`](examples/actioncable-demo/frontend/src/codemirror.js) |
 
-The demo also syncs plain Yjs shapes with no editor at all — a whiteboard
-on a `Y.Map`, a kanban board on a `Y.Array`, a co-filled form — over the
+The demo also syncs plain Yjs shapes with no editor at all (a whiteboard
+on a `Y.Map`, a kanban board on a `Y.Array`, a co-filled form) over the
 same channel. The demo README's "Using this in your own app" section has
 the integration recipe, and its `NoteMaterializer` shows how to render a
 document to ActionText server-side with `Y::Tiptap` or `Y::Lexxy`.
@@ -183,7 +183,7 @@ doc.handle_sync_message(data)     # => [msg_type, sync_type, response]; answers 
 
 ### Reading document contents
 
-Reconstruct a document server-side — search, exports, emails, SSR — with no
+Reconstruct a document server-side (search, exports, emails, SSR) with no
 Node process:
 
 ```ruby
@@ -200,7 +200,7 @@ empty, but the pending block is held as a recovery buffer and heals if the
 missing dependency later arrives. `Doc#pending?` reports this.
 
 Pending structs are *not* document state, so they must not cross the sync
-boundary — a peer that receives one can't integrate it and gets stuck. Two
+boundary; a peer that receives one can't integrate it and gets stuck. Two
 guarantees keep serving safe:
 
 - `handle_sync_message` answers `SyncStep1` with **integrated-only** state, so a
@@ -231,7 +231,7 @@ tiptap.to_html("content") # or another XML root
 The output matches Tiptap's own `getHTML()`, checked byte-for-byte in the tests
 against a document captured from a real editor. It follows
 [`tiptap-php`](https://github.com/ueberdosis/tiptap-php) and reads both name
-styles editors use — Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
+styles editors use: Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
 `bullet_list`/`strong`.
 
 It covers paragraphs, headings, blockquotes, bullet/ordered/task lists, code
@@ -241,8 +241,8 @@ as semantic `<table><tbody>`, without the column-width styling Tiptap's editor
 view adds.
 
 The support is layered like the Lexical side: `Y::ProseMirror` covers core
-ProseMirror natively — prosemirror-schema-basic plus the prosemirror-tables
-family — and Tiptap's extension nodes (task lists, mentions, the details
+ProseMirror natively (prosemirror-schema-basic plus the prosemirror-tables
+family) and Tiptap's extension nodes (task lists, mentions, the details
 family) are `Y::Tiptap`'s rule set (`Y::Tiptap::NODES`), built on the
 extension API below. Marks stay in the base: mark rendering (nesting order,
 `textStyle` CSS, `code` exclusivity) runs through native text-run machinery
@@ -259,8 +259,8 @@ lexxy.to_html("notepad") # or another XML root
 
 The HTML is identical to what a `lexxy-editor` submits to Rails (its `value`).
 The tests check this byte-for-byte against a document captured from a real
-editor. Stock Lexical has no canonical serializer — every editor configures
-its own — so the editor-specific class carries the editor's name, and
+editor. Stock Lexical has no canonical serializer (every editor configures
+its own), so the editor-specific class carries the editor's name, and
 `Y::Lexical` is the core-Lexical base: paragraphs, headings, quotes, code,
 lists, tables, links, and the full text-format model, for any other Lexical
 editor to extend with rules.
@@ -273,14 +273,14 @@ mentions both emit `<action-text-attachment>` elements that ActionText can
 re-render).
 
 Internally that support is layered: `Y::Lexical` covers core Lexical
-structure natively, and everything Lexxy adds — its node types (attachments,
+structure natively, and everything Lexxy adds, its node types (attachments,
 galleries) and its decorations of core nodes (the table wrapper, header-cell
-styling, nested-list classes) — is `Y::Lexxy`'s rule set
+styling, nested-list classes), is `Y::Lexxy`'s rule set
 (`Y::Lexxy::NODES`), built on the extension API below. The gem's own Lexxy
 support is the API's first consumer: an app rule for one of those types
 simply replaces it.
 
-In both renderers an unknown node keeps its content — text and nested blocks
+In both renderers an unknown node keeps its content: text and nested blocks
 fall back to readable markup rather than disappearing.
 
 #### Custom nodes and marks
@@ -290,7 +290,7 @@ their own node types. Both renderers take rules for them. A rule is checked
 before the built-in schema, so it can add a node type or replace how a
 built-in renders.
 
-Rules register in a block — one `rules.node` call per type. A declarative
+Rules register in a block, one `rules.node` call per type. A declarative
 rule is markup as data, rendered natively:
 
 ```ruby
@@ -304,14 +304,14 @@ end
 `tag` names the element. `attrs` values are templates: a string is a literal,
 a symbol reads that attribute off the node, an array concatenates both kinds;
 an attribute that resolves empty is left out. `text` (same template form)
-emits literal text content. `contains` declares what lives inside the node — `:inline` (formatted text,
-the default), `:blocks` (child block nodes — a container), or `:none` (a
+emits literal text content. `contains` declares what lives inside the node: `:inline` (formatted text,
+the default), `:blocks` (child block nodes, a container), or `:none` (a
 leaf). `void: true` skips the closing tag.
 
 You don't have to guess any of those names or shapes. Editors store types
 and attributes under names you'd never predict (Rhino's strike mark is
 `rhino-strike`; Lexical prefixes its own props `__`), so ask a real
-document instead — make one in your editor using your custom node, then:
+document instead: make one in your editor using your custom node, then:
 
 ```ruby
 Y::Tiptap.new(doc).node_types
@@ -336,25 +336,25 @@ lexical = Y::Lexical.new(doc) do |rules|
 end
 ```
 
-The block gets the node's type, its stored attributes, `node.content` — the
-children, already rendered to HTML — and `node.child_types`, the node's
+The block gets the node's type, its stored attributes, `node.content` (the
+children, already rendered to HTML), and `node.child_types`, the node's
 element/block children by type, in document order. `child_types` answers the
 structural questions attributes can't: how many images a gallery holds, or
 whether a list item carries a nested list. Whatever the block returns is
 spliced into the output as-is: it's trusted HTML, so escape any values you
-interpolate. To set the content mode for a callback, give the node both —
+interpolate. To set the content mode for a callback, give the node both:
 `rules.node "embed", contains: :blocks do |node| ... end`.
 
 Callbacks never run while the document is locked. The render finishes first
 (inside one read transaction, GVL released), then the blocks run and their
-output is spliced in — so a callback can safely read or even write the same
+output is spliced in, so a callback can safely read or even write the same
 doc. With no callback rules, `to_html` skips the splicing entirely.
 
 Blocks are the escape hatch for everything the declarative form can't say,
 and they're proven sufficient: `Y::Lexxy` and `Y::Tiptap` are themselves
-built on this API (`lib/y/lexxy.rb`, `lib/y/tiptap.rb`) — simple nodes as
+built on this API (`lib/y/lexxy.rb`, `lib/y/tiptap.rb`): simple nodes as
 declarative hashes, everything with logic as plain methods mapped by node
-type (a `Method` responds to `call` like any lambda) — and the fixture tests
+type (a `Method` responds to `call` like any lambda), and the fixture tests
 hold their output byte-identical to a live editor's.
 
 The ProseMirror side also takes custom marks:
@@ -371,7 +371,7 @@ for a built-in mark name (`"bold"`) replaces its built-in tag.
 
 ##### Worked examples
 
-A video-embed node from an app's Tiptap extension — a type the pinned schema
+A video-embed node from an app's Tiptap extension, a type the pinned schema
 has never heard of:
 
 ```ruby
@@ -398,7 +398,7 @@ tiptap = Y::Tiptap.new(doc) do |rules|
 end
 ```
 
-Overriding a shipped rule — rendering Lexxy uploads as real image markup
+Overriding a shipped rule: rendering Lexxy uploads as real image markup
 instead of the `<action-text-attachment>` elements ActionText re-renders:
 
 ```ruby
@@ -414,7 +414,7 @@ lexxy = Y::Lexxy.new(doc) do |rules|
 end
 ```
 
-Markup that depends on structure — `node.child_types` lists the node's
+Markup that depends on structure: `node.child_types` lists the node's
 element/block children in document order, so a layout container can size
 itself by its column count while the columns themselves stay declarative:
 
@@ -427,7 +427,7 @@ tiptap = Y::Tiptap.new(doc) do |rules|
 end
 ```
 
-Content-aware overrides — dropping the empty paragraphs an editor keeps
+Content-aware overrides: dropping the empty paragraphs an editor keeps
 around the cursor, since `node.content` arrives already rendered:
 
 ```ruby
@@ -438,10 +438,10 @@ lexical = Y::Lexical.new(doc) do |rules|
 end
 ```
 
-For a larger reference, the gem's own editor schemas ship this way — see
+For a larger reference, the gem's own editor schemas ship this way; see
 `Y::Lexxy::NODES` in `lib/y/lexxy.rb` (declarative hashes for the simple
-nodes, a plain method per node that needs logic — galleries, list items,
-header cells, both attachment types — mapped with `method(:name)`) and
+nodes, a plain method per node that needs logic (galleries, list items,
+header cells, both attachment types) mapped with `method(:name)`) and
 `Y::Tiptap::NODES` in `lib/y/tiptap.rb` (task lists, mentions, the details
 family).
 
@@ -449,7 +449,7 @@ family).
 
 Classifying and unwrapping wire frames is stateless, so it's exposed as
 `Y` module functions rather than a class. The server never holds presence
-or document state to route a frame — presence lives in the browser clients, and
+or document state to route a frame; presence lives in the browser clients, and
 the server only relays awareness frames opaquely.
 
 ```ruby
@@ -470,31 +470,31 @@ bin/rails db:migrate
 The models ship in the gem, the way Action Text owns
 `ActionText::RichText`:
 
-- **`Y::Document`** — one row per document, addressed two ways: by `key`
-  (what a channel addresses — one opaque, unique string, sometimes
+- **`Y::Document`**: one row per document, addressed two ways: by `key`
+  (what a channel addresses; one opaque, unique string, sometimes
   app-supplied, never parsed) and, optionally, by polymorphic `record` +
   `name` (which model attribute it backs; `name` is the attribute name,
-  `"body"` — one document per attribute per record, the
+  `"body"`; one document per attribute per record, the
   ActionText::RichText scheme). Key-only documents leave the binding nil.
   Either side can arrive first: `Y::Document.for(record, name)` finds or
   creates the binding, derives a readable key (`post/1/body`), and adopts
   a key-only row already holding that key, so a channel writing first and
   a binding created later converge on one document. The row also holds
-  the merged `state` snapshot — CRDT state only; derived data (rendered
+  the merged `state` snapshot, CRDT state only; derived data (rendered
   HTML, search text) is the application's job, typically in the channel's
   on_change. `.load_state(key)` / `.append(key, update)` are the store
   calls the generated channel uses.
-- **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
+- **`Y::DocumentUpdate`**: the uncompacted tail, one delta per row,
   compacted into `state` and deleted once the tail reaches `compact_every`
   (default 64). Loading reads the snapshot plus the current tail; an
   empty tail returns `state` directly. Compaction serializes on a
-  per-document row lock and skips causally-gapped rows — they're
+  per-document row lock and skips causally-gapped rows; they're
   quarantined until they heal rather than compacted into state or
   deleted. Destroying a document deletes its updates with it.
 
 Encrypted storage: `Y::EncryptedDocument` stores `state` and update
 payloads through Active Record encryption on the same tables, the way
-`ActionText::EncryptedRichText` does — point the channel's
+`ActionText::EncryptedRichText` does. Point the channel's
 `on_load`/`on_change` at it instead and configure your app's encryption
 keys. Use one access path per document: rows written encrypted read back
 as ciphertext through the plain classes.
@@ -556,7 +556,7 @@ no single client can relay garbage that breaks the others in a room.
 
 #### Delivery guarantees
 
-The contract is the same at every scale — one process, or hundreds across many
+The contract is the same at every scale: one process, or hundreds across many
 servers:
 
 - **The document always converges.** CRDT updates are commutative and
@@ -575,13 +575,13 @@ servers:
   There is no negative-ack: the client simply never receives the ack, keeps the
   update pending, and retransmits on its timer/reconnect. This is built for
   *transient* failures (the store is briefly down → a retry lands). A block that
-  raises *deterministically* — a validation that always fails for this edit —
+  raises *deterministically* (a validation that always fails for this edit)
   will be retried forever, since nothing tells the client to stop. Enforce hard
   rejections before the edit reaches `on_change` (channel authorization in
   `subscribed`), not by raising inside it.
 - **An over-cap frame is dropped the same silent way.** A frame larger than
-  `max_frame_bytes` (default 8 MiB) is dropped before decoding — no ack, no
-  broadcast — to bound the work a client can force. For a genuine document
+  `max_frame_bytes` (default 8 MiB) is dropped before decoding (no ack, no
+  broadcast) to bound the work a client can force. For a genuine document
   update that means the same implicit rejection as above: unacked, retransmitted
   forever. Normal typing never approaches the cap, but a large paste, an embedded
   image, or a big initial `SyncStep2` can. The drop is logged (`warn` for
@@ -669,13 +669,13 @@ one `{ ack: id }` cumulatively confirms everything up to it. Because CRDT apply
 is idempotent, a resend that already landed is a harmless no-op that just
 re-acks. Awareness stays ephemeral and is not acked.
 
-Presence (cursors, selections) is owned by the browser clients — the server
+Presence (cursors, selections) is owned by the browser clients; the server
 never sets or holds presence state, it only relays awareness frames opaquely.
 See `yrby-client` for the client-side awareness API.
 
 ## Thread Safety
 
-A `Doc` is safe to share across Ruby threads — used concurrently from Puma
+A `Doc` is safe to share across Ruby threads, used concurrently from Puma
 workers, ActionCable connection threads, or background jobs without external
 locking.
 
