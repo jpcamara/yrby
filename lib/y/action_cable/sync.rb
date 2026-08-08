@@ -223,6 +223,29 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
+    # Log each causal-gap resync at info. The reject path is otherwise silent
+    # (it transmits a SyncStep1 and returns), so without this there's no way to
+    # see how often clients are sending updates ahead of their dependencies and
+    # forcing a resync. Names the document key and whatever sync_log_context
+    # returns, so frequency can be counted and traced per document.
+    #
+    # One line per forced resync: a client that keeps re-sending the same gapped
+    # update logs on every retry. That's the signal you want, but it can be
+    # chatty; override this method to change the level or silence it.
+    def sync_log_gap_resync
+      logger.info do
+        parts = ["key=#{@sync_key.inspect}"]
+        # A broken context hook must surface, not take down frame handling.
+        context = begin
+          sync_log_context
+        rescue StandardError => e
+          "log-context-error=#{e.class}"
+        end
+        parts << context if context
+        "[yrby] causal-gap resync (update depends on a prior update the store hasn't seen): #{parts.join(" ")}"
+      end
+    end
+
     # This concern acks updates as durably recorded, so it must have both a
     # loader (to rebuild the doc and detect causal gaps) and a recorder (to
     # actually persist before acking). Fail closed rather than silently acking
@@ -283,6 +306,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         # heals as one complete delta.
         unless doc.update_ready?(update)
           sync_request_resync(doc)
+          sync_log_gap_resync
           return :gap
         end
 
