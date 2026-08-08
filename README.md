@@ -11,7 +11,7 @@ anywhere in the path.
 
 ![Two people typing on separate lines of the same document, each keystroke synced through a Rails server, seen from a third browser with labeled carets](docs/images/collab.gif)
 
-On the server, `yrby-actioncable` implements the full y-websocket protocol
+On the server, `yrby-rails` implements the full y-websocket protocol
 (document sync plus presence) as a channel concern. Its delivery contract is
 stricter than the usual Yjs servers: every update is ack-tracked, checked for
 causal gaps, and durably recorded before it is acknowledged or broadcast to
@@ -54,7 +54,7 @@ end
 Install the gem and the npm package:
 
 ```
-gem install yrby-actioncable # depends on yrby
+gem install yrby-rails # depends on yrby
 npm install yrby-client
 ```
 
@@ -75,7 +75,7 @@ guarantees, correctness, and thread safety.
 Towards that goal, `yrby` adds opinionated defaults on top of normal Yjs syncing:
 
 - Built-in update acknowledgement: the `ActionCableProvider` in `yrby-client` will continue to
-  send updates until an ack is received from the server. [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
+  send updates until an ack is received from the server. [`yrby-rails`](https://rubygems.org/gems/yrby-rails)
   only sends an ack when applying an update is successful. The goal is at-least-once delivery,
   and because CRDTs are idempotent a duplicate update is effectively a no-op.
 - Gap detection in document updates: before applying an update and sending an ack to the client,
