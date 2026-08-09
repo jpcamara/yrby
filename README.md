@@ -58,6 +58,30 @@ gem install yrby-rails # depends on yrby
 npm install yrby-client
 ```
 
+## Contents
+
+- [Scope](#scope)
+- [Durability and delivery](#durability-and-delivery)
+- [What about yrb?](#what-about-yrb)
+- [Testing](#testing)
+- [Install](#install)
+- [Docs](#docs)
+- [Editors](#editors)
+- [Usage](#usage)
+  - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
+  - [Reading document contents](#reading-document-contents)
+  - [Pending structs and gap-free state](#pending-structs-and-gap-free-state)
+  - [Rendering to HTML](#rendering-to-html)
+  - [Protocol codec (module functions)](#protocol-codec-module-functions)
+  - [ActionCable Integration](#actioncable-integration)
+- [Thread Safety](#thread-safety)
+  - [Parallelism (GVL release)](#parallelism-gvl-release)
+- [Message Type Constants](#message-type-constants)
+- [Sync Flow](#sync-flow)
+- [Development](#development)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
 ## Scope
 
 `yrby` binds just the part of `y-crdt` you need to *sync and persist* collaborative
