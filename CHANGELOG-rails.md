@@ -7,39 +7,59 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Causally-gapped updates are now accepted instead of rejected.** An update
+  whose causally-prior update the store hasn't seen is recorded and acked like
+  any other; it parks as a pending struct and integrates when its dependency
+  arrives. Previously it was refused and the sender was asked to resync, so the
+  edit stayed in the client's hands until the round trip completed and was lost
+  if the sender disconnected first. Serving is unaffected — `handle_sync_message`
+  and `compacted_state_update` still exclude pending, so a peer is never sent
+  content it can't integrate.
+
+  **This requires a lossless store.** `on_load` must return state that preserves
+  pending (`encode_state_as_update`, or a replayed raw append log), and
+  compaction must not run `compacted_state_update` while `doc.pending?`. A store
+  whose load strips pending will re-run `on_change` for every retransmission of a
+  gapped update, and compacting over an open gap drops it. `Y::Document` handles
+  both; check any store of your own. See "Accepting causal gaps" in the README.
+
+- `Y::Document#load_state` is now lossless (`encode_state_as_update` rather than
+  `compacted_state_update`), so a parked pending struct survives a reload. Its
+  output was gap-free before and no longer is; callers needing gap-free bytes
+  should use `Doc#compacted_state_update`. The sync channel applies that at serve
+  time, so peers are unaffected.
+
+- `Y::Document#append` no longer compacts. Folding the tail into `state` is a
+  whole-document rewrite and shouldn't ride along on a write, so it is now
+  something you schedule: `compact!` to compact now, or `compact_if_needed` for
+  the old at-or-over-`compact_every` behavior. To restore the previous inline
+  behavior exactly, call `compact_if_needed` after `append`.
+
 ### Added
 
-- Log each causal-gap resync at `info` (`[yrby] causal-gap resync ...`, with the
-  document key and `sync_log_context`). The reject path was otherwise silent, so
-  there was no way to see how often clients force a resync. Override
-  `sync_log_gap_resync` to change the level or silence it.
-- `causal_gap_policy` channel option (default `:reject`, preserving current
-  behavior) with three settings for how a causally-gapped update is handled:
-  - `:reject`: the current behavior. Don't record it, ask the sender to resync.
-  - `:accept_strict`: record it (durable on arrival) but withhold the ack until
-    it integrates, so the sender keeps retransmitting and an open gap
-    self-signals as retry traffic.
-  - `:accept`: record and ack it immediately (ack-on-durable) via an inverted
-    write path that doesn't rebuild the document; dedup is delegated to the
-    store's idempotency. Fastest, and an open gap is repaired via the join
-    handshake rather than a resend.
-
-  Serving stays gap-free under every policy. Accept modes require a lossless
-  store (`on_load` must preserve pending; compaction guarded with `doc.pending?`)
-  and, being quiet about an open gap, add:
-  - a **repair loop**: when a client joins or syncs and a gap is open, the server
-    solicits the missing dependency from that client (any live client that has it
-    heals the gap);
-  - an **`on_gap` observability hook**, fired with the document key when a gap is
-    observed, plus an `info` log, so an unhealed gap is visible (accept modes heal
-    silently, replacing reject mode's resync-storm signal).
+- `on_gap` channel hook, fired with the document key whenever a causal gap is
+  observed — at record time, and at join/serve time whenever a loaded document is
+  still pending. A gap is also logged at `info`. Because it fires when a gap is
+  *observed*, a gap on a document nobody touches again isn't reported until
+  something loads it; pair it with a periodic sweep if you need to catch those.
+  Errors raised in the hook are swallowed.
+- Gap repair on join: when a client joins or sends a SyncStep1 while a gap is
+  open, the server sends its own SyncStep1 to ask that client for the missing
+  dependency. Any connected client that has it heals the gap on contact.
 - `Doc#update_adds_content?`: true if an update adds any content (integrated or
   pending) the doc doesn't already hold. Unlike `update_advances?` it stays
-  correct when the doc already holds pending, so a gap-storing caller can tell a
-  fresh gap from a duplicate retry. (`yrby` core.)
+  correct when the doc already holds pending, so a second distinct gap isn't
+  misread as a duplicate and dropped. This is now the channel's per-update dedup
+  check. (`yrby` core.)
 
-Proposal / RFC: the policy defaults to `:reject`, so nothing changes unless you
-opt in. See the "Accepting causal gaps" section of the README.
+### Removed
+
+- `sync_log_gap_resync`. Gapped updates no longer trigger a resync, so there is
+  no resync to log; the `[yrby] causal gap present ...` line and `on_gap` replace
+  it. If you overrode this method to change its level or silence it, remove the
+  override.
 
 ## [0.5.0] - 2026-08-05
 

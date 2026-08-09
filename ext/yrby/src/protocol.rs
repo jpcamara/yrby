@@ -230,8 +230,35 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
 /// lossless encoding (which includes pending) before and after applying, on a
 /// throwaway copy, so a newly-parked pending struct counts as added content.
 /// Pure read; does not mutate `doc`.
+///
+/// This is the sync flow's per-update dedup check, so it carries the same fast
+/// path as `update_advances_doc`: a frame carrying clocks the doc has never seen
+/// adds content by definition, and answering from the state vector avoids
+/// encoding the whole document three times. Only retries and delete-bearing
+/// frames pay for the probe.
 pub(crate) fn update_adds_content_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
+
+    // Fast path: blocks beyond the doc's state vector are content the doc lacks,
+    // whether they integrate or park as pending — either way the caller must
+    // record them. Deletes tombstone existing structs without moving the state
+    // vector, so a delete-bearing frame falls through to the exact comparison.
+    //
+    // "Not covered" implies added content, and a doc's own pending can't make
+    // this lie: a causally-pending diff reports an EMPTY state vector (yrs can't
+    // place its structs yet), so a retransmit of content already parked here
+    // always reads as covered and falls through to the exact comparison rather
+    // than short-circuiting to a wrong "new content". This only ever
+    // short-circuits to *true*, so it can never report a duplicate for content
+    // the doc is genuinely missing.
+    if update.delete_set().is_empty() {
+        // Partial order: "not covered" includes incomparable, which also means
+        // the update carries clocks this doc lacks.
+        let covered = doc.transact().state_vector() >= update.state_vector();
+        if !covered {
+            return Ok(true);
+        }
+    }
 
     // Seed a probe with the doc's current full state (pending included), so we
     // measure the update's effect without mutating the real doc.
@@ -1061,6 +1088,47 @@ mod tests {
         assert!(
             !update_adds_content_doc(&pending, &dependent).unwrap(),
             "re-applying an already-pending gap adds nothing"
+        );
+    }
+
+    #[test]
+    fn update_adds_content_fast_path_cannot_misread_a_parked_retransmit() {
+        // What makes the state-vector short-circuit safe on a doc that already
+        // holds a gap: a causally-pending diff reports an EMPTY state vector, so
+        // a retransmit of the parked struct always reads as covered and falls
+        // through to the exact comparison. Were that not so, the fast path would
+        // call every retransmit fresh content and re-record it forever. Pinned
+        // here because the fast path's correctness rests on it.
+        let (_first, dependent) = gap_pair();
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(yrs::Update::decode_v1(&dependent).unwrap())
+            .unwrap();
+
+        assert!(has_pending(&doc), "precondition: the doc holds a gap");
+        assert!(
+            yrs::Update::decode_v1(&dependent)
+                .unwrap()
+                .state_vector()
+                .is_empty(),
+            "a causally-pending diff reports an EMPTY state vector, so it always \
+             reads as covered and never reaches the fast path"
+        );
+        assert!(
+            !update_adds_content_doc(&doc, &dependent).unwrap(),
+            "a retransmit of the parked struct is a duplicate, not new content"
+        );
+    }
+
+    #[test]
+    fn update_adds_content_takes_the_fast_path_for_a_novel_edit() {
+        // The common case: a gap-free doc and an edit it has never seen.
+        let (first, _dependent) = gap_pair();
+        let doc = Doc::new();
+        assert!(!has_pending(&doc));
+        assert!(
+            update_adds_content_doc(&doc, &first).unwrap(),
+            "novel content is added content"
         );
     }
 

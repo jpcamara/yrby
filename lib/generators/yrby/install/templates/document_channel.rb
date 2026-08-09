@@ -14,6 +14,16 @@ class DocumentChannel < ApplicationCable::Channel
   # Record each CRDT delta durably. Runs before the change is acknowledged
   # or broadcast; if this raises, the change is neither acked nor relayed,
   # and yrby-client retries it.
+  #
+  # `append` only appends. The tail is folded into the document's snapshot by
+  # compaction, which nothing triggers on its own -- schedule it (a periodic job
+  # over recently-written documents is the usual shape) or the tail grows without
+  # bound and every load replays it:
+  #
+  #   Y::Document.find_each { |document| document.compact_if_needed }
+  #
+  # To compact inline on every write instead, as older versions did, follow the
+  # append with `Y::Document.locate!(key).compact_if_needed`.
   on_change { |key, update| Y::Document.append(key, update) }
 
   def subscribed

@@ -35,9 +35,10 @@ class Y::Document < ActiveRecord::Base
   validates :record_id, presence: true, if: :record_type
   before_validation :assign_default_key, on: :create
 
-  # How long the tail may grow before an append compacts it into state.
-  # Lower values compact more often; higher values leave more tail rows
-  # for each load to merge.
+  # The tail length compact_if_needed treats as "long enough to compact".
+  # Lower values compact more often; higher values leave more tail rows for
+  # each load to merge. Nothing compacts on its own: pick when it happens
+  # (a periodic job, an idle-document sweep, an explicit compact! call).
   class_attribute :compact_every, instance_writer: false, default: 64
 
   class << self
@@ -99,13 +100,12 @@ class Y::Document < ActiveRecord::Base
     end
   end
 
-  # Record one delta. The trigger is at-or-over rather than an exact
-  # multiple (concurrent appends can jump past one) and counts only clean
-  # rows: pending rows never satisfy it, so a quarantined gap doesn't
-  # retrigger compaction on every append.
+  # Record one delta. Compaction is not triggered here: it is something you
+  # schedule (see compact! and compact_if_needed), because folding the tail
+  # into state is a whole-document rewrite that shouldn't ride along on a
+  # keystroke's write path.
   def append(bytes)
     updates.create!(payload: bytes)
-    compact! if updates.where(pending: false).count >= compact_every
   end
 
   # The merged document: state plus the whole tail. The tail is read first
@@ -113,11 +113,15 @@ class Y::Document < ActiveRecord::Base
   # compaction committing between the two reads then hands us rows already
   # folded into the fresh snapshot, an idempotent double-apply, where
   # the reverse order could pair a pre-compaction snapshot with an empty
-  # tail and omit committed changes. Quarantined rows are applied too:
-  # the output goes through compacted_state_update, which is gap-free by
-  # construction, so an unhealed gap contributes nothing while a gap
-  # healed by a newer tail row is served immediately instead of waiting
-  # for the next compaction.
+  # tail and omit committed changes.
+  #
+  # Lossless, deliberately: the output is encode_state_as_update, which
+  # carries pending structs, not compacted_state_update, which strips them.
+  # A channel accepts a causally-gapped update and parks it as pending, and
+  # it must be able to see that on the next load, or it would read every
+  # retransmission of that update as new content and re-record it. Callers
+  # that need gap-free bytes have compacted_state_update; the sync channel
+  # applies it at serve time, so a peer is still never sent a gap.
   def load_state
     tail = updates.reset.pluck(:payload) # reset: never a cached tail
     snapshot = self.class.where(id: id).pick(:state)
@@ -126,7 +130,16 @@ class Y::Document < ActiveRecord::Base
     doc = Y::Doc.new
     doc.apply_update(snapshot) if snapshot
     tail.each { |payload| doc.apply_update(payload) }
-    doc.compacted_state_update
+    doc.encode_state_as_update
+  end
+
+  # Compact only once the tail has grown past compact_every. Counts clean
+  # rows at-or-over rather than an exact multiple (concurrent appends can
+  # jump past one), and pending rows never satisfy it, so a quarantined gap
+  # doesn't retrigger compaction on every call. Call it from wherever you
+  # want compaction to happen.
+  def compact_if_needed
+    compact! if updates.where(pending: false).count >= compact_every
   end
 
   # Compact the tail into state. The row lock serializes racing

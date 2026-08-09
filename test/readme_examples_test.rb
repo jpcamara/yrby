@@ -29,6 +29,7 @@ class ReadmeExamplesTest < Minitest::Test
     ydoc = doc
     key = "readme-example-\#{name}"
     Y::Document.append(key, YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+    document = Y::Document.locate!(key)
     update = YjsFixtures::TwoDocsMerged::DOC2_UPDATE
     update_bytes = update
     sv = doc.encode_state_vector

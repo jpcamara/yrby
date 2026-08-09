@@ -117,21 +117,33 @@ class DocumentTest < Minitest::Test
     assert_equal before, read_back("room-1")
   end
 
-  def test_append_compacts_at_or_over_the_threshold
+  def test_append_never_compacts_on_its_own
+    Y::Document.compact_every = 2
+    document = Y::Document.locate!("room-1")
+
+    4.times { document.append(CLIENT_ONE) }
+
+    assert_equal 4, document.updates.count,
+                 "compaction is scheduled by the app, never ridden in on a write"
+  end
+
+  def test_compact_if_needed_compacts_at_or_over_the_threshold
     Y::Document.compact_every = 2
     document = Y::Document.locate!("room-1")
 
     document.append(CLIENT_ONE)
+    document.compact_if_needed
 
     assert_equal 1, document.updates.count, "below threshold: no compact"
 
     document.append(CLIENT_TWO)
+    document.compact_if_needed
 
-    assert_equal 0, document.updates.count, "threshold append compacts"
+    assert_equal 0, document.updates.count, "at threshold: compacts"
     assert_equal "from doc1from doc2", read_back("room-1")
   end
 
-  def test_a_jumped_threshold_still_compacts
+  def test_compact_if_needed_fires_past_a_jumped_threshold
     Y::Document.compact_every = 2
     document = Y::Document.locate!("room-1")
     # Simulate concurrent appends jumping past the multiple: three rows land
@@ -139,6 +151,7 @@ class DocumentTest < Minitest::Test
     3.times { document.updates.create!(payload: CLIENT_ONE) }
 
     document.append(CLIENT_TWO)
+    document.compact_if_needed
 
     assert_equal 0, document.updates.count, "at-or-over fires past the multiple"
   end
@@ -173,8 +186,10 @@ class DocumentTest < Minitest::Test
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
     document.append(YjsFixtures::Gap::DEPENDENT_OTHER)
+    document.compact! # quarantines both gaps
 
     document.append(CLIENT_ONE)
+    document.compact_if_needed
 
     assert_equal 1, document.updates.where(pending: false).count,
                  "one clean row is below the threshold; quarantined rows don't trigger"
