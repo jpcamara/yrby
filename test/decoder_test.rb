@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "test_helper"
-require "y/decoder"
 require "base64"
 require "json"
 
