@@ -177,12 +177,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # Reliable delivery: acknowledge an accepted update back to the sending
     # connection. An ack-aware client tags each outgoing update with an "id"
     # and retains it until the matching `{ "ack" => id }` returns, retransmitting
-    # on a timer or reconnect; idempotent CRDT apply makes resends free. Acks
-    # are sent only after the update has been durably recorded, or when a retry
-    # is already present in the durable store.
-    def sync_send_ack(id, outcome)
+    # on a timer or reconnect; applying a CRDT update twice is safe. Which
+    # outcomes are ackable is the engine's call (Result#ack?), so the two can't
+    # drift as outcomes are added; sync_handle_frame has already routed the
+    # reply or broadcast by the time this runs.
+    def sync_send_ack(id, result)
       return if id.nil?
-      return unless %i[recorded applied].include?(outcome)
+      return unless result.ack?
 
       # The braces are required: a bare hash would bind to transmit's `via:`
       # keyword instead of its positional data argument.
@@ -285,9 +286,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # Hand one decoded frame to the engine and route its Result onto the
     # cable: a direct reply to the sender (a SyncStep2 or a resync request),
-    # or a broadcast on the document stream, or neither. Routing happens
-    # before the ack outcome goes back to sync_send_ack, so an ack never
-    # promises delivery that has not been attempted.
+    # or a broadcast on the document stream, or neither. Returns the Result,
+    # routed, so sync_send_ack never acks delivery that wasn't attempted.
     def sync_handle_frame(encoded, bytes)
       sync_validate_required_hooks!
       sync_validate_key!
@@ -296,7 +296,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       sync_transmit(result.reply) if result.reply
       sync_distribute(result.broadcast) if result.broadcast
       sync_log_gap_resync if result.ack == :gap
-      result.ack
+      result
     end
 
     def sync_stream_name
