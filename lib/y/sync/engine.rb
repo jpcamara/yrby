@@ -5,31 +5,28 @@ module Y
     # The transport-neutral yrby sync core: the y-websocket protocol state
     # machine, with no transport attached.
     #
-    # `Y::ActionCable::Sync` is a thin adapter over this: it decodes the cable
-    # envelope, calls {#handle}, and routes the {Result} back through
-    # `transmit` / `ActionCable.server.broadcast`. Those routing calls are the
-    # only thing that ties collaboration to ActionCable. Any transport that can
-    # deliver a reply to one client and relay a frame to the rest can carry the
-    # same protocol: a raw WebSocket, or REST plus a pub/sub bus (Discourse's
-    # MessageBus), for instance.
+    # `Y::ActionCable::Sync` decodes the cable envelope, calls {#handle}, and
+    # routes the {Result} through `transmit` and `ActionCable.server.broadcast`.
+    # Another transport supplies its own routing for the same Results.
     #
-    # The engine adds no mutable protocol state. Every call rebuilds the
-    # document from the store through the `load` hook, which is what lets any
-    # process serve any document. Sharing one engine across connections,
-    # requests, or threads is therefore only as safe as its hooks: they must
-    # be thread-safe and must not close over one connection's state. The
-    # ActionCable adapter builds an engine per channel instance, whose hooks
-    # deliberately capture that channel.
+    # The engine adds no mutable protocol state. Document frames rebuild from
+    # the store through the `load` hook, which is what lets any process serve
+    # any document. Sharing one engine is therefore only as safe as its
+    # hooks: they must be thread-safe, and must not close over a single
+    # connection's state. Two concurrent calls can also classify the same
+    # delta as new and both call `change`, so a recorder must tolerate
+    # duplicates. The ActionCable adapter builds one engine per channel
+    # instance, whose hooks capture that channel on purpose.
     #
     #   engine = Y::Sync::Engine.new(
     #     load:   ->(key)         { MyStore.load(key) },      # bytes, or nil
     #     change: ->(key, update) { MyStore.append(key, update) }
     #   )
     #
-    # Reliability (ack-tracked delivery, causal-gap detection, integrated-only
-    # serving) lives here, because it is the yrs calls themselves;
-    # `update_ready?`, `update_advances?`, `handle_sync_message`,
-    # `compacted_state_update`.
+    # The engine decides the ack outcome and owns causal-gap detection and
+    # integrated-only serving, through `update_ready?`, `update_advances?`,
+    # `handle_sync_message`, and `compacted_state_update`. Transmitting the
+    # ack is the transport's job.
     class Engine
       # Frame kinds from Y.message_kind. Its other codes (0 for a drop, 4 for
       # an awareness query) fall through to a no-op.
@@ -55,13 +52,14 @@ module Y
       #               :gap (rejected, resync requested), or :noop. See
       #               {#ack?}.
       #
-      # The branches: a SyncStep1 replies only; an update either broadcasts
-      # (:recorded, :applied) or replies (:gap); awareness broadcasts only;
-      # anything else sets neither (:noop).
+      # The branches: a SyncStep1 replies only; a valid update either
+      # broadcasts (:recorded, :applied) or replies (:gap); awareness
+      # broadcasts only; an unreadable update and any other kind set neither
+      # (:noop).
       Result = Data.define(:reply, :broadcast, :ack) do
-        # Reliable-delivery clients are acked only once an update is durably
-        # recorded (:recorded), or on an already-present retry that was still
-        # relayed (:applied). A gap or a no-op is never acked.
+        # The outcomes a transport should ack: :recorded, whose delta the
+        # `change` hook stored, and :applied, an already-present retry the
+        # transport relays again. A gap or a no-op is never acked.
         def ack?
           %i[recorded applied].include?(ack)
         end
@@ -86,10 +84,9 @@ module Y
         load_doc(key).sync_step1
       end
 
-      # The current document state as one gap-free update, for a joiner over a
-      # request/response transport (REST) that applies it directly rather than
-      # diffing. `compacted_state_update` (not `encode_state_as_update`) so a
-      # joiner never receives pending structs it cannot integrate.
+      # The current integrated state as one gap-free update, for a joiner
+      # that applies it directly instead of diffing. `compacted_state_update`
+      # excludes pending structs, which a joiner cannot integrate.
       def full_state(key)
         load_doc(key).compacted_state_update
       end
@@ -123,8 +120,6 @@ module Y
         update = Y.update_from_message(bytes)
         return noop unless update
 
-        # Rebuild from the store (O(history) per update; snapshot in `load` if
-        # that cost bites).
         doc = load_doc(key)
 
         # Don't record a causally-incomplete update; request a resync so the
@@ -133,8 +128,8 @@ module Y
 
         # A lost-ack retry: already recorded, so skip `change`, but do
         # re-relay. If the first attempt died between record and broadcast,
-        # this retry is the only path left to the live subscribers. Duplicate
-        # relays are free (CRDT apply is idempotent).
+        # this retry is the only path left to the live subscribers. Relaying
+        # it twice is safe, since applying a CRDT update is idempotent.
         return Result.new(reply: nil, broadcast: encoded, ack: :applied) unless doc.update_advances?(update)
 
         @change.call(key, update) # record before relay

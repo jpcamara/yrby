@@ -5,11 +5,10 @@ require_relative "fixtures/yjs_fixtures"
 require "base64"
 
 # Y::Sync::Engine on its own, with no transport. Y::ActionCable::Sync is one
-# adapter over it (see sync_test.rb); these pin the protocol core directly, so
-# a second adapter (a REST + pub/sub binding, say) inherits the same
-# guarantees. Every update here is a real Yjs delta captured from Y.js, since
-# a Doc is read-only from Ruby; the client produces updates, the engine
-# relays/records/reads them opaquely.
+# adapter over it, covered in sync_test.rb; these pin the protocol core
+# directly, so what a second adapter inherits is tested here rather than
+# through a cable. Every update is a real Yjs delta captured from Y.js,
+# because a Doc is read-only from Ruby.
 class SyncEngineTest < Minitest::Test
   HELLO = YjsFixtures::TextHelloWorld::UPDATE  # "hello world" on "content"
   DOC1 = YjsFixtures::TwoDocsMerged::DOC1_UPDATE
