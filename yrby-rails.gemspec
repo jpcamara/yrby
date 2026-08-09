@@ -39,7 +39,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "base64", "~> 0.2"
   spec.add_dependency "railties", ">= 7.1"
   # 0.7.0 ships Y::Sync::Engine, which the concern is now an adapter over.
-  # (It also subsumes 0.3.1's exact update_ready?, which the channel gates
+  # (It also subsumes 0.3.1's exact update_ready?, which the engine gates
   # recording on.)
   spec.add_dependency "yrby", ">= 0.7.0"
   # The concern calls ActionCable.server directly, and railties doesn't

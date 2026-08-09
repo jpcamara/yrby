@@ -49,6 +49,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # allocation/parse cost. Override per channel with `max_frame_bytes`.
     DEFAULT_MAX_FRAME_BYTES = 8 * 1024 * 1024
 
+    # The message kinds live on the engine now, with the state machine that
+    # reads them. Kept here because they were reachable under this namespace.
+    MSG_KIND_SYNC_STEP1 = Y::Sync::Engine::MSG_KIND_SYNC_STEP1
+    MSG_KIND_UPDATE = Y::Sync::Engine::MSG_KIND_UPDATE
+    MSG_KIND_AWARENESS = Y::Sync::Engine::MSG_KIND_AWARENESS
+
     def self.included(base)
       base.extend(ClassMethods)
     end

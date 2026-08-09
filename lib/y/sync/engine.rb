@@ -13,10 +13,13 @@ module Y
     # same protocol: a raw WebSocket, or REST plus a pub/sub bus (Discourse's
     # MessageBus), for instance.
     #
-    # The engine holds no per-connection or per-document state. Every call
-    # rebuilds the document from the store through the `load` hook, so one
-    # engine is safe to share across connections, requests, and threads; the
-    # same statelessness that lets any process serve any document.
+    # The engine adds no mutable protocol state. Every call rebuilds the
+    # document from the store through the `load` hook, which is what lets any
+    # process serve any document. Sharing one engine across connections,
+    # requests, or threads is therefore only as safe as its hooks: they must
+    # be thread-safe and must not close over one connection's state. The
+    # ActionCable adapter builds an engine per channel instance, whose hooks
+    # deliberately capture that channel.
     #
     #   engine = Y::Sync::Engine.new(
     #     load:   ->(key)         { MyStore.load(key) },      # bytes, or nil
@@ -34,19 +37,27 @@ module Y
       MSG_KIND_UPDATE = 2
       MSG_KIND_AWARENESS = 3
 
-      # What the transport should do with a handled frame. Exactly one of
-      # `reply` / `broadcast` is set in every branch, but they are separate
-      # fields so a transport routes them without re-inspecting the frame.
+      # What the transport should do with a handled frame. Each field is
+      # separate so a transport routes it without re-inspecting the frame.
+      # Route before acking: an ack promises the work already happened.
       #
-      # - `reply`     raw protocol bytes to send back to THIS client only (a
-      #               SyncStep2 answering a SyncStep1, or a resync request), or
-      #               nil.
-      # - `broadcast` the caller-supplied encoded frame to relay to the OTHER
-      #               clients on this document, or nil.
-      # - `ack`       the reliable-delivery outcome: :recorded (durably stored
-      #               and relayed), :applied (a lost-ack retry, re-relayed but
-      #               not re-recorded), :gap (rejected, resync requested), or
-      #               :noop. See {#ack?}.
+      # - `reply`     raw protocol bytes for the client that sent this frame
+      #               (a SyncStep2 answering a SyncStep1, or a resync
+      #               request), or nil.
+      # - `broadcast` the caller-supplied encoded frame to relay to the
+      #               document's subscribers, or nil. Who receives it is the
+      #               transport's policy; the ActionCable adapter broadcasts
+      #               to a stream that includes the sender, which is harmless
+      #               because applying a CRDT update is idempotent.
+      # - `ack`       the reliable-delivery outcome: :recorded (durably
+      #               stored, and the caller should relay it), :applied (a
+      #               lost-ack retry, relay again but do not re-record),
+      #               :gap (rejected, resync requested), or :noop. See
+      #               {#ack?}.
+      #
+      # The branches: a SyncStep1 replies only; an update either broadcasts
+      # (:recorded, :applied) or replies (:gap); awareness broadcasts only;
+      # anything else sets neither (:noop).
       Result = Data.define(:reply, :broadcast, :ack) do
         # Reliable-delivery clients are acked only once an update is durably
         # recorded (:recorded), or on an already-present retry that was still
