@@ -16,13 +16,14 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `Y::ActionCable::Sync` is now a thin adapter over the new transport-neutral
-  `Y::Sync::Engine` (core yrby). Behavior is unchanged (the full protocol test
-  suite passes as-is), but the state machine, reliability, and gap handling now
-  live in the engine, and the concern is just the cable wiring: envelope
-  decode, size cap, and routing the engine's result through `transmit` /
-  `broadcast`. `MSG_KIND_*` are canonically on `Y::Sync::Engine` now, aliased under the concern so existing references keep resolving. Requires
-  `yrby >= 0.7.0`, which ships the engine.
+- `Y::ActionCable::Sync` now hands each decoded frame to `Y::Sync::Engine`
+  (core yrby) and routes the reply, broadcast, and ack outcome it returns.
+  Behavior is unchanged. The state machine, causal-gap detection, and
+  record-before-relay decisions live in the engine; the concern keeps
+  envelope decoding, the frame size cap, hook and key validation, cable
+  routing, logging, and ack transmission. `MSG_KIND_*` are canonically on
+  the engine and aliased under the concern, so existing references keep
+  resolving. Requires `yrby >= 0.7.0`, which ships the engine.
 
 ## [0.5.0] - 2026-08-05
 
