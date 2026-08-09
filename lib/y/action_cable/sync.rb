@@ -35,30 +35,36 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # There is no unsubscribe hook: the server keeps no per-connection document or
   # presence state, so a disconnect needs no server-side cleanup.
   #
-  # The concern is store-backed: every document update is validated against
-  # `on_load`, recorded through `on_change`, and only then broadcast.
+  # The concern is store-backed: Y::Sync::Engine rebuilds each document
+  # through `on_load`, records a new update through `on_change` before it is
+  # broadcast, and relays an already-stored retry without recording it again.
   # No authoritative document state is kept in ActionCable process memory.
+  #
+  # The protocol state machine lives in Y::Sync::Engine; this concern is the
+  # ActionCable adapter over it: it decodes the cable envelope, calls the
+  # engine, and routes the result back through `transmit` and
+  # `ActionCable.server.broadcast`.
   module Sync
-    # Frame kinds we act on, from Y.message_kind. Its other codes (0 for a
-    # drop: malformed/truncated/multi-message/unknown, and 4 for an awareness
-    # query) fall through to a no-op in the dispatch below.
-    MSG_KIND_SYNC_STEP1 = 1
-    MSG_KIND_UPDATE = 2
-    MSG_KIND_AWARENESS = 3
-
     # Default incoming-frame size cap (decoded bytes). Generous enough for a
     # large initial SyncStep2, small enough to bound a single message's
     # allocation/parse cost. Override per channel with `max_frame_bytes`.
     DEFAULT_MAX_FRAME_BYTES = 8 * 1024 * 1024
+
+    # Canonically on the engine, with the state machine that reads them.
+    # Kept in this namespace because they were reachable here.
+    MSG_KIND_SYNC_STEP1 = Y::Sync::Engine::MSG_KIND_SYNC_STEP1
+    MSG_KIND_UPDATE = Y::Sync::Engine::MSG_KIND_UPDATE
+    MSG_KIND_AWARENESS = Y::Sync::Engine::MSG_KIND_AWARENESS
 
     def self.included(base)
       base.extend(ClassMethods)
     end
 
     module ClassMethods
-      # Load persisted document state. Called once per key with (key); return a
-      # binary Y.js update (or nil for a fresh document). Runs in the channel
-      # instance's context (instance_exec).
+      # Load persisted document state. Called with (key) every time the engine
+      # rebuilds the document, which is once per handshake and once per
+      # incoming update; return a binary Y.js update, or nil for a fresh
+      # document. Runs in the channel instance's context (instance_exec).
       def on_load(&block)
         @on_load = block if block
         return @on_load if defined?(@on_load) && @on_load
@@ -66,10 +72,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         superclass.respond_to?(:on_load) ? superclass.on_load : nil
       end
 
-      # Record every document change durably before it is applied or
-      # distributed. Called synchronously with (key, update), where update is
-      # the exact CRDT delta. If the block raises, the change is rejected:
-      # neither acknowledged nor broadcast to other subscribers.
+      # Record a new document change durably, before it is broadcast or
+      # acked. Called synchronously with (key, update), where update is the
+      # exact CRDT delta. An update already present in the store is relayed
+      # without calling this again. If the block raises, the change is
+      # rejected: neither acknowledged nor broadcast. Concurrent deliveries
+      # of the same delta can both reach it, so it must tolerate duplicates.
       #
       # Runs in the channel instance's context (instance_exec). Fires from within
       # sync_receive.
@@ -104,12 +112,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # client path to ephemeral presence rather than the durable document stream.
       stream_from sync_stream_name
       stream_from sync_awareness_stream_name, whisper: true if respond_to?(:whispers_to)
-      sync_transmit(sync_load_doc.sync_step1)
+      sync_transmit(sync_engine.sync_step1(@sync_key))
     end
 
-    # Call from `receive`. Applies the client's message, replies directly
-    # when the protocol calls for it, and relays document/awareness changes
-    # to the other subscribers.
+    # Call from `receive`. Hands the client's frame to the engine, replies
+    # directly when the protocol calls for it, and relays document and
+    # awareness frames to the document stream.
     #
     # Reliable delivery: document updates carry an "id", and the server replies
     # `{ "ack" => id }` once the update has been durably recorded. A
@@ -142,8 +150,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       begin
         bytes = Base64.strict_decode64(encoded)
       rescue ArgumentError
-        sync_log_drop(:debug, "not valid base64", id) # garbage or a probe, rarely a real client
-        return # ignore the frame and keep the connection
+        sync_log_drop(:debug, "not valid base64", id)
+        return
       end
 
       if cap && bytes.bytesize > cap
@@ -156,23 +164,26 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     private
 
-    # Ask this connection's client to resync: re-send SyncStep1 carrying the
-    # server's current (gap-free) state vector. The client replies SyncStep2
-    # with everything the server is missing, delivered as one causally-complete
-    # delta, which heals the gap that triggered the resync.
-    def sync_request_resync(doc)
-      sync_transmit(doc.sync_step1)
+    # One engine per channel instance. Its hooks run on_load and on_change in
+    # this instance's context (instance_exec), so they can reach current_user,
+    # params, and the channel's own methods.
+    def sync_engine
+      @sync_engine ||= Y::Sync::Engine.new(
+        load: ->(key) { instance_exec(key, &self.class.on_load) },
+        change: ->(key, update) { instance_exec(key, update, &self.class.on_change) }
+      )
     end
 
     # Reliable delivery: acknowledge an accepted update back to the sending
     # connection. An ack-aware client tags each outgoing update with an "id"
     # and retains it until the matching `{ "ack" => id }` returns, retransmitting
-    # on a timer or reconnect; idempotent CRDT apply makes resends free. Acks
-    # are sent only after the update has been durably recorded, or when a retry
-    # is already present in the durable store.
-    def sync_send_ack(id, outcome)
+    # on a timer or reconnect; applying a CRDT update twice is safe. Which
+    # outcomes are ackable is the engine's call (Result#ack?), so the two can't
+    # drift as outcomes are added; sync_handle_frame has already routed the
+    # reply or broadcast by the time this runs.
+    def sync_send_ack(id, result)
       return if id.nil?
-      return unless %i[recorded applied].include?(outcome)
+      return unless result.ack?
 
       # The braces are required: a bare hash would bind to transmit's `via:`
       # keyword instead of its positional data argument.
@@ -195,9 +206,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       { "update" => encoded }
     end
 
-    # Override in the channel to add identifying context to dropped-frame logs --
-    # a user id, a connection id, a request id. Return a short string (or nil for
-    # none); it is appended to the log line. Default: no extra context.
+    # Override in the channel to add identifying context to dropped-frame and
+    # gap-resync logs: a user id, a connection id, a request id. Return a short
+    # string, or nil for none. Default: no extra context.
     def sync_log_context
       nil
     end
@@ -212,7 +223,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       logger.public_send(level) do
         parts = ["key=#{@sync_key.inspect}"]
         parts << "id=#{id}" unless id.nil?
-        # A broken context hook must surface, not take down frame handling.
+        # Report a broken context hook in the log line rather than raising.
         context = begin
           sync_log_context
         rescue StandardError => e
@@ -223,19 +234,15 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
-    # Log each causal-gap resync at info. The reject path is otherwise silent
-    # (it transmits a SyncStep1 and returns), so without this there's no way to
-    # see how often clients are sending updates ahead of their dependencies and
-    # forcing a resync. Names the document key and whatever sync_log_context
-    # returns, so frequency can be counted and traced per document.
-    #
-    # One line per forced resync: a client that keeps re-sending the same gapped
-    # update logs on every retry. That's the signal you want, but it can be
-    # chatty; override this method to change the level or silence it.
+    # Log every causal-gap resync with the document key and sync_log_context.
+    # The reject path sends no error to the client, so this is the only
+    # record of how often updates arrive ahead of their dependencies. A
+    # client retrying the same gapped update logs each time; override to
+    # change the level or silence it.
     def sync_log_gap_resync
       logger.info do
         parts = ["key=#{@sync_key.inspect}"]
-        # A broken context hook must surface, not take down frame handling.
+        # Report a broken context hook in the log line rather than raising.
         context = begin
           sync_log_context
         rescue StandardError => e
@@ -246,11 +253,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
-    # This concern acks updates as durably recorded, so it must have both a
-    # loader (to rebuild the doc and detect causal gaps) and a recorder (to
-    # actually persist before acking). Fail closed rather than silently acking
-    # and broadcasting updates that were never stored, which a cold load or
-    # reconnect would then lose.
+    # Both hooks are required: the engine needs stored state to rebuild the
+    # document and detect causal gaps, and a new update must be persisted
+    # before it is broadcast or acked. Without them the channel would ack and
+    # broadcast updates that were never stored, and a cold load or reconnect
+    # would lose them.
     def sync_validate_required_hooks!
       missing = []
       missing << :on_load unless self.class.on_load
@@ -265,9 +272,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # Fail closed when no document key is set (typically: AnyCable rebuilt the
     # channel instance and the app forgot to pass `key` to sync_receive).
-    # Proceeding would record under nil, broadcast to a stream nobody
-    # subscribes to, and still ack — the client believes the edit was
-    # delivered when it reached no one.
+    # Proceeding would record under nil, broadcast on a stream derived from
+    # nil, and still ack, telling the client an edit landed on a document it
+    # never reached.
     def sync_validate_key!
       return unless @sync_key.nil? || @sync_key.empty?
 
@@ -277,66 +284,19 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
             "doesn't keep the channel instance alive across actions (e.g. AnyCable)."
     end
 
-    # Stateless per message: any process can handle any document. A client's
-    # SyncStep1 is answered from the store, document changes are recorded durably
-    # before relay and then broadcast, and awareness is relayed best-effort.
-    # Echoing back to the sender is harmless, since the CRDT apply is idempotent.
-    #
-    # Returns an outcome symbol for the reliable-delivery ack: :recorded when a
-    # document update was durably recorded and relayed, :gap when it was
-    # rejected for a resync, :noop for everything else.
+    # Hand one decoded frame to the engine and route its Result onto the
+    # cable: a direct reply to the sender (a SyncStep2 or a resync request),
+    # or a broadcast on the document stream, or neither. Returns the Result,
+    # routed, so sync_send_ack never acks delivery that wasn't attempted.
     def sync_handle_frame(encoded, bytes)
       sync_validate_required_hooks!
       sync_validate_key!
 
-      case Y.message_kind(bytes)
-      when MSG_KIND_SYNC_STEP1
-        result = sync_load_doc.handle_sync_message(bytes)
-        sync_transmit(result[2])
-        :noop
-      when MSG_KIND_UPDATE
-        update = Y.update_from_message(bytes)
-        return :noop unless update
-
-        # Rebuild from the store (O(history) per update; snapshot in on_load if
-        # that cost bites).
-        doc = sync_load_doc
-
-        # Don't record a causally-incomplete update; resync instead so the gap
-        # heals as one complete delta.
-        unless doc.update_ready?(update)
-          sync_request_resync(doc)
-          sync_log_gap_resync
-          return :gap
-        end
-
-        # A lost-ack retry: already recorded, so skip on_change — but DO
-        # re-broadcast. If the first attempt died between record and broadcast,
-        # this retry is the only path left to the live subscribers. Duplicate
-        # broadcasts are free (CRDT apply is idempotent).
-        unless doc.update_advances?(update)
-          sync_distribute(encoded)
-          return :applied
-        end
-
-        sync_record_change(update) # record before relay
-        sync_distribute(encoded)
-        :recorded
-      when MSG_KIND_AWARENESS
-        sync_distribute(encoded)
-        :noop
-      else
-        :noop
-      end
-    end
-
-    # Build a fresh document from the durable store (on_load). Callers validate
-    # the hooks first, so on_load is present; a nil state means a fresh document.
-    def sync_load_doc
-      doc = Y::Doc.new
-      state = instance_exec(@sync_key, &self.class.on_load)
-      doc.apply_update(state) if state
-      doc
+      result = sync_engine.handle(@sync_key, encoded, bytes)
+      sync_transmit(result.reply) if result.reply
+      sync_distribute(result.broadcast) if result.broadcast
+      sync_log_gap_resync if result.ack == :gap
+      result
     end
 
     def sync_stream_name
@@ -345,13 +305,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     def sync_awareness_stream_name
       "#{sync_stream_name}:awareness"
-    end
-
-    # Invoke the on_change recorder in this channel instance's context
-    # (instance_exec) so it can reach the channel's own methods. Mirrors how
-    # sync_load_doc fetches and runs on_load.
-    def sync_record_change(update)
-      instance_exec(@sync_key, update, &self.class.on_change)
     end
   end
 end
