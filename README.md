@@ -2,12 +2,42 @@
 
 [![CI](https://github.com/jpcamara/yrby/actions/workflows/ci.yml/badge.svg)](https://github.com/jpcamara/yrby/actions/workflows/ci.yml)
 
-Collaborative editing for Rails, backed by [y-crdt](https://github.com/y-crdt/y-crdt)
-(the Rust library behind Y.js). Your Rails server speaks the y-websocket sync
-protocol directly, so there's no separate Node process hosting the Y.js
-documents. Pronounced "yer-bee".
+yrby (pronounced "yer-bee") makes Rails a real Yjs backend. It binds
+[y-crdt](https://github.com/y-crdt/y-crdt), the Rust engine behind Y.js, into
+Ruby, and builds the rest of the stack around it: a sync server for Action
+Cable and AnyCable, a browser provider, and server-side reading and rendering
+of the documents. Real-time collaboration in a Rails app with no Node process
+anywhere in the path.
 
 ![Two people typing on separate lines of the same document, each keystroke synced through a Rails server, seen from a third browser with labeled carets](docs/images/collab.gif)
+
+On the server, `yrby-rails` implements the full y-websocket protocol
+(document sync plus presence) as a channel concern. Its delivery contract is
+stricter than the usual Yjs servers: every update is ack-tracked, checked for
+causal gaps, and durably recorded before it is acknowledged or broadcast to
+anyone. Replaying your store always rebuilds the document, across any number
+of processes. ([Delivery guarantees](#delivery-guarantees))
+
+In the browser, `yrby-client`'s `ActionCableProvider` connects anything that
+speaks Yjs. The demo app runs four rich text editors, and CI drives each one
+in real Chrome: Tiptap, [Lexxy](https://www.npmjs.com/package/lexxy-realtime),
+Rhino Editor, and CodeMirror. The same channel also syncs Yjs shapes with no
+editor at all: a whiteboard on a `Y.Map`, a kanban board on a `Y.Array`, a
+co-filled form. ([Editors](#editors))
+
+In Ruby, the documents are readable without a browser. `Doc#read_text` and
+`Doc#read_map` reconstruct contents for search, validation, and exports.
+`Y::Tiptap` and `Y::Lexxy` render a document to HTML byte-identical to the
+editor's own serializer, take rules for your app's custom nodes, and drop
+straight into ActionText. ([Rendering to HTML](#rendering-to-html))
+
+Underneath, the core is built for a production Rails deployment. A `Doc` is
+thread-safe across Puma and ActionCable threads. Native CRDT work runs with
+the GVL released, so it parallelizes on MRI. Incoming frames are validated
+before anything processes them, and multi-process and AnyCable setups are
+tested end to end. ([Thread Safety](#thread-safety))
+
+The whole server side of a collaborative document is one channel:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
@@ -21,31 +51,36 @@ class DocumentChannel < ApplicationCable::Channel
 end
 ```
 
-On the browser, use the `ActionCableProvider` from the 
-[`yrby-client`](https://www.npmjs.com/package/yrby-client) npm package.
-Integrates with any editor that includes Y.js support, such as Tiptap, ProseMirror
-and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
-
-## Usage
-
-Install the gem and npm package:
+Install the gem and the npm package:
 
 ```
-gem install yrby-actioncable # depends on yrby
+gem install yrby-rails # depends on yrby
 npm install yrby-client
 ```
 
-## What you get
+## Contents
 
-- A thread-safe Ruby `Doc` you can share across Ruby threads/fibers, and native CRDT work
-  runs with the GVL released.
-- The y-websocket protocol (document sync plus awareness/presence) as a
-  one-include ActionCable concern.
-- Authoritative record-before-distribute semantics: each document change can be
-  recorded durably before it goes out to anyone.
-- Optional server-side reads: `Doc#read_text` and `Doc#read_map` reconstruct a
-  document's contents in Ruby - no Node process - for search, exports, validation,
-  or server-side rendering.
+- [Scope](#scope)
+- [Durability and delivery](#durability-and-delivery)
+- [What about yrb?](#what-about-yrb)
+- [Testing](#testing)
+- [Install](#install)
+- [Docs](#docs)
+- [Editors](#editors)
+- [Usage](#usage)
+  - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
+  - [Reading document contents](#reading-document-contents)
+  - [Pending structs and gap-free state](#pending-structs-and-gap-free-state)
+  - [Rendering to HTML](#rendering-to-html)
+  - [Protocol codec (module functions)](#protocol-codec-module-functions)
+  - [ActionCable Integration](#actioncable-integration)
+- [Thread Safety](#thread-safety)
+  - [Parallelism (GVL release)](#parallelism-gvl-release)
+- [Message Type Constants](#message-type-constants)
+- [Sync Flow](#sync-flow)
+- [Development](#development)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ## Scope
 
@@ -64,7 +99,7 @@ guarantees, correctness, and thread safety.
 Towards that goal, `yrby` adds opinionated defaults on top of normal Yjs syncing:
 
 - Built-in update acknowledgement: the `ActionCableProvider` in `yrby-client` will continue to
-  send updates until an ack is received from the server. [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
+  send updates until an ack is received from the server. [`yrby-rails`](https://rubygems.org/gems/yrby-rails)
   only sends an ack when applying an update is successful. The goal is at-least-once delivery,
   and because CRDTs are idempotent a duplicate update is effectively a no-op.
 - Gap detection in document updates: before applying an update and sending an ack to the client,
@@ -512,8 +547,7 @@ answered, and they can point at anything.
 
 `include Y::ActionCable` (from the `yrby-rails` gem) is the channel
 integration: the y-websocket protocol (document sync +
-awareness/presence) over ActionCable. (`include Y::ActionCable::Sync`
-keeps working and has the same effect.)
+awareness/presence) over ActionCable.
 
 ```ruby
 # app/channels/document_channel.rb
@@ -734,6 +768,80 @@ duplicate record replays to the same document.
 
 The demo wires `on_change` to a durable Postgres-backed log by default, and checks
 end to end that the log alone rebuilds the document.
+
+#### Ephemeral documents (no database)
+
+`on_load` and `on_change` are plain blocks, and nothing requires them to touch
+a database. For documents that don't need to outlive their session (a
+scratchpad, live form state, a draft you only persist on submit) the store
+can be connection state that travels with each request:
+
+```ruby
+class ScratchpadChannel < ApplicationCable::Channel
+  include Y::ActionCable
+
+  on_load { |key| @doc_state }
+
+  on_change do |key, update|
+    doc = Y::Doc.new
+    doc.apply_update(@doc_state) if @doc_state
+    doc.apply_update(update)
+    @doc_state = doc.compacted_state_update
+  end
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
+end
+```
+
+On AnyCable the channel object doesn't survive between messages, so an
+instance variable won't hold. Declare the store as channel state instead
+(`state_attr_accessor` comes from anycable-rails) and Base64 it, because that
+state is serialized as JSON into each RPC exchange with `anycable-go`:
+
+```ruby
+class ScratchpadChannel < ApplicationCable::Channel
+  include Y::ActionCable
+
+  state_attr_accessor :doc_state
+
+  on_load { |key| doc_state && Base64.strict_decode64(doc_state) }
+
+  on_change do |key, update|
+    doc = Y::Doc.new
+    doc.apply_update(Base64.strict_decode64(doc_state)) if doc_state
+    doc.apply_update(update)
+    self.doc_state = Base64.strict_encode64(doc.compacted_state_update)
+  end
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
+end
+```
+
+Both hooks run in the channel instance (`instance_exec`), so they can use
+anything the channel can, and `sync_receive` rebuilds the document from
+`on_load` on every update, which is what lets the store live on the
+connection. On Action Cable the channel instance lasts as long as the
+connection, so an instance variable is the whole store. Merging into
+`compacted_state_update` keeps it one blob instead of a growing update log.
+
+The store is per connection, which shapes what this fits. A single writer gets
+the full delivery contract with no database anywhere. With several people
+editing at once, one client's update can depend on another client's edits that
+its own connection state has never seen; the gap check refuses the update and
+starts a resync, and the client, which always holds the full document,
+sends the missing state back. The document still converges, but heavy
+concurrent editing pays resync round trips that a shared store doesn't. On
+AnyCable, keep the payload in mind too: the blob travels with every message,
+so that variant suits small documents, not long manuscripts.
+
+Durability is the connection plus the browsers. A reconnecting client re-seeds
+an empty server through the ordinary sync handshake, so the document survives
+server restarts as long as some client still has it. For ephemeral documents
+shared across clients on a single-process deployment, the same two hooks over
+a class-level `Concurrent::Map` work instead; that version stops being
+coherent the moment you scale past one process.
 
 #### Reliable delivery (acks)
 
