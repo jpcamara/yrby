@@ -136,10 +136,11 @@ class SyncTest < Minitest::Test
     assert_equal source.encode_state_vector, rebuilt.encode_state_vector
   end
 
-  def test_sync_step1_is_answered_with_gap_free_state_from_the_store
-    # A store holding a legacy gappy update: the loaded doc has a pending struct.
-    # The concern must answer SyncStep1 with integrated-only state, so a client
-    # applying the reply is not poisoned.
+  def test_sync_step1_is_answered_with_full_state_including_pending
+    # A store holding a gappy update: the loaded doc has a pending struct.
+    # The concern serves full state, pending included, like any Yjs server;
+    # the client parks the pending struct the same way and heals it when the
+    # missing dependency arrives.
     transmits = []
     helper = helper_for(store: [YjsFixtures::Gap::DEPENDENT], transmits: transmits)
 
@@ -151,7 +152,10 @@ class SyncTest < Minitest::Test
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
-    refute_predicate client, :pending?, "the concern served integrated-only state"
+    assert_predicate client, :pending?, "the pending struct was served and parked"
+    client.apply_update(YjsFixtures::Gap::FIRST)
+
+    refute_predicate client, :pending?, "and healed once the dependency arrived"
   end
 
   def test_records_then_relays_and_acks_update
@@ -459,22 +463,32 @@ class SyncTest < Minitest::Test
                  "the healed doc integrated exactly the same structs as an in-order apply"
   end
 
-  def test_serves_gap_free_state_while_a_gap_is_open
+  def test_a_joiner_receives_the_open_gap_and_heals_with_the_room
     store = []
     transmits = []
     helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
     transmits.clear
 
-    # A joining client asks for state. It must receive integrated-only state;
-    # the pending U3 is never served, so it is not left holding a pending struct.
+    # A joining client receives full state, the pending U3 included: it parks
+    # it exactly as the server did.
     client = Y::Doc.new
     helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
-    refute_predicate client, :pending?, "the open gap was not served to the joining client"
+    assert_predicate client, :pending?, "the open gap traveled to the joiner"
+
+    # The missing dependencies arrive (their sender retransmits until acked);
+    # the server relays them, and the joiner's copy heals in place.
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1, id: 2), "doc-key")
+    helper.sync_receive(update_message(YjsFixtures::CausalChain::U2, id: 3), "doc-key")
+    client.apply_update(YjsFixtures::CausalChain::U1)
+    client.apply_update(YjsFixtures::CausalChain::U2)
+
+    refute_predicate client, :pending?, "the joiner healed with the room"
+    assert_equal "ABC", client.read_text("content"), "into the complete document"
   end
 
   def test_a_deduping_store_collapses_retries
