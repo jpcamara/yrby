@@ -334,7 +334,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       when MSG_KIND_SYNC_STEP1
         doc = sync_load_doc
         result = doc.handle_sync_message(bytes)
-        sync_transmit(result[2])         # integrated-only state (never pending)
+        sync_transmit(result[2])         # full state, pending included
         sync_solicit_repair(doc)         # if a gap is open, ask this client to fill it
         :noop
       when MSG_KIND_UPDATE
@@ -352,11 +352,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # Ack-on-durable, with no doc rebuild and no gap check on the write
     # path: record (before relay), relay, ack. A causally-incomplete update is
-    # recorded as a pending struct like any other edit; serving stays
-    # integrated-only, the gap heals when its missing dependency arrives
-    # (usually via the join handshake, see sync_solicit_repair), and an open
-    # gap is surfaced by on_gap at join/serve time. on_change must tolerate
-    # duplicates: a lost-ack retry records again.
+    # recorded as a pending struct like any other edit and served onward like
+    # one (a peer parks and heals it the same way this doc does). The gap
+    # heals when its missing dependency arrives: its own sender retransmits
+    # it until acked, and the join handshake solicits it from other clients
+    # (sync_solicit_repair). An open gap is surfaced by on_gap at join/serve
+    # time. on_change must tolerate duplicates: a lost-ack retry records
+    # again.
     def sync_handle_document_update(update, encoded)
       sync_record_change(update) # record before relay
       sync_distribute(encoded)

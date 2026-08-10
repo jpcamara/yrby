@@ -179,8 +179,8 @@ doc.update_advances?(update)      # => true if update moves integrated state for
 # Sync protocol
 doc.sync_step1                    # => SyncStep1 message (this doc's state vector)
 doc.handle_sync_message(data)     # => [msg_type, sync_type, response]; answers a
-                                  #    peer's SyncStep1 with an integrated-only
-                                  #    SyncStep2 (never serves pending structs)
+                                  #    peer's SyncStep1 with full state (lossless,
+                                  #    pending included, like Y.js)
 ```
 
 ### Reading document contents
@@ -201,16 +201,18 @@ update), yrs parks it as a **pending** struct: the integrated state vector stays
 empty, but the pending block is held as a recovery buffer and heals if the
 missing dependency later arrives. `Doc#pending?` reports this.
 
-Pending structs are *not* document state, so they must not cross the sync
-boundary; a peer that receives one can't integrate it and gets stuck. Two
-guarantees keep serving safe:
+Pending structs travel like any other state. `handle_sync_message` answers
+`SyncStep1` with the doc's full state, pending included, the same way Y.js's
+`encodeStateAsUpdate` does: a peer parks the pending struct exactly as this
+doc did and heals it when the missing dependency arrives. The place pending
+must *not* go is a compacted snapshot:
 
-- `handle_sync_message` answers `SyncStep1` with **integrated-only** state, so a
-  server never serves a struct it can't integrate itself (this is automatic).
-- `Doc#compacted_state_update` gives you the same gap-free full-state update for
-  when you persist or hand off state yourself. It's non-destructive (the doc
-  keeps its pending), while `encode_state_as_update` stays lossless so you can
-  still preserve the raw pending bytes for recovery.
+- `Doc#compacted_state_update` gives a gap-free full-state update for
+  compaction (folding a log into one blob would otherwise freeze an
+  un-integrable struct into the base state forever). It's non-destructive:
+  the doc keeps its pending.
+- `encode_state_as_update` stays lossless, so persistence and serving keep
+  the raw pending bytes and the gap can still heal.
 
 ### Rendering to HTML
 
@@ -564,12 +566,12 @@ servers:
 - **The document always converges.** CRDT updates are commutative and
   idempotent, so out-of-order, duplicate, or concurrent delivery all converge to
   the same correct document. This needs no coordination and holds everywhere.
-- **Every received update is durable the moment it is acked.** A
-  causally-incomplete update is recorded immediately as a pending struct and
-  heals when its missing dependency arrives, so a received edit survives even
-  if its sender dies before the rest of the batch lands. Serving stays
-  gap-free throughout, and the join handshake repairs an open gap. See
-  [Causal gaps](#causal-gaps).
+- **Every received update is durable the moment it is acked, and gaps heal
+  through the same ack loop.** A causally-incomplete update is recorded
+  immediately as a pending struct; its missing dependency is a frame some
+  client still holds unacked, so that client retransmits it until the server
+  records it, and the gap closes. Rejecting the dependent update never added
+  durability; the ack loop is the guarantee. See [Causal gaps](#causal-gaps).
 - **`on_change` is at-least-once, and the durable guarantee is that replaying the
   log reconstructs the document.** Every update triggers `on_change` before it's acked or
   broadcast (record-before-distribute). If exactly-once updates matter for you, **you
@@ -603,10 +605,13 @@ pending struct and heals the moment its missing dependency lands. The write
 path does not rebuild the document at all: it appends, relays, and acks, which
 is also what makes it cheap (no O(history) rebuild per update).
 
-**Serving is always gap-free.** `handle_sync_message` and
-`compacted_state_update` exclude pending, so a peer never receives
-un-integrable content. A gap changes what the server *stores*, never what it
-*serves*.
+**Serving is lossless, like any Yjs server.** `handle_sync_message` serves
+full state, pending included; a peer parks a pending struct exactly as the
+server did and heals it the same way. What heals the gap is the ack loop:
+the missing dependency is an update its own sender still holds unacked, and
+at-least-once retransmission delivers it. Only compaction excludes pending
+(`compacted_state_update`), because folding a log must not freeze an
+un-integrable struct into the base state.
 
 This asks two things of the store:
 

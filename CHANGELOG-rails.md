@@ -11,13 +11,14 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Causal gaps are now accepted.** A causally-incomplete update, one whose
   causally-prior update the store hasn't seen, is recorded and acked like any
-  other (ack-on-durable) instead of being rejected with a resync request. It
-  parks as a pending struct, is never served (serving stays gap-free), and
-  heals when its missing dependency arrives, usually through the join
-  handshake: when a client joins or syncs while a gap is open, the server
-  solicits the missing dependency from it. The write path no longer rebuilds
-  the document per update: it appends, relays, and acks, so a lost-ack retry
-  records again (replay converges; CRDT apply is idempotent).
+  other (ack-on-durable) instead of being rejected with a resync request,
+  and served onward like any other state (a peer parks a pending struct
+  exactly as the server does). The gap heals through the ack loop: the
+  missing dependency is an update its own sender still holds unacked and
+  keeps retransmitting; the join handshake additionally solicits it from
+  other clients. The write path no longer rebuilds the document per update:
+  it appends, relays, and acks, so a lost-ack retry records again (replay
+  converges; CRDT apply is idempotent).
 
   This tightens the store contract: `on_load` must preserve pending
   (`encode_state_as_update` or a replayed raw append log), compaction must
