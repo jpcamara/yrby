@@ -146,7 +146,8 @@ class SyncTest < Minitest::Test
     client = Y::Doc.new
     helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
-    assert_equal 1, transmits.length
+    assert_equal 2, transmits.length,
+                 "the SyncStep2 reply, plus a repair solicit (SyncStep1) for the open gap"
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
@@ -195,37 +196,6 @@ class SyncTest < Minitest::Test
     assert_empty recorded
     assert_empty broadcasts
     assert_empty acks_in(transmits)
-  end
-
-  def test_rejects_gapped_update_and_requests_resync
-    store = []
-    broadcasts = []
-    transmits = []
-    helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts)
-
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1, id: 1), "doc-key")
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 2), "doc-key")
-
-    assert_equal [YjsFixtures::CausalChain::U1], store
-    assert_equal 1, broadcasts.length
-    assert_equal [1], acks_in(transmits)
-    assert_operator transmits.length, :>, 1, "gapped update should trigger a SyncStep1 resync"
-  end
-
-  def test_gap_resync_is_logged
-    logged = []
-    helper = helper_for
-    helper.logger = capturing_logger(logged)
-    helper.define_singleton_method(:sync_log_context) { "user=42" }
-
-    # A gapped update (U3 with no U1/U2 in the store) forces a resync.
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-
-    resync = logged.find { |lvl, msg| lvl == :info && msg.include?("causal-gap resync") }
-
-    assert resync, "each forced resync is logged at info so its frequency is observable"
-    assert_includes resync.last, "doc-key", "the log names the document"
-    assert_includes resync.last, "user=42", "and includes sync_log_context"
   end
 
   def test_gap_heals_after_client_resyncs
@@ -308,9 +278,11 @@ class SyncTest < Minitest::Test
     helper.transmits = []
     helper.broadcasts = []
 
-    # sync_receive of a document update rebuilds the doc via sync_load_doc,
-    # which invokes on_load, proving the loader runs in the channel's context.
-    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE), "doc-key")
+    # The write path records without rebuilding, so on_load runs when state
+    # is served: a SyncStep1 rebuilds via sync_load_doc, proving the loader
+    # runs in the channel's context.
+    client = Y::Doc.new
+    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     assert_equal "loader-42", seen
   end
@@ -399,7 +371,7 @@ class SyncTest < Minitest::Test
            "a raising context hook surfaces in the log instead of breaking the drop")
   end
 
-  def test_lost_ack_retry_acks_without_double_recording
+  def test_lost_ack_retry_re_records_re_relays_and_re_acks
     store = []
     broadcasts = []
     transmits = []
@@ -409,79 +381,31 @@ class SyncTest < Minitest::Test
     helper.sync_receive(msg, "doc-key")
     helper.sync_receive(msg, "doc-key")
 
-    assert_equal [YjsFixtures::TwoDocsMerged::DOC1_UPDATE], store
-    # The retry is not re-RECORDED, but it IS re-broadcast: if the original
-    # attempt recorded and then crashed before distributing, the retry is the
-    # only mechanism that can still reach live subscribers. Idempotent apply
-    # makes the duplicate broadcast free.
+    # The write path records without rebuilding, so a lost-ack retry records
+    # again; replaying the log converges anyway, because applying a CRDT
+    # update twice is a no-op. The re-broadcast also closes the crash window
+    # between the original record and its relay.
+    assert_equal [YjsFixtures::TwoDocsMerged::DOC1_UPDATE] * 2, store
     assert_equal 2, broadcasts.length
     assert_equal [5, 5], acks_in(transmits)
+    replay = Y::Doc.new
+    store.each { |u| replay.apply_update(u) }
+
+    assert_equal "from doc1", replay.read_text("content"), "duplicate records replay to the same document"
   end
 
-  def test_lost_ack_delete_retry_acks_without_double_recording
-    # A pure-delete retry the server already integrated must be acked and not
-    # re-recorded (it IS re-broadcast — see the retry test above). Insert
-    # content, delete a char, then replay the deletion.
-    content = YjsFixtures::DeleteRetry::CONTENT
-    deletion = YjsFixtures::DeleteRetry::DELETION
-
-    store = []
-    broadcasts = []
-    transmits = []
-    helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts)
-
-    helper.sync_receive(update_message(content, id: 1), "doc-key")
-    helper.sync_receive(update_message(deletion, id: 2), "doc-key")
-    helper.sync_receive(update_message(deletion, id: 3), "doc-key") # lost-ack retry
-
-    assert_equal 2, store.length, "the deletion records once; its retry does not"
-    assert_equal 3, broadcasts.length, "the retry re-broadcasts (crash-window heal)"
-    assert_equal [1, 2, 3], acks_in(transmits), "every frame is still acked"
-  end
-
-  def test_cross_client_origin_gap_is_resynced_not_acked
-    # DELTA's origins reference client 3's blocks (CONTENT), which this store
-    # never saw. Its per-client clock lower bound passes, so a clock-only ready
-    # check used to let it through — and the advances? probe then misread the
-    # parked update as an already-applied retry: acked :applied and dropped.
-    # It must instead be rejected as a gap: resynced, never recorded, never
-    # acked.
-    store = []
-    broadcasts = []
-    transmits = []
-    helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts)
-
-    helper.sync_receive(update_message(YjsFixtures::CrossClientOrigin::DELTA, id: 7), "doc-key")
-
-    assert_empty store, "a causally-incomplete update is never recorded"
-    assert_empty broadcasts
-    assert_empty acks_in(transmits), "and never acked (the old bug acked it)"
-    assert_equal 1, transmits.length, "a resync (SyncStep1) was requested"
-
-    # Once the missing content arrives, the same delta is ready and records.
-    helper.sync_receive(update_message(YjsFixtures::CrossClientOrigin::CONTENT, id: 8), "doc-key")
-    helper.sync_receive(update_message(YjsFixtures::CrossClientOrigin::DELTA, id: 9), "doc-key")
-
-    assert_equal 2, store.length, "content + delta both recorded once healed"
-    assert_equal [8, 9], acks_in(transmits)
-  end
-
-  # -- causal_gap_policy: :accept and :accept_strict ----------------------
+  # -- causal gaps ---------------------------------------------------------
   #
-  # :accept records + acks a gappy update immediately (ack-on-durable) via an
-  # inverted write path that doesn't rebuild the doc; dedup is delegated to the
-  # store. :accept_strict records it but withholds the ack until it integrates.
-  # Serving stays gap-free under every policy. These tests rely on the loader
-  # being lossless (doc_state uses encode_state_as_update, which keeps pending);
-  # the store contract accept modes require.
-  def policy_helper(policy, **)
-    helper = helper_for(**)
-    helper.class.causal_gap_policy policy
-    helper
-  end
+  # A causally-incomplete update is recorded and acked like any other
+  # (ack-on-durable); it stays pending until its dependency arrives, serving
+  # stays gap-free throughout, and the join handshake solicits the repair.
+  # These tests rely on the loader being lossless (doc_state uses
+  # encode_state_as_update, which keeps pending); the store contract this
+  # behavior requires.
 
-  # A store that dedups by content hash: the durable ingress log :accept mode
-  # relies on, since :accept doesn't rebuild the doc to dedup a retry.
+  # A store that dedups by content hash: an option for apps that want the
+  # ingress log deduplicated, since the write path doesn't rebuild the doc to
+  # dedup a retry.
   class HashDedupStore
     def initialize = @log = Hash.new { |h, k| h[k] = {} }
     def append(key, update) = @log[key][Digest::SHA256.hexdigest(update)] ||= update
@@ -497,28 +421,12 @@ class SyncTest < Minitest::Test
     end
   end
 
-  def test_causal_gap_policy_defaults_reject_is_settable_validated_and_inherited
-    base = Class.new do
-      include Y::ActionCable::Sync
-
-      on_load { |_k| nil }
-      on_change { |_k, _u| nil }
-    end
-
-    assert_equal :reject, base.causal_gap_policy, "defaults to :reject"
-    base.causal_gap_policy :accept
-
-    assert_equal :accept, base.causal_gap_policy
-    assert_equal :accept, Class.new(base).causal_gap_policy, "subclasses inherit the setting"
-    assert_raises(ArgumentError) { base.causal_gap_policy :nonsense }
-  end
-
-  def test_accept_records_relays_and_acks_a_gapped_update
+  def test_records_relays_and_acks_a_gapped_update
     store = []
     broadcasts = []
     transmits = []
-    helper = policy_helper(:accept, store: store, recorder: ->(_k, u) { store << u },
-                                    transmits: transmits, broadcasts: broadcasts)
+    helper = helper_for(store: store, recorder: ->(_k, u) { store << u },
+                        transmits: transmits, broadcasts: broadcasts)
 
     # U3 depends on U2 -> U1, neither of which the store has: a genuine gap.
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
@@ -529,9 +437,9 @@ class SyncTest < Minitest::Test
     refute(transmits.any? { |t| t.is_a?(Hash) && t.key?("update") }, "no SyncStep1 resync was sent")
   end
 
-  def test_accept_gap_heals_when_the_dependency_arrives
+  def test_gap_heals_when_the_dependency_arrives
     store = []
-    helper = policy_helper(:accept, store: store, recorder: ->(_k, u) { store << u })
+    helper = helper_for(store: store, recorder: ->(_k, u) { store << u })
 
     # Arrive fully out of causal order: C, then B, then A.
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key")
@@ -551,10 +459,10 @@ class SyncTest < Minitest::Test
                  "the healed doc integrated exactly the same structs as an in-order apply"
   end
 
-  def test_accept_serves_gap_free_state_while_a_gap_is_open
+  def test_serves_gap_free_state_while_a_gap_is_open
     store = []
     transmits = []
-    helper = policy_helper(:accept, store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
+    helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
     transmits.clear
 
@@ -569,13 +477,13 @@ class SyncTest < Minitest::Test
     refute_predicate client, :pending?, "the open gap was not served to the joining client"
   end
 
-  def test_accept_delegates_dedup_to_the_store
-    # :accept doesn't rebuild the doc, so a lost-ack retry is deduped by the
-    # store's idempotency (content hash), not the concern.
+  def test_a_deduping_store_collapses_retries
+    # The write path doesn't rebuild the doc, so a store that wants a deduped
+    # ingress log does it itself (content hash); the concern doesn't care.
     store = HashDedupStore.new
     broadcasts = []
     transmits = []
-    helper = policy_helper(:accept, transmits: transmits, broadcasts: broadcasts)
+    helper = helper_for(transmits: transmits, broadcasts: broadcasts)
     helper.class.on_load { |k| store.load(k) }
     helper.class.on_change { |k, u| store.append(k, u) }
     msg = update_message(YjsFixtures::CausalChain::U3, id: 5)
@@ -587,11 +495,11 @@ class SyncTest < Minitest::Test
     assert_equal [5, 5], acks_in(transmits), "both are acked (ack-on-durable, idempotent)"
   end
 
-  def test_accept_join_solicits_repair_and_fires_on_gap
+  def test_join_solicits_repair_and_fires_on_gap
     gaps = []
     store = []
     transmits = []
-    helper = policy_helper(:accept, store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
+    helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
     helper.class.on_gap { |key| gaps << key }
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key") # open a gap
     transmits.clear
@@ -608,111 +516,45 @@ class SyncTest < Minitest::Test
     assert_includes gaps, "doc-key", "on_gap fired for the open gap"
   end
 
-  def test_accept_strict_records_a_gap_but_withholds_the_ack
-    store = []
-    broadcasts = []
-    transmits = []
-    helper = policy_helper(:accept_strict, store: store, recorder: ->(_k, u) { store << u },
-                                           transmits: transmits, broadcasts: broadcasts)
-
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-
-    assert_equal [YjsFixtures::CausalChain::U3], store, "the gap is recorded (durable on arrival)"
-    assert_equal 1, broadcasts.length, "and relayed"
-    assert_empty acks_in(transmits), "but NOT acked until it integrates (self-signaling)"
-  end
-
-  def test_accept_strict_acks_once_the_gap_integrates
-    store = []
-    transmits = []
-    helper = policy_helper(:accept_strict, store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
-
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key") # gap: recorded, not acked
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U2, id: 2), "doc-key") # still gappy: not acked
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1, id: 3), "doc-key") # heals: ready, acked
-
-    assert_includes acks_in(transmits), 3, "the update that integrates the chain is acked"
-    replay = Y::Doc.new
-    store.each { |u| replay.apply_update(u) }
-
-    assert_equal "ABC", replay.read_text("content"), "and the document is whole"
-  end
-
-  def test_accept_strict_does_not_double_record_a_pending_retry
-    store = []
-    broadcasts = []
-    transmits = []
-    helper = policy_helper(:accept_strict, store: store, recorder: ->(_k, u) { store << u },
-                                           transmits: transmits, broadcasts: broadcasts)
-    msg = update_message(YjsFixtures::CausalChain::U3, id: 5)
-
-    helper.sync_receive(msg, "doc-key")
-    helper.sync_receive(msg, "doc-key") # retry of a still-pending gap
-
-    assert_equal [YjsFixtures::CausalChain::U3], store,
-                 "a retry of an already-pending gap is not re-recorded (sync_adds_content?)"
-    assert_equal 2, broadcasts.length, "but it is re-broadcast (crash-window heal)"
-    assert_empty acks_in(transmits),
-                 "and the still-gappy retry is not acked; the sender must keep retransmitting"
-  end
-
-  def test_accept_strict_does_not_observe_a_gap_when_recording_fails
-    # on_change raises (store down) -> the update is rejected. on_gap must NOT
-    # fire and no gap must be logged: nothing was persisted, so a metric or log
-    # claiming a durable gap would be false, and would re-inflate on every retry.
-    logged = []
-    gaps = []
-    helper = policy_helper(:accept_strict, recorder: ->(_k, _u) { raise "store unavailable" })
-    helper.logger = capturing_logger(logged)
-    helper.class.on_gap { |key| gaps << key }
-
-    assert_raises(RuntimeError) do
-      helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-    end
-
-    assert_empty gaps, "on_gap did not fire for a gap that was never persisted"
-    refute(logged.any? { |_lvl, msg| msg.include?("causal gap") },
-           "no durable-looking gap was logged when the record failed")
-  end
-
-  def test_accept_observes_a_gap_via_log_and_hook
+  def test_observes_an_open_gap_at_serve_time
     logged = []
     gaps = []
     store = []
-    helper = policy_helper(:accept_strict, store: store, recorder: ->(_k, u) { store << u })
+    helper = helper_for(store: store, recorder: ->(_k, u) { store << u })
     helper.logger = capturing_logger(logged)
     helper.class.on_gap { |key| gaps << key }
 
+    # The write path records without observing: the gap is durable, quiet.
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+
+    assert_empty gaps, "recording a gap does not observe it"
+
+    # Serving rebuilds the doc; an open gap surfaces there.
+    client = Y::Doc.new
+    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     assert(logged.any? { |lvl, msg| lvl == :info && msg.include?("causal gap") && msg.include?("doc-key") },
-           "a gap is logged at info so it is findable")
+           "the open gap is logged at info so it is findable")
     assert_equal ["doc-key"], gaps, "the on_gap hook fired with the document key"
   end
 
   def test_on_gap_hook_errors_do_not_break_frame_handling
     logged = []
     store = []
-    helper = policy_helper(:accept_strict, store: store, recorder: ->(_k, u) { store << u })
+    transmits = []
+    helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
     helper.logger = capturing_logger(logged)
     helper.class.on_gap { |_key| raise "metrics backend down" }
-
-    # The gap is still recorded even though the hook raised.
-    assert_nil helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-    assert_equal [YjsFixtures::CausalChain::U3], store
-    assert(logged.any? { |lvl, msg| lvl == :error && msg.include?("on_gap hook raised") })
-  end
-
-  def test_reject_mode_default_still_resyncs_a_gap
-    store = []
-    transmits = []
-    helper = helper_for(store: store, transmits: transmits) # default policy
-
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+    transmits.clear
 
-    assert_empty store, "the default rejects a gap rather than recording it"
-    assert_empty acks_in(transmits), "and does not ack it"
-    assert_equal 1, transmits.length, "a resync (SyncStep1) was requested instead"
+    # Serving observes the open gap; the raising hook must not break the serve.
+    client = Y::Doc.new
+    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+
+    refute_empty transmits, "the handshake was still answered"
+    assert_equal [YjsFixtures::CausalChain::U3], store, "the gap stayed recorded"
+    assert(logged.any? { |lvl, msg| lvl == :error && msg.include?("on_gap hook raised") })
   end
 
   def test_receive_without_a_key_fails_closed
