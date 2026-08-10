@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Y::Decoder` ships in the core gem and loads with `require "y"`. It was
+  scaffolded as a separate `yrby-decoder` gem, but it is 66 lines of pure
+  Ruby over `Doc#read_text` / `read_xml`, requires the native core either
+  way, and the separate gem was never published, so the split left the
+  module in no gem at all. The `yrby-decoder` name is retired unused.
+
 ### Changed
 
 - `Doc#handle_sync_message` answers a SyncStep1 with the doc's full state,
