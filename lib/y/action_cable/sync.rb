@@ -306,7 +306,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # Fail closed when no document key is set (typically: AnyCable rebuilt the
     # channel instance and the app forgot to pass `key` to sync_receive).
     # Proceeding would record under nil, broadcast to a stream nobody
-    # subscribes to, and still ack — the client believes the edit was
+    # subscribes to, and still ack; the client believes the edit was
     # delivered when it reached no one.
     def sync_validate_key!
       return unless @sync_key.nil? || @sync_key.empty?
