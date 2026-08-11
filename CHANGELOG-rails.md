@@ -28,9 +28,6 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   update that leaves durable storage before it integrates is a silent
   data loss.
 
-  There is no setting. An open gap is logged at `info` and surfaced through
-  the `on_gap` hook at join/serve time (errors in the hook are swallowed).
-
 ### Added
 
 - `on_gap` channel hook: fires with the document key at join/serve time
