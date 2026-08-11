@@ -401,8 +401,8 @@ class SyncTest < Minitest::Test
   # -- causal gaps ---------------------------------------------------------
   #
   # A causally-incomplete update is recorded and acked like any other
-  # (ack-on-durable); it stays pending until its dependency arrives, serving
-  # stays gap-free throughout, and the join handshake solicits the repair.
+  # (ack-on-durable) and served onward like any other state; it stays pending
+  # until its dependency arrives, and the join handshake solicits the repair.
   # These tests rely on the loader being lossless (doc_state uses
   # encode_state_as_update, which keeps pending); the store contract this
   # behavior requires.
@@ -518,8 +518,8 @@ class SyncTest < Minitest::Test
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key") # open a gap
     transmits.clear
 
-    # A client sends SyncStep1. The server serves integrated state AND, because a
-    # gap is open, sends its own SyncStep1 to solicit the missing dependency.
+    # A client sends SyncStep1. The server answers the handshake AND, because
+    # a gap is open, sends its own SyncStep1 to solicit the missing dependency.
     client = Y::Doc.new
     helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
