@@ -298,13 +298,10 @@ impl RbDoc {
                     Message::Sync(sync_msg) => match sync_msg {
                         SyncMessage::SyncStep1(sv) => {
                             // Respond with SyncStep2 carrying the doc's full
-                            // state, pending included, like Y.js's own
+                            // state, pending included, matching Y.js's
                             // encodeStateAsUpdate. A peer parks a pending
-                            // struct exactly as this doc does and heals it when
-                            // the missing dependency arrives from its sender's
-                            // ack-driven retransmit. Compaction, not serving,
-                            // is where pending must be excluded
-                            // (compacted_state_update).
+                            // struct exactly as this doc does and heals it
+                            // when the missing dependency arrives.
                             let txn = doc.transact();
                             let update = txn.encode_state_as_update_v1(&sv);
                             let response = Message::Sync(SyncMessage::SyncStep2(update));
