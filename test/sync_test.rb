@@ -147,8 +147,7 @@ class SyncTest < Minitest::Test
     client = Y::Doc.new
     helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
-    assert_equal 2, transmits.length,
-                 "the SyncStep2 reply, plus a repair solicit (SyncStep1) for the open gap"
+    assert_equal 1, transmits.length, "the SyncStep2 reply"
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
@@ -402,7 +401,7 @@ class SyncTest < Minitest::Test
   #
   # A causally-incomplete update is recorded and acked like any other
   # (ack-on-durable) and served onward like any other state; it stays pending
-  # until its dependency arrives, and the join handshake solicits the repair.
+  # until its dependency arrives; join and reconnect handshakes heal it.
   # These tests rely on the loader being lossless (doc_state uses
   # encode_state_as_update, which keeps pending); the store contract this
   # behavior requires.
@@ -509,7 +508,7 @@ class SyncTest < Minitest::Test
     assert_equal [5, 5], acks_in(transmits), "both are acked (ack-on-durable, idempotent)"
   end
 
-  def test_join_solicits_repair_and_fires_on_gap
+  def test_serving_while_a_gap_is_open_sends_no_extra_frames
     gaps = []
     store = []
     transmits = []
@@ -518,16 +517,14 @@ class SyncTest < Minitest::Test
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key") # open a gap
     transmits.clear
 
-    # A client sends SyncStep1. The server answers the handshake AND, because
-    # a gap is open, sends its own SyncStep1 to solicit the missing dependency.
+    # A client sends SyncStep1. The server answers it and surfaces the gap
+    # through on_gap; nothing else is transmitted. Healing rides the ack loop
+    # and the join/reconnect handshakes.
     client = Y::Doc.new
     helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
-    kinds = transmits.map { |t| Y.message_kind(Base64.strict_decode64(t["update"])) }
-
-    assert_includes kinds, Y::ActionCable::Sync::MSG_KIND_SYNC_STEP1,
-                    "the server solicited a repair (SyncStep1) while the gap was open"
-    assert_includes gaps, "doc-key", "on_gap fired for the open gap"
+    assert_equal 1, transmits.length, "the SyncStep2 reply is the only frame"
+    assert_equal ["doc-key"], gaps, "on_gap fired for the open gap"
   end
 
   def test_observes_an_open_gap_at_serve_time
