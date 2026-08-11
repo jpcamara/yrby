@@ -135,7 +135,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # Reliable delivery: document updates carry an "id", and the server replies
     # `{ "ack" => id }` once the update has been durably recorded. A causally-
     # incomplete update is recorded and acked like any other; it stays pending
-    # (durable, never served) until its missing dependency arrives.
+    # (durable, invisible in the document) until its missing dependency
+    # arrives.
     def sync_receive(data, key = nil)
       # Pass `key` (params[:id]) when your transport doesn't keep the channel
       # instance alive across actions. Under AnyCable each RPC command gets a
@@ -244,8 +245,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     # A causal gap was observed at join/serve time: the update is durable but
-    # will not appear in served state until its missing dependency arrives and
-    # heals it. Healing is quiet, so make the open gap findable: log at info,
+    # its content stays invisible in the document until its missing dependency
+    # arrives and heals it. Healing is quiet, so make the open gap findable: log at info,
     # and fire the on_gap hook so the app can emit a metric (pending-document
     # count, gap age). Errors in the hook are swallowed; observability must
     # never break frame handling.

@@ -687,8 +687,9 @@ class DocumentStore
 end
 ```
 
-**2. Observability, because an open gap is quiet.** A gap sits as pending and
-is simply never served, so two mechanisms make it visible and heal it:
+**2. Observability, because an open gap is quiet.** A gap sits as pending,
+its content invisible in the document, so two mechanisms make it visible and
+heal it:
 
 - **The repair loop.** When a client joins (or sends a SyncStep1) and a gap is
   open, the server solicits the missing dependency from that client by sending
