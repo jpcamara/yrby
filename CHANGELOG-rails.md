@@ -22,9 +22,11 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   This tightens the store contract: `on_load` must preserve pending
   (`encode_state_as_update` or a replayed raw append log), compaction must
-  not run while `doc.pending?` (the bundled `Y::Document` already
-  quarantines), and `on_change` must tolerate duplicate deltas. A store
-  whose `on_load` strips pending would silently drop an acked edit.
+  never fold a pending update into a gap-free snapshot and drop the raw
+  row (the bundled `Y::Document` quarantines pending rows and folds only
+  clean ones), and `on_change` must tolerate duplicate deltas. An acked
+  update that leaves durable storage before it integrates is a silent
+  data loss.
 
   There is no setting. An open gap is logged at `info` and surfaced through
   the `on_gap` hook at join/serve time (errors in the hook are swallowed).
