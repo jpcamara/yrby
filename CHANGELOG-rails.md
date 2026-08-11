@@ -15,8 +15,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   and served onward like any other state (a peer parks a pending struct
   exactly as the server does). The gap heals through the ack loop: the
   missing dependency is an update its own sender still holds unacked and
-  keeps retransmitting; the join handshake additionally solicits it from
-  other clients. The write path no longer rebuilds the document per update:
+  keeps retransmitting, and join or reconnect handshakes let any client
+  that holds it supply it. The write path no longer rebuilds the document
+  per update:
   it appends, relays, and acks, so a lost-ack retry records again (replay
   converges; CRDT apply is idempotent).
 

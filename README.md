@@ -688,15 +688,13 @@ end
 ```
 
 **2. Observability, because an open gap is quiet.** A gap sits as pending,
-its content invisible in the document, so two mechanisms make it visible and
-heal it:
+its content invisible in the document. Healing needs no dedicated mechanism:
+the missing dependency's own sender retransmits it until acked, and every
+join or reconnect handshake has a client send everything beyond the server's
+integrated state, so any client that holds the dependency supplies it by
+connecting. A *truly* unhealable gap, one no live client can supply, is what
+the hook exists to surface:
 
-- **The repair loop.** When a client joins (or sends a SyncStep1) and a gap is
-  open, the server solicits the missing dependency from that client by sending
-  its SyncStep1. Any live client that has the missing update heals the gap on
-  contact. A *truly* unhealable gap (no live client has the dependency, e.g.
-  it was lost from the store) will not heal this way; that is what the hook
-  below is for.
 - **The `on_gap` hook.** Fires with the document key at join/serve time
   whenever the loaded doc still holds a gap. Use it to emit a metric (a
   pending-document count, or the age of the oldest open gap) so an unhealed

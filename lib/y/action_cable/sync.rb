@@ -179,14 +179,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     private
 
-    # Ask this connection's client to resync: re-send SyncStep1 carrying the
-    # server's current (gap-free) state vector. The client replies SyncStep2
-    # with everything the server is missing, delivered as one causally-complete
-    # delta, which heals the gap that triggered the resync.
-    def sync_request_resync(doc)
-      sync_transmit(doc.sync_step1)
-    end
-
     # Reliable delivery: acknowledge an accepted update back to the sending
     # connection. An ack-aware client tags each outgoing update with an "id"
     # and retains it until the matching `{ "ack" => id }` returns,
@@ -267,19 +259,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
-    # If the loaded doc still holds a gap, ask this client to supply the
-    # missing dependency by sending our SyncStep1 (it replies with everything
-    # beyond our integrated state). This is the repair loop for an unhealed
-    # gap: any client that has the missing update heals it on contact. A
-    # truly-unhealable gap (no live client has the dependency) will not heal
-    # here; it needs operator action, which is what on_gap surfaces.
-    def sync_solicit_repair(doc)
-      return unless doc.pending?
-
-      sync_request_resync(doc)
-      sync_observe_gap
-    end
-
     # sync_log_context, guarded: a broken context hook must surface in the log,
     # not take down frame handling.
     def sync_log_context_safe
@@ -336,8 +315,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       when MSG_KIND_SYNC_STEP1
         doc = sync_load_doc
         result = doc.handle_sync_message(bytes)
-        sync_transmit(result[2])         # full state, pending included
-        sync_solicit_repair(doc)         # if a gap is open, ask this client to fill it
+        sync_transmit(result[2]) # full state, pending included
+        sync_observe_gap if doc.pending?
         :noop
       when MSG_KIND_UPDATE
         update = Y.update_from_message(bytes)
@@ -357,10 +336,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # recorded as a pending struct like any other edit and served onward like
     # one (a peer parks and heals it the same way this doc does). The gap
     # heals when its missing dependency arrives: its own sender retransmits
-    # it until acked, and the join handshake solicits it from other clients
-    # (sync_solicit_repair). An open gap is surfaced by on_gap at join/serve
-    # time. on_change must tolerate duplicates: a lost-ack retry records
-    # again.
+    # it until acked, and every join or reconnect handshake has the client
+    # send everything beyond the server's integrated state. An open gap is
+    # surfaced by on_gap at join/serve time. on_change must tolerate
+    # duplicates: a lost-ack retry records again.
     def sync_handle_document_update(update, encoded)
       sync_record_change(update) # record before relay
       sync_distribute(encoded)
