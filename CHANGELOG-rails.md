@@ -28,6 +28,17 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   update that leaves durable storage before it integrates is a silent
   data loss.
 
+### Changed (Y::Document)
+
+- Compaction folds past an open gap. A batch holding a causal gap still
+  compacts everything integrable: the fold captures every struct that
+  integrates, rows independent of the gap included, and only the gap
+  tail survives as quarantined raw rows. A healed gap folds out at the
+  next compaction. Rows are judged per row against the folded state, so
+  a row that causally builds on the gap quarantines with it and an
+  acked update never leaves the table before its content is durably in
+  state.
+
 ### Added
 
 - `on_gap` channel hook: fires with the document key at join/serve time
