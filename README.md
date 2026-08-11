@@ -100,15 +100,15 @@ Towards that goal, `yrby` adds opinionated defaults on top of normal Yjs syncing
 
 - Built-in update acknowledgement: the `ActionCableProvider` in `yrby-client` will continue to
   send updates until an ack is received from the server. [`yrby-rails`](https://rubygems.org/gems/yrby-rails)
-  only sends an ack when applying an update is successful. The goal is at-least-once delivery,
+  only sends an ack once the update is durably recorded. The goal is at-least-once delivery,
   and because CRDTs are idempotent a duplicate update is effectively a no-op.
-- Gap detection in document updates: before applying an update and sending an ack to the client,
-  `yrby` checks whether the update results in any causal gap. Ie, an update comes through
-  which depends on a previous update that is not yet present in the document. This can result in
-  a document stuck with "pending" updates, which will _never_ apply if the missing update is not sent.
-  To avoid this, `yrby` does not apply the update, and starts a new y-protocol sync with the client.
-  That will cause the client to synchronize its document with the server, sending through any updates
-  that may have been missed
+- Gap awareness in document storage: an update can depend on a causally-prior
+  update the store hasn't seen. `yrby` records it durably the moment it arrives
+  and acks it; it parks as a pending struct, invisible in the document, and
+  heals when the missing dependency arrives through the same ack loop (whoever
+  sent that dependency retransmits it until acked). `Doc#pending?` and the
+  `on_gap` hook expose open gaps, and compaction quarantines pending rows so a
+  fold can never drop an acked edit
 
 ## What about [yrb](https://github.com/y-crdt/yrb)?
 
@@ -830,10 +830,10 @@ connection, so an instance variable is the whole store. Merging into
 The store is per connection, which shapes what this fits. A single writer gets
 the full delivery contract with no database anywhere. With several people
 editing at once, one client's update can depend on another client's edits that
-its own connection state has never seen; the gap check refuses the update and
-starts a resync, and the client, which always holds the full document,
-sends the missing state back. The document still converges, but heavy
-concurrent editing pays resync round trips that a shared store doesn't. On
+its own connection state has never seen; it records as pending, and the next
+handshake with that client, which always holds the full document, supplies the
+missing state and heals it. The document still converges, but heavy concurrent
+editing parks more pending between handshakes than a shared store would. On
 AnyCable, keep the payload in mind too: the blob travels with every message,
 so that variant suits small documents, not long manuscripts.
 
@@ -847,9 +847,9 @@ coherent the moment you scale past one process.
 #### Reliable delivery (acks)
 
 yrby document delivery is ack-tracked. Browser document updates carry an
-`"id"`, and the server replies `{ "ack": <id> }` once `on_change` has succesfully fired.
-A causally-gapped update is not acked; the server sends a resync request, and
-the client keeps the update queued until it lands.
+`"id"`, and the server replies `{ "ack": <id> }` once `on_change` has
+successfully fired. Every decodable document update is recorded and acked,
+causally gapped or not.
 
 ```
 client -> server   { "update": "<base64 update>", "id": 42 }
