@@ -35,9 +35,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # There is no unsubscribe hook: the server keeps no per-connection document or
   # presence state, so a disconnect needs no server-side cleanup.
   #
-  # The concern is store-backed: every document update is validated against
-  # `on_load`, recorded through `on_change`, and only then broadcast.
-  # No authoritative document state is kept in ActionCable process memory.
+  # The concern is store-backed: every document update is recorded through
+  # `on_change` before it is broadcast or acked, and documents rebuild from
+  # `on_load` whenever state is served. No authoritative document state is
+  # kept in ActionCable process memory.
   module Sync
     # Frame kinds we act on, from Y.message_kind. Its other codes (0 for a
     # drop: malformed/truncated/multi-message/unknown, and 4 for an awareness
