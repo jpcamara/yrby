@@ -26,11 +26,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   quarantines), and `on_change` must tolerate duplicate deltas. A store
   whose `on_load` strips pending would silently drop an acked edit.
 
-  There is no setting. The `causal_gap_policy` option from earlier drafts of
-  this change shipped nowhere and is gone with the reject path, along with
-  its `sync_log_gap_resync` logging; an open gap is instead logged at `info`
-  and surfaced through the new `on_gap` hook at join/serve time (errors in
-  the hook are swallowed).
+  There is no setting. An open gap is logged at `info` and surfaced through
+  the `on_gap` hook at join/serve time (errors in the hook are swallowed).
 
 ### Added
 
