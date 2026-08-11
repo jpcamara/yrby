@@ -604,8 +604,8 @@ servers:
   through the same ack loop.** A causally-incomplete update is recorded
   immediately as a pending struct; its missing dependency is a frame some
   client still holds unacked, so that client retransmits it until the server
-  records it, and the gap closes. Rejecting the dependent update never added
-  durability; the ack loop is the guarantee. See [Causal gaps](#causal-gaps).
+  records it, and the gap closes. The ack loop is the guarantee. See
+  [Causal gaps](#causal-gaps).
 - **`on_change` is at-least-once, and the durable guarantee is that replaying the
   log reconstructs the document.** Every update triggers `on_change` before it's acked or
   broadcast (record-before-distribute). If exactly-once updates matter for you, **you

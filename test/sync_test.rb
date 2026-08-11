@@ -435,7 +435,7 @@ class SyncTest < Minitest::Test
     # U3 depends on U2 -> U1, neither of which the store has: a genuine gap.
     helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
 
-    assert_equal [YjsFixtures::CausalChain::U3], store, "the gapped update is recorded, not rejected"
+    assert_equal [YjsFixtures::CausalChain::U3], store, "the gapped update is recorded"
     assert_equal 1, broadcasts.length, "and relayed to peers (they park it as pending too)"
     assert_equal [1], acks_in(transmits), "and acked immediately (ack-on-durable)"
     refute(transmits.any? { |t| t.is_a?(Hash) && t.key?("update") }, "no SyncStep1 resync was sent")
