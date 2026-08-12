@@ -40,7 +40,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "railties", ">= 7.1"
   # 0.3.1's update_ready? is exact for cross-client gaps; the channel gates
   # recording on it, and an older core could ack-and-drop real content.
-  spec.add_dependency "yrby", ">= 0.3.1"
+  spec.add_dependency "yrby", ">= 0.7.0"
   # The concern calls ActionCable.server directly, and railties doesn't
   # depend on actioncable, so declare it. activesupport comes along with
   # activerecord either way; listed because the gem uses it directly.
