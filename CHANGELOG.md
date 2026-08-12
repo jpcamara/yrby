@@ -24,6 +24,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the tree is mutated (possibly on another thread), so a nested handle keeps
   working even as sibling keys change around it. `Y::Map` is asserted `Send + Sync`
   at compile time alongside `Doc`.
+- `Y::Decoder` ships in the core gem and loads with `require "y"`. It was
+  scaffolded as a separate `yrby-decoder` gem, but it is 66 lines of pure
+  Ruby over `Doc#read_text` / `read_xml`, requires the native core either
+  way, and the separate gem was never published, so the split left the
+  module in no gem at all. The `yrby-decoder` name is retired unused.
+
+### Changed
+
+- `Doc#handle_sync_message` answers a SyncStep1 with the doc's full state,
+  pending included, matching Y.js's `encodeStateAsUpdate`. It previously
+  served integrated-only state. A peer parks a served pending struct the
+  same way the doc did and heals it when the missing dependency arrives
+  from its sender's ack-driven retransmit. `compacted_state_update` still
+  excludes pending, so compaction cannot freeze a gap into a snapshot.
 
 ### Fixed
 

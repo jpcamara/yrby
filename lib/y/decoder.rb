@@ -1,23 +1,21 @@
 # frozen_string_literal: true
 
 require "y"
-require "y/decoder/version"
 
 module Y
-  # Plain-text reconstruction of a stored Yjs document, in pure Ruby — for search
-  # indexing and previews. The core `yrby` gem moves and stores opaque CRDT
-  # updates without reading them; this reads the text out of the shared type the
-  # editor uses (Lexical's `Y.XmlText`, plain `Y.Text`, or ProseMirror's
-  # `Y.XmlFragment`), in-process, on the native extension core already ships — no
-  # Node, no subprocess, no binary.
+  # Plain-text reconstruction of a stored Yjs document, for search indexing
+  # and previews. It reads the text out of the shared type the editor uses
+  # (Lexical's `Y.XmlText`, plain `Y.Text`, or ProseMirror's `Y.XmlFragment`)
+  # in-process, on the same native extension as `Doc`: no Node, no
+  # subprocess.
   #
-  #   state = doc.encode_state_as_update        # opaque CRDT bytes from the store
+  #   state = doc.encode_state_as_update  # opaque CRDT bytes from the store
   #   Y::Decoder.text(state)              # => "hello world"
   #   Y::Decoder.preview(state, 280)      # => "hello world…"
   #
-  # Full-fidelity reconstruction (the exact Lexical EditorState / HTML, which
-  # needs @lexical/yjs) is a separate, opt-in concern — see the `yrby-decode`
-  # package's Bun binary. This gem stays pure Ruby on purpose.
+  # For full-fidelity HTML, `Y::Lexxy` and `Y::Tiptap` render the document
+  # with the editor's own semantics; this module is the cheap plain-text
+  # path.
   module Decoder
     class Error < Y::Error; end
 

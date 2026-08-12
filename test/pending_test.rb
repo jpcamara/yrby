@@ -96,19 +96,25 @@ class PendingTest < Minitest::Test
     assert_equal "ab", peer.read_text("notepad")
   end
 
-  # --- the sync path serves gap-free by default ---
+  # --- the sync path serves lossless state, like Y.js ---
 
-  def test_sync_step2_reply_does_not_poison_a_peer
-    # A server whose stored state contains a legacy gappy update.
+  def test_sync_step2_reply_carries_pending_which_heals
+    # A server whose stored state contains a gappy update.
     server = Y::Doc.new
     server.apply_update(DEPENDENT)
 
-    # A fresh client announces its (empty) state; the server answers SyncStep2.
+    # A fresh client announces its (empty) state; the server answers SyncStep2
+    # with full state, pending included. The client parks it as the server did
+    # and heals once the missing dependency arrives.
     client = Y::Doc.new
     reply = server.handle_sync_message(client.sync_step1)[2]
     client.handle_sync_message(reply)
 
-    refute_predicate client, :pending?, "the server served integrated-only state, no poison"
+    assert_predicate client, :pending?, "the pending struct traveled with the state"
+    client.apply_update(FIRST)
+
+    refute_predicate client, :pending?, "and healed once the dependency arrived"
+    assert_equal "ab", client.read_text("notepad")
   end
 
   def test_sync_step2_still_delivers_real_content
@@ -139,9 +145,10 @@ class PendingTest < Minitest::Test
     refute_predicate peer, :pending?, "dropped the pending"
   end
 
-  def test_sync_diff_to_an_up_to_date_peer_excludes_pending
-    # The production path: server has integrated content + pending; a peer that
-    # already has the content asks for a diff (its own state vector).
+  def test_sync_diff_to_an_up_to_date_peer_carries_the_pending
+    # Server has integrated content + pending; a peer that already has the
+    # content asks for a diff. The diff includes the pending struct, so the
+    # peer holds the same recovery buffer the server does.
     server = Y::Doc.new
     server.apply_update(FIRST)
     server.apply_update(DEPENDENT_OTHER)
@@ -152,7 +159,7 @@ class PendingTest < Minitest::Test
     peer.handle_sync_message(reply)
 
     assert_equal "a", peer.read_text("notepad")
-    refute_predicate peer, :pending?, "the diff carried no pending"
+    assert_predicate peer, :pending?, "the diff carried the pending recovery buffer"
   end
 
   # --- pending delete set (delete-side counterpart) ---
@@ -170,7 +177,7 @@ class PendingTest < Minitest::Test
     assert_predicate doc, :pending?, "non-destructive: source keeps its pending"
   end
 
-  def test_sync_step2_does_not_serve_a_pending_delete_set
+  def test_sync_step2_serves_a_pending_delete_set_too
     server = Y::Doc.new
     server.apply_update(PENDING_DELETE)
 
@@ -178,7 +185,7 @@ class PendingTest < Minitest::Test
     reply = server.handle_sync_message(client.sync_step1)[2]
     client.handle_sync_message(reply)
 
-    refute_predicate client, :pending?
+    assert_predicate client, :pending?, "the pending delete set traveled with the state"
   end
 
   # --- thread safety of the new readers (match the nogvl model) ---

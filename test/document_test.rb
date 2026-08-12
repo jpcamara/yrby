@@ -168,6 +168,31 @@ class DocumentTest < Minitest::Test
     assert_equal "from doc2", read_back("room-1")
   end
 
+  def test_independent_rows_in_the_same_batch_as_a_gap_still_compact
+    document = Y::Document.locate!("room-1")
+    document.append(CLIENT_TWO)                    # independent content
+    document.append(YjsFixtures::Gap::DEPENDENT)   # a gap, same batch
+
+    document.compact!
+
+    assert_equal [true], document.updates.pluck(:pending),
+                 "only the gap survives as a row; the independent row folded"
+    assert_equal "from doc2", read_back("room-1"),
+                 "the independent content is in state"
+  end
+
+  def test_a_healed_gap_folds_out_at_the_next_compaction
+    document = Y::Document.locate!("room-1")
+    document.append(YjsFixtures::Gap::DEPENDENT)
+    document.compact!                              # quarantined
+    document.append(YjsFixtures::Gap::FIRST)       # the missing dependency
+
+    document.compact!
+
+    assert_equal 0, document.updates.count, "everything folded, quarantine included"
+    assert_equal "ab", read_back("room-1", text: "notepad")
+  end
+
   def test_quarantined_rows_do_not_count_toward_the_compact_trigger
     Y::Document.compact_every = 2
     document = Y::Document.locate!("room-1")
