@@ -14,6 +14,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   way, and the separate gem was never published, so the split left the
   module in no gem at all. The `yrby-decoder` name is retired unused.
 
+### Changed
+
+- `Doc#handle_sync_message` answers a SyncStep1 with the doc's full state,
+  pending included, matching Y.js's `encodeStateAsUpdate`. It previously
+  served integrated-only state. A peer parks a served pending struct the
+  same way the doc did and heals it when the missing dependency arrives
+  from its sender's ack-driven retransmit. `compacted_state_update` still
+  excludes pending, so compaction cannot freeze a gap into a snapshot.
+
 ### Fixed
 
 - **`Doc#update_advances?` no longer misreads a gappy merged update carrying

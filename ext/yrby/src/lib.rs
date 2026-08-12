@@ -297,13 +297,13 @@ impl RbDoc {
                 match msg {
                     Message::Sync(sync_msg) => match sync_msg {
                         SyncMessage::SyncStep1(sv) => {
-                            // Respond with SyncStep2 carrying only *integrated*
-                            // state. Never hand a peer un-integrable pending
-                            // structs: the peer would park the same pending
-                            // forever and the state-vector/content mismatch drives
-                            // endless resync traffic. (integrated_update is a no-op
-                            // fast path when nothing is pending.)
-                            let update = integrated_update(doc, &sv)?;
+                            // Respond with SyncStep2 carrying the doc's full
+                            // state, pending included, matching Y.js's
+                            // encodeStateAsUpdate. A peer parks a pending
+                            // struct exactly as this doc does and heals it
+                            // when the missing dependency arrives.
+                            let txn = doc.transact();
+                            let update = txn.encode_state_as_update_v1(&sv);
                             let response = Message::Sync(SyncMessage::SyncStep2(update));
                             Ok((0, 0, response.encode_v1()))
                         }
