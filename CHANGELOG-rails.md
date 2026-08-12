@@ -7,12 +7,45 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Causal gaps are now accepted.** A causally-incomplete update, one whose
+  causally-prior update the store hasn't seen, is recorded and acked like any
+  other (ack-on-durable) instead of being rejected with a resync request,
+  and served onward like any other state (a peer parks a pending struct
+  exactly as the server does). The gap heals through the ack loop: the
+  missing dependency is an update its own sender still holds unacked and
+  keeps retransmitting, and join or reconnect handshakes let any client
+  that holds it supply it. The write path no longer rebuilds the document
+  per update:
+  it appends, relays, and acks, so a lost-ack retry records again (replay
+  converges; CRDT apply is idempotent).
+
+  This tightens the store contract: `on_load` must preserve pending
+  (`encode_state_as_update` or a replayed raw append log), compaction must
+  never fold a pending update into a gap-free snapshot and drop the raw
+  row (the bundled `Y::Document` quarantines pending rows and folds only
+  clean ones), and `on_change` must tolerate duplicate deltas. An acked
+  update that leaves durable storage before it integrates is a silent
+  data loss.
+
+### Changed (Y::Document)
+
+- Compaction folds past an open gap. A batch holding a causal gap still
+  compacts everything integrable: the fold captures every struct that
+  integrates, rows independent of the gap included, and only the gap
+  tail survives as quarantined raw rows. A healed gap folds out at the
+  next compaction. Rows are judged per row against the folded state, so
+  a row that causally builds on the gap quarantines with it and an
+  acked update never leaves the table before its content is durably in
+  state.
+
 ### Added
 
-- Log each causal-gap resync at `info` (`[yrby] causal-gap resync ...`, with the
-  document key and `sync_log_context`). The reject path was otherwise silent, so
-  there was no way to see how often clients force a resync. Override
-  `sync_log_gap_resync` to change the level or silence it.
+- `on_gap` channel hook: fires with the document key at join/serve time
+  whenever the loaded document still holds a causal gap, for metrics on
+  unhealed gaps (which no longer surface as resync traffic). An open gap is
+  also logged at `info`.
 
 ## [0.5.0] - 2026-08-05
 
@@ -64,7 +97,6 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rails generate yrby:install`: a `DocumentChannel` speaking the
   y-websocket protocol over the gem-owned storage, plus the storage
   migration.
-
 ## [0.3.1] - 2026-07-01
 
 ### Removed
