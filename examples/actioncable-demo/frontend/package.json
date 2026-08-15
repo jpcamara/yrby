@@ -8,7 +8,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@37signals/lexxy": "^0.9",
+    "@37signals/lexxy": "^0.9.29",
     "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.26.0",
@@ -24,7 +24,7 @@
     "@tiptap-v3/extension-collaboration-caret": "npm:@tiptap/extension-collaboration-caret@^3.27",
     "codemirror": "^6.0.1",
     "lexical": "^0.44",
-    "lexxy-realtime": "^0.2.1",
+    "lexxy-realtime": "^0.6.0",
     "lib0": "^0.2.97",
     "prosemirror-keymap": "^1.2.2",
     "rhino-editor": "^0.18.3",
