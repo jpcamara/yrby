@@ -1,4 +1,4 @@
-# yrs-lexical-html
+# lexical-yjs-html
 
 Render a Lexical-shaped [yrs](https://github.com/y-crdt/y-crdt) document to
 HTML — no browser, no Node process, no headless editor. Covers core Lexical:
@@ -26,7 +26,7 @@ doc.transact_mut()
 
 let txn = doc.transact();
 let fragment = txn.get_xml_fragment("root").expect("Lexical's default root");
-let html = yrs_lexical_html::render(&txn, &fragment);
+let html = lexical_yjs_html::render(&txn, &fragment);
 // => Some("<h1>Heading One</h1><p>…</p>") — or None if the fragment
 //    isn't Lexical-shaped (e.g. a ProseMirror document).
 ```
@@ -42,7 +42,7 @@ markup as data — tag, attributes, content slot — and renders natively:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_lexical_html::{flatten, render_segments, Rules};
+use lexical_yjs_html::{flatten, render_segments, Rules};
 
 let rules = Rules::parse(
     r#"{
@@ -71,7 +71,7 @@ is `"inline"` (formatted text, the default), `"blocks"` (child block
 nodes), or `"none"` (a leaf); `"void": true` skips the closing tag. A rule
 for a built-in type replaces how that type renders. (There is no marks
 tier here: marks are a ProseMirror concept, and Lexical folds formatting
-into its core text model, rendered natively — see `yrs-prosemirror-html`
+into its core text model, rendered natively — see `prosemirror-yjs-html`
 for the marks side.)
 
 ## Custom nodes, with your own code
@@ -84,7 +84,7 @@ children, and you splice the result:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_lexical_html::{render_segments, Rules, Segment};
+use lexical_yjs_html::{render_segments, Rules, Segment};
 
 fn splice(segments: Vec<Segment>) -> String {
     segments
@@ -119,7 +119,7 @@ let html = splice(segments);
 ```
 
 (The rules surface — `Rules`, `Segment`, `flatten`, and friends — is
-re-exported here; `yrs-html-core` is an internal implementation crate.)
+re-exported here; `yjs-html-core` is an internal implementation crate.)
 
 ## Discovering what a document stores
 
@@ -128,7 +128,7 @@ prefixes its own props `__`). Don't guess — ask a real document:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_lexical_html::{collect_node_types, is_builtin};
+use lexical_yjs_html::{collect_node_types, is_builtin};
 
 let doc = Doc::new();
 let txn = doc.transact();
@@ -148,10 +148,10 @@ degrade to readable markup rather than disappearing.
 ## Building and testing
 
 ```bash
-cargo build -p yrs-lexical-html
-cargo test -p yrs-lexical-html
+cargo build -p lexical-yjs-html
+cargo test -p lexical-yjs-html
 ```
 
 Extracted from (and maintained with) [yrby](https://github.com/jpcamara/yrby),
 the Rails CRDT sync gem, where it backs `Y::Lexical`/`Y::Lexxy`. Depends only
-on yrs, serde_json, and yrs-html-core. MIT.
+on yrs, serde_json, and yjs-html-core. MIT.

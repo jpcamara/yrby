@@ -42,10 +42,10 @@
 mod readme_examples {}
 
 // The full rules surface, re-exported: depend on this crate alone;
-// yrs-html-core is an internal implementation crate.
-pub use yrs_html_core::*;
-use yrs::types::text::YChange;
+// yjs-html-core is an internal implementation crate.
+pub use yjs_html_core::*;
 use yrs::types::Attrs;
+use yrs::types::text::YChange;
 use yrs::{
     Any, GetString, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut,
     XmlTextRef,
@@ -105,7 +105,7 @@ pub fn render_segments<T: ReadTxn>(
 /// callback rules, segments always flatten.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
-        yrs_html_core::flatten(segs)
+        yjs_html_core::flatten(segs)
             .into_html()
             .expect("no callback rules registered")
     })
@@ -1236,7 +1236,7 @@ mod tests {
         let txn = doc.transact();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
         assert_eq!(
-            yrs_html_core::flatten(segs).into_html().unwrap(),
+            yjs_html_core::flatten(segs).into_html().unwrap(),
             "<aside class=\"callout callout--warning\"><div class=\"para\">careful</div></aside>"
         );
     }
@@ -1294,7 +1294,7 @@ mod tests {
         }
         let txn = doc.transact();
         let map = collect_node_types(&txn, &frag).unwrap();
-        let json = yrs_html_core::type_map_json(&map, |ty| {
+        let json = yjs_html_core::type_map_json(&map, |ty| {
             if is_builtin(ty) {
                 Some("builtin")
             } else {
