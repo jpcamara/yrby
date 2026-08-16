@@ -196,11 +196,7 @@ pub fn resolve_parts<F: Fn(&str) -> Option<String>>(
             }
         }
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 /// An attribute reference on a node: rules say `:kind`; Lexical stores its own
@@ -384,7 +380,7 @@ fn parse_node_rule(name: &str, spec: &serde_json::Value) -> Result<NodeRule, Str
         Some(other) => {
             return Err(format!(
                 "rule for {name:?}: unknown content kind {other:?} (blocks|inline|none)"
-            ))
+            ));
         }
     };
     if spec
@@ -431,7 +427,7 @@ fn parse_attrs(
         Some(_) => {
             return Err(format!(
                 "rule for {name:?}: attrs must be an array of [name, template] pairs"
-            ))
+            ));
         }
     };
     for entry in entries {

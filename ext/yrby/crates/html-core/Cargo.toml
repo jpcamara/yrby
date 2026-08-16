@@ -1,5 +1,5 @@
 [package]
-name = "yrs-html-core"
+name = "yjs-html-core"
 description = "Internal core for the yrs-*-html renderer crates; depend on those instead"
 repository = "https://github.com/jpcamara/yrby"
 readme = "README.md"

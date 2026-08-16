@@ -9,14 +9,14 @@ use yrs::{Doc, GetString, ReadTxn, Transact};
 
 mod protocol;
 mod read;
+use lexical_yjs_html as lexical_html;
+use prosemirror_yjs_html as prosemirror_html;
 use protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
     update_is_ready,
 };
 use render_rules::{Rules, Segment};
-pub(crate) use yrs_html_core as render_rules;
-use yrs_lexical_html as lexical_html;
-use yrs_prosemirror_html as prosemirror_html;
+pub(crate) use yjs_html_core as render_rules;
 
 /// Wrapper around yrs Doc.
 ///

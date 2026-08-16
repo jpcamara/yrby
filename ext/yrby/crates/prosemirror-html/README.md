@@ -1,4 +1,4 @@
-# yrs-prosemirror-html
+# prosemirror-yjs-html
 
 Render a ProseMirror-shaped [yrs](https://github.com/y-crdt/y-crdt) document
 to HTML — no browser, no Node process, no headless editor. Covers
@@ -27,7 +27,7 @@ doc.transact_mut()
 
 let txn = doc.transact();
 let fragment = txn.get_xml_fragment("default").expect("Tiptap's default root");
-let html = yrs_prosemirror_html::render(&txn, &fragment);
+let html = prosemirror_yjs_html::render(&txn, &fragment);
 // => Some("<h1>Heading One</h1><p>…</p>") — or None if the fragment
 //    isn't ProseMirror-shaped (e.g. a Lexical document).
 ```
@@ -44,7 +44,7 @@ markup as data — tag, attributes, content slot — and renders natively:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_prosemirror_html::{flatten, render_segments, Rules};
+use prosemirror_yjs_html::{flatten, render_segments, Rules};
 
 let rules = Rules::parse(
     r#"{
@@ -84,7 +84,7 @@ A mark rule registers under `"marks"` and wraps the text runs carrying it:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_prosemirror_html::{flatten, render_segments, Rules};
+use prosemirror_yjs_html::{flatten, render_segments, Rules};
 
 let rules = Rules::parse(
     r#"{
@@ -124,7 +124,7 @@ children, and you splice the result:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_prosemirror_html::{render_segments, Rules, Segment};
+use prosemirror_yjs_html::{render_segments, Rules, Segment};
 
 fn splice(segments: Vec<Segment>) -> String {
     segments
@@ -159,7 +159,7 @@ let html = splice(segments);
 ```
 
 (The rules surface — `Rules`, `Segment`, `flatten`, and friends — is
-re-exported here; `yrs-html-core` is an internal implementation crate.)
+re-exported here; `yjs-html-core` is an internal implementation crate.)
 
 ## Discovering what a document stores
 
@@ -168,7 +168,7 @@ Editor's strike mark is `rhino-strike`). Don't guess — ask a real document:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use yrs_prosemirror_html::{collect_node_types, is_builtin};
+use prosemirror_yjs_html::{collect_node_types, is_builtin};
 
 let doc = Doc::new();
 let txn = doc.transact();
@@ -188,10 +188,10 @@ degrade to readable markup rather than disappearing.
 ## Building and testing
 
 ```bash
-cargo build -p yrs-prosemirror-html
-cargo test -p yrs-prosemirror-html
+cargo build -p prosemirror-yjs-html
+cargo test -p prosemirror-yjs-html
 ```
 
 Extracted from (and maintained with) [yrby](https://github.com/jpcamara/yrby),
 the Rails CRDT sync gem, where it backs `Y::ProseMirror`/`Y::Tiptap`. Depends only
-on yrs, serde_json, and yrs-html-core. MIT.
+on yrs, serde_json, and yjs-html-core. MIT.
