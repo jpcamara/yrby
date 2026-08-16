@@ -1,6 +1,6 @@
 [package]
 name = "yjs-html-core"
-description = "Internal core for the yrs-*-html renderer crates; depend on those instead"
+description = "Internal core for the lexical-yjs-html and prosemirror-yjs-html renderer crates; depend on those instead"
 repository = "https://github.com/jpcamara/yrby"
 readme = "README.md"
 version = "0.1.0"
