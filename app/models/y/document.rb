@@ -113,11 +113,11 @@ class Y::Document < ActiveRecord::Base
   # compaction committing between the two reads then hands us rows already
   # folded into the fresh snapshot, an idempotent double-apply, where
   # the reverse order could pair a pre-compaction snapshot with an empty
-  # tail and omit committed changes. Quarantined rows are applied too:
-  # the output goes through compacted_state_update, which is gap-free by
-  # construction, so an unhealed gap contributes nothing while a gap
-  # healed by a newer tail row is served immediately instead of waiting
-  # for the next compaction.
+  # tail and omit committed changes. Quarantined rows are applied too,
+  # and the output is lossless (encode_state_as_update): an unhealed gap
+  # rides along as a pending struct, so a peer loaded mid-gap holds the
+  # parked edit and heals it the moment the missing dependency arrives,
+  # while a gap healed by a newer tail row is served merged immediately.
   def load_state
     tail = updates.reset.pluck(:payload) # reset: never a cached tail
     snapshot = self.class.where(id: id).pick(:state)
@@ -126,32 +126,57 @@ class Y::Document < ActiveRecord::Base
     doc = Y::Doc.new
     doc.apply_update(snapshot) if snapshot
     tail.each { |payload| doc.apply_update(payload) }
-    doc.compacted_state_update
+    doc.encode_state_as_update
   end
 
   # Compact the tail into state. The row lock serializes racing
   # compactions; a delta landing mid-compaction isn't in `rows`, so it
   # survives the delete and compacts next time.
   #
-  # A causally-gapped batch is never compacted whole and never deleted:
-  # state would silently exclude the gap, destroying the only healable
-  # copy. If the clean rows alone merge gap-free, they compact and only
-  # the gap is quarantined (marked pending); rows that causally build on
-  # quarantined content quarantine with it.
+  # A gapped batch still compacts everything integrable: the fold's
+  # compacted_state_update captures every struct that integrates, so
+  # rows independent of the gap land in state no matter how they
+  # interleave with it. Only the gap tail survives as raw rows, judged
+  # per row against the folded state: a row the new state could not
+  # integrate cleanly carries the gap (or builds on it) and is
+  # quarantined (marked pending); a row that is ready and adds nothing
+  # is fully captured and deleted. An acked update never leaves the
+  # table before its content is durably in state.
   def compact!
     with_lock do
       rows = updates.pluck(:id, :payload, :pending)
       next if rows.empty?
+      next if compact_rows(rows)
 
-      unless compact_rows(rows)
-        clean = rows.reject { |_, _, pending| pending }
-        remainder = compact_rows(clean) ? rows - clean : rows
-        updates.where(id: remainder.map(&:first)).update_all(pending: true)
-      end
+      compact_around_gap(rows)
     end
   end
 
   private
+
+  # The gapped-batch path: fold everything integrable into state, then
+  # judge each row against the folded state. A row the folded state
+  # cannot integrate cleanly carries the gap (or builds on it) and is
+  # quarantined; a row that is ready and adds nothing is fully captured
+  # and deleted.
+  def compact_around_gap(rows)
+    folded = Y::Doc.new
+    folded.apply_update(state) if state
+    rows.each { |_, payload, _| folded.apply_update(payload) }
+    new_state = folded.compacted_state_update
+    # Skip the write when nothing integrated beyond the current state
+    # (compacted encoding is deterministic, so equal structs mean equal
+    # bytes); a gap-only batch leaves state untouched.
+    update!(state: new_state) unless new_state == (state || Y::Doc.new.compacted_state_update)
+
+    base = Y::Doc.new
+    base.apply_update(new_state)
+    tail, captured = rows.partition do |_, payload, _|
+      !base.update_ready?(payload) || base.update_advances?(payload)
+    end
+    updates.where(id: captured.map(&:first)).delete_all
+    updates.where(id: tail.map(&:first)).update_all(pending: true)
+  end
 
   # Compact state + the given rows if the merge is gap-free: writes state,
   # deletes the rows, returns true. Leaves everything untouched and returns

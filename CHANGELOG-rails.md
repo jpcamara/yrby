@@ -1,9 +1,62 @@
-# Changelog — yrby-rails
+# Changelog: yrby-rails
 
 All notable changes to the `yrby-rails` gem (formerly `yrby-actioncable`) are
 documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.6.1] - 2026-08-11
+
+### Fixed
+
+- `Y::Document.load_state` serves lossless state (`encode_state_as_update`).
+  It previously served gap-free state, so a client joining while a gap was
+  open never received the parked edit and could not heal it until its next
+  handshake. The quarantined row was always preserved; now the pending
+  struct rides along in served state and a mid-gap joiner heals the moment
+  the missing dependency arrives.
+
+## [0.6.0] - 2026-08-11
+
+### Changed
+
+- **Causal gaps are now accepted.** A causally-incomplete update, one whose
+  causally-prior update the store hasn't seen, is recorded and acked like any
+  other (ack-on-durable) instead of being rejected with a resync request,
+  and served onward like any other state (a peer parks a pending struct
+  exactly as the server does). The gap heals through the ack loop: the
+  missing dependency is an update its own sender still holds unacked and
+  keeps retransmitting, and join or reconnect handshakes let any client
+  that holds it supply it. The write path no longer rebuilds the document
+  per update:
+  it appends, relays, and acks, so a lost-ack retry records again (replay
+  converges; CRDT apply is idempotent).
+
+  This tightens the store contract: `on_load` must preserve pending
+  (`encode_state_as_update` or a replayed raw append log), compaction must
+  never fold a pending update into a gap-free snapshot and drop the raw
+  row (the bundled `Y::Document` quarantines pending rows and folds only
+  clean ones), and `on_change` must tolerate duplicate deltas. An acked
+  update that leaves durable storage before it integrates is a silent
+  data loss.
+
+### Changed (Y::Document)
+
+- Compaction folds past an open gap. A batch holding a causal gap still
+  compacts everything integrable: the fold captures every struct that
+  integrates, rows independent of the gap included, and only the gap
+  tail survives as quarantined raw rows. A healed gap folds out at the
+  next compaction. Rows are judged per row against the folded state, so
+  a row that causally builds on the gap quarantines with it and an
+  acked update never leaves the table before its content is durably in
+  state.
+
+### Added
+
+- `on_gap` channel hook: fires with the document key at join/serve time
+  whenever the loaded document still holds a causal gap, for metrics on
+  unhealed gaps (which no longer surface as resync traffic). An open gap is
+  also logged at `info`.
 
 ## [0.5.0] - 2026-08-05
 
@@ -11,7 +64,7 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Y::EncryptedDocument` / `Y::EncryptedDocumentUpdate`: document storage
   encrypted with Active Record encryption (`state` and update payloads),
-  on the same tables — the class you access through decides the
+  on the same tables; the class you access through decides the
   cryptography, the way `ActionText::EncryptedRichText` does. Point a
   channel's `on_load`/`on_change` (or a record association) at
   `Y::EncryptedDocument` and configure the app's encryption keys. Keep
@@ -55,7 +108,6 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rails generate yrby:install`: a `DocumentChannel` speaking the
   y-websocket protocol over the gem-owned storage, plus the storage
   migration.
-
 ## [0.3.1] - 2026-07-01
 
 ### Removed
@@ -80,7 +132,7 @@ Fixes from a full source review:
 - **A lost-ack retry now re-broadcasts.** If the original attempt recorded the
   update and then crashed (or the pub/sub broadcast failed) before
   distributing, the retry was previously settled as `:applied` without
-  re-broadcasting — live subscribers stayed stale until their next full resync,
+  re-broadcasting; live subscribers stayed stale until their next full resync,
   and nothing else could reach them. The retry now re-broadcasts before acking;
   idempotent CRDT apply makes the duplicate free for every receiver.
 - **A missing document key now fails closed.** Under a transport that doesn't
@@ -101,10 +153,10 @@ Fixes from a full source review:
 ### Changed
 - Raised the `yrby` floor to `>= 0.3.0`. That release makes
   `Doc#handle_sync_message` answer `SyncStep1` with integrated-only (gap-free)
-  state — it no longer serves un-integrable pending structs, which previously
+  state: it no longer serves un-integrable pending structs, which previously
   poisoned peers and drove endless resync traffic. The sync channel serves its
   SyncStep2 response through that method, so with an older core a poisoned server
-  store would still hand the gap to clients. No code change here — pinning the
+  store would still hand the gap to clients. No code change here; pinning the
   floor makes gap-free serving self-enforcing instead of dependent on the app
   updating the core gem.
 
@@ -116,7 +168,7 @@ Fixes from a full source review:
   record-before-distribute on `update_advances?` (`return :applied unless
   doc.update_advances?(update)`), so with an older core a lost-ack retry of a
   deletion the server had already integrated was re-recorded and re-broadcast
-  each time. No code change here — pinning the floor just makes the gem's
+  each time. No code change here; pinning the floor just makes the gem's
   exactly-once durable-recording guarantee self-enforcing instead of dependent on
   the app updating the core gem.
 
@@ -124,7 +176,7 @@ Fixes from a full source review:
 
 ### Changed
 - **Internal:** ActionCable stream-name prefix `y_ruby:` → `yrby:`.
-  Server-internal (broadcast + `stream_from` both use it) — no public API or
+  Server-internal (broadcast + `stream_from` both use it), no public API or
   client-facing wire change. Depends on `yrby >= 0.2.1`.
 
 ## [0.2.0] - 2026-06-28

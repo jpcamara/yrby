@@ -15,9 +15,10 @@ end
 require_relative "y/rendering"
 require_relative "y/lexxy"
 require_relative "y/tiptap"
+require_relative "y/decoder"
 
 module Y
   # Doc, Error, and the protocol module functions are defined in the Rust
   # extension. The ActionCable integration (Y::ActionCable::Sync) lives in the
-  # separate `yrby-actioncable` gem; require "y/action_cable".
+  # `yrby-rails` gem; require "y/action_cable".
 end

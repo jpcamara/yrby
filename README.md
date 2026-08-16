@@ -2,12 +2,42 @@
 
 [![CI](https://github.com/jpcamara/yrby/actions/workflows/ci.yml/badge.svg)](https://github.com/jpcamara/yrby/actions/workflows/ci.yml)
 
-Collaborative editing for Rails, backed by [y-crdt](https://github.com/y-crdt/y-crdt)
-(the Rust library behind Y.js). Your Rails server speaks the y-websocket sync
-protocol directly, so there's no separate Node process hosting the Y.js
-documents. Pronounced "yer-bee".
+yrby (pronounced "yer-bee") makes Rails a real Yjs backend. It binds
+[y-crdt](https://github.com/y-crdt/y-crdt), the Rust engine behind Y.js, into
+Ruby, and builds the rest of the stack around it: a sync server for Action
+Cable and AnyCable, a browser provider, and server-side reading and rendering
+of the documents. Real-time collaboration in a Rails app with no Node process
+anywhere in the path.
 
 ![Two people typing on separate lines of the same document, each keystroke synced through a Rails server, seen from a third browser with labeled carets](docs/images/collab.gif)
+
+On the server, `yrby-rails` implements the full y-websocket protocol
+(document sync plus presence) as a channel concern. Its delivery contract is
+stricter than the usual Yjs servers: every update is ack-tracked and durably
+recorded before it is acknowledged or broadcast to anyone. Replaying your
+store always rebuilds the document, across any number of processes.
+([Delivery guarantees](#delivery-guarantees))
+
+In the browser, `yrby-client`'s `ActionCableProvider` connects anything that
+speaks Yjs. The demo app runs four rich text editors, and CI drives each one
+in real Chrome: Tiptap, [Lexxy](https://www.npmjs.com/package/lexxy-realtime),
+Rhino Editor, and CodeMirror. The same channel also syncs Yjs shapes with no
+editor at all: a whiteboard on a `Y.Map`, a kanban board on a `Y.Array`, a
+co-filled form. ([Editors](#editors))
+
+In Ruby, the documents are readable without a browser. `Doc#read_text` and
+`Doc#read_map` reconstruct contents for search, validation, and exports.
+`Y::Tiptap` and `Y::Lexxy` render a document to HTML byte-identical to the
+editor's own serializer, take rules for your app's custom nodes, and drop
+straight into ActionText. ([Rendering to HTML](#rendering-to-html))
+
+Underneath, the core is built for a production Rails deployment. A `Doc` is
+thread-safe across Puma and ActionCable threads. Native CRDT work runs with
+the GVL released, so it parallelizes on MRI. Incoming frames are validated
+before anything processes them, and multi-process and AnyCable setups are
+tested end to end. ([Thread Safety](#thread-safety))
+
+The whole server side of a collaborative document is one channel:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
@@ -21,31 +51,36 @@ class DocumentChannel < ApplicationCable::Channel
 end
 ```
 
-On the browser, use the `ActionCableProvider` from the 
-[`yrby-client`](https://www.npmjs.com/package/yrby-client) npm package.
-Integrates with any editor that includes Y.js support, such as Tiptap, ProseMirror
-and [Lexxy](https://www.npmjs.com/package/lexxy-realtime).
-
-## Usage
-
-Install the gem and npm package:
+Install the gem and the npm package:
 
 ```
-gem install yrby-actioncable # depends on yrby
+gem install yrby-rails # depends on yrby
 npm install yrby-client
 ```
 
-## What you get
+## Contents
 
-- A thread-safe Ruby `Doc` you can share across Ruby threads/fibers, and native CRDT work
-  runs with the GVL released.
-- The y-websocket protocol (document sync plus awareness/presence) as a
-  one-include ActionCable concern.
-- Authoritative record-before-distribute semantics: each document change can be
-  recorded durably before it goes out to anyone.
-- Optional server-side reads: `Doc#read_text` and `Doc#read_map` reconstruct a
-  document's contents in Ruby - no Node process - for search, exports, validation,
-  or server-side rendering.
+- [Scope](#scope)
+- [Durability and delivery](#durability-and-delivery)
+- [What about yrb?](#what-about-yrb)
+- [Testing](#testing)
+- [Install](#install)
+- [Docs](#docs)
+- [Editors](#editors)
+- [Usage](#usage)
+  - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
+  - [Reading document contents](#reading-document-contents)
+  - [Pending structs and gap-free state](#pending-structs-and-gap-free-state)
+  - [Rendering to HTML](#rendering-to-html)
+  - [Protocol codec (module functions)](#protocol-codec-module-functions)
+  - [ActionCable Integration](#actioncable-integration)
+- [Thread Safety](#thread-safety)
+  - [Parallelism (GVL release)](#parallelism-gvl-release)
+- [Message Type Constants](#message-type-constants)
+- [Sync Flow](#sync-flow)
+- [Development](#development)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ## Scope
 
@@ -63,17 +98,16 @@ guarantees, correctness, and thread safety.
 
 Towards that goal, `yrby` adds opinionated defaults on top of normal Yjs syncing:
 
-- Built-in update acknowledgement: the `ActionCableProvider` in `yrby-client` will continue to
-  send updates until an ack is received from the server. [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
-  only sends an ack when applying an update is successful. The goal is at-least-once delivery,
-  and because CRDTs are idempotent a duplicate update is effectively a no-op.
-- Gap detection in document updates: before applying an update and sending an ack to the client,
-  `yrby` checks whether the update results in any causal gap. Ie, an update comes through
-  which depends on a previous update that is not yet present in the document. This can result in
-  a document stuck with "pending" updates, which will _never_ apply if the missing update is not sent.
-  To avoid this, `yrby` does not apply the update, and starts a new y-protocol sync with the client.
-  That will cause the client to synchronize its document with the server, sending through any updates
-  that may have been missed
+- Built-in update acknowledgement: the `ActionCableProvider` in `yrby-client` keeps
+  sending an update until the server acks it, and [`yrby-rails`](https://rubygems.org/gems/yrby-rails)
+  only acks once the update is durably recorded. That gives you at-least-once
+  delivery, and because CRDT updates are idempotent a duplicate is a no-op.
+- Gap awareness: an update can arrive before another update it depends on (a
+  "causal gap"). `yrby` records and acks it like any other, and the document
+  heals on its own once the missing update arrives; its sender keeps
+  retransmitting it until it is acked. `Doc#pending?` and the `on_gap` hook
+  tell you when a document is waiting on a missing update.
+  ([Causal gaps](#causal-gaps))
 
 ## What about [yrb](https://github.com/y-crdt/yrb)?
 
@@ -147,8 +181,8 @@ editor's own serializer. Each page is a working integration to copy from:
 | [Rhino Editor](https://github.com/KonnorRogers/rhino-editor) (Tiptap 3) | `@tiptap/extension-collaboration` + `-caret` | [`rhino.js`](examples/actioncable-demo/frontend/src/rhino.js) |
 | [CodeMirror 6](https://codemirror.net) | `y-codemirror.next` | [`codemirror.js`](examples/actioncable-demo/frontend/src/codemirror.js) |
 
-The demo also syncs plain Yjs shapes with no editor at all — a whiteboard
-on a `Y.Map`, a kanban board on a `Y.Array`, a co-filled form — over the
+The demo also syncs plain Yjs shapes with no editor at all (a whiteboard
+on a `Y.Map`, a kanban board on a `Y.Array`, a co-filled form) over the
 same channel. The demo README's "Using this in your own app" section has
 the integration recipe, and its `NoteMaterializer` shows how to render a
 document to ActionText server-side with `Y::Tiptap` or `Y::Lexxy`.
@@ -173,17 +207,19 @@ doc.compacted_state_update        # => full update, gap-free (excludes pending)
 # Applying updates
 doc.apply_update(update_bytes)    # apply raw V1 update
 doc.pending?                      # => true if holding un-integrable pending structs
+doc.update_ready?(update)         # => true if update would integrate cleanly (no gap)
+doc.update_advances?(update)      # => true if update moves integrated state forward
 
 # Sync protocol
 doc.sync_step1                    # => SyncStep1 message (this doc's state vector)
 doc.handle_sync_message(data)     # => [msg_type, sync_type, response]; answers a
-                                  #    peer's SyncStep1 with an integrated-only
-                                  #    SyncStep2 (never serves pending structs)
+                                  #    peer's SyncStep1 with full state (lossless,
+                                  #    pending included, like Y.js)
 ```
 
 ### Reading document contents
 
-Reconstruct a document server-side — search, exports, emails, SSR — with no
+Reconstruct a document server-side (search, exports, emails, SSR) with no
 Node process:
 
 ```ruby
@@ -199,16 +235,18 @@ update), yrs parks it as a **pending** struct: the integrated state vector stays
 empty, but the pending block is held as a recovery buffer and heals if the
 missing dependency later arrives. `Doc#pending?` reports this.
 
-Pending structs are *not* document state, so they must not cross the sync
-boundary — a peer that receives one can't integrate it and gets stuck. Two
-guarantees keep serving safe:
+Pending structs travel like any other state. `handle_sync_message` answers
+`SyncStep1` with the doc's full state, pending included, just like Y.js's
+`encodeStateAsUpdate`: a peer parks the pending struct the same way this doc
+did and heals it the same way. The one place pending must not go is a
+compacted snapshot:
 
-- `handle_sync_message` answers `SyncStep1` with **integrated-only** state, so a
-  server never serves a struct it can't integrate itself (this is automatic).
-- `Doc#compacted_state_update` gives you the same gap-free full-state update for
-  when you persist or hand off state yourself. It's non-destructive (the doc
-  keeps its pending), while `encode_state_as_update` stays lossless so you can
-  still preserve the raw pending bytes for recovery.
+- `Doc#compacted_state_update` returns a gap-free full-state update for
+  compaction. Folding a log into one blob would otherwise freeze an
+  un-integrable struct into the base state forever. It's non-destructive: the
+  doc keeps its pending.
+- `encode_state_as_update` stays lossless, so persistence and serving keep
+  the raw pending bytes and the gap can still heal.
 
 ### Rendering to HTML
 
@@ -231,7 +269,7 @@ tiptap.to_html("content") # or another XML root
 The output matches Tiptap's own `getHTML()`, checked byte-for-byte in the tests
 against a document captured from a real editor. It follows
 [`tiptap-php`](https://github.com/ueberdosis/tiptap-php) and reads both name
-styles editors use — Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
+styles editors use: Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
 `bullet_list`/`strong`.
 
 It covers paragraphs, headings, blockquotes, bullet/ordered/task lists, code
@@ -241,8 +279,8 @@ as semantic `<table><tbody>`, without the column-width styling Tiptap's editor
 view adds.
 
 The support is layered like the Lexical side: `Y::ProseMirror` covers core
-ProseMirror natively — prosemirror-schema-basic plus the prosemirror-tables
-family — and Tiptap's extension nodes (task lists, mentions, the details
+ProseMirror natively (prosemirror-schema-basic plus the prosemirror-tables
+family) and Tiptap's extension nodes (task lists, mentions, the details
 family) are `Y::Tiptap`'s rule set (`Y::Tiptap::NODES`), built on the
 extension API below. Marks stay in the base: mark rendering (nesting order,
 `textStyle` CSS, `code` exclusivity) runs through native text-run machinery
@@ -259,8 +297,8 @@ lexxy.to_html("notepad") # or another XML root
 
 The HTML is identical to what a `lexxy-editor` submits to Rails (its `value`).
 The tests check this byte-for-byte against a document captured from a real
-editor. Stock Lexical has no canonical serializer — every editor configures
-its own — so the editor-specific class carries the editor's name, and
+editor. Stock Lexical has no canonical serializer (every editor configures
+its own), so the editor-specific class carries the editor's name, and
 `Y::Lexical` is the core-Lexical base: paragraphs, headings, quotes, code,
 lists, tables, links, and the full text-format model, for any other Lexical
 editor to extend with rules.
@@ -273,14 +311,14 @@ mentions both emit `<action-text-attachment>` elements that ActionText can
 re-render).
 
 Internally that support is layered: `Y::Lexical` covers core Lexical
-structure natively, and everything Lexxy adds — its node types (attachments,
+structure natively, and everything Lexxy adds, its node types (attachments,
 galleries) and its decorations of core nodes (the table wrapper, header-cell
-styling, nested-list classes) — is `Y::Lexxy`'s rule set
+styling, nested-list classes), is `Y::Lexxy`'s rule set
 (`Y::Lexxy::NODES`), built on the extension API below. The gem's own Lexxy
 support is the API's first consumer: an app rule for one of those types
 simply replaces it.
 
-In both renderers an unknown node keeps its content — text and nested blocks
+In both renderers an unknown node keeps its content: text and nested blocks
 fall back to readable markup rather than disappearing.
 
 #### Custom nodes and marks
@@ -290,7 +328,7 @@ their own node types. Both renderers take rules for them. A rule is checked
 before the built-in schema, so it can add a node type or replace how a
 built-in renders.
 
-Rules register in a block — one `rules.node` call per type. A declarative
+Rules register in a block, one `rules.node` call per type. A declarative
 rule is markup as data, rendered natively:
 
 ```ruby
@@ -304,14 +342,14 @@ end
 `tag` names the element. `attrs` values are templates: a string is a literal,
 a symbol reads that attribute off the node, an array concatenates both kinds;
 an attribute that resolves empty is left out. `text` (same template form)
-emits literal text content. `contains` declares what lives inside the node — `:inline` (formatted text,
-the default), `:blocks` (child block nodes — a container), or `:none` (a
+emits literal text content. `contains` declares what lives inside the node: `:inline` (formatted text,
+the default), `:blocks` (child block nodes, a container), or `:none` (a
 leaf). `void: true` skips the closing tag.
 
 You don't have to guess any of those names or shapes. Editors store types
 and attributes under names you'd never predict (Rhino's strike mark is
 `rhino-strike`; Lexical prefixes its own props `__`), so ask a real
-document instead — make one in your editor using your custom node, then:
+document instead: make one in your editor using your custom node, then:
 
 ```ruby
 Y::Tiptap.new(doc).node_types
@@ -336,25 +374,25 @@ lexical = Y::Lexical.new(doc) do |rules|
 end
 ```
 
-The block gets the node's type, its stored attributes, `node.content` — the
-children, already rendered to HTML — and `node.child_types`, the node's
+The block gets the node's type, its stored attributes, `node.content` (the
+children, already rendered to HTML), and `node.child_types`, the node's
 element/block children by type, in document order. `child_types` answers the
 structural questions attributes can't: how many images a gallery holds, or
 whether a list item carries a nested list. Whatever the block returns is
 spliced into the output as-is: it's trusted HTML, so escape any values you
-interpolate. To set the content mode for a callback, give the node both —
+interpolate. To set the content mode for a callback, give the node both:
 `rules.node "embed", contains: :blocks do |node| ... end`.
 
 Callbacks never run while the document is locked. The render finishes first
 (inside one read transaction, GVL released), then the blocks run and their
-output is spliced in — so a callback can safely read or even write the same
+output is spliced in, so a callback can safely read or even write the same
 doc. With no callback rules, `to_html` skips the splicing entirely.
 
 Blocks are the escape hatch for everything the declarative form can't say,
 and they're proven sufficient: `Y::Lexxy` and `Y::Tiptap` are themselves
-built on this API (`lib/y/lexxy.rb`, `lib/y/tiptap.rb`) — simple nodes as
+built on this API (`lib/y/lexxy.rb`, `lib/y/tiptap.rb`): simple nodes as
 declarative hashes, everything with logic as plain methods mapped by node
-type (a `Method` responds to `call` like any lambda) — and the fixture tests
+type (a `Method` responds to `call` like any lambda), and the fixture tests
 hold their output byte-identical to a live editor's.
 
 The ProseMirror side also takes custom marks:
@@ -371,7 +409,7 @@ for a built-in mark name (`"bold"`) replaces its built-in tag.
 
 ##### Worked examples
 
-A video-embed node from an app's Tiptap extension — a type the pinned schema
+A video-embed node from an app's Tiptap extension, a type the pinned schema
 has never heard of:
 
 ```ruby
@@ -398,7 +436,7 @@ tiptap = Y::Tiptap.new(doc) do |rules|
 end
 ```
 
-Overriding a shipped rule — rendering Lexxy uploads as real image markup
+Overriding a shipped rule: rendering Lexxy uploads as real image markup
 instead of the `<action-text-attachment>` elements ActionText re-renders:
 
 ```ruby
@@ -414,7 +452,7 @@ lexxy = Y::Lexxy.new(doc) do |rules|
 end
 ```
 
-Markup that depends on structure — `node.child_types` lists the node's
+Markup that depends on structure: `node.child_types` lists the node's
 element/block children in document order, so a layout container can size
 itself by its column count while the columns themselves stay declarative:
 
@@ -427,7 +465,7 @@ tiptap = Y::Tiptap.new(doc) do |rules|
 end
 ```
 
-Content-aware overrides — dropping the empty paragraphs an editor keeps
+Content-aware overrides: dropping the empty paragraphs an editor keeps
 around the cursor, since `node.content` arrives already rendered:
 
 ```ruby
@@ -438,10 +476,10 @@ lexical = Y::Lexical.new(doc) do |rules|
 end
 ```
 
-For a larger reference, the gem's own editor schemas ship this way — see
+For a larger reference, the gem's own editor schemas ship this way; see
 `Y::Lexxy::NODES` in `lib/y/lexxy.rb` (declarative hashes for the simple
-nodes, a plain method per node that needs logic — galleries, list items,
-header cells, both attachment types — mapped with `method(:name)`) and
+nodes, a plain method per node that needs logic (galleries, list items,
+header cells, both attachment types) mapped with `method(:name)`) and
 `Y::Tiptap::NODES` in `lib/y/tiptap.rb` (task lists, mentions, the details
 family).
 
@@ -449,7 +487,7 @@ family).
 
 Classifying and unwrapping wire frames is stateless, so it's exposed as
 `Y` module functions rather than a class. The server never holds presence
-or document state to route a frame — presence lives in the browser clients, and
+or document state to route a frame; presence lives in the browser clients, and
 the server only relays awareness frames opaquely.
 
 ```ruby
@@ -470,31 +508,31 @@ bin/rails db:migrate
 The models ship in the gem, the way Action Text owns
 `ActionText::RichText`:
 
-- **`Y::Document`** — one row per document, addressed two ways: by `key`
-  (what a channel addresses — one opaque, unique string, sometimes
+- **`Y::Document`**: one row per document, addressed two ways: by `key`
+  (what a channel addresses; one opaque, unique string, sometimes
   app-supplied, never parsed) and, optionally, by polymorphic `record` +
   `name` (which model attribute it backs; `name` is the attribute name,
-  `"body"` — one document per attribute per record, the
+  `"body"`; one document per attribute per record, the
   ActionText::RichText scheme). Key-only documents leave the binding nil.
   Either side can arrive first: `Y::Document.for(record, name)` finds or
   creates the binding, derives a readable key (`post/1/body`), and adopts
   a key-only row already holding that key, so a channel writing first and
   a binding created later converge on one document. The row also holds
-  the merged `state` snapshot — CRDT state only; derived data (rendered
+  the merged `state` snapshot, CRDT state only; derived data (rendered
   HTML, search text) is the application's job, typically in the channel's
   on_change. `.load_state(key)` / `.append(key, update)` are the store
   calls the generated channel uses.
-- **`Y::DocumentUpdate`** — the uncompacted tail: one delta per row,
+- **`Y::DocumentUpdate`**: the uncompacted tail, one delta per row,
   compacted into `state` and deleted once the tail reaches `compact_every`
   (default 64). Loading reads the snapshot plus the current tail; an
   empty tail returns `state` directly. Compaction serializes on a
-  per-document row lock and skips causally-gapped rows — they're
+  per-document row lock and skips causally-gapped rows; they're
   quarantined until they heal rather than compacted into state or
   deleted. Destroying a document deletes its updates with it.
 
 Encrypted storage: `Y::EncryptedDocument` stores `state` and update
 payloads through Active Record encryption on the same tables, the way
-`ActionText::EncryptedRichText` does — point the channel's
+`ActionText::EncryptedRichText` does. Point the channel's
 `on_load`/`on_change` at it instead and configure your app's encryption
 keys. Use one access path per document: rows written encrypted read back
 as ciphertext through the plain classes.
@@ -508,8 +546,7 @@ answered, and they can point at anything.
 
 `include Y::ActionCable` (from the `yrby-rails` gem) is the channel
 integration: the y-websocket protocol (document sync +
-awareness/presence) over ActionCable. (`include Y::ActionCable::Sync`
-keeps working and has the same effect.)
+awareness/presence) over ActionCable.
 
 ```ruby
 # app/channels/document_channel.rb
@@ -537,8 +574,8 @@ end
 ```
 
 The concern is store-backed. A handshake is answered from `on_load`; document
-changes are checked against that durable state, recorded through `on_change`,
-then broadcast. Nothing authoritative is kept in ActionCable process memory, so
+changes are recorded through `on_change`, then broadcast. Nothing
+authoritative is kept in ActionCable process memory, so
 AnyCable RPC workers, Puma workers, and separate dynos can all handle messages
 for the same document as long as they share the same store and cable adapter.
 
@@ -556,16 +593,18 @@ no single client can relay garbage that breaks the others in a room.
 
 #### Delivery guarantees
 
-The contract is the same at every scale — one process, or hundreds across many
+The contract is the same at every scale: one process, or hundreds across many
 servers:
 
 - **The document always converges.** CRDT updates are commutative and
   idempotent, so out-of-order, duplicate, or concurrent delivery all converge to
   the same correct document. This needs no coordination and holds everywhere.
-- **The durable log never goes gappy.** An update is recorded only once its
-  causal dependencies are already in the store (checked against `on_load`); a
-  causally-incomplete update triggers a resync instead, so the log always
-  rebuilds cleanly.
+- **An acked update is durable, even one that arrived out of order.** An
+  update with a missing dependency is recorded and acked like any other, and
+  parks as pending in the document. That missing dependency is an update some
+  client still holds unacked, so that client keeps retransmitting it until
+  the server records it, and the gap closes. The ack loop is the guarantee.
+  See [Causal gaps](#causal-gaps).
 - **`on_change` is at-least-once, and the durable guarantee is that replaying the
   log reconstructs the document.** Every update triggers `on_change` before it's acked or
   broadcast (record-before-distribute). If exactly-once updates matter for you, **you
@@ -575,13 +614,13 @@ servers:
   There is no negative-ack: the client simply never receives the ack, keeps the
   update pending, and retransmits on its timer/reconnect. This is built for
   *transient* failures (the store is briefly down → a retry lands). A block that
-  raises *deterministically* — a validation that always fails for this edit —
+  raises *deterministically* (a validation that always fails for this edit)
   will be retried forever, since nothing tells the client to stop. Enforce hard
   rejections before the edit reaches `on_change` (channel authorization in
   `subscribed`), not by raising inside it.
 - **An over-cap frame is dropped the same silent way.** A frame larger than
-  `max_frame_bytes` (default 8 MiB) is dropped before decoding — no ack, no
-  broadcast — to bound the work a client can force. For a genuine document
+  `max_frame_bytes` (default 8 MiB) is dropped before decoding (no ack, no
+  broadcast) to bound the work a client can force. For a genuine document
   update that means the same implicit rejection as above: unacked, retransmitted
   forever. Normal typing never approaches the cap, but a large paste, an embedded
   image, or a big initial `SyncStep2` can. The drop is logged (`warn` for
@@ -590,6 +629,85 @@ servers:
   id. Size the cap for your largest expected payload, and reject
   genuinely-too-big content upstream rather than relying on the cap to reject it
   gracefully.
+
+#### Causal gaps
+
+Yjs updates can arrive out of order: an update can reach the server before
+another update it depends on. yrby treats that as normal. The update is
+recorded and acked like any other, parks as a pending struct in the document,
+and integrates on its own the moment the missing dependency lands. The write
+path never rebuilds the document; it appends, relays, and acks, so a gapped
+update costs the same as any other.
+
+Serving is lossless too, like any Yjs server. `handle_sync_message` serves
+full state, pending included, so a peer parks the same pending struct and
+heals it the same way. Healing needs no special machinery: the missing
+dependency is an update its sender still holds unacked, and at-least-once
+retransmission delivers it. Only compaction excludes pending
+(`compacted_state_update`), because folding a log must not freeze an
+un-integrable struct into the base state.
+
+The bundled `Y::Document` store handles all of this. If you write your own
+store, keep two things in mind:
+
+**1. Load losslessly, and tolerate duplicates.** `on_load` should return
+state that preserves pending: `encode_state_as_update`, or a replay of the
+raw append log. Don't compact with `compacted_state_update` while
+`doc.pending?`; that strips the pending struct and the acked edit inside it.
+(`Y::Document` quarantines pending rows for exactly this reason.) A lost ack
+also means a client resends an update the store already has. Replay converges
+anyway, because CRDT apply is idempotent, so deduping is optional. If log
+size matters, dedup by content hash:
+
+```ruby
+class DocumentStore
+  # append tolerates duplicates: a re-delivered update upserts to a no-op.
+  def append(key, update)
+    Revision.upsert({ doc_key: key, update_hash: Digest::SHA256.hexdigest(update), update: update },
+                    unique_by: %i[doc_key update_hash])
+  end
+
+  # load is lossless: replay the raw log so a pending struct is preserved and
+  # heals when its dependency arrives.
+  def load(key)
+    updates = Revision.where(doc_key: key).order(:id).pluck(:update)
+    return nil if updates.empty?
+
+    doc = Y::Doc.new
+    updates.each { |u| doc.apply_update(u) }
+    doc.encode_state_as_update # lossless: keeps pending
+  end
+
+  # optional compaction: only when there is no open gap, or you would drop it.
+  def compact(key)
+    doc = Y::Doc.new
+    Revision.where(doc_key: key).order(:id).pluck(:update).each { |u| doc.apply_update(u) }
+    return if doc.pending? # a gap is open; compacting now would drop it
+    # ... replace the log with a single revision holding doc.compacted_state_update ...
+  end
+end
+```
+
+**2. Watch for gaps that never heal.** An open gap is quiet: the edit sits
+as pending, invisible in the document, until its dependency arrives. Normally
+that resolves itself. The sender retransmits the missing update until it is
+acked, and every join or reconnect handshake has the client send everything
+the server hasn't integrated, so any client holding the dependency supplies
+it just by connecting. The gap worth alerting on is one no live client can
+supply, and that is what the `on_gap` hook surfaces. It fires with the
+document key whenever a document is loaded to serve state and a gap is still
+open. Use it to emit a metric (a pending-document count, or the age of the
+oldest open gap) so a stuck gap is visible. Gaps are also logged at `info`,
+and errors raised in the hook are swallowed so observability can never break
+frame handling.
+
+```ruby
+class DocumentChannel < ApplicationCable::Channel
+  include Y::ActionCable
+
+  on_gap { |key| StatsD.increment("yrby.gap", tags: ["doc:#{key}"]) }
+end
+```
 
 #### Multi-process deployments
 
@@ -650,12 +768,86 @@ duplicate record replays to the same document.
 The demo wires `on_change` to a durable Postgres-backed log by default, and checks
 end to end that the log alone rebuilds the document.
 
+#### Ephemeral documents (no database)
+
+`on_load` and `on_change` are plain blocks, and nothing requires them to touch
+a database. For documents that don't need to outlive their session (a
+scratchpad, live form state, a draft you only persist on submit) the store
+can be connection state that travels with each request:
+
+```ruby
+class ScratchpadChannel < ApplicationCable::Channel
+  include Y::ActionCable
+
+  on_load { |key| @doc_state }
+
+  on_change do |key, update|
+    doc = Y::Doc.new
+    doc.apply_update(@doc_state) if @doc_state
+    doc.apply_update(update)
+    @doc_state = doc.compacted_state_update
+  end
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
+end
+```
+
+On AnyCable the channel object doesn't survive between messages, so an
+instance variable won't hold. Declare the store as channel state instead
+(`state_attr_accessor` comes from anycable-rails) and Base64 it, because that
+state is serialized as JSON into each RPC exchange with `anycable-go`:
+
+```ruby
+class ScratchpadChannel < ApplicationCable::Channel
+  include Y::ActionCable
+
+  state_attr_accessor :doc_state
+
+  on_load { |key| doc_state && Base64.strict_decode64(doc_state) }
+
+  on_change do |key, update|
+    doc = Y::Doc.new
+    doc.apply_update(Base64.strict_decode64(doc_state)) if doc_state
+    doc.apply_update(update)
+    self.doc_state = Base64.strict_encode64(doc.compacted_state_update)
+  end
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
+end
+```
+
+Both hooks run in the channel instance (`instance_exec`), so they can use
+anything the channel can, and `sync_receive` rebuilds the document from
+`on_load` on every update, which is what lets the store live on the
+connection. On Action Cable the channel instance lasts as long as the
+connection, so an instance variable is the whole store. Merging into
+`compacted_state_update` keeps it one blob instead of a growing update log.
+
+The store is per connection, which shapes what this fits. A single writer gets
+the full delivery contract with no database anywhere. With several people
+editing at once, one client's update can depend on edits its own connection
+has never seen; that update records as pending, and the next handshake with
+that client (which always holds the full document) supplies the missing state
+and heals it. The document still converges; heavy concurrent editing just
+parks more pending between handshakes than a shared store would. On
+AnyCable, keep the payload in mind too: the blob travels with every message,
+so that variant suits small documents, not long manuscripts.
+
+Durability is the connection plus the browsers. A reconnecting client re-seeds
+an empty server through the ordinary sync handshake, so the document survives
+server restarts as long as some client still has it. For ephemeral documents
+shared across clients on a single-process deployment, the same two hooks over
+a class-level `Concurrent::Map` work instead; that version stops being
+coherent the moment you scale past one process.
+
 #### Reliable delivery (acks)
 
 yrby document delivery is ack-tracked. Browser document updates carry an
-`"id"`, and the server replies `{ "ack": <id> }` once `on_change` has succesfully fired.
-A causally-gapped update is not acked; the server sends a resync request, and
-the client keeps the update queued until it lands.
+`"id"`, and the server replies `{ "ack": <id> }` once `on_change` has
+successfully fired. Every decodable document update is recorded and acked,
+including one that arrives out of order.
 
 ```
 client -> server   { "update": "<base64 update>", "id": 42 }
@@ -669,13 +861,13 @@ one `{ ack: id }` cumulatively confirms everything up to it. Because CRDT apply
 is idempotent, a resend that already landed is a harmless no-op that just
 re-acks. Awareness stays ephemeral and is not acked.
 
-Presence (cursors, selections) is owned by the browser clients — the server
+Presence (cursors, selections) is owned by the browser clients; the server
 never sets or holds presence state, it only relays awareness frames opaquely.
 See `yrby-client` for the client-side awareness API.
 
 ## Thread Safety
 
-A `Doc` is safe to share across Ruby threads — used concurrently from Puma
+A `Doc` is safe to share across Ruby threads, used concurrently from Puma
 workers, ActionCable connection threads, or background jobs without external
 locking.
 

@@ -87,8 +87,8 @@ deferred one microtask so that removal flushes first) and tears down the
 your own `Awareness`, drop down to `YProtocolSession`, which leaves it for you to
 own.)
 
-On the server, include `Y::ActionCable::Sync` in a channel named
-`DocumentChannel` (the [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
+On the server, include `Y::ActionCable` in a channel named
+`DocumentChannel` (the [`yrby-rails`](https://rubygems.org/gems/yrby-rails)
 gem). The server subscribes document broadcasts and AnyCable awareness whispers
 on separate streams, so the document stream is not whisper-enabled. Need a
 different transport or framing? Drop down to `YProtocolSession` and supply your
@@ -166,7 +166,7 @@ Document delivery stays queued and ack-tracked for the lifetime of the session.
 ## How it fits
 
 The server counterpart — ack *generation*, gap detection, record-before-distribute
-— is the `yrby-actioncable` gem's `Y::ActionCable::Sync`. This package
+— is the `yrby-rails` gem's `Y::ActionCable`. This package
 is the client half of the same protocol.
 
 ## License
