@@ -1,18 +1,22 @@
 # prosemirror-yjs-html
 
-Render a ProseMirror-shaped [yrs](https://github.com/y-crdt/y-crdt) document
-to HTML — no browser, no Node process, no headless editor. Covers
+Renders the Yjs representation of a [ProseMirror](https://prosemirror.net)
+document to HTML, using [yrs](https://crates.io/crates/yrs). Covers
 prosemirror-schema-basic plus the prosemirror-tables family, and reads both
-naming styles editors use (Tiptap's `bulletList`/`bold` and
-prosemirror-schema-basic's `bullet_list`/`strong`). Output is pinned
+naming styles editors use: Tiptap's `bulletList`/`bold` and
+prosemirror-schema-basic's `bullet_list`/`strong`. The tests pin the output
 byte-for-byte against fixtures captured from a live Tiptap editor.
 
-Every example below is compile-checked by `cargo test`.
+## Usage
 
-## Rendering a document
+```toml
+[dependencies]
+prosemirror-yjs-html = "0.1"
+yrs = { version = "0.27", features = ["sync"] }
+```
 
-The bytes are a Yjs update — from your durable store, a provider, or
-`Y.encodeStateAsUpdate` in the browser:
+The input is a Yjs update: bytes from a durable store, a provider, or
+`Y.encodeStateAsUpdate` in the browser.
 
 ```rust,no_run
 use yrs::updates::decoder::Decode;
@@ -32,15 +36,15 @@ let html = prosemirror_yjs_html::render(&txn, &fragment);
 //    isn't ProseMirror-shaped (e.g. a Lexical document).
 ```
 
-An editor may hold several fragments under one doc; pass whichever root name
-your editor binds. `render` returns `None` rather than guessing when the
-fragment's shape isn't ProseMirror's.
+An editor may hold several fragments under one doc; pass whichever root
+name your editor binds. `render` returns `None` when the fragment's shape
+is not ProseMirror's.
 
-## Custom nodes, declaratively
+## Declarative rules
 
-Editors add node and mark types the base schema never heard of. A
-declarative rule is
-markup as data — tag, attributes, content slot — and renders natively:
+A rule describes how a node type the built-in schema does not know should
+render: a tag, attribute templates, and a content slot. Declarative rules
+render inside the document transaction with no callback:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -70,16 +74,13 @@ let html = flatten(segments).into_html().expect("no callback rules");
 Attribute templates concatenate literal parts (`lit`) and stored-attribute
 references (`ref`); an attribute that resolves empty is omitted. `content`
 is `"inline"` (formatted text, the default), `"blocks"` (child block
-nodes), or `"none"` (a leaf); `"void": true` skips the closing tag. A rule
+nodes), or `"none"` (a leaf). `"void": true` skips the closing tag. A rule
 for a built-in type replaces how that type renders.
 
-## Custom marks
+## Mark rules
 
-ProseMirror splits a document into nodes (the structure: paragraphs, lists,
-tables) and marks (annotations on runs of text: bold, links, comments). The
-split is ProseMirror's — the Lexical crate has no marks tier, because
-Lexical folds formatting into its core text model and renders it natively.
-
+ProseMirror splits a document into nodes (structure: paragraphs, lists,
+tables) and marks (annotations on runs of text: bold, links, comments).
 A mark rule registers under `"marks"` and wraps the text runs carrying it:
 
 ```rust,no_run
@@ -106,21 +107,21 @@ let html = flatten(segments).into_html().expect("no callback rules");
 // <span data-comment-id="c42">…</span>, wrapped outside the built-in marks.
 ```
 
-The built-in marks nest deterministically (subscript/superscript innermost,
-then highlight, underline, strike, italic, bold, a `textStyle` span, link on
-the outside), and `code` renders alone among the formatting marks, matching
-Tiptap's Code mark. A custom mark wraps outside every built-in; several on
-one run nest alphabetically by name, so output never depends on
-registration order. A rule for a built-in mark name (`"bold"`) replaces its
-markup while the exclusivity behavior holds.
+Built-in marks nest deterministically: subscript and superscript
+innermost, then highlight, underline, strike, italic, bold, a `textStyle`
+span, and link on the outside. `code` renders alone among the formatting
+marks, matching Tiptap's Code mark. A custom mark wraps outside every
+built-in, and several custom marks on one run nest alphabetically by name,
+so output never depends on registration order. A rule for a built-in mark
+name (`"bold"`) replaces its markup and keeps the exclusivity behavior.
 
-## Custom nodes, with your own code
+## Callback rules
 
-When markup-as-data isn't enough — the node needs a database lookup, or
-logic — mark the rule `callback` and the renderer defers it to you. The
-render itself never runs your code: deferred nodes come back as segments
-carrying their type, stored attributes (as JSON), and already-rendered
-children, and you splice the result:
+A rule marked `callback` defers rendering to your code, for nodes that
+need logic or a database lookup. Deferred nodes come back as segments
+carrying their type, stored attributes as JSON, and already-rendered
+children. The render itself never runs your code; you splice the result
+after it returns:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -158,13 +159,15 @@ let segments = render_segments(&txn, &fragment, &rules).expect("ProseMirror-shap
 let html = splice(segments);
 ```
 
-(The rules surface — `Rules`, `Segment`, `flatten`, and friends — is
-re-exported here; `yjs-html-core` is an internal implementation crate.)
+The rules surface (`Rules`, `Segment`, `flatten`) is re-exported here;
+[`yjs-html-core`](https://crates.io/crates/yjs-html-core) is an internal
+implementation crate.
 
-## Discovering what a document stores
+## Schema discovery
 
-Editors store types and attributes under names you'd never predict (Rhino
-Editor's strike mark is `rhino-strike`). Don't guess — ask a real document:
+Editors store types and attributes under their own names; Rhino Editor's
+strike mark, for example, is `rhino-strike`. `collect_node_types` reports
+what a real document holds:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -181,17 +184,10 @@ for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default()
 }
 ```
 
-Types where `is_builtin` is false are the ones needing a rule — and even
-without one, an unknown node keeps its content: text and nested blocks
-degrade to readable markup rather than disappearing.
+Types where `is_builtin` is false need a rule. Without one, an unknown
+node still renders its text and nested blocks as plain markup.
 
-## Building and testing
+## License
 
-```bash
-cargo build -p prosemirror-yjs-html
-cargo test -p prosemirror-yjs-html
-```
-
-Extracted from (and maintained with) [yrby](https://github.com/jpcamara/yrby),
-the Rails CRDT sync gem, where it backs `Y::ProseMirror`/`Y::Tiptap`. Depends only
-on yrs, serde_json, and yjs-html-core. MIT.
+MIT. Developed in [yrby](https://github.com/jpcamara/yrby), where it backs
+`Y::ProseMirror` and `Y::Tiptap`.
