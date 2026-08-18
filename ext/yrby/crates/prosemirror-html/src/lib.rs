@@ -637,29 +637,6 @@ fn render_text_runs<T: ReadTxn>(txn: &T, t: &XmlTextRef, em: &mut Emitter, rules
     }
 }
 
-/// Wrap one text run in its marks, nesting innermost-first:
-/// subscript/superscript, highlight, underline, strike, italic, bold, a
-/// textStyle span, then link on the outside. `code` renders alone among the
-/// formatting marks (Tiptap's Code mark excludes them all), but a link still
-/// wraps it — Tiptap can't produce code+link, prosemirror-schema-basic can,
-/// and dropping the link would lose the href.
-///
-/// A registered mark rule claims its stored name from the built-in wraps
-/// (overriding it) and wraps outside everything; multiple custom marks nest
-/// alphabetically by name, so output is deterministic regardless of
-/// registration order. Overriding replaces only the markup: a claimed
-/// `code` still excludes the other formatting marks, and a claimed
-/// formatting mark stays excluded from a code run.
-fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
-    let stack = run_stack(marks, rules);
-    let mut html: String = stack.iter().map(|(open, _)| open.as_str()).collect();
-    html.push_str(&escape_text(text));
-    for (_, close) in stack.iter().rev() {
-        html.push_str(close);
-    }
-    html
-}
-
 /// The run's mark wrappers as (open tag, close tag) pairs, outermost
 /// first: registered custom marks (reverse-alphabetical, so the last name
 /// alphabetically is outermost), link, the textStyle span, then bold,
@@ -932,6 +909,18 @@ mod tests {
             a.insert((*k).into(), Any::Bool(true));
         }
         a
+    }
+
+    /// Single-run rendering for the mark unit tests: the run's full
+    /// open/close stack around the escaped text.
+    fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
+        let stack = run_stack(marks, rules);
+        let mut html: String = stack.iter().map(|(open, _)| open.as_str()).collect();
+        html.push_str(&escape_text(text));
+        for (_, close) in stack.iter().rev() {
+            html.push_str(close);
+        }
+        html
     }
 
     fn run(text: &str, marks: Option<&Attrs>) -> String {
