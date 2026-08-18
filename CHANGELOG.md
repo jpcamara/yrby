@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `Y::ProseMirror` and `Y::Tiptap` keep marks shared by adjacent text
+  runs open across them, the way ProseMirror's own serializer does:
+  bold then bold-italic renders as `<strong>a<em>b</em></strong>`, not
+  as two sibling `<strong>` wraps. A mark whose attributes differ
+  between runs never merges. Found by the new cross-renderer
+  verification, which checks the renderers against a live Tiptap
+  editor, `@tiptap/html`'s static `generateHTML`, `tiptap-php`, and
+  Lexical's `$generateHtmlFromNodes` on a shared corpus.
+
 ## [0.7.0] - 2026-08-11
 
 ### Added
