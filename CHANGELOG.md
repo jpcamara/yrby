@@ -14,8 +14,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as two sibling `<strong>` wraps. A mark whose attributes differ
   between runs never merges. Found by the new cross-renderer
   verification, which checks the renderers against a live Tiptap
-  editor, `@tiptap/html`'s static `generateHTML`, `tiptap-php`, and
-  Lexical's `$generateHtmlFromNodes` on a shared corpus.
+  editor, `@tiptap/html`'s static `generateHTML`, `tiptap-php`,
+  Lexical's `$generateHtmlFromNodes`, and Payload CMS's
+  `convertLexicalToHTML` on a shared corpus.
 
 ## [0.7.0] - 2026-08-11
 

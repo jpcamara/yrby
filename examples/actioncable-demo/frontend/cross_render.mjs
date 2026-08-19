@@ -8,6 +8,8 @@
 // Lexical side, per corpus document:
 //   - @lexical/html's $generateHtmlFromNodes on a headless editor
 //     (compared DOM-normalized against Y::Lexical)
+//   - Payload CMS's convertLexicalToHTML over the same editor's
+//     serialized state (compared DOM-normalized against Y::Lexical)
 //
 // Byte parity is the gem's contract with the editor it pins. The
 // independent sources legitimately differ in spots (escaping style,
@@ -99,6 +101,45 @@ function stripLexicalIdioms(html) {
   }
   for (const span of [...root.querySelectorAll("span")]) {
     if (span.attributes.length === 0) span.replaceWith(...span.childNodes)
+  }
+  return root.innerHTML
+}
+
+// Payload's convertLexicalToHTML spells the same structure with its own
+// conventions, each verified by hand against the live export above:
+//   - strike/underline render as styled <span>s instead of <s>/<u>
+//   - bold+italic nests as <em><strong> where Lexical's export lands on
+//     <i><strong> (same order, different italic spelling)
+//   - lists carry its list-bullet/list-number classes, and every <li>
+//     writes class/style attributes even when they are empty
+// Translate those spellings and strip that chrome before comparing, so
+// anything else still fails.
+function translatePayloadIdioms(html) {
+  const frag = JSDOM.fragment(`<div id="__root">${html}</div>`)
+  const root = frag.firstChild
+  const respell = (el, tag) => {
+    const repl = el.ownerDocument.createElement(tag)
+    repl.append(...el.childNodes)
+    el.replaceWith(repl)
+  }
+  for (const span of [...root.querySelectorAll("span")]) {
+    if (span.attributes.length !== 1) continue
+    const style = span.getAttribute("style")
+    if (style === "text-decoration: line-through;") respell(span, "s")
+    else if (style === "text-decoration: underline;") respell(span, "u")
+  }
+  for (const em of [...root.querySelectorAll("em")]) {
+    if (em.attributes.length === 0 && em.childNodes.length === 1 && em.firstChild.tagName === "STRONG") {
+      respell(em, "i")
+    }
+  }
+  for (const list of [...root.querySelectorAll("ul, ol")]) {
+    const cls = list.getAttribute("class")
+    if (cls === "list-bullet" || cls === "list-number") list.removeAttribute("class")
+  }
+  for (const li of [...root.querySelectorAll("li")]) {
+    if (li.getAttribute("class") === "") li.removeAttribute("class")
+    if (li.getAttribute("style") === "") li.removeAttribute("style")
   }
   return root.innerHTML
 }
@@ -283,6 +324,7 @@ for (const [name, html] of Object.entries(PM_CORPUS)) {
 
 const { createHeadlessEditor } = await import("@lexical/headless")
 const { $generateHtmlFromNodes } = await import("@lexical/html")
+const { convertLexicalToHTML } = await import("@payloadcms/richtext-lexical/html")
 const lexical = await import("lexical")
 const { HeadingNode, QuoteNode, $createHeadingNode, $createQuoteNode } = await import("@lexical/rich-text")
 const { ListNode, ListItemNode, $createListNode, $createListItemNode } = await import("@lexical/list")
@@ -294,6 +336,32 @@ const {
   $getRoot, $createParagraphNode, $createTextNode, $createLineBreakNode,
   HORIZONTAL_RULE_TAG: _unused,
 } = lexical
+
+// Payload's editor serializes links in its own dialect: the URL lives under
+// `fields` ({ url, newTab, linkType }) instead of stock Lexical's top-level
+// `url`/`target`. Re-shape link nodes into that dialect so Payload's own
+// LinkHTMLConverter does the rendering; every other node passes through as-is.
+function toPayloadState(state) {
+  const mapNode = (node) => {
+    const mapped = node.children ? { ...node, children: node.children.map(mapNode) } : { ...node }
+    if (mapped.type === "link" || mapped.type === "autolink") {
+      mapped.fields = { linkType: "custom", newTab: node.target === "_blank", url: node.url }
+    }
+    return mapped
+  }
+  return { root: mapNode(state.root) }
+}
+
+// Payload's default converter set has no Lexical code-block node (code in
+// Payload is a Blocks feature), so extend it through its converters API
+// rather than skipping the case: the wrapper mirrors Lexical's own
+// <pre data-language> export, and the contents still render through
+// Payload's text and linebreak converters (escaping included).
+const payloadConverters = ({ defaultConverters }) => ({
+  ...defaultConverters,
+  code: ({ node, nodesToHTML }) =>
+    `<pre data-language="${node.language}">${nodesToHTML({ nodes: node.children }).join("")}</pre>`,
+})
 
 const LEXICAL_CORPUS = {
   "headings and paragraphs": () => {
@@ -351,7 +419,7 @@ const LEXICAL_CORPUS = {
   },
 }
 
-console.log("\n=== Lexical: Y::Lexical vs @lexical/html ===")
+console.log("\n=== Lexical: Y::Lexical vs @lexical/html and Payload ===")
 
 const lexicalNodes = [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, CodeNode]
 for (const [name, build] of Object.entries(LEXICAL_CORPUS)) {
@@ -382,6 +450,13 @@ for (const [name, build] of Object.entries(LEXICAL_CORPUS)) {
     reference = $generateHtmlFromNodes(editor)
   })
   compareNormalized(`${name}: vs $generateHtmlFromNodes (idioms stripped)`, ours, stripLexicalIdioms(reference))
+
+  const payloadHtml = convertLexicalToHTML({
+    converters: payloadConverters,
+    data: toPayloadState(editor.getEditorState().toJSON()),
+    disableContainer: true,
+  })
+  compareNormalized(`${name}: vs Payload convertLexicalToHTML (idioms translated)`, ours, translatePayloadIdioms(payloadHtml))
 
   removeListener()
   binding.root.getSharedType().unobserveDeep(observer)
