@@ -1,0 +1,6 @@
+# Peer auto-install is off: every package this frontend actually imports is a
+# direct dependency. @payloadcms/richtext-lexical (cross_render.mjs) would
+# otherwise drag in its admin-UI peer tree — payload is the one peer its
+# HTML converter path needs at runtime, and it is listed explicitly.
+[install]
+peer = false

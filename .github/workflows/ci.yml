@@ -154,6 +154,13 @@ jobs:
         working-directory: examples/actioncable-demo
         run: node frontend/render_e2e.mjs
 
+      # The renderers against independent sources: a live Tiptap editor,
+      # @tiptap/html's static generateHTML, tiptap-php (docker), and
+      # Lexical's $generateHtmlFromNodes, over a shared corpus.
+      - name: E2e — cross-renderer verification
+        working-directory: examples/actioncable-demo
+        run: node frontend/cross_render.mjs
+
       # Run the durability/concurrency suite against a Postgres-backed durable
       # store under a multi-process Puma cluster (WORKERS=2 + Redis) — a
       # realistic deployment where workers share documents only through the cable

@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "prosemirror-yjs-html"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "yjs-html-core",

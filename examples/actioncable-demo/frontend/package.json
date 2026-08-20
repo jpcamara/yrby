@@ -36,6 +36,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@lexical/code": "^0.44",
+    "@lexical/headless": "^0.44",
+    "@lexical/html": "^0.44",
+    "@lexical/link": "^0.44",
+    "@lexical/list": "^0.44",
+    "@lexical/rich-text": "^0.44",
+    "@lexical/table": "^0.44",
+    "@lexical/text": "^0.44",
+    "@payloadcms/richtext-lexical": "^3.88.0",
     "@tiptap/extension-color": "^2.11.0",
     "@tiptap/extension-highlight": "^2.11.0",
     "@tiptap/extension-image": "^2.11.0",
@@ -51,9 +60,13 @@
     "@tiptap/extension-task-list": "^2.11.0",
     "@tiptap/extension-text-style": "^2.11.0",
     "@tiptap/extension-underline": "^2.11.0",
+    "@tiptap/html": "^2.11",
+    "@tiptap/suggestion": "^2.27.2",
+    "@tiptap/y-tiptap": "^3.0.6",
     "agent-browser": "^0.28.0",
     "eslint": "^10.5.0",
     "globals": "^17.6.0",
-    "jsdom": "^25.0.0"
+    "jsdom": "^25.0.0",
+    "payload": "^3.88.0"
   }
 }
