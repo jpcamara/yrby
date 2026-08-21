@@ -244,11 +244,11 @@ module Y
 
     # The node types to_html degrades: present in the document, handled by
     # neither the built-in schema nor a registered rule. An unknown
-    # container renders its children without its own markup; an unknown
-    # decorator renders nothing, so content living only in its attributes
-    # drops out of the HTML. Empty when every type is handled — or when the
-    # root is missing or not Lexical-shaped, where to_html returns nil and
-    # nothing degrades.
+    # container or inline wrapper renders its children without its own
+    # markup (text is never dropped); an unknown decorator renders nothing,
+    # so content living only in its attributes drops out of the HTML. Empty
+    # when every type is handled — or when the root is missing or not
+    # Lexical-shaped, where to_html returns nil and nothing degrades.
     def unknown_types(root = nil)
       types = node_types(root)
       types ? types.filter_map { |type, info| type if info["handled"].nil? } : []

@@ -20,6 +20,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The Lexical renderers keep the text of an unknown inline wrapper (a
+  mark-style node with no rule): it renders unwrapped, the way unknown
+  containers degrade. It previously rendered as nothing, text included.
 - `Y::Lexxy`'s list-item rule escapes the stored `__checked` and
   `__value` attributes it interpolates. Stored attributes are collaborator
   input, and a crafted value could break out of the attribute position.

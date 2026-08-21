@@ -153,11 +153,12 @@ for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default()
 ```
 
 Types where `is_builtin` is false need a rule. Without one, the render
-degrades instead of erroring: an unknown container renders its children
-with no wrapping markup, and an unknown decorator renders nothing —
-content that lives only in the decorator's attributes drops out of the
-HTML silently. Render a real document through `collect_node_types` to
-find the types that still need rules.
+degrades instead of erroring, and never drops text: an unknown container
+or inline wrapper (a mark-style node) renders its children with no
+wrapping markup, and an unknown decorator renders nothing — content that
+lives only in the decorator's attributes drops out of the HTML silently.
+Render a real document through `collect_node_types` to find the types
+that still need rules.
 
 ## License
 
