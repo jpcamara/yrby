@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `unknown_types` on `Y::Lexical` and `Y::ProseMirror` (inherited by
+  `Y::Lexxy` and `Y::Tiptap`): the node types a document contains that
+  neither the built-in schema nor a registered rule handles — the ones
+  `to_html` quietly degrades (an unknown container renders its children
+  without its own markup; a node whose content lives only in its
+  attributes renders nothing). The checklist companion to `node_types`:
+  render a real document from your editor and assert it comes back empty.
+- The renderer crates export `escape_text` / `escape_attr` for splice
+  callers (`lexical-yjs-html` 0.1.2, `prosemirror-yjs-html` 0.1.3).
+
+### Fixed
+
+- The Lexical renderers keep the text of an unknown inline wrapper (a
+  mark-style node with no rule): it renders unwrapped, the way unknown
+  containers degrade. It previously rendered as nothing, text included.
+- `Y::Lexxy`'s list-item rule escapes the stored `__checked` and
+  `__value` attributes it interpolates. Stored attributes are collaborator
+  input, and a crafted value could break out of the attribute position.
+  Legitimate editor values (booleans, integers) render byte-identically.
+- The renderer crate READMEs' callback examples escape the values they
+  interpolate, and both READMEs state how unknown node types degrade.
+
 ## [0.7.1] - 2026-08-19
 
 ### Fixed

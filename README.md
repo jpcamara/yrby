@@ -363,6 +363,15 @@ Y::Tiptap.new(doc).node_types
 names your templates and blocks will read; `children` plus `text` is how you
 pick `contains:` (child block types → `:blocks`; text → `:inline`).
 
+`unknown_types` is the same question as a checklist: just the type names
+whose `handled` is nil. Anything it lists degrades in `to_html` rather than
+erroring — an unknown container or inline wrapper renders its children
+without its own markup (text is never dropped), and a node whose content
+lives only in its attributes renders nothing. A custom editor node with no
+rule doesn't break the render; its markup quietly goes missing from the
+HTML. So when you add editor nodes, add a test: render a real document and
+assert `unknown_types` is empty.
+
 When markup-as-data isn't enough, give the node a block:
 
 ```ruby

@@ -125,7 +125,7 @@ after it returns:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use prosemirror_yjs_html::{render_segments, Rules, Segment};
+use prosemirror_yjs_html::{escape_attr, escape_text, render_segments, Rules, Segment};
 
 fn splice(segments: Vec<Segment>) -> String {
     segments
@@ -139,9 +139,13 @@ fn splice(segments: Vec<Segment>) -> String {
                         let attrs: serde_json::Value =
                             serde_json::from_str(&attrs_json).unwrap();
                         let id = attrs["id"].as_str().unwrap_or("unknown");
-                        // Look the user up, build trusted markup, escape
-                        // anything you interpolate.
-                        format!(r#"<a class="mention" href="/users/{id}">@{id}</a>"#)
+                        // Attribute values are document data, written by
+                        // collaborators: escape everything you interpolate.
+                        format!(
+                            r#"<a class="mention" href="/users/{}">@{}</a>"#,
+                            escape_attr(id),
+                            escape_text(id)
+                        )
                     }
                     _ => children,
                 }
@@ -184,8 +188,12 @@ for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default()
 }
 ```
 
-Types where `is_builtin` is false need a rule. Without one, an unknown
-node still renders its text and nested blocks as plain markup.
+Types where `is_builtin` is false need a rule. Without one, the render
+degrades instead of erroring: an unknown node renders its text and child
+blocks without the node's own markup, a node whose content lives only in
+its attributes renders nothing, and an unknown mark is ignored — its text
+renders unformatted. Render a real document through `collect_node_types`
+to find the types that still need rules.
 
 ## License
 

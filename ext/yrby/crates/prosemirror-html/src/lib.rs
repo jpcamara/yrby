@@ -876,14 +876,18 @@ fn num_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<i64> {
 }
 
 /// Text-content escaping, matching the browser serializer: `&`, `<`, `>`.
-fn escape_text(s: &str) -> String {
+/// Public for splice callers: values read from a deferred segment's
+/// attributes came from the document — from collaborators — so escape
+/// anything you interpolate into markup.
+pub fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
-/// Attribute-value escaping: text escaping plus `"`.
-fn escape_attr(s: &str) -> String {
+/// Attribute-value escaping: text escaping plus `"`. Public for splice
+/// callers, for document values interpolated into attribute positions.
+pub fn escape_attr(s: &str) -> String {
     escape_text(s).replace('"', "&quot;")
 }
 

@@ -684,8 +684,15 @@ fn render_inline<T: ReadTxn>(
                         None => render_link(txn, &child, depth, em, rules),
                     }
                 } else if ruled_inline && !is_builtin(&ty) {
-                    if let Some(rule) = rules.nodes.get(ty.as_str()) {
-                        render_rule_inline(txn, &child, &ty, rule, depth, em, rules);
+                    match rules.nodes.get(ty.as_str()) {
+                        Some(rule) => render_rule_inline(txn, &child, &ty, rule, depth, em, rules),
+                        // An unknown inline wrapper (a mark-style node) with
+                        // no rule renders its text unwrapped, the way unknown
+                        // blocks degrade. User text is never dropped.
+                        None if depth < MAX_INLINE_DEPTH => {
+                            render_inline(txn, &child, depth + 1, ruled_inline, em, rules);
+                        }
+                        None => {}
                     }
                 }
                 // Nested blocks are rendered by their parent block's renderer.
@@ -943,15 +950,19 @@ fn elem_type<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> String {
 }
 
 /// Text-content escaping, matching what the browser's serializer emits:
-/// `&`, `<`, `>` escaped; quotes left alone in text.
-fn escape_text(s: &str) -> String {
+/// `&`, `<`, `>` escaped; quotes left alone in text. Public for splice
+/// callers: values read from a deferred segment's attributes came from the
+/// document — from collaborators — so escape anything you interpolate into
+/// markup.
+pub fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
-/// Attribute-value escaping: text escaping plus `"`.
-fn escape_attr(s: &str) -> String {
+/// Attribute-value escaping: text escaping plus `"`. Public for splice
+/// callers, for document values interpolated into attribute positions.
+pub fn escape_attr(s: &str) -> String {
     escape_text(s).replace('"', "&quot;")
 }
 
@@ -1125,6 +1136,28 @@ mod tests {
         let html = render(&txn, &frag).unwrap();
         assert_eq!(html, expected.trim_end());
         assert!(html.contains("<p>Before gallery</p>"));
+    }
+
+    /// An unknown inline wrapper never drops its text. The fixture is a
+    /// real capture: two collaborating editors typed "Collab #ruby rocks
+    /// and #peer too", the word "rocks" wrapped in @lexical/mark's
+    /// MarkNode and the hashtags as @lexical/hashtag TextNode runs. With
+    /// no rules, the mark's wrapper is lost but "rocks" survives, and
+    /// hashtags render as their text.
+    #[test]
+    fn unknown_inline_wrappers_keep_their_text() {
+        let bytes = include_bytes!("fixtures/mark_hashtag.bin");
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(bytes).unwrap())
+            .unwrap();
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let html = render(&txn, &frag).unwrap();
+
+        assert!(html.contains("rocks"), "marked text survives without a rule: {html}");
+        assert!(!html.contains("<mark"), "no wrapper is invented for it: {html}");
+        assert!(html.contains("#ruby"), "hashtag text survives: {html}");
     }
 
     #[test]
