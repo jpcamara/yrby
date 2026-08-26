@@ -1,0 +1,54 @@
+<% content_for :head do %>
+<style>
+ .demo{margin:1.5rem}
+ #ticket-form{max-width:460px}
+ collaborative-field{margin-bottom:1.1rem}
+ collaborative-field label{display:block;font-size:12px;color:#555;margin-bottom:.2rem}
+ collaborative-field :is(input[type=text],input[type=number],input[type=date],select,textarea){width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font:14px system-ui}
+ collaborative-field textarea{height:5rem;resize:vertical}
+ body:has(collaborative-form[status=synced]) #status::after{content:"synced"}
+ body:not(:has(collaborative-form[status=synced])) #status::after{content:"connecting…"}
+</style>
+<% end %>
+<div class="demo">
+  <header>
+    <h1>Collaborative form fields (yrby-forms)</h1>
+    <p>
+      A plain Rails form over one shared document per record. Selects,
+      checkboxes, numbers, and dates are last-writer-wins map entries;
+      the text fields are <code>Y.Text</code> shares that merge concurrent
+      typing. The channel writes the values back to the ticket's columns
+      after every change (<a href="<%= ticket_state_path(@ticket) %>">materialized state</a>).
+    </p>
+    <p id="status" class="status"></p>
+  </header>
+  <%= form_with(model: @ticket, url: "#", id: "ticket-form") do |form| %>
+    <%= form.collaborative_fields do %>
+      <%= form.collaborative_field :status do %>
+        <label>Status</label>
+        <%= form.select :status, Ticket.statuses.keys %>
+      <% end %>
+      <%= form.collaborative_field :priority do %>
+        <label>Priority</label>
+        <%= form.number_field :priority %>
+      <% end %>
+      <%= form.collaborative_field :urgent do %>
+        <label>Urgent</label>
+        <%= form.check_box :urgent %>
+      <% end %>
+      <%= form.collaborative_field :due_on do %>
+        <label>Due on</label>
+        <%= form.date_field :due_on %>
+      <% end %>
+      <%= form.collaborative_field :summary do %>
+        <label>Summary</label>
+        <%= form.text_field :summary %>
+      <% end %>
+      <%= form.collaborative_field :description do %>
+        <label>Description</label>
+        <%= form.text_area :description %>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>
+<script src="/form_fields.js" defer></script>

@@ -97,6 +97,8 @@ const ENTRIES = [
   { entry: "src/whiteboard.js", name: "whiteboard.js" }, // Y.Map of shapes
   { entry: "src/kanban.js", name: "kanban.js" },         // Y.Array of card Y.Maps
   { entry: "src/forms.js", name: "forms.js" },           // Y.Map of fields
+  // yrby-forms: the packaged elements over a real Rails form (tickets page).
+  { entry: "src/form_fields.js", name: "form_fields.js" },
 ]
 
 async function buildEntry({ entry, name, plugins }) {

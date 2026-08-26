@@ -17,9 +17,10 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
 
-  # The Rails files ship in yrby-rails -- exclude them here so the core gem
-  # can't shadow that gem on the load path. Cargo.lock IS shipped so source
-  # builds compile the exact crate graph CI tested.
+  # The Rails files ship in yrby-rails and the forms files in yrby-forms --
+  # exclude them here so the core gem can't shadow those gems on the load
+  # path. Cargo.lock IS shipped so source builds compile the exact crate
+  # graph CI tested.
   spec.files = Dir[
     "lib/**/*.rb",
     "ext/**/*.{rb,rs,toml}",
@@ -29,7 +30,9 @@ Gem::Specification.new do |spec|
     "README.md",
     "CHANGELOG.md"
   ] - Dir["lib/yrby-rails.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*",
-          "lib/yrby/**/*", "app/**/*"]
+          "lib/yrby/**/*", "app/**/*",
+          "lib/yrby-forms.rb", "lib/y/forms.rb", "lib/y/forms/**/*",
+          "lib/generators/yrby_forms/**/*"]
 
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/yrby/extconf.rb"]

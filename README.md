@@ -67,6 +67,7 @@ npm install yrby-client
 - [Install](#install)
 - [Docs](#docs)
 - [Editors](#editors)
+- [Forms](#forms)
 - [Usage](#usage)
   - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
   - [Reading document contents](#reading-document-contents)
@@ -186,6 +187,15 @@ on a `Y.Map`, a kanban board on a `Y.Array`, a co-filled form) over the
 same channel. The demo README's "Using this in your own app" section has
 the integration recipe, and its `NoteMaterializer` shows how to render a
 document to ActionText server-side with `Y::Tiptap` or `Y::Lexxy`.
+
+## Forms
+
+Plain form fields collaborate too: the `yrby-forms` gem + npm package pair
+adds `has_collaborative_fields` to a model, form helpers, and two custom
+elements, with one shared document per record — selects and checkboxes
+converge last-write-wins, text fields merge concurrent typing, and the
+server writes the values back to the columns. See
+[README-forms.md](README-forms.md).
 
 ## Usage
 
