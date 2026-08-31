@@ -61,9 +61,26 @@ async function converge(label, read, ok, ms = 30000) {
   return undefined
 }
 
+// A click lands on a viewport point, and these pages carry a header, a room bar,
+// and an explanation above the thing being clicked — so on a short window the
+// target is below the fold and the click misses silently (the keystrokes then go
+// to the body). Scroll first, always.
+const clickAt = async (session, selector) => {
+  await ab(session, "scrollintoview", selector)
+  return ab(session, "click", selector)
+}
+
+// Fixed, and deliberately short. A CI runner's default window is smaller than a
+// laptop's, and that difference is exactly what decides whether a click lands —
+// so pin it rather than inherit it.
+const VIEWPORT = ["1280", "720"]
+
 const synced = (s) => js(s, `!!(window.__yrby && window.__yrby.provider.synced)`)
 const openBoth = async (path) => {
-  for (const s of SESSIONS) await ab(s, "open", `${BASE}${path}`)
+  for (const s of SESSIONS) {
+    await ab(s, "open", `${BASE}${path}`)
+    await ab(s, "viewport", ...VIEWPORT)
+  }
   for (const s of SESSIONS) await waitFor(`${s} synced on ${path}`, async () => (await synced(s)) === true)
 }
 
@@ -74,14 +91,8 @@ const prose = (s) => js(s, `JSON.stringify(window.__yrby.editor ? window.__yrby.
 await waitFor("both editors mounted", async () =>
   (await Promise.all(SESSIONS.map(prose))).every((v) => v !== undefined && v !== "null"))
 
-// The editor sits below the fold under this page's header, and a click lands on
-// a viewport point — so scroll it in first or the click misses and the keystrokes
-// go to the body. `press` is a top-level agent-browser command and cannot be
-// chained.
-const focusEditor = async (s) => {
-  await ab(s, "scrollintoview", ".ProseMirror")
-  await ab(s, "click", ".ProseMirror")
-}
+// `press` is a top-level agent-browser command and cannot be chained.
+const focusEditor = (s) => clickAt(s, ".ProseMirror")
 
 await focusEditor(A)
 await ab(A, "keyboard", "type", "hello from A")
@@ -99,9 +110,20 @@ const chips = (s) => js(s, `JSON.stringify([...document.querySelectorAll("#prese
 await waitFor("presence lists two people", async () => JSON.parse((await chips(B)) || "[]").length === 2)
 check("B sees two people in the room", JSON.parse(await chips(B)).length === 2)
 
+// ...and it got there as an AnyCable whisper, relayed between clients by the
+// embedded Go server. Awareness frames never become an RPC call, so cursor
+// traffic costs Ruby nothing. Document updates still go through `send`, because
+// they have to be recorded and acked.
+const transport = (s) => js(s, `JSON.stringify(window.__yrbyTransport)`)
+const counts = JSON.parse(await transport(A))
+check("the subscription offers whisper (AnyCable, not plain Action Cable)", counts.canWhisper === true)
+check(`presence went out as whispers, not sends (${counts.whispers} whispers)`, counts.whispers > 0)
+check(`document updates still went through send (${counts.sends} sends)`, counts.sends > 0)
+
 // --- 2) The room is the boundary ---------------------------------------------
 // A second room on the same demo is a different document, on the same process.
 await ab(B, "open", `${BASE}/demos/tiptap/${ROOM}-other`)
+await ab(B, "viewport", ...VIEWPORT)
 await waitFor("B synced in the other room", async () => (await synced(B)) === true)
 await waitFor("B's editor mounted in the other room", async () => (await prose(B)) !== "null")
 check("a different room is a different document", !((await prose(B)) || "").includes("hello from A"))
@@ -123,7 +145,7 @@ check("both browsers hold the same seeded rows",
 // A blank row to type into: clicking an input drops the caret wherever the click
 // lands, so the typed cases use cells that start empty.
 const seeded = JSON.parse(await rowIds(A)).length
-await ab(A, "click", "#add-row")
+await clickAt(A, "#add-row")
 check("the added row reaches both browsers",
   !!(await converge("row add", rowIds, (v) => JSON.parse(v).length === seeded + 1)))
 const ROW = seeded
@@ -131,11 +153,11 @@ const ROW = seeded
 // A types a value while B bolds the same cell. Different keys of the cell's
 // Y.Map, so both survive — a scalar cell would have lost one. `press` is a
 // top-level agent-browser command and cannot be chained.
-await ab(A, "click", await cellInput(A, ROW, "item"))
+await clickAt(A, await cellInput(A, ROW, "item"))
 await ab(A, "keyboard", "type", "VALUE-A")
 await ab(A, "press", "Enter")
-await ab(B, "click", await cellInput(B, ROW, "item"))
-await ab(B, "click", "#toolbar #bold")
+await clickAt(B, await cellInput(B, ROW, "item"))
+await clickAt(B, "#toolbar #bold")
 check("A's value and B's bold both survive, on both browsers",
   !!(await converge("value + bold", (s) => cell(s, ROW, "item"),
     (v) => JSON.parse(v)[0] === "VALUE-A" && JSON.parse(v)[1] === "700")))
@@ -147,7 +169,7 @@ const cardText = (s) => js(s, `JSON.stringify(window.__yrby.cards.toArray().map(
 check("both boards hold the seeded cards",
   !!(await converge("seeded cards", cardText, (v) => JSON.parse(v).length === 3)))
 
-await ab(A, "click", '.col input[aria-label="add to To Do"]')
+await clickAt(A, '.col input[aria-label="add to To Do"]')
 await ab(A, "keyboard", "type", "card from A")
 await ab(A, "press", "Enter")
 check("a card added in one window reaches the other",

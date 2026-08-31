@@ -31,6 +31,15 @@ plus RPC server (`frontend/anycable_probe.mjs`, `anycable_concurrent.mjs`):
 liveness, the yrby client provider, cross-process reads, and concurrent
 convergence.
 
+This site runs on it too, in the smallest arrangement AnyCable has:
+[anycable-thruster](https://github.com/anycable/thruster) embeds anycable-go in
+the Thruster proxy, so `thrust bin/rails server` is the whole deployment. The Go
+server owns `/cable` and calls Rails back over HTTP RPC at a path AnyCable
+mounts in the app; Rails hands broadcasts back over localhost. No Redis and no
+separate RPC process, because there is one node. The
+[site README](https://github.com/jpcamara/yrby/blob/main/site/README.md) has the
+configuration.
+
 Two things differ from Action Cable, and both come from AnyCable's execution
 model rather than from yrby.
 
@@ -84,6 +93,21 @@ recorded and acked by the server, and only presence takes the short path.
 On plain Action Cable there is no whisper mechanism and both travel the same
 way. Nothing in your channel changes; the concern checks whether the transport
 offers it.
+
+The browser half has to opt in too, by using an AnyCable consumer.
+`yrby-client`'s provider whispers awareness when `subscription.whisper` exists,
+which `@anycable/web` provides and `@rails/actioncable` does not. The two are
+otherwise interchangeable — the provider takes either — so this is a one-import
+change:
+
+```js
+import { createConsumer } from "@anycable/web"
+```
+
+What it buys is that cursor and selection traffic, the part that scales with
+pointer movement, is relayed between clients by the Go server and never becomes
+an RPC call. Document updates still go through the server, because they have to
+be recorded and acked.
 
 ## Threads and the GVL
 

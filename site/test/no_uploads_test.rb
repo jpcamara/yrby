@@ -20,10 +20,11 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
   end
 
   test "every HTTP route is a GET" do
-    # The one exception is the Action Cable mount, which matches any verb; the
-    # WebSocket is the only write path this app has, and it is throttled in
-    # DocumentChannel.
-    routes = Rails.application.routes.routes.reject { |route| route.path.spec.to_s == "/cable" }
+    # The one exception is AnyCable's RPC endpoint, which matches any verb. It
+    # is not a public write surface: it is called by the embedded anycable-go
+    # over localhost, authenticated with the AnyCable secret, and everything it
+    # can reach is throttled in DocumentChannel.
+    routes = Rails.application.routes.routes.reject { |route| route.path.spec.to_s == "/_anycable" }
 
     assert_equal ["GET"], routes.map(&:verb).uniq, "a write endpoint appeared; this site only reads over HTTP"
   end

@@ -17,7 +17,7 @@ it — you already have them if you have an editor binding.
 
 ```js
 import * as Y from "yjs"
-import { createConsumer } from "@rails/actioncable"
+import { createConsumer } from "@rails/actioncable" // or "@anycable/web"
 import { ActionCableProvider } from "yrby-client"
 
 const ydoc = new Y.Doc()
@@ -33,7 +33,10 @@ provider.connect()
 The constructor takes the document, the consumer, the channel name, and the
 channel params. The consumer type is deliberately loose, so the consumers from
 both `@rails/actioncable` and `@anycable/web` are directly assignable with no
-adapter and no casts.
+adapter and no casts. On AnyCable the client's subscription exposes `whisper`,
+and the provider uses it for awareness — cursor traffic is then relayed between
+clients by the AnyCable server and never reaches your Ruby code. This site does
+that; see [Presence](/docs/presence).
 
 ## Bind after the first sync
 

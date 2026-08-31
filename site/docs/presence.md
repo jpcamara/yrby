@@ -75,3 +75,14 @@ Under AnyCable the channel also subscribes an awareness stream with
 `whisper: true`, which scopes the client-to-client path to ephemeral presence
 rather than the durable document stream. Document updates always go through the
 server, are recorded, and are acked. Awareness never is.
+
+The browser has to opt in by using an AnyCable consumer, because the provider
+whispers only when the subscription offers `whisper`:
+
+```js
+import { createConsumer } from "@anycable/web"
+```
+
+That is the difference between presence costing your Ruby process one call per
+pointer move and costing it nothing. This site runs that way, and its end-to-end
+test counts whispers and sends separately to prove it.

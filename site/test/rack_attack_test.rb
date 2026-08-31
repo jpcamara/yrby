@@ -20,29 +20,15 @@ class RackAttackTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Too many requests"
   end
 
-  test "the cable handshake has its own, stricter throttle" do
-    Limits::CABLE_HANDSHAKES.times do
-      get "/cable"
-
-      assert_response :not_found # not an upgrade request; the throttle is what matters
-    end
-
-    get "/cable"
-
-    assert_response :too_many_requests
-    assert_equal Limits::CABLE_PERIOD.to_s, response.headers["retry-after"]
-  end
-
-  test "cable and page throttles are counted separately" do
-    Limits::CABLE_HANDSHAKES.times { get "/cable" }
-
-    get "/cable"
-
-    assert_response :too_many_requests
+  test "the AnyCable RPC endpoint is not throttled" do
+    # Every WebSocket command arrives here from the embedded Go server, so this
+    # path carries the cable's whole message volume. Throttling it by IP would
+    # throttle the site itself.
+    (Limits::PAGE_REQUESTS + 5).times { post "/_anycable/connect" }
 
     get "/docs/getting-started"
 
-    assert_response :success, "a cable flood must not lock a reader out of the docs"
+    assert_response :success
   end
 
   test "static files and the health check are not counted" do

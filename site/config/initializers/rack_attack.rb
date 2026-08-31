@@ -1,32 +1,33 @@
-# Layer 1 of the throttle stack: per-IP HTTP rate limits. See app/lib/limits.rb
+# Layer 1 of the throttle stack: per-IP HTTP rate limits. See config/limits.rb
 # for every number and why it is what it is.
 #
+# This only covers pages. WebSocket traffic never reaches Rack: anycable-go,
+# embedded in the thrust proxy, terminates /cable itself and calls back in over
+# HTTP RPC. So the cable's own limits live where the cable does — in
+# ApplicationCable::Connection (sockets per IP) and DocumentChannel (frames per
+# second), both of which run in Ruby on every RPC call.
+#
 # Rack::Attack's counters live in this process's memory cache, which is correct
-# here for the same reason the document store is: the site is one process. In
-# front of several processes these counters would have to move to a shared cache
-# (and, honestly, to the CDN).
+# here for the same reason the document store is: one worker, always.
 class Rack::Attack
   cache.store = ActiveSupport::Cache::MemoryStore.new(size: 8.megabytes)
 
-  # Static files are served straight off disk by the app, and a docs page pulls
-  # several. Counting them would throttle a single page load.
+  # Static files are served straight off disk, and a docs page pulls several.
+  # Counting them would throttle a single page load.
   ASSET = %r{\A/(assets|[^/]+\.(js|css|map|png|svg|ico|txt))}
 
-  # The health check is polled by the platform, not by visitors.
+  # The AnyCable RPC endpoint. Every WebSocket command arrives here from the
+  # embedded Go server over localhost, so this path carries the cable's whole
+  # message volume — throttling it by IP would throttle the site itself. It is
+  # authenticated by the AnyCable secret and is not reachable from outside the
+  # machine in a real deployment.
+  RPC_PATH = "/_anycable".freeze
+
   safelist("health check") { |req| req.path == "/up" }
   safelist("static files") { |req| ASSET.match?(req.path) }
+  safelist("anycable rpc") { |req| req.path.start_with?(RPC_PATH) }
 
-  # Page requests. Everything that isn't the cable handshake.
-  throttle("pages/ip", limit: Limits::PAGE_REQUESTS, period: Limits::PAGE_PERIOD) do |req|
-    req.ip unless req.path.start_with?("/cable")
-  end
-
-  # The cable handshake is the expensive one: it upgrades to a WebSocket and
-  # holds a connection. Stricter, and counted separately so a burst of reconnects
-  # can't also lock the reader out of the docs.
-  throttle("cable/ip", limit: Limits::CABLE_HANDSHAKES, period: Limits::CABLE_PERIOD) do |req|
-    req.ip if req.path.start_with?("/cable")
-  end
+  throttle("pages/ip", limit: Limits::PAGE_REQUESTS, period: Limits::PAGE_PERIOD, &:ip)
 
   self.throttled_responder = lambda do |request|
     match = request.env["rack.attack.match_data"] || {}

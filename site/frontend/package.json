@@ -8,10 +8,10 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@anycable/web": "^1.1.1",
     "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.26.0",
-    "@rails/actioncable": "^8.0.0",
     "@tanstack/table-core": "^9.2.4",
     "@tiptap/core": "^2.11.0",
     "@tiptap/extension-collaboration": "^2.11.0",

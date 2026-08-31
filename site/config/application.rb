@@ -31,23 +31,22 @@ module Site
     # own assets. There is no separate web server in front inside the machine.
     config.public_file_server.enabled = true
 
-    # Action Cable's worker pool runs channel callbacks. Every callback here is
-    # CPU-bound CRDT work that releases the GVL, so a small pool keeps the
-    # parallelism without letting a flood queue unbounded work.
-    config.action_cable.worker_pool_size = 4
+    # Action Cable does not serve the WebSocket here; the anycable-go embedded in
+    # thrust does, and calls back over the HTTP RPC endpoint AnyCable mounts at
+    # /_anycable. Unmounting Rails' own /cable makes that explicit: hitting Puma
+    # directly can't reach a cable that has no server behind it.
+    config.action_cable.mount_path = nil
 
-    # Action Cable rejects a handshake whose Origin isn't allow-listed. Rooms
-    # are anonymous and hold no credentials, so origin is not a security
-    # boundary here; it only stops another site pointing its visitors' browsers
-    # at this cable. Set CABLE_ALLOWED_ORIGINS (comma separated) in a deploy to
-    # turn it on. Unset, the check is off, so the app boots and works on any
-    # hostname.
-    allowed_origins = ENV.fetch("CABLE_ALLOWED_ORIGINS", nil)
-    if allowed_origins
-      config.action_cable.allowed_request_origins = allowed_origins.split(",").map(&:strip)
-    else
-      config.action_cable.disable_request_forgery_protection = true
-    end
+    # What action_cable_meta_tag renders for the browser. thrust serves the
+    # pages and the cable on one port, so this is same-origin and relative;
+    # frontend/src/room.js resolves it to an absolute ws:// URL.
+    config.action_cable.url = ENV.fetch("CABLE_URL", "/cable")
+
+    # The origin check runs in anycable-go, not here (ANYCABLE_ALLOWED_ORIGINS).
+    # Rooms are anonymous and hold no credentials, so origin is not a security
+    # boundary; it only stops another site pointing its visitors' browsers at
+    # this cable. Left unset, any origin is accepted, so the app works on
+    # whatever hostname it is deployed to.
 
     config.generators.system_tests = nil
   end

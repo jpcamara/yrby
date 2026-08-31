@@ -49,6 +49,35 @@ ENV RAILS_ENV="production" \
     BUNDLE_PATH="/usr/local/bundle" \
     BUNDLE_WITHOUT="development:test"
 
+# thrust listens on HTTP_PORT and proxies to Puma on TARGET_PORT. The
+# anycable-go embedded in thrust answers /cable itself and never proxies it.
+ENV HTTP_PORT="3000" TARGET_PORT="3001"
+
+# One Puma worker, always: the document store is a Hash in that process's
+# memory. config/puma.rb refuses to boot with any other value.
+ENV WEB_CONCURRENCY="1"
+
+# The embedded Go server calls Rails at the mounted RPC path over localhost.
+ENV ANYCABLE_RPC_HOST="http://localhost:3001/_anycable"
+
+# No Redis: one node, so Rails posts broadcasts straight back to the Go server.
+# The broadcast endpoint gets its own port on purpose — with a secret
+# configured, anycable-go otherwise mounts /_broadcast on the main port, and
+# mounting it there displaces thrust's proxy routing.
+ENV ANYCABLE_BROADCAST_ADAPTER="http" ANYCABLE_HTTP_BROADCAST_PORT="8090"
+
+# Layer 0 of the throttle stack: an over-size frame is refused at the socket and
+# never becomes an RPC call. Same number as Limits::MAX_FRAME_BYTES.
+ENV ANYCABLE_MAX_MESSAGE_SIZE="131072"
+
+# Forward the client address so the per-IP connection cap sees the visitor
+# rather than whatever proxy sits in front.
+ENV ANYCABLE_HEADERS="cookie,x-forwarded-for"
+
+# ANYCABLE_SECRET and SECRET_KEY_BASE are supplied at runtime. The first
+# configures both halves of AnyCable: the HTTP RPC key and the broadcast key are
+# derived from it on the Ruby side and the Go side alike.
+
 COPY --from=gems /usr/local/bundle /usr/local/bundle
 COPY . .
 COPY --from=assets /build/public /rails/public
@@ -63,7 +92,6 @@ USER rails:rails
 
 EXPOSE 3000
 
-# Falcon, one worker. The document store is a Hash in this process's memory and
-# the cable adapter is `async`, so a second worker would serve different rooms
-# under the same URL. See README.md ("Why one process").
-CMD ["bundle", "exec", "falcon", "serve", "--bind", "http://0.0.0.0:3000", "--count", "1"]
+# The default Rails Dockerfile shape, with anycable-thruster in place of
+# thruster: one command runs the proxy, the embedded AnyCable server, and Puma.
+CMD ["bundle", "exec", "thrust", "./bin/rails", "server"]

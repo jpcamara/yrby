@@ -1,6 +1,14 @@
 // Shared page plumbing for every demo: the provider, the room bar, presence, and
 // the status line. The per-demo files hold only the Yjs binding.
-import { createConsumer } from "@rails/actioncable"
+//
+// The consumer comes from @anycable/web rather than @rails/actioncable because
+// the server is AnyCable: anycable-go, embedded in the thrust proxy, terminates
+// every socket. Its subscription exposes `whisper`, and yrby-client's provider
+// routes awareness through it when it is there — so cursor and presence traffic
+// is relayed client-to-client by Go and never reaches Ruby at all. Document
+// updates still go through the server, get recorded, and get acked. The two
+// consumers are otherwise interchangeable; the provider takes either.
+import { createConsumer } from "@anycable/web"
 import { ActionCableProvider } from "yrby-client"
 
 const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia", "Alan"]
@@ -30,7 +38,7 @@ function noticeAwareConsumer(consumer, { onNotice, onRejected }) {
   return {
     subscriptions: {
       create(channel, mixin) {
-        return consumer.subscriptions.create(channel, {
+        const subscription = consumer.subscriptions.create(channel, {
           ...mixin,
           received(message) {
             if (message && message.notice) {
@@ -44,9 +52,47 @@ function noticeAwareConsumer(consumer, { onNotice, onRejected }) {
             if (mixin.rejected) mixin.rejected.call(this)
           },
         })
+        return countTransport(subscription)
       },
     },
   }
+}
+
+// Which path each frame took, exposed for the browser console and the e2e.
+//
+// yrby-client whispers awareness frames when the subscription offers
+// `whisper` and sends everything else. A whisper is relayed by anycable-go
+// between clients and never becomes an RPC call, so `whispers` climbing while
+// carets move is the visible proof that presence traffic is not costing Ruby
+// anything. Document updates stay on `send`: they have to be recorded and
+// acked.
+function countTransport(subscription) {
+  const counts = { whispers: 0, sends: 0, canWhisper: typeof subscription.whisper === "function" }
+  window.__yrbyTransport = counts
+
+  const whisper = subscription.whisper?.bind(subscription)
+  if (whisper) {
+    subscription.whisper = (payload) => {
+      counts.whispers++
+      return whisper(payload)
+    }
+  }
+  const send = subscription.send.bind(subscription)
+  subscription.send = (payload) => {
+    counts.sends++
+    return send(payload)
+  }
+  return subscription
+}
+
+// action_cable_meta_tag renders a same-origin path ("/cable"); the AnyCable
+// client wants an absolute ws:// or wss:// URL, so resolve it here rather than
+// depending on either end's relative-URL handling.
+function cableUrl() {
+  const meta = document.querySelector("meta[name=action-cable-url]")
+  const path = meta?.getAttribute("content") || "/cable"
+  if (/^wss?:/.test(path)) return path
+  return new URL(path, location.href).href.replace(/^http/, "ws")
 }
 
 // Copy link / open a second window. The whole point of the site is seeing two
@@ -117,7 +163,7 @@ export function renderPresence(provider) {
 // rendered from the URL.
 export function connectRoom(ydoc, mount) {
   const documentKey = mount.dataset.documentKey
-  const consumer = noticeAwareConsumer(createConsumer(), {
+  const consumer = noticeAwareConsumer(createConsumer(cableUrl()), {
     onNotice: () =>
       showNotice(
         "This room has reached its document size cap and is no longer accepting edits. " +

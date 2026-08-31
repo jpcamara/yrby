@@ -6,9 +6,9 @@
 #
 # The alternative to fly.toml, not an addition to it. Pick one.
 #
-# ONE host and ONE container, on purpose. The document store is a Hash in
-# process memory and the cable adapter is `async`, so a second container would
-# serve different rooms behind the same URL.
+# ONE host and ONE container, on purpose. The document store is a Hash in the
+# Puma worker's memory, and there is exactly one worker, so a second container
+# would serve different rooms behind the same URL.
 
 service: yrby-site
 
@@ -25,9 +25,8 @@ proxy:
   healthcheck:
     path: /up
     interval: 10
-  # kamal-proxy buffers request bodies by default; a WebSocket is not a request
-  # body. This is the setting to check first if the cable connects and then
-  # dies at 30 seconds.
+  # kamal-proxy has to hold the WebSocket open. This is the setting to check
+  # first if the cable connects and then dies after 30 seconds.
   response_timeout: 300
 
 registry:
@@ -38,17 +37,22 @@ registry:
 builder:
   arch: amd64 # most VPS hosts; drop to arch: arm64 for an Ampere/Graviton box
 
+# Everything else the container needs is baked into the Dockerfile's ENV.
 env:
   clear:
     RAILS_ENV: production
-    PORT: 3000
-    # Locks the cable handshake to this host once the domain is settled.
-    # CABLE_ALLOWED_ORIGINS: https://yrby.example.com
+    # Locks the cable handshake to this host once the domain is settled. The
+    # check runs in the embedded Go server, not in Rails.
+    # ANYCABLE_ALLOWED_ORIGINS: yrby.example.com
   secret:
     - SECRET_KEY_BASE
+    # Configures both halves of AnyCable at once: the embedded Go server and
+    # Rails each derive the HTTP RPC key and the broadcast key from it.
+    - ANYCABLE_SECRET
 
 # No accessories. That is the point of this app: no Postgres, no Redis, nothing
-# to run alongside it.
+# to run alongside it. The WebSocket server is inside the same container, in the
+# thrust proxy.
 
 aliases:
   logs: app logs -f

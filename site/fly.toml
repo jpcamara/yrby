@@ -4,10 +4,11 @@
 #   fly secrets set SECRET_KEY_BASE=$(openssl rand -hex 64)
 #   fly deploy
 #
-# ONE machine, on purpose. The document store is a Hash in process memory and
-# the cable adapter is `async`, so two machines would serve different rooms
-# behind the same URL and a visitor would land on whichever the proxy picked.
-# Scaling this app out means swapping the store and the adapter first.
+# ONE machine, on purpose. The document store is a Hash in the Puma worker's
+# memory, and there is exactly one worker, so two machines would serve different
+# rooms behind the same URL and a visitor would land on whichever the proxy
+# picked. This app scales up, not out. Scaling it out means swapping the store
+# for a shared one first.
 
 app = "yrby-site"
 primary_region = "iad"
@@ -15,12 +16,19 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+# Everything the container needs is baked into the Dockerfile's ENV. What is
+# left here is the one secret and the one optional lock-down.
+#
+#   fly secrets set SECRET_KEY_BASE=$(openssl rand -hex 64)
+#   fly secrets set ANYCABLE_SECRET=$(openssl rand -hex 32)
+#
+# ANYCABLE_SECRET configures both halves of AnyCable at once: the embedded Go
+# server and Rails each derive the HTTP RPC key and the broadcast key from it.
 [env]
   RAILS_ENV = "production"
-  PORT = "3000"
-  # Locks the cable handshake to this host once the domain is settled. Leave it
-  # unset and the origin check is off (see config/application.rb).
-  # CABLE_ALLOWED_ORIGINS = "https://yrby.dev"
+  # Locks the cable handshake to this host once the domain is settled. The
+  # check runs in the embedded Go server, not in Rails.
+  # ANYCABLE_ALLOWED_ORIGINS = "yrby.dev"
 
 [http_service]
   internal_port = 3000
@@ -38,14 +46,17 @@ primary_region = "iad"
   #
   # "suspend" keeps the machine's memory image, so a resumed machine still has
   # its rooms and starts in well under a second. Fly falls back to a full stop
-  # when it can't suspend.
+  # when it can't suspend. Note that an open WebSocket counts as an active
+  # connection, so a machine with people in a room is not stopped underneath
+  # them.
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 0
 
-  # One machine, so the concurrency numbers are this process's ceiling, not a
+  # One machine, so the concurrency numbers are this box's ceiling, not a
   # load-balancing hint. 500 is MAX_CONNECTIONS from config/limits.rb; the app
-  # refuses connections past it rather than degrading.
+  # refuses connections past it rather than degrading. The sockets are held by
+  # the Go server inside thrust, not by Puma.
   [http_service.concurrency]
     type = "connections"
     soft_limit = 400
@@ -62,7 +73,7 @@ primary_region = "iad"
   size = "shared-cpu-1x"
   memory = "1gb"
   # 1 GB, not 512 MB: the store's own ceiling is 200 rooms x 512 KB (100 MB),
-  # 500 connections is roughly another 25 MB, and Rails plus the yrby native
-  # extension is 150-200 MB resident. 512 MB would fit the average case and
-  # fail at the caps, which is the wrong way round for limits that exist to
-  # keep the process alive.
+  # 500 held sockets in the Go server is roughly another 5-10 MB, and Rails plus
+  # the yrby native extension is 150-200 MB resident. 512 MB would fit the
+  # average case and fail at the caps, which is the wrong way round for limits
+  # that exist to keep the process alive.

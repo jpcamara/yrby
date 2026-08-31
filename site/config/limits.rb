@@ -7,6 +7,7 @@
 # boundary on its own; together they bound how much of one machine a stranger
 # can take. The layers are, from outside in:
 #
+#   0. anycable-go           max WebSocket frame size       (ANYCABLE_MAX_MESSAGE_SIZE)
 #   1. Rack::Attack          per-IP HTTP request rate       (rack_attack.rb)
 #   2. ConnectionLimiter     concurrent WebSockets per IP   (connection.rb)
 #   3. TokenBucket           frames per second per client   (document_channel.rb)
@@ -14,6 +15,11 @@
 #   5. document size cap     bytes per room, total          (room_store.rb)
 #   6. room caps             peers per room, rooms per box  (room_store.rb)
 #   7. idle eviction         rooms dropped when untouched   (room_sweeper.rb)
+#
+# Layer 0 runs in Go, in the embedded anycable-go inside the thrust proxy, and
+# is configured by environment variable rather than from here; the value is
+# MAX_FRAME_BYTES below. Layers 2 and 3 run in Ruby, reached over AnyCable's
+# HTTP RPC on connect and on every message.
 #
 # The whole design is written up in README.md ("Throttling").
 module Limits
@@ -26,12 +32,10 @@ module Limits
   PAGE_REQUESTS = 60
   PAGE_PERIOD = 60 # seconds
 
-  # The cable handshake is the expensive request: it upgrades to a WebSocket and
-  # allocates a connection for as long as it is held. A person opening two
-  # windows on a demo makes two. 12/minute covers reloading a demo page every
-  # five seconds; a reconnect storm from one address stops there.
-  CABLE_HANDSHAKES = 12
-  CABLE_PERIOD = 60 # seconds
+  # There is no cable throttle here. /cable never passes through Rack — the
+  # embedded anycable-go answers it in the proxy — so a handshake limit at this
+  # layer would count nothing. What bounds handshakes instead is
+  # MAX_CONNECTIONS_PER_IP below, enforced in Ruby on the Connect RPC.
 
   # --- Connections -----------------------------------------------------------
 
@@ -40,10 +44,12 @@ module Limits
   # past that it is a script.
   MAX_CONNECTIONS_PER_IP = 8
 
-  # Process-wide ceiling. A Falcon fiber plus an Action Cable connection object
-  # and its socket buffers is roughly 50 KB, so 500 is about 25 MB of
-  # connection overhead — affordable on a 1 GB machine next to the document
-  # store's own ceiling below.
+  # Process-wide ceiling. A held socket costs a goroutine and its buffers in
+  # anycable-go — on the order of 10 KB, not the ~50 KB an Action Cable
+  # connection object costs in Ruby — because Ruby holds nothing between
+  # messages. 500 is a deliberately conservative ceiling for a 1 GB machine
+  # sitting next to the document store's own; the sockets themselves are not
+  # what runs out first.
   MAX_CONNECTIONS = 500
 
   # --- Frames ----------------------------------------------------------------
@@ -51,7 +57,9 @@ module Limits
   # Largest single frame accepted, in decoded bytes. yrby's own default is
   # 8 MiB, sized for a large initial SyncStep2 in a real app. Demo documents are
   # tiny, and the whole room is capped at MAX_DOCUMENT_BYTES anyway, so this is
-  # cut to a size a legitimate demo edit never approaches.
+  # cut to a size a legitimate demo edit never approaches. Enforced twice: by
+  # anycable-go at the socket (ANYCABLE_MAX_MESSAGE_SIZE, so an over-size frame
+  # never becomes an RPC call) and again by yrby in Ruby.
   MAX_FRAME_BYTES = 128 * 1024
 
   # Token bucket per subscription. Typing produces a handful of frames a second;

@@ -151,8 +151,9 @@ server restarts as long as some client still has it.
 
 For documents shared across clients on a single-process deployment, the same two
 hooks over a process-wide Hash work instead. That is what this site does. It has
-no database, no Redis, and an `async` cable adapter, and every demo room is a
-document in one process's memory.
+no database and no Redis, and every demo room is a document in the memory of one
+Puma worker. WebSockets terminate in an embedded anycable-go, which calls the
+channel back over HTTP RPC.
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
@@ -170,10 +171,15 @@ tail into `compacted_state_update` — and skips while `doc.pending?`, because a
 snapshot must not carry a gap.
 
 That version stops being coherent the moment you scale past one process: a
-second process would serve different documents under the same key, and `async`
-broadcasts don't cross processes anyway. It is the right shape for ephemeral
-demo rooms and the wrong shape for anything you would miss. Rooms here are
-dropped after 20 minutes idle and lost on restart.
+second worker would serve different documents under the same key. The transport
+would cope — AnyCable is multi-process by design — but the store would not. It
+is the right shape for ephemeral demo rooms and the wrong shape for anything you
+would miss. Rooms here are dropped after 20 minutes idle and lost on restart.
+
+Because the channel runs under AnyCable, it is also a worked example of the
+constraint in [AnyCable and multi-process](/docs/anycable): a fresh channel
+instance per command, so anything that has to survive between them is
+`state_attr_accessor` rather than an instance variable.
 
 The whole thing, including every rate and size limit, is in
 [`site/`](https://github.com/jpcamara/yrby/tree/main/site) and written up in its
