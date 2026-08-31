@@ -97,6 +97,9 @@ const ENTRIES = [
   { entry: "src/whiteboard.js", name: "whiteboard.js" }, // Y.Map of shapes
   { entry: "src/kanban.js", name: "kanban.js" },         // Y.Array of card Y.Maps
   { entry: "src/forms.js", name: "forms.js" },           // Y.Map of fields
+  // Y.Array of row Y.Maps whose cells are nested Y.Maps; TanStack Table (headless)
+  // holds the sorting/column order, which stays out of the document.
+  { entry: "src/spreadsheet.js", name: "spreadsheet.js" },
   // yrby-forms: the packaged elements over a real Rails form (tickets page).
   { entry: "src/form_fields.js", name: "form_fields.js" },
 ]

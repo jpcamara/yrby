@@ -216,6 +216,12 @@ jobs:
           # local, and the materialized ActionText derives from the CRDT
           # (freshened on read).
           PORT=3777 node frontend/rhino_e2e.mjs
+          # The spreadsheet page: nested cell Y.Maps, so two browsers writing
+          # different properties of ONE cell must both survive a partition.
+          # Also that TanStack Table's sorting/column order stays out of the
+          # document, and that a peer's focused cell shows up in the other
+          # browser.
+          PORT=3777 node frontend/spreadsheet_e2e.mjs
           # yrby-forms: the packaged <collaborative-form>/<collaborative-field>
           # elements over a real Rails form (tickets page). Two real browsers:
           # the LWW field converges last-write-wins, the text field merges

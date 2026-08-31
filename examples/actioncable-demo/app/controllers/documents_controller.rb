@@ -36,6 +36,10 @@ class DocumentsController < ApplicationController
   def whiteboard = (@document_id = params[:id]) # Y.Map   (draggable shapes)
   def kanban     = (@document_id = params[:id]) # Y.Array (cards)
   def forms      = (@document_id = params[:id]) # Y.Map   (form fields)
+  # Y.Array of row Y.Maps whose cells are themselves Y.Maps of { value, bold,
+  # fill } — so two people can write different properties of one cell. Sorting
+  # and column order are TanStack Table's, per browser, never shared.
+  def spreadsheet = (@document_id = params[:id])
 
   # Server-side read of the authoritative document: the raw CRDT state,
   # base64-encoded. Replays the durable store into a fresh Y.Doc state.
