@@ -4,7 +4,7 @@
 // conflict; deleting splices the array. The server knows nothing about "cards"
 // or "columns".
 import * as Y from "yjs"
-import { connectRoom, user } from "./room.js"
+import { connectRoom, uid, user } from "./room.js"
 
 const COLUMNS = [["todo", "To Do"], ["doing", "Doing"], ["done", "Done"]]
 const ORDER = COLUMNS.map((c) => c[0])
@@ -30,7 +30,7 @@ for (const [id, title] of COLUMNS) {
     const text = input.value.trim()
     if (!text) return
     const m = new Y.Map()
-    m.set("id", crypto.randomUUID()); m.set("text", text); m.set("column", id)
+    m.set("id", uid()); m.set("text", text); m.set("column", id)
     cards.push([m])
     input.value = ""
   })
@@ -71,7 +71,7 @@ provider.whenSynced.then(() => {
   ydoc.transact(() => {
     for (const [text, column] of [["Design the API", "todo"], ["Write the gem", "doing"], ["Ship it", "done"]]) {
       const m = new Y.Map()
-      m.set("id", crypto.randomUUID()); m.set("text", text); m.set("column", column)
+      m.set("id", uid()); m.set("text", text); m.set("column", column)
       cards.push([m])
     }
   })

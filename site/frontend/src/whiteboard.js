@@ -4,7 +4,7 @@
 // document as a record store and bind it to a Y.Map the same way, so this exact
 // provider drops under them. The server just syncs the Map.
 import * as Y from "yjs"
-import { connectRoom, user } from "./room.js"
+import { connectRoom, uid, user } from "./room.js"
 
 const canvas = document.getElementById("canvas")
 const ydoc = new Y.Doc()
@@ -14,7 +14,7 @@ const provider = connectRoom(ydoc, canvas)
 function addNote(x, y, text = "note") {
   const m = new Y.Map()
   m.set("x", x); m.set("y", y); m.set("text", text); m.set("color", user.color)
-  shapes.set(crypto.randomUUID(), m)
+  shapes.set(uid(), m)
 }
 window.__yrby = { provider, ydoc, shapes, user, addNote }
 

@@ -17,6 +17,19 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)]
 
 export const user = { name: pick(NAMES), color: pick(COLORS) }
 
+// crypto.randomUUID exists only in secure contexts (https, localhost). The
+// demos also run over plain http on a LAN — a Raspberry Pi, a staging box —
+// where calling it throws and takes the whole page module down with it.
+// getRandomValues is available everywhere; this builds a v4 UUID from it.
+export function uid() {
+  if (crypto.randomUUID) return crypto.randomUUID()
+  const b = crypto.getRandomValues(new Uint8Array(16))
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
+
 const statusEl = () => document.getElementById("status")
 const noticeEl = () => document.getElementById("notice")
 const presenceEl = () => document.getElementById("presence")
