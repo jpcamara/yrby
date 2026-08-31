@@ -375,15 +375,50 @@ changes, update the matching page here.
 
 ## Demos
 
-Five pages, chosen for breadth of Yjs shape rather than for count:
+Six pages, chosen for breadth of Yjs shape rather than for count:
 
 | Page | Shape | What it shows |
 |---|---|---|
-| Rich text | `Y.XmlFragment` | Tiptap with remote carets, bound by Tiptap's own Collaboration extension |
+| Rich text | `Y.XmlFragment` | Lexxy over the published lexxy-realtime stack: sgid auth, a record-backed document, and the server rendering `note.body` via `Y::Lexxy` |
+| Tiptap | `Y.XmlFragment` | The same shape through Tiptap's own Collaboration extension |
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges; sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map — the shape canvas tools keep |
 | Kanban | `Y.Array` | A move is one `map.set`, so concurrent moves never conflict |
 | Code | `Y.Text` | CodeMirror 6 with remote cursors and selections |
+
+### The Rich text demo is the flagship stack, end to end
+
+The Lexxy page runs the published `lexxy-realtime` gem (0.7.0) and npm package
+(0.6.0) the way a real app would, not a special demo build:
+
+- **The record shape.** Each room is a `Note` (find-or-created by room id).
+  `has_collaborative_rich_text :body` comes from the gem's Collaborative
+  concern, which capability-detects Action Text — this app has none, so the
+  concern takes its plain-column path and `refresh_collaborative_rich_text`
+  writes the `Y::Lexxy`-rendered HTML straight into `notes.body`. The page's
+  "Stored HTML" panel reads that column back over a GET-only JSON endpoint:
+  server-rendered markup, no browser in the loop.
+- **The auth shape.** The page mints a signed GlobalID scoped to
+  `lexxy_realtime/body` — the gem's purpose format — and `NoteChannel` (the
+  generated channel template plus this site's throttle layers) locates the
+  record through it. A token for another purpose or field does not locate,
+  and the subscription is rejected. `authorized?` returns true because the
+  rooms are public; the sgid scoping is intact and tested.
+- **The composition API.** The client uses the npm README's "create the
+  provider yourself" path: `room.js` builds the yrby-client provider (over
+  `@anycable/web`, with the room bar and full-room notice), and the
+  `<lexxy-collaboration>` element receives `doc` and `provider` instead of
+  creating its own cable.
+- **One `lexical`.** The bundle pins `lexical` and `@lexical/yjs` as
+  singletons next to the yjs family — two copies break node-class identity
+  the same way two yjs copies break constructor checks (`build.mjs`).
+- **One deliberate cut.** The gem itself is `require: false`: its engine
+  loads the Lexxy gem's engine, which wires Action Text helpers in
+  `to_prepare` and cannot boot without Action Text. The app requires only
+  `lexxy_realtime/collaborative` — the concern is self-contained — and
+  mirrors the gem's one-line sgid purpose format. The ERB form helper
+  (`collaborative_rich_textarea`) is part of what stays unloaded, so the
+  page renders the `<lexxy-editor>` element directly.
 
 They are ports of the pages in
 [`examples/actioncable-demo`](../examples/actioncable-demo), with the provider

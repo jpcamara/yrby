@@ -47,6 +47,21 @@ gem "anycable-rails", "~> 1.6"
 gem "yrby", "~> 0.7"
 gem "yrby-rails", "~> 0.6"
 
+# The flagship integration: collaborative Lexxy editing over yrby. require:
+# false, deliberately — the gem's engine requires the lexxy gem, whose own
+# engine wires Action Text helpers in to_prepare blocks and cannot boot
+# without Action Text loaded. This app refuses Action Text (see "No uploads"
+# in the README), so config/application.rb requires only
+# lexxy_realtime/collaborative: the storage concern, which capability-detects
+# has_rich_text and materializes into a plain column without it. The editor
+# JavaScript comes from npm, not from the gems' asset builds.
+gem "lexxy-realtime", "~> 0.7", require: false
+
+# Signed GlobalIDs are how a lexxy-realtime client proves which record and
+# field it may join (the sgid the form flow mints). Rails apps normally get
+# this through Active Job, which this app does not carry.
+gem "globalid"
+
 # Renders the docs markdown. One gem, ships precompiled, GFM tables and fenced
 # code included.
 gem "commonmarker", "~> 2.10"

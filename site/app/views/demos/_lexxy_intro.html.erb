@@ -1,0 +1,13 @@
+<p>
+  A <a href="https://github.com/basecamp/lexxy">Lexxy</a> editor collaborating
+  through <a href="https://github.com/jpcamara/lexxy-realtime">lexxy-realtime</a>,
+  the record-based integration: the room is a <code>Note</code> record, the
+  client joins with a signed GlobalID scoped to that record and field, and the
+  shared state is the <code>Y.XmlFragment</code> Lexical keeps its document in.
+</p>
+<p>
+  What no other demo can show: after every update the server renders the full
+  document to HTML with <code>Y::Lexxy</code> — byte-identical to the editor's
+  own serializer — and saves it into the note's plain <code>body</code> column.
+  The snapshot below reads that column back over HTTP; no browser produced it.
+</p>

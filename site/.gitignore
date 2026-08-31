@@ -7,6 +7,8 @@
 
 # Built demo bundles. `cd frontend && bun run build` regenerates them; the
 # Dockerfile builds them during the image build.
+/public/lexxy.js
+/public/lexxy.css
 /public/tiptap.js
 /public/spreadsheet.js
 /public/whiteboard.js

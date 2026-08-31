@@ -154,12 +154,15 @@ function refuseFiles() {
 
 // Everyone in the room, as colored chips. Awareness is relayed by the server and
 // stored nowhere, so this list is only ever as fresh as the live connections.
+// Two state shapes appear: the demos set { user: { name, color } }, and
+// Lexical-family bindings (lexxy-realtime's cursors) publish { name, color }
+// at the top level — replacing whatever was there, so both are read.
 export function renderPresence(provider) {
   const el = presenceEl()
   if (!el) return
   el.replaceChildren(
     ...[...provider.awareness.getStates().values()]
-      .map((state) => state.user)
+      .map((state) => state.user || (state.name ? { name: state.name, color: state.color } : null))
       .filter(Boolean)
       .map((u) => {
         const chip = document.createElement("span")
@@ -173,8 +176,10 @@ export function renderPresence(provider) {
 
 // Builds the provider for this page's room and wires the shared chrome. The
 // document key comes from the mount element's data attribute, which the server
-// rendered from the URL.
-export function connectRoom(ydoc, mount) {
+// rendered from the URL. Channel and params default to the shape demos'
+// DocumentChannel; the Lexxy page overrides both to reach NoteChannel with its
+// signed-GlobalID credentials.
+export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params } = {}) {
   const documentKey = mount.dataset.documentKey
   const consumer = noticeAwareConsumer(createConsumer(cableUrl()), {
     onNotice: () =>
@@ -186,7 +191,7 @@ export function connectRoom(ydoc, mount) {
       showNotice("Could not join this room. It may be full, or the site may be at capacity."),
   })
 
-  const provider = new ActionCableProvider(ydoc, consumer, "DocumentChannel", { id: documentKey })
+  const provider = new ActionCableProvider(ydoc, consumer, channel, params || { id: documentKey })
   provider.awareness.setLocalStateField("user", user)
   provider.awareness.on("update", () => renderPresence(provider))
 

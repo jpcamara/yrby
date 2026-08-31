@@ -19,6 +19,24 @@ class DemosController < ApplicationController
     return head :not_found unless Demos.valid_room?(@room)
 
     @document_key = Demos.document_key(@demo.slug, @room)
+    return unless @demo.slug == "lexxy"
+
+    # The Rich text demo is record-based (lexxy-realtime's shape): one Note
+    # per room, and the page hands the client a signed GlobalID scoped to
+    # this record and field — the token NoteChannel authenticates.
+    @note = Note.find_or_create_by!(room: @room)
+  end
+
+  # The materialized column, as JSON. This is the part no other demo can
+  # show: NoteChannel renders the document server-side (Y::Lexxy) into
+  # note.body after every update, so this read-only endpoint always returns a
+  # current HTML snapshot with no browser in the loop. The e2e polls it.
+  def body
+    room = params[:room].to_s
+    return head :not_found unless Demos.valid_room?(room)
+
+    note = Note.find_by(room: room)
+    render json: { body: note&.body }
   end
 
   private

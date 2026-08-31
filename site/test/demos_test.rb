@@ -75,4 +75,51 @@ class DemosTest < ActionDispatch::IntegrationTest
 
     assert_equal 0, Y::Document.count, "documents are created by the channel, not the page"
   end
+
+  test "the lexxy page mints its note and hands the client the sgid credentials" do
+    get "/demos/lexxy/room1"
+
+    assert_response :success
+    note = Note.find_by!(room: "room1")
+
+    # Signed GlobalIDs embed a minting timestamp, so compare by what the token
+    # DOES rather than its bytes: the page's sgid must locate this note under
+    # the gem's field-scoped purpose.
+    sgid = response.body[/data-sgid="([^"]+)"/, 1]
+
+    assert_predicate sgid, :present?
+    assert_equal note, GlobalID::Locator.locate_signed(sgid, for: Note.sgid_purpose(:body))
+    assert_includes response.body, %(data-field="body")
+    # The document itself is minted by the channel on first join, not the page.
+    assert_equal 0, Y::Document.count
+  end
+
+  test "the lexxy editor mounts with attachments disabled" do
+    get "/demos/lexxy/room1"
+
+    assert_includes response.body, %(attachments="false")
+  end
+
+  test "the body endpoint returns the materialized column" do
+    note = Note.create!(room: "room1", body: "<h1>from Ruby</h1>")
+
+    get "/demos/lexxy/room1/body"
+
+    assert_response :success
+    assert_equal "no-store", response.headers["cache-control"]
+    assert_equal({ "body" => note.body }, response.parsed_body)
+  end
+
+  test "the body endpoint is empty-safe" do
+    get "/demos/lexxy/nothere/body"
+
+    assert_response :success
+    assert_nil response.parsed_body["body"]
+  end
+
+  test "the body endpoint rejects malformed rooms" do
+    get "/demos/lexxy/#{"a" * 33}/body"
+
+    assert_response :not_found
+  end
 end

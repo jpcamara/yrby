@@ -10,6 +10,9 @@ Rails.application.routes.draw do
   # A bare demo URL mints a room and redirects, so every visitor lands
   # somewhere private without having to think about it.
   get "demos/:demo", to: "demos#new_room", as: :demo
+  # The Rich text demo's materialized column (see DemosController#body).
+  get "demos/lexxy/:room/body", to: "demos#body", as: :demo_note_body
+
   # The room segment's shape is checked in the controller against
   # Demos::ROOM_FORMAT rather than here, so an odd link 404s instead of falling
   # through to a routing error.

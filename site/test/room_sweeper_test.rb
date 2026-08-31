@@ -63,6 +63,43 @@ class RoomSweeperTest < ActiveSupport::TestCase
     assert_equal [], RoomSweeper.run_once(rooms: broken)
   end
 
+  test "a stale note whose document is gone is swept" do
+    note = Note.create!(room: "old")
+    note.update_columns(updated_at: 2.days.ago)
+
+    assert_includes RoomSweeper.run_once(ttl: 1.day), "note:old"
+    assert_not Note.exists?(room: "old")
+  end
+
+  test "a note with a live document is never swept while the document is" do
+    note = Note.create!(room: "busy")
+    document = note.find_or_create_collaborative_document(:body)
+    note.update_columns(updated_at: 2.days.ago)
+
+    RoomSweeper.run_once(ttl: 1.day)
+
+    # The document is fresh (just created), so both survive: a stale-looking
+    # note never takes a live document down with it.
+    assert Note.exists?(room: "busy")
+    assert Y::Document.exists?(key: "note/#{note.id}/body")
+
+    # Once the document itself goes stale, one pass takes both: the document
+    # sweep runs first, and the note sweep then finds the note document-less.
+    document.update_columns(updated_at: 2.days.ago)
+    evicted = RoomSweeper.run_once(ttl: 1.day)
+
+    assert_includes evicted, "note/#{note.id}/body"
+    assert_includes evicted, "note:busy"
+    assert_not Note.exists?(room: "busy")
+  end
+
+  test "a fresh note is not swept" do
+    Note.create!(room: "new")
+
+    assert_empty RoomSweeper.run_once(ttl: 1.day)
+    assert Note.exists?(room: "new")
+  end
+
   test "the sweeper thread starts once and can be stopped" do
     thread = RoomSweeper.start(interval: 60)
 

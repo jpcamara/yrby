@@ -46,6 +46,7 @@ Layout/LineLength:
 Metrics/BlockLength:
   Exclude:
     - "config/**/*"
+    - "db/schema.rb" # generated
     - "test/**/*"
 
 Metrics/ClassLength:

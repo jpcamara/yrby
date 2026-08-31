@@ -1,0 +1,30 @@
+<% content_for :head do %>
+  <%# Lexxy's editor styles plus lexxy-realtime's caret styles, bundled by bun
+      alongside the page's JS (see frontend/src/lexxy.js). %>
+  <link rel="stylesheet" href="/lexxy.css">
+<% end %>
+
+<%# attachments="false" is Lexxy's own editor option (a default-preset key,
+    overridable as an element attribute): it removes the upload toolbar
+    buttons and disables the file paste/drop handlers inside the editor.
+    room.js blocks files at the document level too, and the app has no
+    Active Storage — the no-uploads policy, in layers. %>
+<lexxy-editor id="editor" name="body" attachments="false" markdown="false"
+              placeholder="Write together…"
+              data-document-key="<%= @document_key %>"
+              data-sgid="<%= @note.body_sgid %>"
+              data-field="body"></lexxy-editor>
+
+<details class="stored group mt-4 rounded-xl border border-zinc-800 bg-panel">
+  <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-400 select-none group-open:border-b group-open:border-zinc-800 hover:text-zinc-200">
+    Stored HTML — the server-rendered <code>note.body</code> column
+  </summary>
+  <div class="px-4 py-3">
+    <p class="mb-2 text-xs leading-5 text-zinc-500">
+      Fetched from <code>GET <%= demo_note_body_path(@room) %></code> when
+      opened. This is what your app reads with <code>note.body</code> —
+      rendered by Ruby, not by a browser.
+    </p>
+    <pre id="stored-html" class="!my-0 max-h-64 text-[0.72rem]" data-url="<%= demo_note_body_path(@room) %>"><code>…</code></pre>
+  </div>
+</details>

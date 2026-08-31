@@ -112,8 +112,10 @@ binding. The demo app runs four, and CI drives each one in real Chrome.
 
 The same channel also syncs plain Yjs shapes with no editor at all: a whiteboard
 on a `Y.Map`, a kanban board on a `Y.Array`, a spreadsheet on a `Y.Array` of
-nested `Y.Map`s. The [demos](/demos) on this site are five of those, running
-live.
+nested `Y.Map`s. The [demos](/demos) on this site run six of those live —
+including a Lexxy editor on the published
+[lexxy-realtime](https://github.com/jpcamara/lexxy-realtime) stack, with the
+server rendering the document into a plain column via `Y::Lexxy` as you type.
 
 ## Reading a document in Ruby
 

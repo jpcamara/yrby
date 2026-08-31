@@ -230,6 +230,34 @@
   }
 
   /* -------------------------------------------------------------------------
+   * Rich text (Lexxy). The editor's stylesheet is driven by an ink scale of
+   * CSS custom properties (lexxy-variables.css), designed light: ink is near-
+   * black text and canvas is white. Inverting the scale here — dark canvas,
+   * light ink, the steps between remapped onto zinc — restyles the whole
+   * editor (toolbar buttons, prompts, code blocks, selections) without
+   * touching any of its rules.
+   * ---------------------------------------------------------------------- */
+  lexxy-editor {
+    --lexxy-color-ink: var(--color-zinc-200);
+    --lexxy-color-ink-medium: var(--color-zinc-400);
+    --lexxy-color-ink-light: var(--color-zinc-500);
+    --lexxy-color-ink-lighter: var(--color-zinc-700);
+    --lexxy-color-ink-lightest: var(--color-zinc-800);
+    --lexxy-color-ink-inverted: var(--color-panel);
+    --lexxy-color-canvas: var(--color-panel);
+    --lexxy-color-accent-dark: var(--color-accent);
+    --lexxy-color-selected: color-mix(in oklab, var(--color-rose-500) 18%, transparent);
+    --lexxy-color-selected-hover: color-mix(in oklab, var(--color-rose-500) 28%, transparent);
+    --lexxy-color-code-bg: var(--color-zinc-900);
+    --lexxy-focus-ring-color: var(--color-rose-500);
+    @apply block;
+  }
+
+  lexxy-editor [contenteditable] {
+    @apply min-h-72 leading-relaxed outline-none;
+  }
+
+  /* -------------------------------------------------------------------------
    * Code demo (CodeMirror mounts into #editor; oneDark carries the editor's
    * own colors, this is just the frame).
    * ---------------------------------------------------------------------- */

@@ -11,6 +11,13 @@ require "rails/test_unit/railtie"
 require "bundler"
 Bundler.require(*Rails.groups)
 
+# Only the storage concern from lexxy-realtime (the gem itself is require:
+# false — its engine drags in Lexxy's Action Text wiring, which cannot boot
+# without Action Text; see the Gemfile). The concern is self-contained: it
+# capability-detects has_rich_text and, absent Action Text, materializes the
+# collaborative document into the model's plain column via Y::Lexxy.
+require "lexxy_realtime/collaborative"
+
 # Plain require, not autoload: the Rack::Attack initializer reads these
 # constants while the app is still booting, which is exactly when autoloading is
 # off limits.

@@ -84,7 +84,45 @@ const openBoth = async (path) => {
   for (const s of SESSIONS) await waitFor(`${s} synced on ${path}`, async () => (await synced(s)) === true)
 }
 
-// --- 1) Rich text: typing in one window lands in the other -------------------
+// --- 0) Rich text (Lexxy, the flagship): two browsers through NoteChannel ----
+// This leg exercises the published lexxy-realtime stack end to end: sgid auth,
+// the record-based document, and — the part no other demo has — the server
+// rendering the document into the note's plain body column via Y::Lexxy.
+await openBoth(`/demos/lexxy/${ROOM}`)
+
+const lexxyText = (s) => js(s, `JSON.stringify(document.querySelector("lexxy-editor [contenteditable]")?.innerText ?? null)`)
+await waitFor("both lexxy editors mounted", async () =>
+  (await Promise.all(SESSIONS.map(lexxyText))).every((v) => v !== undefined && v !== "null"))
+
+await clickAt(A, "lexxy-editor [contenteditable]")
+await ab(A, "keyboard", "type", "lexxy from A")
+check("A's lexxy typing reaches B",
+  !!(await converge("lexxy prose", lexxyText, (v) => v.includes("lexxy from A"))))
+
+await clickAt(B, "lexxy-editor [contenteditable]")
+await ab(B, "press", "End")
+await ab(B, "keyboard", "type", " and B")
+check("both lexxy editors converge on both people's text",
+  !!(await converge("lexxy both", lexxyText, (v) => v.includes("lexxy from A") && v.includes("and B"))))
+
+const lexxyChips = (s) => js(s, `document.querySelectorAll("#presence .chip").length`)
+await waitFor("lexxy presence lists two people", async () => (await lexxyChips(B)) === 2)
+check("B sees two people in the lexxy room", (await lexxyChips(B)) === 2)
+
+// The materialized column: poll the GET endpoint until the server-rendered
+// note.body catches up with what was typed. This HTML came from Y::Lexxy in
+// Ruby — no browser serialized it.
+const storedBody = async () => {
+  const res = await fetch(`${BASE}/demos/lexxy/${ROOM}/body`)
+  return (await res.json()).body || ""
+}
+await waitFor("note.body materializes server-side", async () =>
+  (await storedBody()).includes("lexxy from A") && (await storedBody()).includes("and B"))
+const body = await storedBody()
+check(`the stored column is server-rendered HTML (${body.slice(0, 40)}…)`,
+  body.startsWith("<p>") && body.includes("lexxy from A"))
+
+// --- 1) Rich text (Tiptap): same shape through DocumentChannel ---------------
 await openBoth(`/demos/tiptap/${ROOM}`)
 
 const prose = (s) => js(s, `JSON.stringify(window.__yrby.editor ? window.__yrby.editor.getText() : null)`)
@@ -178,4 +216,4 @@ check("a card added in one window reaches the other",
 await ab(A, "close", "--all")
 console.log("")
 if (failures > 0) { console.log(`FAILED: ${failures} check(s) failed`); process.exit(1) }
-console.log("PASS: site demos — rich text, room isolation, cell-level merges, kanban")
+console.log("PASS: site demos — lexxy + materialized column, tiptap, room isolation, cell-level merges, kanban")

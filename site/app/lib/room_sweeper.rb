@@ -44,6 +44,7 @@ module RoomSweeper
       # in one place.
       stale.destroy_all
       evicted.each { |key| rooms.forget(key) }
+      evicted.concat(sweep_notes(cutoff))
       Rails.logger.info("room-sweeper: evicted #{evicted.length} stale room(s)") if evicted.any?
       evicted
     rescue StandardError => e
@@ -51,6 +52,19 @@ module RoomSweeper
       # tries again.
       Rails.logger.error("room-sweeper: #{e.class}: #{e.message}")
       []
+    end
+
+    # The Rich text demo's Note records follow the same TTL. A note is touched
+    # by every materialization (refresh_collaborative_rich_text saves it), so
+    # updated_at tracks writes; a note whose document still exists is left to
+    # the document sweep above (deleting the note would destroy a document the
+    # occupancy check may be protecting). Once the document is gone — swept
+    # above, or never created — a stale note is just an orphaned row.
+    def sweep_notes(cutoff)
+      stale = Note.where(updated_at: ...cutoff).where.missing(:collaborative_document_body)
+      keys = stale.pluck(:room).map { |room| "note:#{room}" }
+      stale.destroy_all
+      keys
     end
   end
 end

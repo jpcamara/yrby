@@ -7,10 +7,16 @@ module Demos
 
   ALL = [
     Demo.new(
-      slug: "tiptap",
+      slug: "lexxy",
       title: "Rich text",
       shape: "Y.XmlFragment",
-      blurb: "A Tiptap editor with remote carets, bound by Tiptap's own Collaboration extension."
+      blurb: "A Lexxy editor over lexxy-realtime; the server renders the document into the record's column as you type."
+    ),
+    Demo.new(
+      slug: "tiptap",
+      title: "Tiptap",
+      shape: "Y.XmlFragment",
+      blurb: "The same document shape through Tiptap's own Collaboration extension."
     ),
     Demo.new(
       slug: "spreadsheet",

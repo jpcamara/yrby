@@ -10,7 +10,15 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 20_260_831_000_001) do
+ActiveRecord::Schema[8.1].define(version: 20_260_831_000_002) do
+  create_table "notes", force: :cascade do |t|
+    t.text "body"
+    t.datetime "created_at", null: false
+    t.string "room", null: false
+    t.datetime "updated_at", null: false
+    t.index ["room"], name: "index_notes_on_room", unique: true
+  end
+
   create_table "y_document_updates", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "document_id", null: false
