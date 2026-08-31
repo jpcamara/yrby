@@ -9,6 +9,7 @@ Rails.application.routes.draw do
   get "docs/:id/whiteboard", to: "documents#whiteboard", as: :document_whiteboard
   get "docs/:id/kanban", to: "documents#kanban", as: :document_kanban
   get "docs/:id/forms", to: "documents#forms", as: :document_forms
+  get "docs/:id/spreadsheet", to: "documents#spreadsheet", as: :document_spreadsheet
   get "docs/:id/content", to: "documents#content", as: :document_content
   get "docs/:id/audit", to: "documents#audit", as: :document_audit
   # DEMO/TEST ONLY — never mount in production. One anonymous POST can wipe a
