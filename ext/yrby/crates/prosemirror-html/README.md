@@ -1,11 +1,11 @@
 # prosemirror-yjs-html
 
-Renders the Yjs representation of a [ProseMirror](https://prosemirror.net)
-document to HTML, using [yrs](https://crates.io/crates/yrs). Covers
-prosemirror-schema-basic plus the prosemirror-tables family, and reads both
-naming styles editors use: Tiptap's `bulletList`/`bold` and
-prosemirror-schema-basic's `bullet_list`/`strong`. The tests pin the output
-byte-for-byte against fixtures captured from a live Tiptap editor.
+Renders a [ProseMirror](https://prosemirror.net) document to HTML straight
+from its Yjs form, using [yrs](https://crates.io/crates/yrs). No browser, no
+Node. It handles prosemirror-schema-basic and the prosemirror-tables family,
+and reads both naming styles editors use: Tiptap's `bulletList`/`bold` and
+prosemirror-schema-basic's `bullet_list`/`strong`. The tests check output
+byte-for-byte against documents captured from a real Tiptap editor.
 
 ## Usage
 
@@ -15,7 +15,7 @@ prosemirror-yjs-html = "0.1"
 yrs = { version = "0.27", features = ["sync"] }
 ```
 
-The input is a Yjs update: bytes from a durable store, a provider, or
+Feed it a Yjs update. That is bytes from your store, a provider, or
 `Y.encodeStateAsUpdate` in the browser.
 
 ```rust,no_run
@@ -36,15 +36,14 @@ let html = prosemirror_yjs_html::render(&txn, &fragment);
 //    isn't ProseMirror-shaped (e.g. a Lexical document).
 ```
 
-An editor may hold several fragments under one doc; pass whichever root
-name your editor binds. `render` returns `None` when the fragment's shape
-is not ProseMirror's.
+One doc can hold several fragments. Pass the root name your editor binds.
+`render` returns `None` when the fragment isn't ProseMirror-shaped.
 
 ## Declarative rules
 
-A rule describes how a node type the built-in schema does not know should
-render: a tag, attribute templates, and a content slot. Declarative rules
-render inside the document transaction with no callback:
+For a node type the built-in schema doesn't know, write a rule: a tag,
+attribute templates, and a content slot. Declarative rules render in the
+transaction, no callback:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -71,17 +70,17 @@ let html = flatten(segments).into_html().expect("no callback rules");
 // <aside class="callout callout--warning">…</aside>
 ```
 
-Attribute templates concatenate literal parts (`lit`) and stored-attribute
-references (`ref`); an attribute that resolves empty is omitted. `content`
-is `"inline"` (formatted text, the default), `"blocks"` (child block
-nodes), or `"none"` (a leaf). `"void": true` skips the closing tag. A rule
-for a built-in type replaces how that type renders.
+An attribute template mixes literal parts (`lit`) with stored attributes
+(`ref`), and drops out when it resolves empty. `content` is `inline` for
+formatted text, `blocks` for child blocks, or `none` for a leaf; `inline`
+is the default. `void: true` drops the closing tag. Point a rule at a
+built-in type to override it.
 
 ## Mark rules
 
-ProseMirror splits a document into nodes (structure: paragraphs, lists,
-tables) and marks (annotations on runs of text: bold, links, comments).
-A mark rule registers under `"marks"` and wraps the text runs carrying it:
+ProseMirror has two kinds of thing. Nodes are structure: paragraphs,
+lists, tables. Marks annotate runs of text: bold, links, comments. A mark
+rule registers under `"marks"` and wraps the runs that carry it:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -107,21 +106,21 @@ let html = flatten(segments).into_html().expect("no callback rules");
 // <span data-comment-id="c42">…</span>, wrapped outside the built-in marks.
 ```
 
-Built-in marks nest deterministically: subscript and superscript
-innermost, then highlight, underline, strike, italic, bold, a `textStyle`
-span, and link on the outside. `code` renders alone among the formatting
-marks, matching Tiptap's Code mark. A custom mark wraps outside every
-built-in, and several custom marks on one run nest alphabetically by name,
-so output never depends on registration order. A rule for a built-in mark
-name (`"bold"`) replaces its markup and keeps the exclusivity behavior.
+Built-in marks nest in a fixed order: subscript and superscript innermost,
+then highlight, underline, strike, italic, bold, a `textStyle` span, and
+link on the outside. `code` renders alone among the formatting marks, the
+way Tiptap's Code mark does. A custom mark wraps outside every built-in.
+Several custom marks on one run nest alphabetically by name, so the output
+doesn't depend on registration order. A rule named for a built-in mark
+(`bold`) replaces its markup and keeps the exclusivity.
 
 ## Callback rules
 
-A rule marked `callback` defers rendering to your code, for nodes that
-need logic or a database lookup. Deferred nodes come back as segments
-carrying their type, stored attributes as JSON, and already-rendered
-children. The render itself never runs your code; you splice the result
-after it returns:
+Some nodes need real work, like a database lookup. Mark the rule
+`callback` and the renderer hands them back to you. Deferred nodes come
+back as segments with their type, attributes as JSON, and rendered
+children. The render never runs your code. You splice the result in after
+it returns:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -159,15 +158,15 @@ let segments = render_segments(&txn, &fragment, &rules).expect("ProseMirror-shap
 let html = splice(segments);
 ```
 
-The rules surface (`Rules`, `Segment`, `flatten`) is re-exported here;
-[`yjs-html-core`](https://crates.io/crates/yjs-html-core) is an internal
-implementation crate.
+`Rules`, `Segment`, and `flatten` are re-exported here. Depend on this
+crate; [`yjs-html-core`](https://crates.io/crates/yjs-html-core) is
+internal.
 
 ## Schema discovery
 
-Editors store types and attributes under their own names; Rhino Editor's
-strike mark, for example, is `rhino-strike`. `collect_node_types` reports
-what a real document holds:
+Editors name their types and attributes however they like. Rhino Editor's
+strike mark, for one, is `rhino-strike`. `collect_node_types` reports what
+a document actually holds:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -184,8 +183,8 @@ for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default()
 }
 ```
 
-Types where `is_builtin` is false need a rule. Without one, an unknown
-node still renders its text and nested blocks as plain markup.
+Anything where `is_builtin` is false needs a rule. Without one, the node
+still renders its text and child blocks, just unwrapped.
 
 ## License
 
