@@ -5,6 +5,17 @@ documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The `yrby:tables` migration template caps `y_documents.state` at
+  `1.gigabyte - 1` instead of `4.gigabytes - 1`. Postgres raises
+  `ArgumentError` for binary limits above 1 GB - 1, so `db:migrate` on a
+  fresh Postgres app failed. MySQL maps both values to `longblob`, and
+  SQLite ignores limits, so nothing changes there. Apps that already
+  migrated are unaffected.
+
 ## [0.6.1] - 2026-08-11
 
 ### Fixed
