@@ -60,4 +60,33 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     assert_not_includes bundle.read, "DirectUploadController",
                         "the ActiveStorage upload client must not be bundled"
   end
+
+  test "write verbs are refused everywhere, multipart included" do
+    file = Rack::Test::UploadedFile.new(StringIO.new("x" * 1024), "image/png", original_filename: "x.png")
+
+    %w[/ /demos /docs/getting-started].each do |path|
+      post path, params: { file: file }
+
+      assert_response :not_found, "POST #{path} must not route"
+      put path, params: { file: file }
+
+      assert_response :not_found, "PUT #{path} must not route"
+    end
+  end
+
+  test "materialization suppresses attachment nodes a crafted document smuggles in" do
+    note = Note.create!(room: "no-uploads-probe")
+    state = File.binread(File.expand_path("fixtures/lexxy_full.bin", __dir__))
+    Y::Document.append(note.find_or_create_collaborative_document(:body).key, state)
+
+    assert note.refresh_collaborative_rich_text(:body)
+    body = note.reload.body
+
+    assert_includes body, "<h1>Heading One</h1>", "text content survives"
+    assert_not_includes body, "action-text-attachment", "attachment nodes render to nothing"
+    assert_not_includes body, "attachment-gallery", "gallery wrappers render to nothing"
+    assert_not_includes body, "data:", "no data: URLs reach the stored column"
+  ensure
+    note&.destroy
+  end
 end

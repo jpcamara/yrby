@@ -22,4 +22,39 @@ class Note < ApplicationRecord
   def self.sgid_purpose(field) = "lexxy_realtime/#{field}"
 
   def body_sgid = to_sgid(for: self.class.sgid_purpose(:body)).to_s
+
+  # The site accepts no uploads, and the editor has attachments disabled — but
+  # a client that skips the page and speaks the protocol can still craft a
+  # document containing attachment nodes (a data: URL in an attachment's url
+  # attribute is a smuggled file). Y::Lexxy's default schema would render them
+  # into the stored column, so materialization suppresses them: attachment
+  # nodes render to nothing, text content survives. The gem's next release
+  # adds a nodes: option on has_collaborative_rich_text that turns this
+  # override back into a macro argument.
+  SUPPRESSED_NODES = {
+    "action_text_attachment" => ->(_node) { "" },
+    "custom_action_text_attachment" => ->(_node) { "" },
+    "image_gallery" => ->(_node) { "" }
+  }.freeze
+
+  def refresh_collaborative_rich_text(name)
+    raise ArgumentError, "#{name.inspect} is not collaborative" unless name.to_sym == :body
+
+    document = collaborative_document(:body)
+    return false unless document
+
+    with_lock do
+      state = document.reload.load_state
+      break false if state.nil?
+
+      doc = Y::Doc.new
+      doc.apply_update(state)
+      html = Y::Lexxy.new(doc, nodes: SUPPRESSED_NODES).to_html
+      break false if html.nil?
+
+      self.body = html
+      save!(validate: false)
+      true
+    end
+  end
 end
