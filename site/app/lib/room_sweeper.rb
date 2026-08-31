@@ -46,6 +46,9 @@ module RoomSweeper
       evicted.each { |key| rooms.forget(key) }
       evicted.concat(sweep_notes(cutoff))
       Rails.logger.info("room-sweeper: evicted #{evicted.length} stale room(s)") if evicted.any?
+      # Reap leaked connection slots on the same cadence — their own backstop
+      # for a Disconnect RPC that never fired. Separate concern, one thread.
+      ConnectionLimiter.current.sweep
       evicted
     rescue StandardError => e
       # A sweep failure must never take the thread down with it; the next tick

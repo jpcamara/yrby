@@ -38,3 +38,6 @@
 # SQLite databases (storage/ itself is the volume mount point in production)
 /storage/*.sqlite3
 /storage/*.sqlite3-*
+
+# Kamal secrets — the real file. .kamal/secrets.example is the committed template.
+/.kamal/secrets

@@ -4,6 +4,15 @@
 # after that, so deploys and restarts are safe unattended.
 set -euo pipefail
 
+# WebSocket origin lock, both halves from one runtime value. Rails reads
+# ALLOWED_ORIGINS itself; the embedded anycable-go wants just the host[:port],
+# so strip the scheme. This is derived at runtime, not baked into the image,
+# because the allowed origins are a per-deploy value. Unset = permissive.
+if [ -n "${ALLOWED_ORIGINS:-}" ] && [ -z "${ANYCABLE_ALLOWED_ORIGINS:-}" ]; then
+  ANYCABLE_ALLOWED_ORIGINS="$(printf '%s' "$ALLOWED_ORIGINS" | sed 's#https\{0,1\}://##g')"
+  export ANYCABLE_ALLOWED_ORIGINS
+fi
+
 if [[ "$*" == *"thrust"* ]]; then
   ./bin/rails db:prepare
 fi

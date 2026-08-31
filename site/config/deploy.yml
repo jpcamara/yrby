@@ -41,9 +41,13 @@ builder:
 env:
   clear:
     RAILS_ENV: production
-    # Locks the cable handshake to this host once the domain is settled. The
-    # check runs in the embedded Go server, not in Rails.
-    # ANYCABLE_ALLOWED_ORIGINS: yrby.example.com
+    # Locks the WebSocket origin on BOTH halves of the cable from one value: the
+    # entrypoint derives ANYCABLE_ALLOWED_ORIGINS for the embedded Go server by
+    # stripping the scheme, and Rails re-checks on the Connect RPC. Set it to the
+    # site's own origins once the domain is settled; unset = permissive.
+    # ALLOWED_ORIGINS: https://yrby.example.com
+  # Secrets come from .kamal/secrets (gitignored; see .kamal/secrets.example),
+  # never from this committed file.
   secret:
     - SECRET_KEY_BASE
     # Configures both halves of AnyCable at once: the embedded Go server and

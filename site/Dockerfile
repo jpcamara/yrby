@@ -94,9 +94,12 @@ COPY . .
 COPY --from=assets /build/public /rails/public
 
 # storage/ is the SQLite volume mount point; the rails user must own it so
-# db:prepare can create the database file on a fresh volume.
+# db:prepare can create the database file on a fresh volume. 700 on storage so
+# the database file (ephemeral room content) is readable only by the app user,
+# not by anything else that lands in the container.
 RUN useradd rails --create-home --shell /bin/bash && \
-    chown -R rails:rails db log storage tmp public
+    chown -R rails:rails db log storage tmp public && \
+    chmod 700 storage
 USER rails:rails
 
 ENTRYPOINT ["/rails/bin/docker-entrypoint"]

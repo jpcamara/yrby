@@ -25,9 +25,11 @@ primary_region = "iad"
 # server and Rails each derive the HTTP RPC key and the broadcast key from it.
 [env]
   RAILS_ENV = "production"
-  # Locks the cable handshake to this host once the domain is settled. The
-  # check runs in the embedded Go server, not in Rails.
-  # ANYCABLE_ALLOWED_ORIGINS = "yrby.dev"
+  # Locks the WebSocket origin on BOTH halves of the cable from one value: the
+  # entrypoint derives ANYCABLE_ALLOWED_ORIGINS for the embedded Go server by
+  # stripping the scheme, and Rails re-checks on the Connect RPC. Set it once the
+  # domain is settled; unset = permissive.
+  # ALLOWED_ORIGINS = "https://yrby.dev"
 
 [http_service]
   internal_port = 3000

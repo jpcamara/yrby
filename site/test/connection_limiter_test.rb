@@ -51,4 +51,44 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
     assert_equal 50, results.count(:ok)
     assert_equal 50, limiter.total
   end
+
+  test "a leaked slot is reclaimed once it ages past the TTL" do
+    limiter = ConnectionLimiter.new(max_per_ip: 1, max_total: 100, max_age: 60)
+    # Acquire at t=0 and never release (the Disconnect RPC that never fired).
+    assert_equal :ok, limiter.acquire("1.2.3.4", 0)
+    assert_equal :too_many_for_ip, limiter.acquire("1.2.3.4", 30), "still held before the TTL"
+
+    # A sweep past the TTL reclaims the leaked slot.
+    assert_equal 1, limiter.sweep(61)
+    assert_equal 0, limiter.total
+    assert_equal :ok, limiter.acquire("1.2.3.4", 61), "the reclaimed slot is free again"
+  end
+
+  test "acquire reaps the IP's own expired slots first, without waiting for a sweep" do
+    limiter = ConnectionLimiter.new(max_per_ip: 1, max_total: 100, max_age: 60)
+    limiter.acquire("1.2.3.4", 0) # leaks
+
+    # Past the TTL, the next acquire from the same IP drops the stale slot and
+    # succeeds — no explicit sweep needed.
+    assert_equal :ok, limiter.acquire("1.2.3.4", 61)
+    assert_equal 1, limiter.count("1.2.3.4", 61)
+  end
+
+  test "a fresh slot is never reaped" do
+    limiter = ConnectionLimiter.new(max_per_ip: 2, max_total: 100, max_age: 3600)
+    limiter.acquire("1.2.3.4", 0)
+
+    assert_equal 0, limiter.sweep(60), "60s is well under the hour TTL"
+    assert_equal 1, limiter.total
+  end
+
+  test "sweeping empties the running total exactly" do
+    limiter = ConnectionLimiter.new(max_per_ip: 100, max_total: 100, max_age: 60)
+    5.times { limiter.acquire("1.1.1.1", 0) }
+    3.times { limiter.acquire("2.2.2.2", 0) }
+
+    assert_equal 8, limiter.sweep(120)
+    assert_equal 0, limiter.total
+    assert_equal 0, limiter.count("1.1.1.1")
+  end
 end

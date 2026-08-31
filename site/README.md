@@ -238,7 +238,10 @@ visitor mints a room and most are abandoned within a minute. Without the sweeper
 (`app/lib/room_sweeper.rb`, one thread, a sweep every five minutes) the
 2000-document ceiling would be reached by normal use rather than by abuse. A
 room is stale when it has no write inside the TTL and nobody in it; occupied
-rooms are never evicted.
+rooms are never evicted. The same sweep reaps leaked connection slots: the
+per-IP cap frees a slot on the Disconnect RPC, but that RPC can fail to arrive
+(a dropped socket, a partition), so a slot older than an hour is treated as
+leaked and reclaimed. Reaping only ever loosens the cap, never rejects wrongly.
 
 **No uploads, anywhere.** The site accepts no files. A public, anonymous write
 surface plus a file endpoint is a free file host, and every one of the throttles
@@ -303,8 +306,37 @@ reasons: the docs pages become a CDN hit and never reach the app, and the free
 plan absorbs volumetric attacks that would otherwise arrive at one small
 machine. WebSockets pass through on the free plan, so the demos keep working —
 just leave the cable path uncached, which it is, because those responses are
-`no-store`. Set `ANYCABLE_ALLOWED_ORIGINS` once the domain is settled so the
-handshake is locked to it; that check runs in the Go server, not in Rails.
+`no-store`.
+
+### Secrets and origins
+
+Kamal reads secrets from `.kamal/secrets` (gitignored). Copy the committed
+template and fill it in — or, better, have each line pull from a password
+manager so nothing sensitive lands on disk:
+
+```bash
+cp .kamal/secrets.example .kamal/secrets
+# SECRET_KEY_BASE=$(openssl rand -hex 64)      — Rails signing key
+# ANYCABLE_SECRET=$(openssl rand -hex 32)      — configures both cable halves
+```
+
+`config/deploy.yml` lists those two under `env.secret`, so they reach the
+container as environment without ever being written into the committed YAML. On
+Fly they are `fly secrets set …` instead. The SQLite volume is `chmod 700` in
+the image, so the database (ephemeral room content) is readable only by the app
+user.
+
+Once the domain is settled, lock the WebSocket origin: set `ALLOWED_ORIGINS`
+(comma-separated full origins, e.g. `https://yrby.dev`) in the deploy env. One
+value drives both halves of the cable — the entrypoint strips the scheme into
+`ANYCABLE_ALLOWED_ORIGINS` for the embedded anycable-go, which 403s a mismatched
+handshake at the socket, and Rails re-checks the Origin on the Connect RPC.
+Behind Cloudflare it also makes `request.ip` the real visitor: `trusted_proxies`
+vendors Cloudflare's ranges (plus loopback and the container-internal ranges,
+but deliberately not `192.168.0.0/16`, so a LAN client can't forge
+`X-Forwarded-For` to escape a throttle bucket), and Rack::Attack keys on that.
+Left unset, all of this is permissive — which is what the plain-http Pi on the
+LAN wants.
 
 Either way it is one machine and one container: the database volume attaches to
 one box, and the throttle counters assume one process. For a demo site that is

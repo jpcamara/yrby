@@ -53,6 +53,14 @@ module Limits
   # what runs out first. Env override for load testing, as above.
   MAX_CONNECTIONS = Integer(ENV.fetch("MAX_CONNECTIONS", 500))
 
+  # How long a connection slot may sit before the limiter reaps it as leaked.
+  # `release` normally frees a slot the moment the Disconnect RPC fires; this is
+  # the backstop for when that RPC never arrives (a dropped socket, a
+  # partition). An hour is far longer than a genuine demo session, so a real
+  # connection is rarely reaped while still open — and reaping only ever loosens
+  # the cap, never rejects wrongly (see ConnectionLimiter).
+  CONNECTION_SLOT_TTL = 60 * 60 # seconds
+
   # --- Frames ----------------------------------------------------------------
 
   # Largest single frame accepted, in decoded bytes. yrby's own default is

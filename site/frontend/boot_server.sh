@@ -65,6 +65,14 @@ export ANYCABLE_HEADERS="${ANYCABLE_HEADERS:-cookie,x-forwarded-for}"
 # broadcast paths dial ports directly and never pass through thrust's handler.
 export MAX_REQUEST_BODY="${MAX_REQUEST_BODY:-65536}"
 
+# WebSocket origin lock, both halves from one source. Rails reads ALLOWED_ORIGINS
+# itself (config/application.rb); the embedded anycable-go wants just the
+# host[:port], so strip the scheme here. Unset = permissive (the default), which
+# is what local e2e and a LAN box want. Local dev normally leaves it unset.
+if [ -n "${ALLOWED_ORIGINS:-}" ]; then
+  export ANYCABLE_ALLOWED_ORIGINS="${ANYCABLE_ALLOWED_ORIGINS:-$(printf '%s' "$ALLOWED_ORIGINS" | sed 's#https\{0,1\}://##g')}"
+fi
+
 # The store is SQLite; make sure the schema exists before the stack boots.
 bin/rails db:prepare >> "$LOG" 2>&1
 
@@ -75,8 +83,11 @@ for _ in $(seq 1 60); do
   page=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/up" || true)
   # Healthy means the cable is up too: a bare upgrade gets the AnyCable
   # welcome, which only arrives once the Connect RPC has round-tripped to Rails.
+  # Send a loopback Origin so the probe still passes when ALLOWED_ORIGINS locks
+  # the cable (anycable-go 403s a blank Origin under an allow-list); a locked
+  # boot must therefore include this host in the list.
   cable=$(curl -s --max-time 3 -N \
-    -H "Connection: Upgrade" -H "Upgrade: websocket" \
+    -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Origin: http://127.0.0.1:$PORT" \
     -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
     "http://127.0.0.1:$PORT/cable" 2>/dev/null | head -c 200 || true)
   if [ "$page" = "200" ] && [[ "$cable" == *welcome* ]]; then
