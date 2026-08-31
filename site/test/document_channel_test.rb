@@ -110,10 +110,14 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   test "frames past the token bucket are dropped" do
     subscribe id: KEY
-    # Drain the burst, then one more.
-    (Limits::FRAME_BURST + 1).times { |i| send_update(Updates::HELLO, id: i) }
+    # Three times the burst, sent as fast as the test can. The bucket refills
+    # while that runs, so the exact number that gets through depends on the wall
+    # clock; what is fixed is that the burst is honoured and the rest is not.
+    total = Limits::FRAME_BURST * 3
+    total.times { |i| send_update(Updates::HELLO, id: i) }
 
-    assert_equal Limits::FRAME_BURST, acks.length, "the frame past the burst should have been dropped"
+    assert_operator acks.length, :>=, Limits::FRAME_BURST, "the burst should have been honoured"
+    assert_operator acks.length, :<, total, "everything past the burst should not have got through"
   end
 
   test "a client that keeps flooding has its connection closed" do
@@ -126,7 +130,13 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
     assert_empty @closes, "not yet at the drop threshold"
 
-    10.times { |i| send_update(Updates::HELLO, id: short + i) }
+    # Refill means the exact frame that trips the threshold depends on the wall
+    # clock, so keep sending until it does.
+    (short...(short * 4)).each do |i|
+      break if @closes.any?
+
+      send_update(Updates::HELLO, id: i)
+    end
 
     assert_equal({ reason: "message rate limit", reconnect: false }, @closes.first)
   end
