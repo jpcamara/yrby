@@ -22,6 +22,14 @@
 # missing one lands. Compaction is the one place that must not carry pending, so
 # it uses `compacted_state_update` and skips while `doc.pending?`.
 #
+# Concurrency: the store is shared. Under Falcon the RPC requests that reach it
+# are fibers on one thread — context switches happen at IO and scheduler yields,
+# not preemptively — and the sweeper is a plain Thread on top of that. The
+# mutexes stay for both reasons: a fiber CAN yield mid-sequence anywhere IO
+# happens, the reactor is free to run requests concurrently, and a mutex that is
+# never contended costs nothing. Nothing in this file is safe by accident of the
+# server's scheduling model.
+#
 # Every limit is a constructor keyword defaulting to config/limits.rb, so the
 # tests can build a small store instead of writing half a megabyte at one.
 class RoomStore

@@ -4,11 +4,11 @@
 #   fly secrets set SECRET_KEY_BASE=$(openssl rand -hex 64)
 #   fly deploy
 #
-# ONE machine, on purpose. The document store is a Hash in the Puma worker's
-# memory, and there is exactly one worker, so two machines would serve different
-# rooms behind the same URL and a visitor would land on whichever the proxy
-# picked. This app scales up, not out. Scaling it out means swapping the store
-# for a shared one first.
+# ONE machine, on purpose. The document store is a Hash in the single Falcon
+# worker's memory (bin/serve enforces --count 1), so two machines would serve
+# different rooms behind the same URL and a visitor would land on whichever the
+# proxy picked. This app scales up, not out. Scaling it out means swapping the
+# store for a shared one first.
 
 app = "yrby-site"
 primary_region = "iad"
@@ -56,7 +56,7 @@ primary_region = "iad"
   # One machine, so the concurrency numbers are this box's ceiling, not a
   # load-balancing hint. 500 is MAX_CONNECTIONS from config/limits.rb; the app
   # refuses connections past it rather than degrading. The sockets are held by
-  # the Go server inside thrust, not by Puma.
+  # the Go server inside thrust, not by Ruby.
   [http_service.concurrency]
     type = "connections"
     soft_limit = 400

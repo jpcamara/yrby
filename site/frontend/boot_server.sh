@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Boots the site the way it is deployed: `thrust bin/rails server`.
+# Boots the site the way it is deployed: `thrust bin/serve`.
 #
 #   PORT=3888 SERVER_PIDFILE=/tmp/site.pid ./boot_server.sh
 #
 # thrust is anycable-thruster — Thruster with anycable-go embedded in the proxy.
 # One command gets you the proxy on $PORT, the embedded AnyCable server owning
-# /cable, and Puma on $TARGET_PORT behind it. The Go server calls back into
+# /cable, and Falcon on $TARGET_PORT behind it (bin/serve translates the PORT
+# thrust hands its upstream into Falcon's --bind). The Go server calls back into
 # Rails over HTTP RPC at /_anycable; nothing else connects the two.
 #
-# ONE Puma worker, always: the document store is a Hash in that process's
-# memory. See site/README.md.
+# ONE Falcon worker, always — bin/serve enforces it: the document store is a
+# Hash in that process's memory. See site/README.md.
 #
 # Backgrounds the whole thing, waits until it is healthy, and writes the thrust
 # pid to $SERVER_PIDFILE so the caller can tear it down.
@@ -24,14 +25,13 @@ cd "$(dirname "$0")/.." # site/
 rm -f "$PIDFILE"
 
 # macOS refuses to fork after certain Objective-C runtime initialization, and
-# Puma's cluster mode forks. Without this the worker dies at boot and every
-# request comes back as a connection reset. Not a yrby problem, and not needed
-# on Linux.
+# Falcon forks its worker from the controller process. Without this the worker
+# dies at boot and every request comes back as a connection reset. Not a yrby
+# problem, and not needed on Linux.
 export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 
 export HTTP_PORT="$PORT"
 export TARGET_PORT
-export WEB_CONCURRENCY=1
 
 # One secret configures both halves: AnyCable derives the HTTP RPC key and the
 # broadcast key from it on the Ruby side and the Go side alike.
@@ -61,7 +61,7 @@ export ANYCABLE_MAX_MESSAGE_SIZE="${ANYCABLE_MAX_MESSAGE_SIZE:-131072}"
 # the visitor rather than the proxy.
 export ANYCABLE_HEADERS="${ANYCABLE_HEADERS:-cookie,x-forwarded-for}"
 
-bundle exec thrust bin/rails server > "$LOG" 2>&1 &
+bundle exec thrust bin/serve > "$LOG" 2>&1 &
 echo $! > "$PIDFILE"
 
 for _ in $(seq 1 60); do
@@ -73,7 +73,7 @@ for _ in $(seq 1 60); do
     -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
     "http://127.0.0.1:$PORT/cable" 2>/dev/null | head -c 200 || true)
   if [ "$page" = "200" ] && [[ "$cable" == *welcome* ]]; then
-    echo "boot_server.sh: healthy on $PORT (thrust pid $(cat "$PIDFILE"), puma :$TARGET_PORT)"
+    echo "boot_server.sh: healthy on $PORT (thrust pid $(cat "$PIDFILE"), falcon :$TARGET_PORT)"
     exit 0
   fi
   sleep 1

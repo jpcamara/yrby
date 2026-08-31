@@ -33,8 +33,8 @@ module Site
 
     # Action Cable does not serve the WebSocket here; the anycable-go embedded in
     # thrust does, and calls back over the HTTP RPC endpoint AnyCable mounts at
-    # /_anycable. Unmounting Rails' own /cable makes that explicit: hitting Puma
-    # directly can't reach a cable that has no server behind it.
+    # /_anycable. Unmounting Rails' own /cable makes that explicit: hitting the
+    # Rails server directly can't reach a cable that has no server behind it.
     config.action_cable.mount_path = nil
 
     # What action_cable_meta_tag renders for the browser. thrust serves the

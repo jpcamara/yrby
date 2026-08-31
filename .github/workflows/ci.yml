@@ -283,7 +283,7 @@ jobs:
         run: bin/rails test
 
       # Two real Chrome windows against the full deployment shape: thrust, the
-      # embedded AnyCable server, and Puma with one worker. Rich text syncs, a
+      # embedded AnyCable server, and Falcon with one worker. Rich text syncs, a
       # second room is a different document, cell-level merges survive, kanban
       # syncs — and presence goes out as AnyCable whispers rather than reaching
       # Ruby at all, which the harness counts rather than assumes.

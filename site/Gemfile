@@ -21,13 +21,18 @@ gem "railties", *rails_version
 # built by bun and served as plain static files.
 gem "propshaft"
 
-# The app server is stock Puma, and it never sees a WebSocket. anycable-thruster
-# is Thruster with anycable-go embedded in the proxy: Go terminates every socket
-# at /cable and calls back into Rails over HTTP RPC, so Puma's threads are only
-# ever handling short RPC requests and page renders. `thrust bin/rails server`
-# runs both.
+# anycable-thruster is Thruster with anycable-go embedded in the proxy: Go
+# terminates every socket at /cable and calls back into Rails over HTTP RPC.
+# Behind it, Falcon serves the Rack app — the docs pages and the RPC mount —
+# on its fiber reactor. `thrust bin/serve` runs the whole stack.
+#
+# Falcon rather than Puma for two reasons. The requests this app serves are
+# short and IO-shaped, which is the fiber scheduler's home ground. And it
+# dogfoods the server yrby's own CI proves the native extension under: the
+# demo e2e boots both Puma and Falcon deliberately, and this site is the
+# Falcon deployment of that pair.
 gem "anycable-thruster"
-gem "puma", ">= 6.0"
+gem "falcon", ">= 0.55"
 
 # The Rails side of AnyCable: the RPC endpoint mounted in this app, the
 # any_cable broadcast adapter, channel state, and whispers.

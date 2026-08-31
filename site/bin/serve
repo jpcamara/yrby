@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# The Rails server behind thrust: Falcon, one process.
+#
+# thrust wraps this command. Before spawning it, thrust sets PORT to its
+# TARGET_PORT (thruster's internal/service.go does os.Setenv("PORT", ...)), and
+# that is the whole contract between the proxy and its upstream — Puma reads
+# PORT natively, Falcon takes a --bind URL, so this script translates.
+#
+# --count 1 is MANDATORY, not a tuning default. Falcon forks one worker per CPU
+# when unset, and every worker would get its own copy of the in-memory RoomStore
+# — the same room URL would land on different documents depending on which
+# worker took the request, with no error anywhere. The guard below makes a
+# misconfiguration die at boot instead of corrupting rooms quietly.
+set -euo pipefail
+
+for var in FALCON_COUNT WEB_CONCURRENCY; do
+  value="${!var:-1}"
+  if [ "$value" != "1" ]; then
+    echo "bin/serve: $var=$value refused — the document store is process-local," \
+         "so this app runs exactly one Falcon worker (see site/README.md)" >&2
+    exit 1
+  fi
+done
+
+# Plain http (Falcon defaults to https with a self-signed cert); thrust and the
+# embedded anycable-go both reach this over localhost.
+exec bundle exec falcon serve --bind "http://0.0.0.0:${PORT:-3000}" --count 1

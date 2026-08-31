@@ -49,13 +49,11 @@ ENV RAILS_ENV="production" \
     BUNDLE_PATH="/usr/local/bundle" \
     BUNDLE_WITHOUT="development:test"
 
-# thrust listens on HTTP_PORT and proxies to Puma on TARGET_PORT. The
-# anycable-go embedded in thrust answers /cable itself and never proxies it.
+# thrust listens on HTTP_PORT and proxies to Falcon on TARGET_PORT (thrust sets
+# PORT to this value for its upstream, and bin/serve turns that into Falcon's
+# --bind). The anycable-go embedded in thrust answers /cable itself and never
+# proxies it.
 ENV HTTP_PORT="3000" TARGET_PORT="3001"
-
-# One Puma worker, always: the document store is a Hash in that process's
-# memory. config/puma.rb refuses to boot with any other value.
-ENV WEB_CONCURRENCY="1"
 
 # The embedded Go server calls Rails at the mounted RPC path over localhost.
 ENV ANYCABLE_RPC_HOST="http://localhost:3001/_anycable"
@@ -92,6 +90,7 @@ USER rails:rails
 
 EXPOSE 3000
 
-# The default Rails Dockerfile shape, with anycable-thruster in place of
-# thruster: one command runs the proxy, the embedded AnyCable server, and Puma.
-CMD ["bundle", "exec", "thrust", "./bin/rails", "server"]
+# One command runs the proxy, the embedded AnyCable server, and Falcon.
+# bin/serve pins Falcon to ONE worker and refuses to boot otherwise — the
+# document store is a Hash in that process's memory.
+CMD ["bundle", "exec", "thrust", "./bin/serve"]

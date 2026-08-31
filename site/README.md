@@ -6,10 +6,10 @@ a Yjs document in one process's memory, behind the channel's `on_load` and
 `on_change` hooks.
 
 WebSockets are served by [anycable-thruster](https://github.com/anycable/thruster):
-Thruster with anycable-go embedded in the proxy. `thrust bin/rails server` runs
-the proxy, the AnyCable server, and Puma as one command. Go holds every socket
-and calls back into Rails over HTTP RPC, so a Puma thread only ever handles a
-short request.
+Thruster with anycable-go embedded in the proxy. `thrust bin/serve` runs the
+proxy, the AnyCable server, and Falcon as one command. Go holds every socket and
+calls back into Rails over HTTP RPC, so the Ruby side only ever handles a short
+request.
 
 It runs on the **published** packages, not on the checkout it sits inside:
 `yrby` and `yrby-rails` from RubyGems, `yrby-client` from npm. If a page here
@@ -38,16 +38,19 @@ cd frontend && bun install && bun run build && cd ..
 PORT=3000 frontend/boot_server.sh
 ```
 
-`boot_server.sh` sets the AnyCable environment, runs `thrust bin/rails server`,
-waits until both the pages and the cable answer, and writes a pidfile. Running
-`bin/rails server` on its own gets you the pages and no WebSocket: Rails' own
-`/cable` mount is turned off, because the cable belongs to the Go server in the
-proxy.
+`boot_server.sh` sets the AnyCable environment, runs `thrust bin/serve`, waits
+until both the pages and the cable answer, and writes a pidfile. `bin/serve` is
+the upstream half of the thrust contract: thrust sets `PORT` to its
+`TARGET_PORT` before spawning its command, and the script translates that into
+Falcon's `--bind`. Running Falcon on its own gets you the pages and no
+WebSocket: Rails' own `/cable` mount is turned off, because the cable belongs to
+the Go server in the proxy.
 
 On macOS, export `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` first if you boot by
-hand. Puma's cluster mode forks, and macOS refuses to fork after certain
-Objective-C runtime initialization; without it the worker dies at boot and every
-request comes back as a connection reset. `boot_server.sh` sets it for you.
+hand. Falcon forks its worker from the controller process, and macOS refuses to
+fork after certain Objective-C runtime initialization; without it the worker
+dies at boot and every request comes back as a connection reset.
+`boot_server.sh` sets it for you.
 
 Tests:
 
@@ -57,7 +60,7 @@ cd frontend && bun run lint
 ```
 
 Two-browser end to end, against the full stack — proxy, embedded AnyCable, and
-Puma, exactly as deployed:
+Falcon, exactly as deployed:
 
 ```bash
 cd frontend
@@ -94,29 +97,41 @@ whose tab is open survives a restart; a room whose tabs are all closed does not.
 ## The stack
 
 ```
-browser ──ws──► thrust (Go) ──HTTP RPC──► Puma ──► DocumentChannel ──► RoomStore
-        ──http─►    │                                                  (memory)
-                    └──► Puma (pages)
+browser ──ws──► thrust (Go) ──HTTP RPC──► Falcon ──► DocumentChannel ──► RoomStore
+        ──http─►    │                                                    (memory)
+                    └──► Falcon (pages)
 ```
 
-`thrust bin/rails server` is one command and one container. Inside it,
-anycable-go owns `/cable`, proxies everything else to Puma, and calls Rails back
-at `/_anycable` — the HTTP RPC endpoint AnyCable mounts in the app — for
-connect, subscribe, and every message. Rails hands broadcasts back to the Go
-server over localhost. No Redis in either direction, because there is one node.
+`thrust bin/serve` is one command and one container. Inside it, anycable-go owns
+`/cable`, proxies everything else to Falcon, and calls Rails back at
+`/_anycable` — the HTTP RPC endpoint AnyCable mounts in the app — for connect,
+subscribe, and every message. Rails hands broadcasts back to the Go server over
+localhost. No Redis in either direction, because there is one node.
 
 The split matters for what this site costs to run. Ruby holds nothing between
 messages: a connected-but-idle client is a goroutine in Go, not a thread or an
-object in Puma. And awareness never reaches Ruby at all — see Presence below.
+object in Ruby. And awareness never reaches Ruby at all — see Presence below.
+
+### Why Falcon behind the proxy
+
+The Ruby side's whole workload is short HTTP requests — page renders and RPC
+calls — which is the fiber reactor's home ground: no thread pool to size, and a
+request that blocks on IO yields instead of holding a worker. It also dogfoods
+the server yrby's own CI proves the native extension under. The demo app's e2e
+suite boots under both Puma and Falcon deliberately, and this site is the Falcon
+deployment of that pair, running the same extension inside the fiber scheduler
+in production shape.
 
 ### Why one process
 
-`WEB_CONCURRENCY=1`, always; `config/puma.rb` refuses to boot with anything
-else. The store is a Hash in that worker's memory, so a second worker would
-serve different documents under the same URL. One machine on Fly, one container
-under Kamal, for the same reason. **This app scales up, not out**, and that is
-deliberate for a demo site: it is the cheapest honest way to show the channel
-working, and it keeps the store small enough to read in one file.
+Falcon runs with `--count 1`, always; `bin/serve` refuses to boot with anything
+else (Falcon's default is one worker per CPU, and every worker would get its own
+copy of the store — the same room URL landing on different documents depending
+on which worker took the request, with no error anywhere). The store is a Hash
+in that worker's memory. One machine on Fly, one container under Kamal, for the
+same reason. **This app scales up, not out**, and that is deliberate for a demo
+site: it is the cheapest honest way to show the channel working, and it keeps
+the store small enough to read in one file.
 
 That is a property of this store, not of yrby. Swapping `RoomStore` for a shared
 one is all a multi-process deployment needs — the channel is unchanged, and
@@ -132,14 +147,17 @@ as JSON in the RPC exchange. The key is passed to `sync_receive` on every call
 for the same reason. This is the AnyCable shape yrby's README documents, and the
 site is a working example of it.
 
-### Thread safety
+### Concurrency safety
 
-Puma runs five threads, and every one of them can be handling an RPC call for a
-different room at the same time. `RoomStore`, `ConnectionLimiter`, and the
-sweeper all hold explicit mutexes: the store's own mutex guards the room table,
-each room has its own for its state, and the two are never held in an order that
-could deadlock. Nothing here is safe by accident because it happens to be
-single-threaded — it isn't.
+Under Falcon the RPC requests are fibers, mostly on one thread, switching at IO
+and scheduler yields rather than preemptively. The mutexes stay anyway:
+`RoomStore`, `ConnectionLimiter`, and the sweeper all take explicit locks — the
+store's mutex guards the room table, each room has its own for its state, and
+the two are never held in an order that could deadlock. A fiber can yield
+anywhere IO happens, the reactor is free to serve requests concurrently, the
+sweeper is a real `Thread`, and an uncontended mutex costs nothing. The code is
+correct under Puma's preemptive threads too, which is what the test suite runs
+it under.
 
 ## Throttling
 
@@ -301,9 +319,10 @@ machine that swaps and dies. On memory alone the Go side would hold several
 thousand.
 
 CPU is the real limit, and it is Ruby's. Every document frame is an RPC call
-into Puma's five threads and a native CRDT apply. yrby releases the GVL for that
-work, so a `shared-cpu-1x` genuinely parallelizes it, but 500 people typing at
-once on one shared vCPU is not a thing this machine does well. Presence is the
+into the Falcon reactor and a native CRDT apply. yrby releases the GVL for that
+work — the fiber scheduler keeps serving while the native code runs — but 500
+people typing at once on one shared vCPU is not a thing this machine does
+well. Presence is the
 part that does not count: awareness is whispered client-to-client by Go and
 never reaches Ruby, which is exactly the traffic that would otherwise scale with
 pointer movement. Realistically this is comfortable holding several hundred

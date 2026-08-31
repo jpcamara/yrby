@@ -7,8 +7,8 @@
 # The alternative to fly.toml, not an addition to it. Pick one.
 #
 # ONE host and ONE container, on purpose. The document store is a Hash in the
-# Puma worker's memory, and there is exactly one worker, so a second container
-# would serve different rooms behind the same URL.
+# single Falcon worker's memory (bin/serve enforces --count 1), so a second
+# container would serve different rooms behind the same URL.
 
 service: yrby-site
 

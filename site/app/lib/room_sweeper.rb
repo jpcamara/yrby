@@ -5,8 +5,10 @@
 # traffic rather than by abuse. A room with nobody in it and no writes for
 # ROOM_IDLE_TTL is deleted.
 #
-# One plain Ruby thread in the Puma worker, started once at boot. It does nothing
-# but sleep, and it takes the store's mutex only for the moment it sweeps.
+# One plain Ruby thread in the server process, started once at boot. It does
+# nothing but sleep, and it takes the store's mutex only for the moment it
+# sweeps. Under Falcon it runs alongside the fiber reactor; a sleeping thread is
+# free either way.
 module RoomSweeper
   class << self
     def start(store: RoomStore.current, interval: Limits::SWEEP_INTERVAL)

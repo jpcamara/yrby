@@ -6,7 +6,7 @@
 # config/limits.rb).
 #
 # Sockets terminate in the anycable-go embedded in thrust, which calls this
-# channel over HTTP RPC. That has one consequence worth knowing before reading
+# channel over HTTP RPC served by Falcon. That has one consequence worth knowing before reading
 # further: a fresh channel instance is built for every command, so an instance
 # variable set in `subscribed` is gone by the time `receive` runs. Everything
 # that has to survive between commands is declared with `state_attr_accessor`,
