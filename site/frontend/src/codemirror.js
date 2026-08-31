@@ -6,6 +6,7 @@ import * as Y from "yjs"
 import { EditorState } from "@codemirror/state"
 import { EditorView, basicSetup } from "codemirror"
 import { javascript } from "@codemirror/lang-javascript"
+import { oneDark } from "@codemirror/theme-one-dark"
 import { yCollab } from "y-codemirror.next"
 import { connectRoom, user } from "./room.js"
 
@@ -20,7 +21,7 @@ new EditorView({
   parent: mount,
   state: EditorState.create({
     doc: ytext.toString(),
-    extensions: [basicSetup, javascript(), yCollab(ytext, provider.awareness)],
+    extensions: [basicSetup, javascript(), oneDark, yCollab(ytext, provider.awareness)],
   }),
 })
 

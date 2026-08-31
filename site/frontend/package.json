@@ -3,14 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build.mjs",
+    "build": "bun build.mjs && bun run build:css",
     "watch": "bun build.mjs --watch",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build:css": "tailwindcss -i css/site.css -o ../public/site.css --minify",
+    "watch:css": "tailwindcss -i css/site.css -o ../public/site.css --watch"
   },
   "dependencies": {
     "@anycable/web": "^1.1.1",
     "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/state": "^6.4.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.26.0",
     "@tanstack/table-core": "^9.2.4",
     "@tiptap/core": "^2.11.0",
@@ -28,8 +31,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@tailwindcss/cli": "^4.1",
     "agent-browser": "^0.28.0",
     "eslint": "^10.5.0",
-    "globals": "^17.6.0"
+    "globals": "^17.6.0",
+    "tailwindcss": "^4.1"
   }
 }

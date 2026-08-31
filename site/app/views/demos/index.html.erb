@@ -1,13 +1,13 @@
 <% content_for :title, "Demos — yrby" %>
 
-<section>
-  <h1>Demos</h1>
-  <p>
+<section class="mx-auto max-w-3xl">
+  <h1 class="text-3xl font-semibold tracking-tight text-zinc-100">Demos</h1>
+  <p class="mt-4 leading-7 text-zinc-400">
     Every demo runs on one <code>DocumentChannel</code>. The server never looks
     inside the document; it records the CRDT update, acks it, and relays it. What
     changes from page to page is only the Yjs shape the browser binds to.
   </p>
-  <p class="warning">
+  <p class="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-3 text-sm leading-6 text-amber-200/90">
     Rooms are public and temporary. Opening a demo puts you in a room of your
     own; share the URL to collaborate. Anyone with the link can edit, and a
     room untouched for 24 hours is deleted.

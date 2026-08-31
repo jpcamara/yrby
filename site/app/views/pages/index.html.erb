@@ -1,50 +1,57 @@
 <% content_for :title, "yrby — Rails as a Yjs backend" %>
 
-<section class="hero">
-  <h1>yrby</h1>
-  <p class="lede">
-    yrby makes Rails a real Yjs backend. It binds
-    <a href="https://github.com/y-crdt/y-crdt">y-crdt</a>, the Rust engine behind
-    Y.js, into Ruby, and builds the rest of the stack around it: a sync server
-    for Action Cable and AnyCable, a browser provider, and server-side reading
-    and rendering of the documents. Real-time collaboration in a Rails app with
-    no Node process anywhere in the path.
+<section class="pt-6 pb-16 sm:pt-14">
+  <p class="mb-4 font-mono text-sm text-accent">gem install yrby-rails</p>
+  <h1 class="max-w-3xl text-4xl font-semibold tracking-tight text-zinc-100 sm:text-5xl">
+    Rails as a real Yjs backend.
+  </h1>
+  <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
+    yrby binds <a class="text-zinc-200 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/y-crdt/y-crdt">y-crdt</a>,
+    the Rust engine behind Y.js, into Ruby — and builds the rest of the stack
+    around it: a sync server for Action Cable and AnyCable, a browser provider,
+    and server-side reading and rendering of the documents. Real-time
+    collaboration with no Node process anywhere in the path.
   </p>
 
-  <pre class="install"><code>gem install yrby-rails # depends on yrby
-npm install yrby-client</code></pre>
+  <div class="mt-8 flex flex-wrap items-center gap-3">
+    <%= link_to "Read the docs", doc_path("getting-started"),
+                class: "rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500" %>
+    <%= link_to "Try the demos", demos_path,
+                class: "rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:border-zinc-500 hover:text-white" %>
+  </div>
 
-  <p class="cta">
-    <%= link_to "Read the docs", doc_path("getting-started"), class: "button" %>
-    <%= link_to "Try the demos", demos_path, class: "button button--ghost" %>
-  </p>
+  <div class="mt-12 max-w-3xl">
+    <p class="mb-2 text-sm font-semibold text-zinc-500">
+      The whole server side of a collaborative document is one channel:
+    </p>
+    <%= code_block "ruby", <<~RUBY %>
+      class DocumentChannel < ApplicationCable::Channel
+        include Y::ActionCable
+
+        on_load   { |key|         Y::Document.load_state(key) }
+        on_change { |key, update| Y::Document.append(key, update) }
+
+        def subscribed    = sync_subscribed(params[:id])
+        def receive(data) = sync_receive(data, params[:id])
+      end
+    RUBY
+    <p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
+      Every update is recorded through <code>on_change</code> before it is
+      acked or broadcast to anyone. Replaying your store always rebuilds the
+      document, on one process or a hundred.
+    </p>
+  </div>
 </section>
 
-<section>
-  <h2>The whole server side is one channel</h2>
-  <pre><code>class DocumentChannel &lt; ApplicationCable::Channel
-  include Y::ActionCable
-
-  on_load   { |key|         Y::Document.load_state(key) }
-  on_change { |key, update| Y::Document.append(key, update) }
-
-  def subscribed    = sync_subscribed(params[:id])
-  def receive(data) = sync_receive(data, params[:id])
-end</code></pre>
-  <p>
-    Every update is recorded through <code>on_change</code> before it is acked or
-    broadcast to anyone. Replaying your store always rebuilds the document, on
-    one process or a hundred.
-  </p>
-</section>
-
-<section>
-  <h2>Any Yjs shape, no editor required</h2>
-  <p>
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="text-2xl font-semibold tracking-tight text-zinc-100">
+    Any Yjs shape, no editor required
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
     The server treats a document as opaque CRDT state, so the same channel syncs
     a rich text editor, a spreadsheet, a whiteboard, or anything else with a Yjs
     binding. Each demo below runs against this site, on the store described in
-    <%= link_to "Storage", doc_path("storage") %>.
+    <%= link_to "Storage", doc_path("storage"), class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>.
   </p>
   <ul class="demo-list">
     <% Demos::ALL.each do |demo| %>
@@ -57,11 +64,11 @@ end</code></pre>
   </ul>
 </section>
 
-<section>
-  <h2>This site</h2>
-  <p>
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="text-2xl font-semibold tracking-tight text-zinc-100">This site</h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
     The site you are reading is a Rails app in the yrby repo
-    (<a href="https://github.com/jpcamara/yrby/tree/main/site"><code>site/</code></a>).
+    (<a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/jpcamara/yrby/tree/main/site"><code>site/</code></a>).
     Its demo rooms run the canonical stack these docs teach —
     <code>Y::Document.load_state</code> / <code>Y::Document.append</code> on
     SQLite — behind the channel's two hooks. Its README covers the store, the

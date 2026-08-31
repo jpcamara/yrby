@@ -23,6 +23,11 @@ class DocPage
 
   README_URL = "https://github.com/jpcamara/yrby/blob/main/README.md".freeze
 
+  # The syntect theme Commonmarker highlights fenced code with, server-side.
+  # base16-eighties.dark is a neutral dark grey whose token colors sit well on
+  # the site's panel color (the stylesheet overrides the background to match).
+  CODE_THEME = "base16-eighties.dark".freeze
+
   ROOT = Rails.root.join("docs")
 
   class << self
@@ -79,7 +84,8 @@ class DocPage
         extension: { table: true, autolink: true, strikethrough: true,
                      header_ids: "", footnotes: false },
         render: { hardbreaks: false, unsafe: false }
-      }
+      },
+      plugins: { syntax_highlighter: { theme: CODE_THEME } }
     ).html_safe
   end
 

@@ -27,13 +27,16 @@ COPY Gemfile Gemfile.lock ./
 RUN bundle install && \
     rm -rf ~/.bundle "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git
 
-# --- demo bundles -------------------------------------------------------------
+# --- demo bundles + stylesheet ------------------------------------------------
 FROM docker.io/oven/bun:1 AS assets
 WORKDIR /build
 COPY frontend/package.json frontend/bun.lock frontend/bunfig.toml ./frontend/
 RUN cd frontend && bun install --frozen-lockfile
 COPY frontend ./frontend
-RUN cd frontend && bun build.mjs
+# Tailwind scans the ERB templates for class names (@source in css/site.css),
+# so the app's views ride along into this stage.
+COPY app ./app
+RUN cd frontend && bun run build
 
 # --- runtime ------------------------------------------------------------------
 FROM docker.io/library/ruby:$RUBY_VERSION-slim
@@ -86,11 +89,9 @@ ENV MAX_REQUEST_BODY="65536"
 
 COPY --from=gems /usr/local/bundle /usr/local/bundle
 COPY . .
+# Everything bun built — the demo bundles and site.css — lands in public/ and
+# is served as plain static files; there is no asset pipeline to run.
 COPY --from=assets /build/public /rails/public
-
-# Digest the stylesheet at build time so a request never pays for it. No
-# database and no secrets are needed for this; the dummy key is discarded.
-RUN SECRET_KEY_BASE=dummy bundle exec rails assets:precompile
 
 # storage/ is the SQLite volume mount point; the rails user must own it so
 # db:prepare can create the database file on a fresh volume.

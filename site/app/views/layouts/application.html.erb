@@ -1,42 +1,53 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="bg-zinc-950">
   <head>
     <title><%= content_for(:title) || "yrby" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="description" content="<%= content_for(:description) || "yrby makes Rails a real Yjs backend: y-crdt in Ruby, a sync server for Action Cable and AnyCable, a browser provider, and server-side rendering." %>">
+    <meta name="theme-color" content="#09090b">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
     <%# Tells createConsumer() where the cable server is. %>
     <%= action_cable_meta_tag %>
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <%= stylesheet_link_tag :application %>
+    <%# Built by `bun run build:css` (Tailwind v4); served as a plain static
+        file, like the demo bundles. %>
+    <link rel="stylesheet" href="/site.css">
     <%= yield :head %>
   </head>
 
-  <body>
-    <header class="site-header">
-      <a class="brand" href="/">yrby</a>
-      <nav>
-        <%= link_to "Docs", doc_path("getting-started") %>
-        <%= link_to "Demos", demos_path %>
-        <a href="https://github.com/jpcamara/yrby">GitHub</a>
-        <a href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
-      </nav>
+  <body class="flex min-h-dvh flex-col">
+    <header class="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/85 backdrop-blur">
+      <div class="mx-auto flex max-w-5xl items-center gap-6 px-5 py-3">
+        <a class="font-mono text-lg font-semibold tracking-tight text-zinc-100" href="/">
+          yrby<span class="text-accent">.</span>
+        </a>
+        <nav class="flex items-center gap-5 text-sm text-zinc-400">
+          <%= link_to "Docs", doc_path("getting-started"), class: "hover:text-zinc-100" %>
+          <%= link_to "Demos", demos_path, class: "hover:text-zinc-100" %>
+        </nav>
+        <nav class="ml-auto flex items-center gap-5 text-sm text-zinc-400">
+          <a class="hover:text-zinc-100" href="https://github.com/jpcamara/yrby">GitHub</a>
+          <a class="hidden hover:text-zinc-100 sm:inline" href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
+        </nav>
+      </div>
     </header>
 
-    <main><%= yield %></main>
+    <main class="mx-auto w-full max-w-5xl flex-1 px-5 py-10"><%= yield %></main>
 
-    <footer class="site-footer">
-      <p>
-        yrby is MIT licensed. The
-        <a href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>
-        is the canonical reference; these pages are a copy of it.
-      </p>
-      <p>
-        Demo rooms are public and temporary: anyone with the link can edit,
-        and rooms untouched for a day are deleted. Don't put anything in them
-        you would miss.
-      </p>
+    <footer class="border-t border-zinc-800/80">
+      <div class="mx-auto max-w-5xl space-y-2 px-5 py-8 text-sm text-zinc-500">
+        <p>
+          yrby is MIT licensed. The
+          <a class="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>
+          is the canonical reference; these pages are a copy of it.
+        </p>
+        <p>
+          Demo rooms are public and temporary: anyone with the link can edit,
+          and rooms untouched for a day are deleted. Don't put anything in them
+          you would miss.
+        </p>
+      </div>
     </footer>
   </body>
 </html>

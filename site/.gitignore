@@ -14,8 +14,8 @@
 /public/codemirror.js
 /public/*.js.map
 
-# Propshaft output
-/public/assets
+# Built stylesheet (Tailwind via `bun run build:css`)
+/public/site.css
 
 # Runtime
 /log/*

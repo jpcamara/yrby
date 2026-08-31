@@ -399,10 +399,12 @@ the server's `{ notice: ... }` envelopes. `yrby-client`'s provider ignores
 envelopes it doesn't recognize, and the mixin it builds closes over the provider
 rather than `this`, so composing a `received` handler around it is safe.
 
-### Building the bundles
+### Building the bundles and the stylesheet
 
 ```bash
-cd frontend && bun run build     # or bun run watch
+cd frontend && bun run build     # JS bundles + CSS
+bun run watch                    # rebuild bundles on change
+bun run watch:css                # rebuild the stylesheet on change
 ```
 
 One entry per demo, output to `public/<slug>.js`, which the page loads by slug.
@@ -412,6 +414,29 @@ the provider and the editor binding end up on different `Y.Doc` internals,
 y-prosemirror throws "Method unimplemented" applying remote updates, and nothing
 about the symptom points at module resolution. The long comment at the top of
 `build.mjs` has the details.
+
+## Frontend styling
+
+Tailwind v4, through the same bun toolchain as the bundles: `bun run build:css`
+compiles `frontend/css/site.css` to `public/site.css` (a few KB gzipped,
+purged), served as a plain static file. There is no asset pipeline — Propshaft
+is gone, and everything the browser loads is a file bun built.
+
+The design is dark-only: zinc-950 background, one ruby accent for links, CTAs,
+and focus rings, and nothing else colored. Page structure is Tailwind utilities
+in the ERB templates; a small component layer in `site.css` covers the two
+things utilities can't reach — DOM the demo JS builds at runtime (cards, chips,
+notes, grid cells; every one of those classes is load-bearing for the JS and
+the e2e, so they are styled, never renamed) and the docs' rendered markdown.
+
+Code blocks are highlighted server-side by Commonmarker's built-in syntect
+highlighter (`DocPage::CODE_THEME`), the same pipeline for docs pages and the
+home page's snippets, so there is no client-side highlighting and no extra gem.
+
+Two lessons are baked into the stylesheet's comments: no `scroll-smooth`
+(animated scrolling makes any automated scroll-then-click race the animation —
+it broke the e2e, and the same race hits real users of assistive tech), and a
+global `scroll-margin-top` so nothing scrolls under the sticky header.
 
 ## What this app is not
 

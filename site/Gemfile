@@ -23,10 +23,6 @@ gem "railties", *rails_version
 # wants, so database.yml carries no pragma tuning.
 gem "sqlite3", ">= 2.1"
 
-# Digests and serves app/assets/stylesheets. The demo bundles (public/*.js) are
-# built by bun and served as plain static files.
-gem "propshaft"
-
 # anycable-thruster is Thruster with anycable-go embedded in the proxy: Go
 # terminates every socket at /cable and calls back into Rails over HTTP RPC.
 # Behind it, Falcon serves the Rack app — the docs pages and the RPC mount —

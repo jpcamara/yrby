@@ -2,31 +2,37 @@
 
 <div class="demo">
   <header class="demo-header">
-    <h1><%= @demo.title %></h1>
+    <h1 class="text-3xl font-semibold tracking-tight text-zinc-100"><%= @demo.title %></h1>
 
-    <nav class="demo-nav">
+    <nav class="demo-nav mt-3 mb-5 text-sm text-zinc-500">
       Same room, different shape:
       <% Demos::ALL.each_with_index do |demo, i| %><%= " · " if i.positive? %><%
-        if demo.slug == @demo.slug %><strong><%= demo.title %></strong><%
-        else %><%= link_to demo.title, demo_room_path(demo.slug, @room) %><% end %><% end %>
+        if demo.slug == @demo.slug %><strong class="font-semibold text-zinc-200"><%= demo.title %></strong><%
+        else %><%= link_to demo.title, demo_room_path(demo.slug, @room), class: "text-zinc-400 hover:text-accent" %><% end %><% end %>
     </nav>
 
-    <div class="roombar">
-      <span class="roombar-label">Room</span>
-      <input id="room-url" type="text" readonly value="<%= demo_room_url(@demo.slug, @room) %>" aria-label="room link">
-      <button id="copy-room" type="button">Copy link</button>
-      <button id="second-window" type="button">Open a second window</button>
+    <div class="roombar flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-panel p-2">
+      <span class="pl-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">Room</span>
+      <input id="room-url" type="text" readonly value="<%= demo_room_url(@demo.slug, @room) %>"
+             aria-label="room link"
+             class="min-w-48 flex-[1_1_20rem] rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 font-mono text-xs text-zinc-400">
+      <button id="copy-room" type="button"
+              class="cursor-pointer rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:border-zinc-500 hover:text-white">Copy link</button>
+      <button id="second-window" type="button"
+              class="cursor-pointer rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500">Open a second window</button>
     </div>
-    <p class="roombar-note">
+    <p class="roombar-note mt-2 text-xs leading-5 text-zinc-500">
       This room is yours until you share it. Open a second window (or send the
       link) and edit in both — that is the demo. Rooms are public, capped at
       <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB of
       document, and deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours untouched.
     </p>
 
-    <%= render "demos/#{@demo.slug}_intro" %>
+    <div class="mt-4 max-w-2xl space-y-3 text-sm leading-6 text-zinc-400 [&_a]:text-accent">
+      <%= render "demos/#{@demo.slug}_intro" %>
+    </div>
 
-    <div id="presence" class="presence"></div>
+    <div id="presence" class="presence mt-4 min-h-6"></div>
     <p id="status" class="status">connecting…</p>
     <p id="notice" class="notice" hidden></p>
   </header>

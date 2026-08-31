@@ -1,0 +1,398 @@
+/* The site's whole stylesheet: Tailwind v4, built by bun (`bun run build:css`)
+ * into public/site.css and served as a plain static file, like the demo
+ * bundles.
+ *
+ * Architecture: utilities in the ERB templates for page structure and chrome;
+ * the component layer below for two kinds of thing utilities can't reach —
+ * DOM the demo JS builds at runtime (cards, chips, notes, grid cells) and the
+ * rendered markdown of the docs pages. Dark only, one accent (a ruby red),
+ * used for links, CTAs, and focus rings and nothing else.
+ */
+@import "tailwindcss";
+
+@source "../src";
+@source "../../app/views";
+@source "../../app/helpers";
+
+@theme {
+  /* The accent. rose-400 for text on dark (7:1 on zinc-950), rose-600 for
+   * solid CTA surfaces with white text. */
+  --color-accent: #fb7185;
+  --color-accent-strong: #e11d48;
+  /* The panel every code block and editor surface sits on: a shade above the
+   * page background, below the borders. */
+  --color-panel: #121215;
+}
+
+/* ---------------------------------------------------------------------------
+ * Base
+ * ------------------------------------------------------------------------ */
+@layer base {
+  /* No scroll-smooth, deliberately. Animated scrolling makes any automated
+   * click race the animation — coordinates get computed while the page is
+   * still moving — which broke the e2e's scroll-then-click sequences, and it
+   * is the same race a screen-reader or keyboard user hits. Anchor jumps just
+   * jump.
+   *
+   * The header is sticky, so anything scrolled "into view" — anchor jumps and
+   * the e2e harness's scrollintoview-before-click alike — needs clearance or
+   * it lands underneath the header (and a click at that point hits the header,
+   * not the target). */
+  * {
+    scroll-margin-top: 4.5rem;
+  }
+
+  body {
+    @apply bg-zinc-950 text-zinc-300 antialiased;
+  }
+
+  ::selection {
+    @apply bg-rose-500/30 text-zinc-100;
+  }
+
+  /* Visible focus everywhere; the accent doubles as the focus color. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-rose-500;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Code blocks — the hero of a docs site.
+ *
+ * Commonmarker highlights fenced blocks server-side (syntect,
+ * base16-eighties.dark) and stamps its own background color inline; the
+ * override keeps every block on the one panel color, and the token colors
+ * were designed for a background this dark.
+ * ------------------------------------------------------------------------ */
+@layer components {
+  pre {
+    background-color: var(--color-panel) !important;
+    @apply my-5 overflow-x-auto rounded-xl border border-zinc-800 px-5 py-4
+           text-[0.8rem] leading-relaxed;
+  }
+
+  pre code {
+    @apply block bg-transparent p-0 font-mono whitespace-pre;
+  }
+
+  /* Inline code, everywhere prose appears. */
+  :not(pre) > code {
+    @apply rounded-md bg-zinc-800/70 px-1.5 py-0.5 font-mono text-[0.85em]
+           text-zinc-200;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Docs prose (rendered markdown). Hand-styled rather than a typography
+   * plugin: the markdown is ours, so the surface area is known.
+   * ---------------------------------------------------------------------- */
+  .docs-body {
+    @apply max-w-[70ch] text-[0.95rem] leading-7;
+  }
+
+  .docs-body h1 {
+    @apply mt-2 mb-4 text-3xl font-semibold tracking-tight text-zinc-100;
+  }
+
+  .docs-body h2 {
+    @apply mt-12 mb-3 scroll-mt-24 border-b border-zinc-800/70 pb-2 text-xl
+           font-semibold tracking-tight text-zinc-100;
+  }
+
+  .docs-body h3 {
+    @apply mt-8 mb-2 scroll-mt-24 text-base font-semibold text-zinc-100;
+  }
+
+  .docs-body h4,
+  .docs-body h5 {
+    @apply mt-6 mb-2 scroll-mt-24 text-sm font-semibold text-zinc-200;
+  }
+
+  .docs-body p {
+    @apply my-4;
+  }
+
+  .docs-body a {
+    @apply text-accent underline decoration-rose-400/40 underline-offset-2
+           hover:decoration-rose-400;
+  }
+
+  .docs-body ul,
+  .docs-body ol {
+    @apply my-4 space-y-1.5 pl-6;
+  }
+
+  .docs-body ul {
+    @apply list-disc marker:text-zinc-600;
+  }
+
+  .docs-body ol {
+    @apply list-decimal marker:text-zinc-500;
+  }
+
+  .docs-body table {
+    @apply my-5 w-full border-collapse text-sm;
+  }
+
+  .docs-body th {
+    @apply border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-left
+           font-semibold text-zinc-200;
+  }
+
+  .docs-body td {
+    @apply border border-zinc-800 px-3 py-1.5 align-top;
+  }
+
+  .docs-body blockquote {
+    @apply my-4 border-l-2 border-zinc-700 pl-4 text-zinc-400;
+  }
+
+  .docs-body hr {
+    @apply my-8 border-zinc-800;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Shared demo chrome the JS builds or updates at runtime. Every class and
+   * id here is load-bearing: the demo bundles and the e2e harness select on
+   * them, so they are styled, never renamed.
+   * ---------------------------------------------------------------------- */
+
+  /* Presence chips (room.js renders these). Peer colors are light 400-level
+   * pastels, so the readable text on them is dark, not white. */
+  .chip {
+    @apply mr-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold
+           text-zinc-900;
+  }
+
+  .status {
+    @apply my-1 text-xs text-zinc-500;
+  }
+
+  .status[data-state="connected"],
+  .status[data-state="synced"] {
+    @apply text-emerald-400;
+  }
+
+  .status[data-state="disconnected"] {
+    @apply text-rose-400;
+  }
+
+  .notice {
+    @apply my-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3
+           py-2 text-sm text-amber-200;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Rich text (Tiptap mounts into #editor and generates .tiptap).
+   * ---------------------------------------------------------------------- */
+  #editor .tiptap {
+    @apply min-h-80 rounded-xl border border-zinc-800 bg-panel px-5 py-4
+           leading-relaxed text-zinc-200 outline-none;
+  }
+
+  #editor .tiptap:focus-within {
+    @apply border-rose-500/60;
+  }
+
+  #editor .tiptap :is(h1, h2, h3) {
+    @apply mt-4 mb-2 font-semibold text-zinc-100;
+  }
+
+  #editor .tiptap h1 {
+    @apply text-2xl;
+  }
+
+  #editor .tiptap h2 {
+    @apply text-xl;
+  }
+
+  #editor .tiptap :is(ul, ol) {
+    @apply my-2 list-disc pl-6;
+  }
+
+  #editor .tiptap ol {
+    @apply list-decimal;
+  }
+
+  #editor .tiptap blockquote {
+    @apply my-2 border-l-2 border-zinc-700 pl-3 text-zinc-400;
+  }
+
+  /* Remote carets (CollaborationCursor). */
+  .collaboration-cursor__caret {
+    @apply pointer-events-none relative -mx-px border-x border-current
+           break-normal;
+  }
+
+  .collaboration-cursor__label {
+    @apply absolute -top-5 -left-px rounded-sm rounded-bl-none px-1.5 py-0.5
+           text-[0.65rem] leading-normal font-semibold whitespace-nowrap
+           text-zinc-900 select-none;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Code demo (CodeMirror mounts into #editor; oneDark carries the editor's
+   * own colors, this is just the frame).
+   * ---------------------------------------------------------------------- */
+  #editor:has(.cm-editor) {
+    @apply overflow-hidden rounded-xl border border-zinc-800;
+  }
+
+  .demo .cm-editor {
+    @apply h-104 text-[13px];
+  }
+
+  .demo .cm-editor.cm-focused {
+    @apply outline-none;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Whiteboard (#canvas; notes are JS-built). Notes keep their light sticky
+   * colors — dark text on them stays readable, and they pop on the dark
+   * canvas.
+   * ---------------------------------------------------------------------- */
+  #canvas {
+    @apply relative h-104 touch-none overflow-hidden rounded-xl border
+           border-zinc-800 bg-panel;
+    background-image:
+      linear-gradient(rgb(255 255 255 / 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  .note {
+    @apply absolute h-20 w-30 cursor-grab rounded-lg p-1 shadow-lg
+           shadow-black/40;
+  }
+
+  .note textarea {
+    @apply h-full w-full resize-none border-0 bg-transparent text-[13px]
+           leading-snug text-zinc-900 outline-none;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Kanban (#board; columns and cards are JS-built).
+   * ---------------------------------------------------------------------- */
+  #board {
+    @apply flex items-start gap-4;
+  }
+
+  .col {
+    @apply min-h-32 flex-1 rounded-xl border border-zinc-800 bg-panel p-3;
+  }
+
+  .col h3 {
+    @apply mt-0.5 mb-2 text-sm font-semibold text-zinc-400;
+  }
+
+  .card {
+    @apply mb-2 flex items-center justify-between gap-2 rounded-lg border
+           border-zinc-800 bg-zinc-900 px-2.5 py-2 text-sm text-zinc-200;
+  }
+
+  .card .t {
+    @apply flex-1;
+  }
+
+  .ctl button {
+    @apply ml-0.5 cursor-pointer rounded-md border border-zinc-700 bg-zinc-800
+           px-1.5 py-px text-xs text-zinc-300 hover:border-zinc-500
+           hover:text-zinc-100;
+  }
+
+  .add input {
+    @apply mt-1 w-full rounded-lg border border-dashed border-zinc-700
+           bg-transparent px-2 py-1.5 text-[13px] text-zinc-200
+           placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Spreadsheet (#grid, #toolbar; rows and cells are JS-built).
+   * ---------------------------------------------------------------------- */
+  #toolbar {
+    @apply my-2 flex items-center gap-1;
+  }
+
+  #toolbar button {
+    @apply h-7 w-7 cursor-pointer rounded-md border border-zinc-700
+           bg-zinc-900 text-[13px] font-semibold text-zinc-300
+           hover:border-zinc-500;
+  }
+
+  #toolbar button.on {
+    @apply border-rose-500 text-zinc-100 ring-1 ring-rose-500;
+  }
+
+  #toolbar .label {
+    @apply mx-1.5 text-xs text-zinc-500;
+  }
+
+  #toolbar #add-row {
+    @apply w-auto border-dashed px-2.5 font-normal;
+  }
+
+  #grid {
+    @apply border-separate border-spacing-0 bg-panel text-[13px];
+  }
+
+  #grid th {
+    @apply border border-zinc-800 bg-zinc-900 px-1 py-0.5 text-left
+           whitespace-nowrap;
+  }
+
+  #grid th button {
+    @apply cursor-pointer border-0 bg-transparent px-1 py-0.5 text-xs
+           font-semibold text-zinc-300 hover:text-zinc-100;
+  }
+
+  #grid th .movecol {
+    @apply px-px text-[9px] font-normal text-zinc-600 hover:text-zinc-300;
+  }
+
+  #grid td {
+    @apply relative border border-zinc-800 p-0;
+  }
+
+  #grid td input {
+    @apply w-44 border-0 bg-transparent px-2 py-1.5 text-[13px] text-zinc-200
+           outline-none;
+  }
+
+  #grid td input:focus {
+    @apply -outline-offset-2 outline-2 outline-rose-500;
+  }
+
+  .peerlabel {
+    @apply absolute -top-2.5 -right-px rounded-sm px-1 py-0.5 text-[9px]
+           leading-none font-semibold text-zinc-900;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Demo/docs list cards (server-rendered, shared by the home page and the
+   * demo index).
+   * ---------------------------------------------------------------------- */
+  .demo-list {
+    @apply my-6 grid list-none gap-3 p-0 sm:grid-cols-2;
+  }
+
+  .demo-list li {
+    @apply rounded-xl border border-zinc-800 bg-panel p-4 transition-colors
+           hover:border-zinc-600;
+  }
+
+  .demo-list li a {
+    @apply font-semibold text-zinc-100 after:absolute after:inset-0
+           hover:text-accent;
+  }
+
+  .demo-list li {
+    @apply relative;
+  }
+
+  .demo-list li code {
+    @apply ml-2;
+  }
+
+  .demo-list li span {
+    @apply mt-1.5 block text-sm text-zinc-400;
+  }
+}

@@ -6,9 +6,10 @@ Rails.application.configure do
   config.consider_all_requests_local = false
   config.action_controller.perform_caching = true
 
-  # Assets are digest stamped by Propshaft; the demo bundles in public/ are
-  # rebuilt on every image build and change name only when the app does, so they
-  # get a shorter life than a year.
+  # Everything in public/ — the demo bundles and site.css, all built by bun —
+  # is served as plain static files with an hour of cache, matching the docs
+  # pages' own max-age. There is no asset pipeline; a deploy's new files are
+  # picked up within the hour, or immediately once a CDN purge is wired up.
   config.public_file_server.headers = { "cache-control" => "public, max-age=#{1.hour.to_i}" }
 
   # Behind Fly's proxy, Kamal's proxy, or Cloudflare — all of which terminate TLS.

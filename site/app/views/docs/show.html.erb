@@ -1,27 +1,30 @@
 <% content_for :title, "#{@page.title} — yrby" %>
 
-<div class="docs">
-  <aside class="docs-nav">
-    <h2>Docs</h2>
-    <ul>
+<div class="gap-12 lg:grid lg:grid-cols-[13rem_minmax(0,1fr)]">
+  <aside class="mb-10 text-sm lg:sticky lg:top-20 lg:mb-0 lg:max-h-[calc(100dvh-7rem)] lg:self-start lg:overflow-y-auto">
+    <h2 class="mb-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">Docs</h2>
+    <ul class="space-y-0.5 border-l border-zinc-800">
       <% DocPage.all.each do |entry| %>
-        <li class="<%= "current" if entry.slug == @page.slug %>">
-          <%= link_to entry.nav, doc_path(entry.slug) %>
+        <li>
+          <%= link_to entry.nav, doc_path(entry.slug),
+                      class: entry.slug == @page.slug ?
+                        "-ml-px block border-l-2 border-rose-500 py-1 pl-3 font-medium text-zinc-100" :
+                        "-ml-px block border-l-2 border-transparent py-1 pl-3 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200" %>
         </li>
       <% end %>
     </ul>
     <% if @page.sections.any? %>
-      <h2>On this page</h2>
-      <ul class="docs-toc">
+      <h2 class="mt-8 mb-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">On this page</h2>
+      <ul class="space-y-1">
         <% @page.sections.each do |text, anchor| %>
-          <li><a href="#<%= anchor %>"><%= text %></a></li>
+          <li><a class="block text-zinc-500 hover:text-zinc-200" href="#<%= anchor %>"><%= text %></a></li>
         <% end %>
       </ul>
     <% end %>
   </aside>
 
-  <article class="docs-body">
-    <p class="canonical">
+  <article class="docs-body min-w-0">
+    <p class="mb-8 rounded-lg border border-zinc-800 bg-panel px-4 py-3 text-[0.82rem] leading-6 text-zinc-500">
       The <a href="<%= @page.source_url %>">repo README</a> is the canonical
       reference for this API. This page is a copy of it. If the two disagree,
       the README is right.

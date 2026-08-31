@@ -19,7 +19,10 @@ import { connectRoom, user } from "./room.js"
 
 const COLUMNS = [["item", "Item"], ["qty", "Qty"], ["owner", "Owner"], ["notes", "Notes"]]
 const COL_IDS = COLUMNS.map((c) => c[0])
-const FILLS = [["", "none"], ["#fef08a", "yellow"], ["#bbf7d0", "green"], ["#bfdbfe", "blue"]]
+// Dark tints, not pastels: the fill is the cell's background and the text on
+// it stays the page's light zinc, so the fills have to be darker than the
+// text, not lighter.
+const FILLS = [["", "none"], ["#4a3a12", "amber"], ["#143a26", "green"], ["#1c2f57", "blue"]]
 
 const grid = document.getElementById("grid")
 const toolbarEl = document.getElementById("toolbar")
@@ -245,7 +248,7 @@ function renderToolbar() {
 toolbarEl.innerHTML =
   `<button id="add-row" title="append a row">+ row</button>` +
   `<button id="bold" title="bold the selected cell">B</button>` +
-  FILLS.map(([c, n]) => `<button data-fill="${c}" title="fill ${n}" style="background:${c || "#fff"}"></button>`).join("") +
+  FILLS.map(([c, n]) => `<button data-fill="${c}" title="fill ${n}" style="background:${c || "transparent"}"></button>`).join("") +
   `<span class="label"></span>`
 // mousedown default is what blurs the input, so the formatting buttons act on
 // the cell you are in rather than the one you just left.
