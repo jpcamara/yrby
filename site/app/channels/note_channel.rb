@@ -18,7 +18,9 @@ class NoteChannel < ApplicationCable::Channel
   on_load { |_key| record.find_or_create_collaborative_document(field).load_state }
   on_change do |key, update|
     record.find_or_create_collaborative_document(field).append(update)
-    Rooms.current.note_append(key, update.bytesize)
+    # The size cap is charged before the write (RoomGuarded#refuse_write?), so
+    # there is no size bookkeeping here.
+    #
     # Log render failures. The stored document renders again after the next
     # update. Raising would make the client resend an update the server
     # already has.

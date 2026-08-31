@@ -54,12 +54,25 @@ export ANYCABLE_BROADCAST_ADAPTER=http
 export ANYCABLE_HTTP_BROADCAST_PORT="${ANYCABLE_HTTP_BROADCAST_PORT:-8090}"
 
 # Layer 0 of the throttle stack: an over-size frame is refused at the socket and
-# never becomes an RPC call. Same number as Limits::MAX_FRAME_BYTES.
-export ANYCABLE_MAX_MESSAGE_SIZE="${ANYCABLE_MAX_MESSAGE_SIZE:-131072}"
+# never becomes an RPC call. This bounds the whole ENCODED message, so it is set
+# above Limits::MAX_FRAME_BYTES (which caps the decoded update): a max-size update
+# is ~4/3 larger base64 plus the JSON envelope, and would die at the socket if
+# this matched the decoded cap. 196608 = Limits::MAX_MESSAGE_BYTES.
+export ANYCABLE_MAX_MESSAGE_SIZE="${ANYCABLE_MAX_MESSAGE_SIZE:-196608}"
 
-# Forward the client address to the RPC calls, so the per-IP connection cap sees
-# the visitor rather than the proxy.
-export ANYCABLE_HEADERS="${ANYCABLE_HEADERS:-cookie,x-forwarded-for}"
+# Hard ceiling on concurrent sockets, on the process that actually owns them
+# (anycable-go). The Ruby ConnectionLimiter is the per-IP and soft process cap in
+# front of this; this is the real backstop, so a slot-accounting drift can't push
+# the true socket count past the machine's budget. Same number as
+# Limits::MAX_CONNECTIONS.
+export ANYCABLE_MAX_CONN="${ANYCABLE_MAX_CONN:-500}"
+
+# Forward the client address AND the Origin to the RPC calls: the per-IP
+# connection cap needs the visitor's address, and the Rails-side origin re-check
+# only runs when HTTP_ORIGIN is present in the connect env (anycable-rails treats
+# a missing Origin as allowed), so the header must be forwarded for the belt to
+# the anycable-go origin check to be real.
+export ANYCABLE_HEADERS="${ANYCABLE_HEADERS:-cookie,x-forwarded-for,origin}"
 
 # Same public-body cap the deploys set. Everything public is a GET; the RPC and
 # broadcast paths dial ports directly and never pass through thrust's handler.

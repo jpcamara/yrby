@@ -37,10 +37,10 @@ class RoomSweeperTest < ActiveSupport::TestCase
   end
 
   test "eviction clears the room's cached size" do
-    Rooms.current = Rooms.new(max_document_bytes: 10, size_cache_ttl: 3600)
+    # HELLO is larger than this tiny cap, so the room reads full straight from
+    # the store; a long TTL means only `forget` (from the sweep) can clear it.
+    Rooms.current = Rooms.new(max_document_bytes: 5, size_cache_ttl: 3600)
     make_room("tiptap/stale", age: 2.hours)
-    Rooms.current.document_full?("tiptap/stale")
-    Rooms.current.note_append("tiptap/stale", 100)
 
     assert Rooms.current.document_full?("tiptap/stale")
 

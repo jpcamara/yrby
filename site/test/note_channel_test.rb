@@ -90,13 +90,16 @@ class NoteChannelTest < ActionCable::Channel::TestCase
   end
 
   test "the throttle layers guard this channel too" do
-    Rooms.current = Rooms.new(max_document_bytes: 1)
+    # Size the cap to exactly one update: the first fills the room, the second
+    # crosses the cap and is refused (the prospective-reservation check).
+    one_update = Y.update_from_message(Base64.strict_decode64(Updates.frame(LEXXY_STATE)))
+    Rooms.current = Rooms.new(max_document_bytes: one_update.bytesize)
     subscribe_with_valid_sgid
 
     perform :receive, "update" => Updates.frame(LEXXY_STATE), "id" => 1
     perform :receive, "update" => Updates.frame(LEXXY_STATE), "id" => 2
 
-    assert_equal [1], acks, "the second update hits the byte cap"
+    assert_equal [1], acks, "the first write fills the room; the second crosses the cap"
     assert(transmissions.any? { |m| m["notice"] == "document_full" })
   end
 

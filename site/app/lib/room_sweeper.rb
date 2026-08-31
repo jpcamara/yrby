@@ -34,27 +34,76 @@ module RoomSweeper
     end
 
     def run_once(rooms: Rooms.current, ttl: Limits::ROOM_IDLE_TTL)
-      cutoff = Time.current - ttl
-      stale = Y::Document.where(updated_at: ...cutoff)
-                         .where.not(id: Y::DocumentUpdate.where(created_at: cutoff..).select(:document_id))
-                         .where.not(key: rooms.occupied_keys)
-      evicted = stale.pluck(:key)
-      # destroy_all, not delete_all: Y::Document owns its update rows
-      # (dependent: :delete_all), and destroying through the model keeps that
-      # in one place.
-      stale.destroy_all
-      evicted.each { |key| rooms.forget(key) }
-      evicted.concat(sweep_notes(cutoff))
+      evicted = sweep_documents(rooms, ttl)
+      evicted.concat(sweep_notes(Time.current - ttl))
       Rails.logger.info("room-sweeper: evicted #{evicted.length} stale room(s)") if evicted.any?
-      # Reap leaked connection slots on the same cadence — their own backstop
-      # for a Disconnect RPC that never fired. Separate concern, one thread.
-      ConnectionLimiter.current.sweep
+      reap_leaked_slots
       evicted
     rescue StandardError => e
       # A sweep failure must never take the thread down with it; the next tick
       # tries again.
       Rails.logger.error("room-sweeper: #{e.class}: #{e.message}")
+      # The slot reaps are the connection caps' only leak backstop; a failure in
+      # the room sweep above must not skip them, so run them in their own rescue.
+      reap_leaked_slots
       []
+    end
+
+    # Delete stale documents without racing a join or a write.
+    #
+    # `occupied_keys` was a snapshot: a join or an append could commit between
+    # selecting the stale set and destroying it, deleting a document out from
+    # under a live session (and cascading to update rows written in that window).
+    # So eviction is now a claim. The stale set is only a *candidate* list; the
+    # room bookkeeping decides, atomically with its seat check, which candidates
+    # have no occupant and no reservation, and marks them evicting — after which
+    # a racing join is refused (:evicting) and a racing write can't re-open them.
+    # We then re-read the database for the claimed keys (a write that landed
+    # after the candidate query but before the claim leaves a fresh update row)
+    # and delete only those still stale, dropping the mark on every claimed key.
+    def sweep_documents(rooms, ttl)
+      cutoff = Time.current - ttl
+      candidates = stale_document_keys(cutoff, exclude: rooms.occupied_keys)
+      claimed = rooms.claim_evictions(candidates)
+      return [] if claimed.empty?
+
+      begin
+        # Under the claim no new join or write can touch these keys, so this
+        # freshness re-read is stable: it only catches writes that slipped in
+        # before the claim.
+        evictable = stale_document_keys(cutoff, only: claimed)
+        # destroy_all, not delete_all: Y::Document owns its update rows
+        # (dependent: :delete_all), and destroying through the model keeps that
+        # in one place.
+        Y::Document.where(key: evictable).destroy_all if evictable.any?
+        evictable
+      ensure
+        # Drop the evicting mark on every claimed key — deleted ones and the
+        # ones the freshness re-read spared alike, so a spared room is joinable
+        # again.
+        claimed.each { |key| rooms.forget(key) }
+      end
+    end
+
+    # Keys whose document is stale: no compaction (updated_at) and no append
+    # (a fresh update row) inside the TTL. `exclude` drops occupied rooms from
+    # the candidate pass; `only` narrows to the claimed keys for the freshness
+    # re-read.
+    def stale_document_keys(cutoff, exclude: nil, only: nil)
+      scope = Y::Document.where(updated_at: ...cutoff)
+                         .where.not(id: Y::DocumentUpdate.where(created_at: cutoff..).select(:document_id))
+      scope = scope.where(key: only) if only
+      scope = scope.where.not(key: exclude) if exclude&.any?
+      scope.pluck(:key)
+    end
+
+    # Reap leaked connection slots and per-connection guards on the sweep
+    # cadence — their own backstop for a Disconnect RPC that never fired.
+    def reap_leaked_slots
+      ConnectionLimiter.current.sweep
+      ConnectionGuard.current.sweep
+    rescue StandardError => e
+      Rails.logger.error("room-sweeper (slot reap): #{e.class}: #{e.message}")
     end
 
     # The Rich text demo's Note records follow the same TTL. A note is touched

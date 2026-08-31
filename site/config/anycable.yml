@@ -23,6 +23,11 @@ default: &default
   http_rpc: true
   http_rpc_mount_path: "/_anycable"
 
+  # Development and test fall back to a committed, well-known value — fine off a
+  # laptop. Production must supply its own and is NOT allowed this fallback:
+  # config/initializers/production_boot_checks.rb refuses to boot on an unset,
+  # default, or short secret, because /_anycable authenticates callers with a
+  # bearer derived from it.
   secret: <%= ENV.fetch("ANYCABLE_SECRET", "yrby-site-development-secret") %>
 
   # The browser-facing URL is config.action_cable.url in config/application.rb.
@@ -37,3 +42,6 @@ test:
 
 production:
   <<: *default
+  # No fallback here: an unset ANYCABLE_SECRET in production must fail the boot
+  # (see production_boot_checks.rb), not silently adopt the development default.
+  secret: <%= ENV.fetch("ANYCABLE_SECRET", nil) %>

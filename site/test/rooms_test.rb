@@ -1,9 +1,9 @@
 require "test_helper"
 
-# The site's caps around the Y::Document store: seats, room count, and the
-# document size cap. The store itself (load/append round-trip, compaction,
-# pending quarantine) is the gem's own, tested in the gem; these tests cover
-# what the site adds on top.
+# The site's caps around the Y::Document store: seats, room count, the document
+# size cap, and the eviction coordination the sweeper leans on. The store itself
+# (load/append round-trip, compaction, pending quarantine) is the gem's own,
+# tested in the gem; these tests cover what the site adds on top.
 class RoomsTest < ActiveSupport::TestCase
   KEY = "tiptap/room1".freeze
 
@@ -64,13 +64,50 @@ class RoomsTest < ActiveSupport::TestCase
     assert_equal 0, rooms.peers(KEY)
   end
 
-  test "documents on disk are capped" do
+  test "documents on disk are capped by persisted rows" do
     rooms = Rooms.new(max_rooms: 1)
     Y::Document.append("tiptap/taken", Updates::HELLO)
 
     assert_equal :too_many_rooms, rooms.join(KEY)
     # A room whose document already exists is not a new room.
     assert_equal :ok, rooms.join("tiptap/taken")
+  end
+
+  test "pending reservations count toward the room cap before any append" do
+    # The flood the seat reservation closes: many subscribes to distinct valid
+    # keys, none of which has minted a document yet. Without reservations every
+    # one would be admitted (persisted count still 0) and then create a row.
+    rooms = Rooms.new(max_rooms: 2)
+
+    assert_equal :ok, rooms.join("tiptap/a")
+    assert_equal :ok, rooms.join("tiptap/b")
+    assert_equal :too_many_rooms, rooms.join("tiptap/c"),
+                 "two seated-but-unwritten rooms already fill a cap of two"
+  end
+
+  test "a reservation is released when its last occupant leaves" do
+    rooms = Rooms.new(max_rooms: 1)
+
+    assert_equal :ok, rooms.join("tiptap/a")
+    assert_equal :too_many_rooms, rooms.join("tiptap/b")
+
+    rooms.leave("tiptap/a") # never wrote a document; the reservation frees
+
+    assert_equal :ok, rooms.join("tiptap/b")
+  end
+
+  test "a reservation is released once the room's document is written" do
+    rooms = Rooms.new(max_rooms: 1)
+
+    assert_equal :ok, rooms.join("tiptap/a") # reserves the one slot
+    rooms.reserve_write("tiptap/a", 10)      # first write: it is a real row now
+    Y::Document.append("tiptap/a", Updates::HELLO)
+
+    # The reservation is settled into a persisted row, but the cap is still 1 and
+    # that row exists, so a brand-new room is still refused...
+    assert_equal :too_many_rooms, rooms.join("tiptap/b")
+    # ...while the written room, now persisted, still admits a second peer.
+    assert_equal :ok, rooms.join("tiptap/a")
   end
 
   test "a second seat in a not-yet-written room is not blocked by the room cap" do
@@ -89,27 +126,32 @@ class RoomsTest < ActiveSupport::TestCase
 
     assert_not rooms.document_full?(KEY), "an empty room is not full"
 
-    Y::Document.append(KEY, Updates::HELLO)
-    rooms.note_append(KEY, Updates::HELLO.bytesize)
-
+    assert rooms.reserve_write(KEY, Updates::HELLO.bytesize)
     assert rooms.document_full?(KEY)
   end
 
-  test "note_append keeps the cap tight without waiting for the cache to expire" do
-    # A long TTL: only note_append can move the cached size.
+  test "reserve_write refuses the write that would cross the cap, not the next one" do
+    rooms = Rooms.new(max_document_bytes: 100)
+
+    assert rooms.reserve_write(KEY, 60), "60 of 100 fits"
+    assert_not rooms.reserve_write(KEY, 50), "60 + 50 crosses the cap and is refused"
+    assert rooms.reserve_write(KEY, 40), "60 + 40 exactly reaches the cap and fits"
+    assert_not rooms.reserve_write(KEY, 1), "the room is full"
+  end
+
+  test "reserve_write keeps the cap tight without waiting for the cache to expire" do
+    # A long TTL: only reserve_write can move the cached size.
     rooms = Rooms.new(max_document_bytes: 100, size_cache_ttl: 3600)
 
     assert_not rooms.document_full?(KEY) # primes the cache at 0
 
-    rooms.note_append(KEY, 100)
-
-    assert rooms.document_full?(KEY), "the cap must trip from notes alone, mid-TTL"
+    assert rooms.reserve_write(KEY, 100)
+    assert rooms.document_full?(KEY), "the cap must trip from the reservation alone, mid-TTL"
   end
 
   test "forget clears the cached size so an evicted room starts from zero" do
-    rooms = Rooms.new(max_document_bytes: 10, size_cache_ttl: 3600)
-    rooms.document_full?(KEY)
-    rooms.note_append(KEY, 100)
+    rooms = Rooms.new(max_document_bytes: 100, size_cache_ttl: 3600)
+    rooms.reserve_write(KEY, 100) # fills the room to its cap
 
     assert rooms.document_full?(KEY)
 
@@ -133,5 +175,49 @@ class RoomsTest < ActiveSupport::TestCase
     rooms.leave("tiptap/a")
 
     assert_equal ["kanban/b"], rooms.occupied_keys
+  end
+
+  # --- eviction coordination (see RoomSweeper) --------------------------------
+
+  test "claim_evictions marks unoccupied, unreserved candidates" do
+    rooms = Rooms.new
+    Y::Document.append("tiptap/idle", Updates::HELLO)
+
+    assert_equal ["tiptap/idle"], rooms.claim_evictions(["tiptap/idle"])
+    assert rooms.evicting?("tiptap/idle")
+  end
+
+  test "claim_evictions refuses to claim an occupied room" do
+    rooms = Rooms.new
+    Y::Document.append("tiptap/busy", Updates::HELLO)
+    rooms.join("tiptap/busy")
+
+    assert_empty rooms.claim_evictions(["tiptap/busy"])
+    assert_not rooms.evicting?("tiptap/busy")
+  end
+
+  test "claim_evictions refuses to claim a reserved room" do
+    rooms = Rooms.new
+    rooms.join("tiptap/pending") # reserved, not yet written
+
+    assert_empty rooms.claim_evictions(["tiptap/pending"])
+  end
+
+  test "a join for an evicting key is refused" do
+    rooms = Rooms.new
+    Y::Document.append("tiptap/going", Updates::HELLO)
+    rooms.claim_evictions(["tiptap/going"])
+
+    assert_equal :evicting, rooms.join("tiptap/going")
+  end
+
+  test "forget lifts the evicting mark so a spared room is joinable again" do
+    rooms = Rooms.new
+    Y::Document.append("tiptap/spared", Updates::HELLO)
+    rooms.claim_evictions(["tiptap/spared"])
+    rooms.forget("tiptap/spared") # sweeper spared it on the freshness re-read
+
+    assert_not rooms.evicting?("tiptap/spared")
+    assert_equal :ok, rooms.join("tiptap/spared")
   end
 end

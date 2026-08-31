@@ -12,11 +12,13 @@ module ActiveSupport
     # per-test transaction like any Rails model.
 
     # The singletons the app reaches for through `.current`. Swapping them per
-    # test keeps one test's seats and cached sizes out of the next, and lets a
-    # test set deliberately tiny caps.
+    # test keeps one test's seats, slots, guards, and cached sizes out of the
+    # next, and lets a test set deliberately tiny caps.
     setup do
       Rooms.current = Rooms.new
       ConnectionLimiter.current = ConnectionLimiter.new
+      ConnectionGuard.current = ConnectionGuard.new
+      WriteBudget.current = WriteBudget.new
     end
   end
 end

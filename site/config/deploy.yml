@@ -41,17 +41,20 @@ builder:
 env:
   clear:
     RAILS_ENV: production
-    # Locks the WebSocket origin on BOTH halves of the cable from one value: the
-    # entrypoint derives ANYCABLE_ALLOWED_ORIGINS for the embedded Go server by
-    # stripping the scheme, and Rails re-checks on the Connect RPC. Set it to the
-    # site's own origins once the domain is settled; unset = permissive.
-    # ALLOWED_ORIGINS: https://yrby.example.com
+    # REQUIRED in production — the app refuses to boot without it (see
+    # config/initializers/production_boot_checks.rb). Locks the WebSocket origin
+    # on BOTH halves of the cable from one value: the entrypoint derives
+    # ANYCABLE_ALLOWED_ORIGINS for the embedded Go server by stripping the scheme,
+    # and Rails re-checks on the Connect RPC. Set it to this site's own origin(s).
+    ALLOWED_ORIGINS: https://yrby.example.com
   # Secrets come from .kamal/secrets (gitignored; see .kamal/secrets.example),
   # never from this committed file.
   secret:
     - SECRET_KEY_BASE
     # Configures both halves of AnyCable at once: the embedded Go server and
-    # Rails each derive the HTTP RPC key and the broadcast key from it.
+    # Rails each derive the HTTP RPC key and the broadcast key from it. REQUIRED
+    # in production and must be strong (>= 32 chars, not the dev default); the
+    # app refuses to boot otherwise.
     - ANYCABLE_SECRET
 
 # The SQLite database lives on a named volume so documents survive deploys and

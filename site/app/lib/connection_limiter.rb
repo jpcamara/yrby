@@ -5,20 +5,26 @@
 # connection is a fiber, a socket, and an Action Cable connection object for as
 # long as the client keeps it.
 #
-# Each slot carries the time it was acquired, for one reason: a leak. The count
-# is decremented by `release`, which fires from the Disconnect RPC — and that
-# RPC can fail to arrive (anycable-go drops a socket without delivering the
-# disconnect, a partition, a crashed edge). A leaked slot would then sit
-# elevated until the process restarts, slowly starving the leaking IP of its
-# own future connections. `sweep` reaps slots older than CONNECTION_SLOT_TTL so
-# a leak self-heals; the RoomSweeper thread calls it on its cadence, and
-# `acquire` also drops an IP's own expired slots first, so a busy address heals
-# without waiting for the sweep.
+# Each slot has a token, minted by `acquire` and released by that exact token.
+# Identity matters: `disconnect` releases the slot its own `connect` took, not
+# "the oldest one for this IP" — without the token, releasing the wrong slot
+# lets the running count drift away from the real socket count, past both caps.
 #
-# Reaping can only *under*-count (free a slot a genuinely long-lived connection
-# is still using), never over-count, so the worst case is the per-IP cap
-# running slightly loose for a connection held past the TTL — never a wrongful
-# rejection. That is the safe direction for a backstop.
+# A slot also carries the time it was acquired, for one reason: a leak. The
+# count is decremented by `release`, which fires from the Disconnect RPC — and
+# that RPC can fail to arrive (anycable-go drops a socket without delivering the
+# disconnect, a partition, a crashed edge). A leaked slot would then sit elevated
+# until the process restarts. `sweep` reaps slots older than CONNECTION_SLOT_TTL
+# so a leak self-heals; the RoomSweeper thread calls it on its cadence, and
+# `acquire` also drops an IP's own expired slots first, so a busy address heals
+# without waiting for the sweep. The TTL is only a leak backstop — a genuine demo
+# session is far shorter than an hour, so a live connection is rarely reaped —
+# and it can only *under*-count (free a slot a long-lived connection still uses),
+# never over-count, so the worst case is the per-IP cap running slightly loose,
+# never a wrongful rejection.
+#
+# The real ceiling on sockets is ANYCABLE_MAX_CONN on the Go process, which owns
+# them; this limiter is the per-IP and soft process-wide cap in front of it.
 class ConnectionLimiter
   class << self
     attr_writer :current
@@ -34,35 +40,37 @@ class ConnectionLimiter
     @max_per_ip = max_per_ip
     @max_total = max_total
     @max_age = max_age
-    @slots = Hash.new { |h, k| h[k] = [] } # ip => [acquired_at (monotonic), ...]
+    @slots = Hash.new { |h, k| h[k] = {} } # ip => { token => acquired_at (monotonic) }
     @total = 0
     @mutex = Mutex.new
   end
 
-  # Returns :ok, :too_many_for_ip, or :too_many_connections. On :ok the caller
-  # owns a slot and must call `release` when the connection closes.
+  # Returns [:ok, token], [:too_many_for_ip, nil], or [:too_many_connections,
+  # nil]. On :ok the caller owns the slot named by `token` and must call
+  # `release(ip, token)` when the connection closes.
   def acquire(ip, now = monotonic)
     @mutex.synchronize do
       drop_expired(ip, now)
-      next :too_many_connections if @total >= @max_total
-      next :too_many_for_ip if @slots[ip].size >= @max_per_ip
+      next [:too_many_connections, nil] if @total >= @max_total
+      next [:too_many_for_ip, nil] if @slots[ip].size >= @max_per_ip
 
-      @slots[ip] << now
+      token = SecureRandom.uuid
+      @slots[ip][token] = now
       @total += 1
-      :ok
+      [:ok, token]
     end
   end
 
-  def release(ip)
+  # Release the exact slot `acquire` handed out. A token that isn't held (already
+  # reaped as leaked, or a double disconnect) is a no-op, so the count can't go
+  # negative or free a slot that belongs to another live connection.
+  def release(ip, token)
     @mutex.synchronize do
-      list = @slots[ip]
-      next if list.empty?
+      slots = @slots[ip]
+      next unless slots.delete(token)
 
-      # Drop the oldest timestamp: identity doesn't matter for counting, and
-      # keeping the fresher stamps makes the reaper more accurate.
-      list.shift
       @total -= 1
-      @slots.delete(ip) if list.empty?
+      @slots.delete(ip) if slots.empty?
     end
     nil
   end
@@ -90,20 +98,16 @@ class ConnectionLimiter
   # Caller holds the mutex. Removes ip's slots older than max_age, adjusts the
   # running total, and prunes an emptied IP. Returns the count removed.
   def drop_expired(ip, now)
-    list = @slots[ip]
-    return 0 if list.empty?
+    slots = @slots[ip]
+    return 0 if slots.empty?
 
-    kept = list.reject { |acquired_at| now - acquired_at >= @max_age }
-    removed = list.size - kept.size
-    return 0 if removed.zero?
+    expired = slots.select { |_token, acquired_at| now - acquired_at >= @max_age }
+    return 0 if expired.empty?
 
-    @total -= removed
-    if kept.empty?
-      @slots.delete(ip)
-    else
-      @slots[ip] = kept
-    end
-    removed
+    expired.each_key { |token| slots.delete(token) }
+    @total -= expired.size
+    @slots.delete(ip) if slots.empty?
+    expired.size
   end
 
   def monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)

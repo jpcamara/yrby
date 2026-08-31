@@ -8,9 +8,12 @@
 # can take. The layers are, from outside in:
 #
 #   0. anycable-go           max WebSocket frame size       (ANYCABLE_MAX_MESSAGE_SIZE)
+#   0. anycable-go           max concurrent sockets         (ANYCABLE_MAX_CONN)
 #   1. Rack::Attack          per-IP HTTP request rate       (rack_attack.rb)
 #   2. ConnectionLimiter     concurrent WebSockets per IP   (connection.rb)
+#   2. ConnectionGuard       subscriptions + writes per WS  (connection.rb)
 #   3. TokenBucket           frames per second per client   (document_channel.rb)
+#   3. write budget          document writes per second     (rooms.rb, process-wide)
 #   4. frame size cap        bytes per frame                (document_channel.rb)
 #   5. document size cap     bytes per room, total          (rooms.rb)
 #   6. room caps             peers per room, rooms on disk  (rooms.rb)
@@ -45,6 +48,28 @@ module Limits
   # every connection arrives from one generator IP; production leaves it unset.
   MAX_CONNECTIONS_PER_IP = Integer(ENV.fetch("MAX_CONNECTIONS_PER_IP", 8))
 
+  # --- Subscriptions (per physical connection) -------------------------------
+  #
+  # One WebSocket can open many channel subscriptions, and every subscription
+  # takes a room seat and can create a document. Without a per-connection cap a
+  # single socket could subscribe to thousands of distinct rooms and mint a
+  # document in each, walking straight past the room cap (which only counts a
+  # brand-new key as it is first *seated*). These bound one socket's reach.
+
+  # Concurrent subscriptions one connection may hold. A person opens one room per
+  # page and a handful of pages; twenty is generous for that and far below what a
+  # script needs to be useful. With the per-IP connection cap (8) this bounds one
+  # address to 160 concurrently-held rooms — well under MAX_LIVE_ROOMS.
+  MAX_SUBSCRIPTIONS_PER_CONNECTION = Integer(ENV.fetch("MAX_SUBSCRIPTIONS_PER_CONNECTION", 20))
+
+  # Rate limit on `subscribe` commands from one connection, as a token bucket.
+  # Opening a page is a single subscribe; even a fast tab-through of every demo
+  # is a few per second. The burst absorbs a reconnect storm re-subscribing the
+  # tabs a client had open; the sustained rate stops a socket from cycling
+  # subscribe/unsubscribe to churn rooms.
+  SUBSCRIBES_PER_SECOND = 5
+  SUBSCRIBE_BURST = 20
+
   # Process-wide ceiling. A held socket costs a goroutine and its buffers in
   # anycable-go — on the order of 10 KB, not the ~50 KB an Action Cable
   # connection object costs in Ruby — because Ruby holds nothing between
@@ -67,9 +92,36 @@ module Limits
   # 8 MiB, sized for a large initial SyncStep2 in a real app. Demo documents are
   # tiny, and the whole room is capped at MAX_DOCUMENT_BYTES anyway, so this is
   # cut to a size a legitimate demo edit never approaches. Enforced twice: by
-  # anycable-go at the socket (ANYCABLE_MAX_MESSAGE_SIZE, so an over-size frame
-  # never becomes an RPC call) and again by yrby in Ruby.
+  # anycable-go at the socket (ANYCABLE_MAX_MESSAGE_SIZE) and again by yrby in
+  # Ruby. Note the two limits measure different things: Ruby caps the *decoded*
+  # update, anycable-go caps the whole *encoded* message (base64 is ~4/3, plus
+  # the JSON envelope). The Go limit is therefore set higher — see
+  # MAX_MESSAGE_BYTES below — so a legitimately-sized update is not killed at the
+  # socket before Ruby's decoded check can run.
   MAX_FRAME_BYTES = 128 * 1024
+
+  # The value ANYCABLE_MAX_MESSAGE_SIZE must carry (bin/serve, Dockerfile,
+  # fly.toml). It bounds the whole encoded WebSocket message, so it has to hold
+  # a MAX_FRAME_BYTES-decoded update after base64 expansion (4/3) plus the JSON
+  # envelope (`{"update":"…","id":N}`). 192 KiB clears
+  # MAX_ENCODED_BYTES (~171 KiB) with room for the envelope; smaller and a valid
+  # max-size update dies in Go before the RPC. Documented here so the number and
+  # its reasoning live with the other frame limits even though Go reads it from
+  # the environment.
+  MAX_MESSAGE_BYTES = 192 * 1024
+
+  # A process-wide ceiling on document writes per second, shed before they reach
+  # SQLite. Every accepted document frame is a single-writer SQLite insert, and
+  # the per-subscription and per-connection buckets bound one client, not the
+  # sum of all of them — at the intended caps the aggregate still dwarfs what one
+  # SQLite file absorbs before SQLITE_BUSY starts starving page requests. This is
+  # the aggregate backstop: over it, document frames are dropped (the client
+  # keeps the update queued and retries, the same shape as any other dropped
+  # frame), so a flood sheds instead of wedging the database. Awareness is never
+  # counted here. Generous for real use — a full room typing flat out is a few
+  # dozen writes a second — and a hard shelf under abuse.
+  DOCUMENT_WRITES_PER_SECOND = 400
+  DOCUMENT_WRITE_BURST = 800
 
   # Token bucket per subscription. Typing produces a handful of frames a second;
   # dragging a whiteboard note or moving a caret produces awareness frames at

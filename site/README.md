@@ -181,33 +181,51 @@ it; the table below is the summary.
 
 | Layer | Limit | Value | Why |
 |---|---|---|---|
-| 0. anycable-go | bytes per WebSocket frame | 128 KiB | Refused at the socket, in Go, so an over-size frame never becomes an RPC call. `ANYCABLE_MAX_MESSAGE_SIZE`. |
-| 1. Rack::Attack | page requests per IP | 60 / minute | A reader loads a page every few seconds. Static files, `/up`, and the RPC endpoint are not counted. |
-| 2. Connection | concurrent sockets per IP | 8 | "Open a second window" is the demo, and a visitor may open one per page. Past that it is a script. |
-| 2. Connection | concurrent sockets, process-wide | 500 | A held socket is a goroutine in Go, not an object in Ruby, so this is roughly 5-10 MB. A conservative ceiling, not a memory limit. |
-| 3. Token bucket | frames per second, per subscription | 40, burst 120 | Typing plus awareness at pointer-event rate is well under this. The burst absorbs what arrives together at join. |
+| 0. anycable-go | bytes per WebSocket message | 192 KiB | Refused at the socket, in Go, so an over-size frame never becomes an RPC call. `ANYCABLE_MAX_MESSAGE_SIZE`. Bounds the whole *encoded* message, so it sits above the 128 KiB *decoded* cap below (base64 is ~4/3, plus the JSON envelope). |
+| 0. anycable-go | concurrent sockets, process-wide | 500 | The hard ceiling on the process that actually owns the sockets. `ANYCABLE_MAX_CONN`. The Ruby caps below are the per-IP and soft cap in front of it. |
+| 1. Rack::Attack | page requests per IP | 60 / minute | A reader loads a page every few seconds. Static files and `/up` are not counted. `/_anycable` is blocked from the public listener and safelisted for the authenticated Go RPC. |
+| 2. Connection | concurrent sockets per IP | 8 | "Open a second window" is the demo, and a visitor may open one per page. Past that it is a script. Keyed to the real client IP (trusted-proxy aware), and each slot has a token so a disconnect frees its own slot, not the oldest. |
+| 2. Connection guard | subscriptions per socket | 20 | One socket, many subscriptions: each takes a room seat and can mint a document. This bounds one socket's reach (with the per-IP cap, 160 rooms). |
+| 2. Connection guard | subscribe commands per socket | 5 / s, burst 20 | Stops a socket churning subscribe/unsubscribe to cycle through rooms. |
+| 3. Token bucket | frames per second, per socket | 40, burst 120 | Typing plus awareness at pointer-event rate is well under this. One bucket **per connection** (not per subscription), so re-subscribing can't reset the burst and multiple subscriptions can't multiply the rate. |
 | 3. Token bucket | dropped frames before the socket closes | 200 | Bursts of drops are normal during a fast drag. A client that keeps going past this is not a person. |
-| 4. Frame size | bytes per frame | 128 KiB | yrby's own default is 8 MiB, sized for a real app's initial `SyncStep2`. Demo documents are tiny. |
-| 5. Document size | bytes per room | 512 KiB | About ten times a realistic demo document. At the cap the room goes read-only and says so. |
-| 6. Room caps | peers per room | 12 | More than a dozen carets is unreadable, and each peer is another fan-out target. |
-| 6. Room caps | documents on disk | 2000 | 2000 x 512 KiB bounds the database file at about 1 GB — a disk cap now, not RAM. |
-| 7. Eviction | idle time before a room is deleted | 24 hours | A content decision: rooms are public and anonymous, and "temporary" is a promise. A link shared in the morning still works after dinner. |
+| 3. Write budget | document writes per second, process-wide | 400, burst 800 | The aggregate shelf in front of single-writer SQLite: past it, document frames are shed so a flood degrades throughput instead of wedging the database with `SQLITE_BUSY`. Awareness is never counted. |
+| 4. Frame size | bytes per frame | 128 KiB | yrby's own default is 8 MiB, sized for a real app's initial `SyncStep2`. Demo documents are tiny. This is the *decoded* cap; see the Go message cap in layer 0. |
+| 5. Document size | bytes per room | 512 KiB | About ten times a realistic demo document. Reserved **prospectively** — the update that would cross the cap is the one refused — so a room can't be pushed one update past the cap. At the cap the room goes read-only and says so. |
+| 6. Room caps | peers per room | 12 | More than a dozen carets is unreadable, and each peer is another fan-out target. One connection may hold at most one seat in a room. |
+| 6. Room caps | documents on disk | 2000 | 2000 x 512 KiB bounds the database file at about 1 GB — a disk cap now, not RAM. Counts persisted rows **plus live reservations**: a seated-but-not-yet-written room already consumes capacity, so a flood of `subscribe`s can't slip past the cap before minting its documents. |
+| 7. Eviction | idle time before a room is deleted | 24 hours | A content decision: rooms are public and anonymous, and "temporary" is a promise. A link shared in the morning still works after dinner. Eviction is coordinated with joins and writes (a claim under lock) so the sweeper can't delete a room out from under an active session. |
 
-There is no cable-handshake throttle in Rack::Attack any more. `/cable` never
-passes through Rack — the embedded Go server answers it in the proxy — so a
-limit there would count nothing. What bounds handshakes instead is the per-IP
-connection cap, which runs in Ruby on the Connect RPC. The RPC endpoint itself
-is safelisted: every WebSocket command arrives there, so throttling it by IP
-would throttle the site.
-
-There is no cable-handshake throttle in Rack::Attack any more. `/cable` never
-passes through Rack — the embedded Go server answers it in the proxy — so a
-limit there would count nothing. What bounds handshakes instead is the per-IP
-connection cap, which runs in Ruby on the Connect RPC. The RPC endpoint itself
-is safelisted: every WebSocket command arrives there, so throttling it by IP
-would throttle the site.
+There is no cable-handshake throttle in Rack::Attack. `/cable` never passes
+through Rack — the embedded Go server answers it in the proxy — so a limit there
+would count nothing. What bounds handshakes instead is the per-IP connection cap,
+which runs in Ruby on the Connect RPC. The RPC endpoint (`/_anycable`) is blocked
+from the public listener (an outside client can't present the bearer the Go
+server carries) and safelisted for the authenticated Go RPC, which arrives on
+that path with the whole cable's message volume.
 
 A few of these are worth explaining rather than tabulating.
+
+**The caps count more than they used to.** Two holes closed with the store move.
+A room is not a database row until its first write, but a subscription takes a
+seat the moment it joins — so a burst of `subscribe`s for distinct keys would all
+be admitted (no rows yet) and then mint a document each, past the room cap. So a
+brand-new seated key is a *reservation* that counts against the cap until it is
+written or its last occupant leaves. Likewise the frame bucket and the subscribe
+budget live on the connection, not the subscription: a per-subscription bucket
+resets on every subscribe and multiplies with the number of subscriptions, so one
+socket could reset its burst by re-subscribing or run several buckets' worth of
+rate at once. One bucket per socket has neither hole.
+
+**The RPC endpoint is not public.** `/_anycable` authenticates callers with a
+bearer derived from `ANYCABLE_SECRET`, and the embedded Go server reaches it
+directly over loopback. thrust's public proxy would otherwise forward it to
+Falcon like any other path (both land on Falcon's one port), so it is blocked at
+the edge — an outside request without the bearer gets a 404 — while the
+authenticated Go RPC passes. In production `ANYCABLE_SECRET` must be set to a
+strong value: with the committed development default anyone could compute the
+bearer and drive RPCs directly, past the socket boundary and every limit. The app
+refuses to boot in production on an unset, default, or short secret.
 
 **Rate limiting is not frame validation.** yrby already validates every frame as
 a single well-formed protocol message and drops anything malformed, truncated,
@@ -238,10 +256,21 @@ visitor mints a room and most are abandoned within a minute. Without the sweeper
 (`app/lib/room_sweeper.rb`, one thread, a sweep every five minutes) the
 2000-document ceiling would be reached by normal use rather than by abuse. A
 room is stale when it has no write inside the TTL and nobody in it; occupied
-rooms are never evicted. The same sweep reaps leaked connection slots: the
+rooms are never evicted. Eviction is a *claim*, not a snapshot delete: the stale
+set is only a candidate list, and the room bookkeeping marks — atomically with
+its seat check — which candidates have no occupant and no reservation, after
+which a racing join is refused and a racing write can't re-open them. Only then,
+after a freshness re-read, are the still-stale ones deleted. A snapshot delete
+could otherwise race a join or an append and delete a document out from under an
+active session.
+
+The same sweep reaps leaked connection slots and per-connection guards: the
 per-IP cap frees a slot on the Disconnect RPC, but that RPC can fail to arrive
 (a dropped socket, a partition), so a slot older than an hour is treated as
-leaked and reclaimed. Reaping only ever loosens the cap, never rejects wrongly.
+leaked and reclaimed. Each slot carries a token, so a disconnect frees its own
+slot rather than the oldest one for the IP. Reaping only ever loosens the caps,
+never rejects wrongly, and the hard ceiling on real sockets is `ANYCABLE_MAX_CONN`
+on the Go process, which owns them.
 
 **No uploads, anywhere.** The site accepts no files. A public, anonymous write
 surface plus a file endpoint is a free file host, and every one of the throttles
@@ -326,17 +355,32 @@ Fly they are `fly secrets set …` instead. The SQLite volume is `chmod 700` in
 the image, so the database (ephemeral room content) is readable only by the app
 user.
 
-Once the domain is settled, lock the WebSocket origin: set `ALLOWED_ORIGINS`
-(comma-separated full origins, e.g. `https://yrby.dev`) in the deploy env. One
-value drives both halves of the cable — the entrypoint strips the scheme into
+**Production requires both `ANYCABLE_SECRET` and `ALLOWED_ORIGINS`, and refuses
+to boot without them.** `ANYCABLE_SECRET` must be a strong value (at least 32
+chars; not the committed development default) — the `/_anycable` RPC endpoint
+authenticates with a bearer derived from it, and a weak or default secret lets
+anyone forge RPC calls past the socket boundary and every limit. `ALLOWED_ORIGINS`
+must name the site's own origin(s) — without it Rails disables the cable's
+forgery protection and any page anywhere could open a socket to it (cross-site
+WebSocket hijacking). This is enforced in
+`config/initializers/production_boot_checks.rb`; development, test, and the local
+e2e stay permissive.
+
+Set `ALLOWED_ORIGINS` (comma-separated full origins, e.g. `https://yrby.dev`, or
+`http://192.168.1.10:3000` for a plain-http LAN box) in the deploy env. One value
+drives both halves of the cable — the entrypoint strips the scheme into
 `ANYCABLE_ALLOWED_ORIGINS` for the embedded anycable-go, which 403s a mismatched
-handshake at the socket, and Rails re-checks the Origin on the Connect RPC.
-Behind Cloudflare it also makes `request.ip` the real visitor: `trusted_proxies`
-vendors Cloudflare's ranges (plus loopback and the container-internal ranges,
-but deliberately not `192.168.0.0/16`, so a LAN client can't forge
-`X-Forwarded-For` to escape a throttle bucket), and Rack::Attack keys on that.
-Left unset, all of this is permissive — which is what the plain-http Pi on the
-LAN wants.
+handshake at the socket, and Rails re-checks the Origin on the Connect RPC (which
+is why `ANYCABLE_HEADERS` forwards `origin`: anycable-rails treats a *missing*
+Origin as allowed, so the header has to reach the RPC for the re-check to be
+real). Behind Cloudflare it also makes the throttle key the real visitor:
+`trusted_proxies` vendors Cloudflare's ranges (plus loopback and the
+container-internal ranges, but deliberately not `192.168.0.0/16`). The cable's
+per-IP cap derives the client IP with that same trusted set rather than
+`request.remote_ip` — on the RPC path the RemoteIp middleware never runs, and its
+fallback would honor a forged `X-Forwarded-For` from a client connecting straight
+to the edge; the strict rule here consumes a forwarded address only past a hop it
+actually trusts.
 
 Set `CANONICAL_HOST` in the same deploy env, to the site's real origin
 (e.g. `https://yrby.dev`). It is the one host used in canonical tags, Open

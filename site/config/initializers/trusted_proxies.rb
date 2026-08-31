@@ -66,6 +66,55 @@ module TrustedProxies
   ].freeze
 
   RANGES = (INTERNAL + CLOUDFLARE_V4 + CLOUDFLARE_V6).map { |cidr| IPAddr.new(cidr) }.freeze
+
+  # The real client IP for a WebSocket connect, using these ranges as the trusted
+  # set. This deliberately does NOT reuse ActionDispatch::RemoteIp / its GetIp.
+  #
+  # Two reasons. First, on the AnyCable connect path the RemoteIp middleware never
+  # runs (the env is built by the RPC handler), so `request.remote_ip` there falls
+  # back to Rack's default IP logic, which trusts every private range — including
+  # the LAN this config excludes. Second, and worse for a cap, GetIp with spoof-
+  # checking off will PREFER an X-Forwarded-For entry over an untrusted socket
+  # peer: a client connecting straight to the edge (no trusted proxy in front)
+  # could set any X-Forwarded-For and be counted as that address, a different one
+  # per connection, sailing past the per-IP cap.
+  #
+  # So the rule here is strict and explicit: a forwarded address is honored only
+  # when the IMMEDIATE peer (REMOTE_ADDR, set by anycable-go from the real socket)
+  # is a proxy we trust to have set it. Behind Cloudflare/kamal/Fly that recovers
+  # the true client (walk the chain from the right, skip trusted hops, take the
+  # first untrusted). Connected to directly, the peer is the client (or an
+  # untrusted hop) and its X-Forwarded-For is unverifiable, so the socket address
+  # wins and the forged header is ignored.
+  def self.client_ip(request)
+    remote_addr = ip_string(request.get_header("REMOTE_ADDR"))
+    return remote_addr unless trusted?(remote_addr)
+
+    forwarded = split_ips(request.get_header("HTTP_X_FORWARDED_FOR"))
+    forwarded.reverse_each.find { |ip| !trusted?(ip) } || remote_addr
+  end
+
+  def self.trusted?(ip)
+    addr = IPAddr.new(ip)
+    RANGES.any? { |range| range.include?(addr) }
+  rescue IPAddr::Error
+    false
+  end
+
+  def self.split_ips(header)
+    header.to_s.split(",").map { |part| ip_string(part) }.reject(&:empty?)
+  end
+
+  # Normalize an address token to a bare IP for the trusted-set check and the
+  # throttle key. anycable-go's REMOTE_ADDR can carry a port, so strip it — two
+  # connections from one client on different source ports must count as one IP.
+  def self.ip_string(raw)
+    s = raw.to_s.strip
+    return "" if s.empty?
+    return s[/\A\[([^\]]+)\]/, 1] || s.delete("[]") if s.start_with?("[") # [::1] / [::1]:443
+
+    s.count(":") == 1 ? s.sub(/:\d+\z/, "") : s # IPv4:port has one colon; IPv6 has many
+  end
 end
 
 Rails.application.config.action_dispatch.trusted_proxies = TrustedProxies::RANGES

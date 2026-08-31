@@ -16,13 +16,12 @@ class DocumentChannel < ApplicationCable::Channel
   # The canonical store, verbatim from the README. Y::Document keeps nothing
   # authoritative in process memory: load replays the snapshot plus the tail,
   # append records one delta, and the gem's own compaction (every 64 rows by
-  # default) folds the tail with pending rows quarantined, not dropped.
-  # note_append keeps the site's size cap current without a query per frame.
+  # default) folds the tail with pending rows quarantined, not dropped. The
+  # site's size cap is charged before the write (RoomGuarded#refuse_write?
+  # reserves the bytes through Rooms#reserve_write), so there is no size
+  # bookkeeping to do here.
   on_load { |key| Y::Document.load_state(key) }
-  on_change do |key, update|
-    Y::Document.append(key, update)
-    Rooms.current.note_append(key, update.bytesize)
-  end
+  on_change { |key, update| Y::Document.append(key, update) }
 
   def subscribed
     key = params[:id].to_s

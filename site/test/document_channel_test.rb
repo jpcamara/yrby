@@ -68,6 +68,19 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_predicate subscription, :rejected?
   end
 
+  test "a connection over its subscription cap is refused" do
+    # Saturate this connection's guard (connection_id "c1" from setup), then a
+    # further subscribe is refused before it can take a seat or mint a document.
+    ConnectionGuard.current = ConnectionGuard.new(max_subscriptions: 1)
+    ConnectionGuard.current.admit_subscription("c1", "tiptap/elsewhere")
+
+    subscribe id: KEY
+
+    assert_predicate subscription, :rejected?
+    assert_equal 0, Rooms.current.peers(KEY), "no seat taken"
+    assert_equal 0, Y::Document.count, "no document minted"
+  end
+
   test "the room cap refuses a subscription that would mint a new document" do
     Rooms.current = Rooms.new(max_rooms: 1)
     Y::Document.append("tiptap/taken", Updates::HELLO)

@@ -68,12 +68,21 @@ ENV ANYCABLE_RPC_HOST="http://localhost:3001/_anycable"
 ENV ANYCABLE_BROADCAST_ADAPTER="http" ANYCABLE_HTTP_BROADCAST_PORT="8090"
 
 # Layer 0 of the throttle stack: an over-size frame is refused at the socket and
-# never becomes an RPC call. Same number as Limits::MAX_FRAME_BYTES.
-ENV ANYCABLE_MAX_MESSAGE_SIZE="131072"
+# never becomes an RPC call. This bounds the whole ENCODED message, so it sits
+# above Limits::MAX_FRAME_BYTES (the decoded-update cap): a max-size update is
+# ~4/3 larger base64 plus the JSON envelope and would die at the socket if this
+# matched the decoded cap. 196608 = Limits::MAX_MESSAGE_BYTES.
+ENV ANYCABLE_MAX_MESSAGE_SIZE="196608"
 
-# Forward the client address so the per-IP connection cap sees the visitor
-# rather than whatever proxy sits in front.
-ENV ANYCABLE_HEADERS="cookie,x-forwarded-for"
+# Hard ceiling on concurrent sockets, on the process that owns them (anycable-go).
+# The Ruby ConnectionLimiter is the per-IP and soft process cap in front of this;
+# this is the real backstop. Same number as Limits::MAX_CONNECTIONS.
+ENV ANYCABLE_MAX_CONN="500"
+
+# Forward the client address AND the Origin so the per-IP connection cap sees the
+# visitor and the Rails-side origin re-check has an Origin to check (anycable-rails
+# treats a missing Origin as allowed, so the header must be forwarded).
+ENV ANYCABLE_HEADERS="cookie,x-forwarded-for,origin"
 
 # Cap request bodies at the proxy. Every public route is a GET, so 64 KB is
 # generous. This does NOT constrain AnyCable's RPC calls: the embedded Go
