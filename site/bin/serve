@@ -22,6 +22,9 @@ for var in FALCON_COUNT WEB_CONCURRENCY; do
   fi
 done
 
-# Plain http (Falcon defaults to https with a self-signed cert); thrust and the
-# embedded anycable-go both reach this over localhost.
-exec bundle exec falcon serve --bind "http://0.0.0.0:${PORT:-3000}" --count 1
+# Plain http (Falcon defaults to https with a self-signed cert). Loopback
+# only: thrust and the embedded anycable-go are the only clients and both
+# reach it over localhost. Binding all interfaces would expose the backend
+# directly — past the proxy's MAX_REQUEST_BODY and with the RPC mount
+# reachable from the network instead of only from the box.
+exec bundle exec falcon serve --bind "http://127.0.0.1:${PORT:-3000}" --count 1

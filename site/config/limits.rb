@@ -41,16 +41,17 @@ module Limits
 
   # "Open a second window" is the whole point of the site, and a curious visitor
   # may open one per demo. Eight is generous for a person and cheap to hold;
-  # past that it is a script.
-  MAX_CONNECTIONS_PER_IP = 8
+  # past that it is a script. The env override exists for load testing, where
+  # every connection arrives from one generator IP; production leaves it unset.
+  MAX_CONNECTIONS_PER_IP = Integer(ENV.fetch("MAX_CONNECTIONS_PER_IP", 8))
 
   # Process-wide ceiling. A held socket costs a goroutine and its buffers in
   # anycable-go — on the order of 10 KB, not the ~50 KB an Action Cable
   # connection object costs in Ruby — because Ruby holds nothing between
   # messages. 500 is a deliberately conservative ceiling for a 1 GB machine
   # sitting next to the document store's own; the sockets themselves are not
-  # what runs out first.
-  MAX_CONNECTIONS = 500
+  # what runs out first. Env override for load testing, as above.
+  MAX_CONNECTIONS = Integer(ENV.fetch("MAX_CONNECTIONS", 500))
 
   # --- Frames ----------------------------------------------------------------
 
