@@ -1,0 +1,13 @@
+# The async adapter is in-process, which is the correct choice here and a
+# constraint everywhere else. This app keeps every document in one process's
+# memory (app/lib/room_store.rb), so a second process would serve different
+# documents under the same URL whatever the adapter did. Running more than one
+# process means swapping the store AND this adapter for redis or solid_cable.
+development:
+  adapter: async
+
+test:
+  adapter: test
+
+production:
+  adapter: async

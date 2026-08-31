@@ -1,0 +1,13 @@
+<p>
+  Shared state is a <code>Y.Array</code> of row <code>Y.Map</code>s, and every
+  cell is its own <code>Y.Map</code> of <code>{ value, bold, fill }</code>. Edits
+  to different cells merge, and edits to different properties of the same cell
+  merge too — bold a cell while someone else is typing in it and both land. Set
+  the same property twice and the last write wins. Values commit on Enter or
+  blur, the way a spreadsheet does.
+</p>
+<p>
+  Sorting and column order come from TanStack Table and are never written to the
+  document: they are your view, not shared state. Sort by Owner in one window and
+  by Qty in the other, then edit the same cell in both.
+</p>

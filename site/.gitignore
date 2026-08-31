@@ -1,0 +1,34 @@
+# Bundler
+/.bundle/
+/vendor/bundle/
+
+# Bun
+/frontend/node_modules/
+
+# Built demo bundles. `cd frontend && bun run build` regenerates them; the
+# Dockerfile builds them during the image build.
+/public/tiptap.js
+/public/spreadsheet.js
+/public/whiteboard.js
+/public/kanban.js
+/public/codemirror.js
+/public/*.js.map
+
+# Propshaft output
+/public/assets
+
+# Runtime
+/log/*
+!/log/.keep
+/tmp/*
+!/tmp/.keep
+!/tmp/pids
+/tmp/pids/*
+!/tmp/pids/.keep
+
+.DS_Store
+
+# The repo root's .gitignore excludes Gemfile.lock (it is a gem there). This is
+# an application: its lock file is checked in, and CI and the Dockerfile both
+# install from it.
+!Gemfile.lock

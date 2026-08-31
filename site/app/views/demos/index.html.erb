@@ -1,0 +1,25 @@
+<% content_for :title, "Demos — yrby" %>
+
+<section>
+  <h1>Demos</h1>
+  <p>
+    Every demo runs on one <code>DocumentChannel</code>. The server never looks
+    inside the document; it records the CRDT update, acks it, and relays it. What
+    changes from page to page is only the Yjs shape the browser binds to.
+  </p>
+  <p class="warning">
+    Rooms are public and ephemeral. Opening a demo puts you in a room of your
+    own; share the URL to collaborate. Rooms live in one process's memory, are
+    dropped after 20 minutes idle, and are lost when the app restarts.
+  </p>
+
+  <ul class="demo-list">
+    <% @demos.each do |demo| %>
+      <li>
+        <%= link_to demo.title, demo_path(demo.slug) %>
+        <code><%= demo.shape %></code>
+        <span><%= demo.blurb %></span>
+      </li>
+    <% end %>
+  </ul>
+</section>

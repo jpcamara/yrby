@@ -1,0 +1,140 @@
+# Getting started
+
+yrby makes Rails a real Yjs backend. It binds
+[y-crdt](https://github.com/y-crdt/y-crdt), the Rust engine behind Y.js, into
+Ruby, and builds the rest of the stack around it: a sync server for Action Cable
+and AnyCable, a browser provider, and server-side reading and rendering of the
+documents. Real-time collaboration in a Rails app with no Node process anywhere
+in the path.
+
+## Install
+
+Two gems and one npm package.
+
+```ruby
+# Core CRDT + protocol primitives:
+gem "yrby"
+
+# The Rails side (the sync channel, document models, the generator).
+# Formerly yrby-actioncable; that name stops at 0.3.1.
+gem "yrby-rails"
+```
+
+```
+npm install yrby-client
+```
+
+Ruby 3.4 or newer. The release workflow builds precompiled gems for Ruby 3.4 and
+4.0 across the supported platforms, with native smoke tests on Linux x86_64 and
+macOS arm64. Installing a matching platform gem needs no Rust; a source build
+needs [Rust](https://rustup.rs).
+
+## Generate the channel
+
+One generator writes the channel and the migration.
+
+```bash
+bin/rails generate yrby:install
+bin/rails db:migrate
+```
+
+The migration creates `y_documents` and `y_document_updates`. The models ship in
+the gem, the way Action Text owns `ActionText::RichText`.
+
+## The server side
+
+The whole server side of a collaborative document is one channel.
+
+```ruby
+class DocumentChannel < ApplicationCable::Channel
+  include Y::ActionCable
+
+  on_load   { |key|         Y::Document.load_state(key) }
+  on_change { |key, update| Y::Document.append(key, update) }
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
+end
+```
+
+`on_load` rebuilds a document from storage. `on_change` records an update. Both
+are required, and both run in the channel instance, so they can use anything the
+channel can. Neither has to touch a database — see
+[Storage](/docs/storage).
+
+The generated channel denies everyone until you wire `authorized?` to your app.
+
+## The browser side
+
+`yrby-client`'s `ActionCableProvider` connects anything that speaks Yjs.
+
+```js
+import * as Y from "yjs"
+import { createConsumer } from "@rails/actioncable"
+import { ActionCableProvider } from "yrby-client"
+
+const ydoc = new Y.Doc()
+const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChannel", { id: "post/1/body" })
+provider.connect()
+
+await provider.whenSynced
+// now hand ydoc to an editor binding
+```
+
+Bind after the first sync, not before. Most editor bindings seed an empty
+document when they mount, so binding early makes each client insert its own
+competing top-level node. See [The JavaScript client](/docs/javascript-client).
+
+## What yrby covers
+
+`yrby` binds just the part of `y-crdt` you need to sync and persist
+collaborative documents: a `Doc`, awareness, and the y-websocket protocol
+primitives. By default the Ruby side treats a document as opaque CRDT state. It
+applies updates, answers sync handshakes, and records deltas without reaching
+into the contents; the browser editor owns the document's shape. When you do
+need to look inside, `Doc#read_text` and `Doc#read_map` reconstruct it
+server-side, in Ruby.
+
+The surface is small on purpose. The focus is durability, resiliency, delivery
+guarantees, correctness, and thread safety.
+
+## Editors
+
+yrby syncs opaque Yjs updates, so it works with any editor that has a Yjs
+binding. The demo app runs four, and CI drives each one in real Chrome.
+
+| Editor | Yjs binding |
+|---|---|
+| [Tiptap](https://tiptap.dev) (v2) | `@tiptap/extension-collaboration` |
+| [Lexxy](https://github.com/basecamp/lexxy) (Lexical) | [`lexxy-realtime`](https://www.npmjs.com/package/lexxy-realtime) |
+| [Rhino Editor](https://github.com/KonnorRogers/rhino-editor) (Tiptap 3) | `@tiptap/extension-collaboration` + `-caret` |
+| [CodeMirror 6](https://codemirror.net) | `y-codemirror.next` |
+
+The same channel also syncs plain Yjs shapes with no editor at all: a whiteboard
+on a `Y.Map`, a kanban board on a `Y.Array`, a spreadsheet on a `Y.Array` of
+nested `Y.Map`s. The [demos](/demos) on this site are five of those, running
+live.
+
+## Reading a document in Ruby
+
+Reconstruct a document server-side for search, exports, or emails, with no Node
+process:
+
+```ruby
+doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
+doc.read_xml("root")          # => text of an XML root, one block per line
+doc.read_map("state")         # => a Y.Map root as a JSON string
+```
+
+For HTML that matches an editor's own serializer byte for byte, see
+[Server-side rendering](/docs/rendering).
+
+## Thread safety
+
+A `Doc` is safe to share across Ruby threads, used concurrently from Puma
+workers, Action Cable connection threads, or background jobs without external
+locking.
+
+Every method that does real CRDT work releases Ruby's Global VM Lock while the
+native code runs. CRDT work parallelizes across Ruby threads on MRI, and a
+thread applying a large update can't stall the VM.

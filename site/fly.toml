@@ -1,0 +1,68 @@
+# fly.toml for the yrby site.
+#
+#   fly launch --no-deploy --copy-config
+#   fly secrets set SECRET_KEY_BASE=$(openssl rand -hex 64)
+#   fly deploy
+#
+# ONE machine, on purpose. The document store is a Hash in process memory and
+# the cable adapter is `async`, so two machines would serve different rooms
+# behind the same URL and a visitor would land on whichever the proxy picked.
+# Scaling this app out means swapping the store and the adapter first.
+
+app = "yrby-site"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RAILS_ENV = "production"
+  PORT = "3000"
+  # Locks the cable handshake to this host once the domain is settled. Leave it
+  # unset and the origin check is off (see config/application.rb).
+  # CABLE_ALLOWED_ORIGINS = "https://yrby.dev"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+
+  # Scale to zero between visitors. The site is a demo, and most of the time
+  # nobody is on it.
+  #
+  # The cost of this is in the store: rooms live in memory, so a machine that
+  # stops loses every one of them. For ephemeral demo rooms that is fine —
+  # they are dropped after 20 minutes idle anyway — but it has to be said out
+  # loud, because it is the same property that makes this app unfit for
+  # anything you would miss. A browser still holding the document re-seeds the
+  # server on reconnect; a room whose tabs are all closed is gone.
+  #
+  # "suspend" keeps the machine's memory image, so a resumed machine still has
+  # its rooms and starts in well under a second. Fly falls back to a full stop
+  # when it can't suspend.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # One machine, so the concurrency numbers are this process's ceiling, not a
+  # load-balancing hint. 500 is MAX_CONNECTIONS from config/limits.rb; the app
+  # refuses connections past it rather than degrading.
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 400
+    hard_limit = 500
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/up"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  # 1 GB, not 512 MB: the store's own ceiling is 200 rooms x 512 KB (100 MB),
+  # 500 connections is roughly another 25 MB, and Rails plus the yrby native
+  # extension is 150-200 MB resident. 512 MB would fit the average case and
+  # fail at the caps, which is the wrong way round for limits that exist to
+  # keep the process alive.

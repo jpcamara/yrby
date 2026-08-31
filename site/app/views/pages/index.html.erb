@@ -1,0 +1,69 @@
+<% content_for :title, "yrby — Rails as a Yjs backend" %>
+
+<section class="hero">
+  <h1>yrby</h1>
+  <p class="lede">
+    yrby makes Rails a real Yjs backend. It binds
+    <a href="https://github.com/y-crdt/y-crdt">y-crdt</a>, the Rust engine behind
+    Y.js, into Ruby, and builds the rest of the stack around it: a sync server
+    for Action Cable and AnyCable, a browser provider, and server-side reading
+    and rendering of the documents. Real-time collaboration in a Rails app with
+    no Node process anywhere in the path.
+  </p>
+
+  <pre class="install"><code>gem install yrby-rails # depends on yrby
+npm install yrby-client</code></pre>
+
+  <p class="cta">
+    <%= link_to "Read the docs", doc_path("getting-started"), class: "button" %>
+    <%= link_to "Try the demos", demos_path, class: "button button--ghost" %>
+  </p>
+</section>
+
+<section>
+  <h2>The whole server side is one channel</h2>
+  <pre><code>class DocumentChannel &lt; ApplicationCable::Channel
+  include Y::ActionCable
+
+  on_load   { |key|         Y::Document.load_state(key) }
+  on_change { |key, update| Y::Document.append(key, update) }
+
+  def subscribed    = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data, params[:id])
+end</code></pre>
+  <p>
+    Every update is recorded through <code>on_change</code> before it is acked or
+    broadcast to anyone. Replaying your store always rebuilds the document, on
+    one process or a hundred.
+  </p>
+</section>
+
+<section>
+  <h2>Any Yjs shape, no editor required</h2>
+  <p>
+    The server treats a document as opaque CRDT state, so the same channel syncs
+    a rich text editor, a spreadsheet, a whiteboard, or anything else with a Yjs
+    binding. Each demo below runs against this site, on the store described in
+    <%= link_to "Storage", doc_path("storage") %>.
+  </p>
+  <ul class="demo-list">
+    <% Demos::ALL.each do |demo| %>
+      <li>
+        <%= link_to demo.title, demo_path(demo.slug) %>
+        <code><%= demo.shape %></code>
+        <span><%= demo.blurb %></span>
+      </li>
+    <% end %>
+  </ul>
+</section>
+
+<section>
+  <h2>This site</h2>
+  <p>
+    The site you are reading is a Rails app in the yrby repo
+    (<a href="https://github.com/jpcamara/yrby/tree/main/site"><code>site/</code></a>).
+    It runs on the published gems, has no database and no Redis, and keeps every
+    demo document in process memory behind the channel's two hooks. Its README
+    covers the store, the throttle design, and what it costs to host.
+  </p>
+</section>

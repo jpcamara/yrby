@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title><%= content_for(:title) || "yrby" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="description" content="<%= content_for(:description) || "yrby makes Rails a real Yjs backend: y-crdt in Ruby, a sync server for Action Cable and AnyCable, a browser provider, and server-side rendering." %>">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%# Tells createConsumer() where the cable server is. %>
+    <%= action_cable_meta_tag %>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <%= stylesheet_link_tag :application %>
+    <%= yield :head %>
+  </head>
+
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/">yrby</a>
+      <nav>
+        <%= link_to "Docs", doc_path("getting-started") %>
+        <%= link_to "Demos", demos_path %>
+        <a href="https://github.com/jpcamara/yrby">GitHub</a>
+        <a href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
+      </nav>
+    </header>
+
+    <main><%= yield %></main>
+
+    <footer class="site-footer">
+      <p>
+        yrby is MIT licensed. The
+        <a href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>
+        is the canonical reference; these pages are a copy of it.
+      </p>
+      <p>
+        Demo rooms are public, ephemeral, and held in one process's memory.
+        They are dropped when idle and lost on restart. Don't put anything
+        in them you would miss.
+      </p>
+    </footer>
+  </body>
+</html>

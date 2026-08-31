@@ -1,0 +1,281 @@
+:root {
+  --ink: #16181d;
+  --muted: #5b6270;
+  --line: #e3e6eb;
+  --bg: #ffffff;
+  --soft: #f6f7f9;
+  --accent: #3b4bd8;
+  --warn: #92400e;
+  --warn-bg: #fef7e6;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--bg);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+a { color: var(--accent); }
+code { font: 0.875em var(--mono); background: var(--soft); padding: 0.1em 0.35em; border-radius: 4px; }
+pre {
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  overflow-x: auto;
+}
+pre code { background: none; padding: 0; font-size: 0.82rem; line-height: 1.55; }
+h1 { font-size: 1.7rem; line-height: 1.25; }
+h2 { font-size: 1.2rem; margin-top: 2.2rem; }
+h3 { font-size: 1.02rem; margin-top: 1.6rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border: 1px solid var(--line); padding: 0.35rem 0.6rem; text-align: left; vertical-align: top; }
+th { background: var(--soft); }
+
+/* --- chrome --------------------------------------------------------------- */
+
+.site-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  padding: 0.9rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+.site-header .brand { font: 600 1.1rem var(--mono); color: var(--ink); text-decoration: none; }
+.site-header nav { display: flex; gap: 1.1rem; font-size: 0.9rem; }
+
+main { max-width: 62rem; margin: 0 auto; padding: 1.5rem; }
+
+.site-footer {
+  max-width: 62rem;
+  margin: 3rem auto 0;
+  padding: 1.2rem 1.5rem 2.5rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.site-footer p { margin: 0.4rem 0; }
+
+/* --- home ----------------------------------------------------------------- */
+
+.hero { max-width: 44rem; }
+.hero h1 { font: 600 2.4rem var(--mono); margin-bottom: 0.5rem; }
+.lede { font-size: 1.05rem; color: #2c3038; }
+.install { max-width: 34rem; }
+.cta { display: flex; gap: 0.7rem; margin-top: 1.4rem; }
+.button {
+  display: inline-block;
+  padding: 0.45rem 0.95rem;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.button--ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+
+.demo-list { list-style: none; padding: 0; }
+.demo-list li { padding: 0.55rem 0; border-bottom: 1px solid var(--line); font-size: 0.92rem; }
+.demo-list li a { font-weight: 600; margin-right: 0.5rem; }
+.demo-list li span { color: var(--muted); display: block; }
+
+.warning {
+  background: var(--warn-bg);
+  border: 1px solid #f3dfb0;
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.9rem;
+}
+
+/* --- docs ----------------------------------------------------------------- */
+
+.docs { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 2.5rem; }
+.docs-nav { font-size: 0.88rem; position: sticky; top: 1rem; align-self: start; }
+.docs-nav h2 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1.2rem 0 0.4rem; }
+.docs-nav ul { list-style: none; padding: 0; margin: 0; }
+.docs-nav li { padding: 0.16rem 0; }
+.docs-nav li.current a { font-weight: 600; color: var(--ink); }
+.docs-toc a { color: var(--muted); }
+
+.docs-body { min-width: 0; }
+.docs-body h1 { margin-top: 0.4rem; }
+.canonical {
+  font-size: 0.85rem;
+  color: var(--muted);
+  border-left: 3px solid var(--line);
+  padding: 0.1rem 0 0.1rem 0.8rem;
+  margin: 0 0 1.6rem;
+}
+
+@media (max-width: 46rem) {
+  .docs { grid-template-columns: 1fr; gap: 1rem; }
+  .docs-nav { position: static; }
+}
+
+/* --- demo chrome ---------------------------------------------------------- */
+
+.demo-header h1 { margin-bottom: 0.3rem; }
+.demo-nav { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.9rem; }
+.demo-header p { font-size: 0.9rem; color: #333842; }
+
+.roombar { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.roombar-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.roombar input {
+  flex: 1 1 20rem;
+  min-width: 12rem;
+  font: 0.8rem var(--mono);
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+}
+.roombar button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.roombar button:hover { border-color: var(--accent); color: var(--accent); }
+.roombar-note { font-size: 0.8rem; color: var(--muted); margin-top: 0.4rem; }
+
+.presence { min-height: 1.6rem; margin: 0.5rem 0 0.2rem; }
+.chip { color: #fff; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-right: 4px; }
+
+.status { font-size: 0.8rem; color: var(--muted); margin: 0.2rem 0 1rem; }
+.status[data-state="connected"] { color: #15803d; }
+.status[data-state="disconnected"] { color: #b91c1c; }
+
+.notice {
+  background: var(--warn-bg);
+  border: 1px solid #f3dfb0;
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+/* --- rich text (tiptap) --------------------------------------------------- */
+
+#editor .tiptap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  min-height: 20rem;
+  outline: none;
+  line-height: 1.6;
+}
+#editor .tiptap:focus-within { border-color: var(--accent); }
+.collaboration-cursor__caret {
+  border-left: 1px solid;
+  border-right: 1px solid;
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+  position: relative;
+  word-break: normal;
+}
+.collaboration-cursor__label {
+  border-radius: 3px 3px 3px 0;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 600;
+  left: -1px;
+  line-height: normal;
+  padding: 0.1rem 0.3rem;
+  position: absolute;
+  top: -1.3em;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* --- code (codemirror) ---------------------------------------------------- */
+
+.demo .cm-editor { height: 26rem; font: 13px/1.55 var(--mono); }
+#editor:has(.cm-editor) { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+
+/* --- whiteboard ----------------------------------------------------------- */
+
+#canvas {
+  position: relative;
+  height: 26rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  touch-action: none;
+  background:
+    linear-gradient(var(--soft) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(90deg, var(--soft) 1px, transparent 1px) 0 0 / 22px 22px,
+    #fff;
+}
+.note {
+  position: absolute;
+  width: 120px;
+  height: 78px;
+  border-radius: 7px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  cursor: grab;
+  padding: 4px;
+}
+.note textarea {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  resize: none;
+  outline: none;
+  font: 13px/1.3 system-ui;
+  color: #1f2937;
+}
+
+/* --- kanban --------------------------------------------------------------- */
+
+#board { display: flex; gap: 1rem; align-items: flex-start; }
+.col { flex: 1; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem; min-height: 8rem; }
+.col h3 { margin: 0.1rem 0 0.5rem; font-size: 0.95rem; color: #374151; }
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.45rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.88rem;
+}
+.card .t { flex: 1; }
+.ctl button { border: 1px solid #d1d5db; background: #fff; border-radius: 5px; cursor: pointer; font-size: 12px; padding: 1px 5px; margin-left: 2px; }
+.add input {
+  width: 100%;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 7px;
+  font: 13px system-ui;
+  background: transparent;
+  margin-top: 0.2rem;
+}
+
+/* --- spreadsheet ---------------------------------------------------------- */
+
+#toolbar { display: flex; align-items: center; gap: 4px; margin: 0.5rem 0; }
+#toolbar button { width: 26px; height: 26px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; cursor: pointer; font: 600 13px system-ui; }
+#toolbar button.on { border-color: #334155; box-shadow: 0 0 0 1px #334155; }
+#toolbar .label { font-size: 12px; color: var(--muted); margin: 0 0.4rem 0 0.2rem; }
+#toolbar #add-row { width: auto; padding: 0 9px; border-style: dashed; font-weight: 400; }
+#grid { border-collapse: separate; border-spacing: 0; font: 13px system-ui; background: #fff; width: auto; }
+#grid th { background: var(--soft); border: 1px solid var(--line); padding: 2px 4px; white-space: nowrap; }
+#grid th button { border: 0; background: transparent; cursor: pointer; font: 600 12px system-ui; color: #374151; padding: 2px 4px; }
+#grid th .movecol { color: #9ca3af; font-size: 9px; padding: 2px 1px; }
+#grid td { border: 1px solid var(--line); padding: 0; position: relative; }
+#grid td input { width: 11rem; border: 0; background: transparent; padding: 5px 7px; font: 13px system-ui; }
+#grid td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+.peerlabel { position: absolute; top: -9px; right: -1px; color: #fff; font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 3px; }

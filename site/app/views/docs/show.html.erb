@@ -1,0 +1,32 @@
+<% content_for :title, "#{@page.title} — yrby" %>
+
+<div class="docs">
+  <aside class="docs-nav">
+    <h2>Docs</h2>
+    <ul>
+      <% DocPage.all.each do |entry| %>
+        <li class="<%= "current" if entry.slug == @page.slug %>">
+          <%= link_to entry.nav, doc_path(entry.slug) %>
+        </li>
+      <% end %>
+    </ul>
+    <% if @page.sections.any? %>
+      <h2>On this page</h2>
+      <ul class="docs-toc">
+        <% @page.sections.each do |text, anchor| %>
+          <li><a href="#<%= anchor %>"><%= text %></a></li>
+        <% end %>
+      </ul>
+    <% end %>
+  </aside>
+
+  <article class="docs-body">
+    <p class="canonical">
+      The <a href="<%= @page.source_url %>">repo README</a> is the canonical
+      reference for this API. This page is a copy of it. If the two disagree,
+      the README is right.
+    </p>
+
+    <%= @page.html %>
+  </article>
+</div>

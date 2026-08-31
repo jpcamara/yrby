@@ -1,0 +1,37 @@
+<% content_for :title, "#{@demo.title} — yrby demos" %>
+
+<div class="demo">
+  <header class="demo-header">
+    <h1><%= @demo.title %></h1>
+
+    <nav class="demo-nav">
+      Same room, different shape:
+      <% Demos::ALL.each_with_index do |demo, i| %><%= " · " if i.positive? %><%
+        if demo.slug == @demo.slug %><strong><%= demo.title %></strong><%
+        else %><%= link_to demo.title, demo_room_path(demo.slug, @room) %><% end %><% end %>
+    </nav>
+
+    <div class="roombar">
+      <span class="roombar-label">Room</span>
+      <input id="room-url" type="text" readonly value="<%= demo_room_url(@demo.slug, @room) %>" aria-label="room link">
+      <button id="copy-room" type="button">Copy link</button>
+      <button id="second-window" type="button">Open a second window</button>
+    </div>
+    <p class="roombar-note">
+      This room is yours until you share it. Open a second window (or send the
+      link) and edit in both — that is the demo. Rooms are public, capped at
+      <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB of
+      document, and dropped after <%= Limits::ROOM_IDLE_TTL / 60 %> minutes idle.
+    </p>
+
+    <%= render "demos/#{@demo.slug}_intro" %>
+
+    <div id="presence" class="presence"></div>
+    <p id="status" class="status">connecting…</p>
+    <p id="notice" class="notice" hidden></p>
+  </header>
+
+  <%= render "demos/#{@demo.slug}" %>
+</div>
+
+<%= javascript_include_tag "/#{@demo.slug}.js", defer: true, skip_pipeline: true %>
