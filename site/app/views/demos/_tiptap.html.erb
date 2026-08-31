@@ -1,1 +1,17 @@
+<%# Toolbar buttons carry data-cmd; tiptap.js wires them to editor commands
+    and reflects active marks back as aria-pressed. %>
+<div id="editor-toolbar" class="mb-2 flex flex-wrap gap-1" hidden>
+  <button type="button" data-cmd="bold" title="Bold (⌘B)" class="tb"><strong>B</strong></button>
+  <button type="button" data-cmd="italic" title="Italic (⌘I)" class="tb"><em>I</em></button>
+  <button type="button" data-cmd="strike" title="Strikethrough" class="tb"><s>S</s></button>
+  <button type="button" data-cmd="code" title="Inline code" class="tb font-mono">&lt;&gt;</button>
+  <span class="tb-sep"></span>
+  <button type="button" data-cmd="h1" title="Heading 1" class="tb">H1</button>
+  <button type="button" data-cmd="h2" title="Heading 2" class="tb">H2</button>
+  <span class="tb-sep"></span>
+  <button type="button" data-cmd="bulletList" title="Bullet list" class="tb">•≡</button>
+  <button type="button" data-cmd="orderedList" title="Numbered list" class="tb">1≡</button>
+  <button type="button" data-cmd="blockquote" title="Quote" class="tb">"</button>
+  <button type="button" data-cmd="codeBlock" title="Code block" class="tb font-mono">{ }</button>
+</div>
 <div id="editor" data-document-key="<%= @document_key %>"></div>

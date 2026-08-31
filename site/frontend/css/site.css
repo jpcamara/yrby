@@ -184,6 +184,19 @@
   /* -------------------------------------------------------------------------
    * Rich text (Tiptap mounts into #editor and generates .tiptap).
    * ---------------------------------------------------------------------- */
+  .tb {
+    @apply min-w-8 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1
+           text-sm text-zinc-300 hover:border-zinc-600 hover:text-zinc-100;
+  }
+
+  .tb[aria-pressed="true"] {
+    @apply border-rose-500/60 bg-rose-500/10 text-zinc-100;
+  }
+
+  .tb-sep {
+    @apply mx-1 w-px self-stretch bg-zinc-800;
+  }
+
   #editor .tiptap {
     @apply min-h-80 rounded-xl border border-zinc-800 bg-panel px-5 py-4
            leading-relaxed text-zinc-200 outline-none;
