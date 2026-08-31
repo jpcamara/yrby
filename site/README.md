@@ -338,6 +338,13 @@ but deliberately not `192.168.0.0/16`, so a LAN client can't forge
 Left unset, all of this is permissive — which is what the plain-http Pi on the
 LAN wants.
 
+Set `CANONICAL_HOST` in the same deploy env, to the site's real origin
+(e.g. `https://yrby.dev`). It is the one host used in canonical tags, Open
+Graph/Twitter URLs, the sitemap, JSON-LD, and llms.txt — deliberately not
+derived from the request, because Cloudflare and the plain-http Pi origin make
+the request host vary while the canonical host must not. **It defaults to the
+`yrby.example.com` placeholder; the SEO tags are wrong until you set it.**
+
 Either way it is one machine and one container: the database volume attaches to
 one box, and the throttle counters assume one process. For a demo site that is
 the right trade — a bigger box is a one-line change, and everything a reader is
@@ -404,6 +411,44 @@ fall out of step with the content.
 The repo README is canonical. These pages are a copy of it and copies drift, so
 every page says so and links back to the section it came from. When the README
 changes, update the matching page here.
+
+The in-page table of contents reads its anchors from the rendered HTML's heading
+ids (`DocPage#sections` parses the `id` attributes Commonmarker generated),
+rather than re-slugifying the markdown, so the contents links can't drift from
+the ids they point at.
+
+## Discoverability
+
+Everything a crawler and an LLM look for, rendered from the same page lists so it
+can't drift:
+
+- **`robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt`** — served by
+  `MetaController` from `DocPage`/`Demos`, not committed as static files, so the
+  URL set and the canonical host stay correct as pages are added. `robots.txt`
+  indexes the docs and the `/demos` index but disallows every `/demos/:slug`
+  prefix, because a bare demo URL mints a fresh room and redirects — a crawler
+  that followed those links would manufacture unlimited URLs. Demo room pages
+  are also `noindex, nofollow` and canonicalize to `/demos`.
+- **Markdown for agents** — every docs page answers `Accept: text/markdown` and
+  a `.md` suffix (`/docs/storage.md`) with its raw markdown plus a small
+  metadata front-block. `llms.txt` points at the `.md` convention; `llms-full.txt`
+  concatenates them.
+- **Canonical / Open Graph / Twitter / JSON-LD** — in the layout head, driven by
+  `content_for :title`/`:description`/`:canonical`. Home carries a
+  `SoftwareSourceCode` block; docs pages carry `TechArticle` + `BreadcrumbList`.
+  The JSON-LD is inline `application/ld+json`, which the strict `script-src`
+  CSP does not govern (browsers never execute it).
+- **`public/og.png`** — one 1200×630 dark social card. Regenerate it by opening
+  the card template in a headless browser at that viewport and screenshotting;
+  the on-brand source is a small standalone HTML page (dark bg, `yrby▌`
+  wordmark, the headline, the flagship line with the accent gutter).
+
+Two things still need the real domain and are **launch follow-ups**, not code
+here: add a prominent link back to this site from the repo root `README.md`
+(the site's first high-authority backlink), and point the gemspec
+`homepage`/`documentation_uri` at it. A tutorial-shaped "collaborative rich text
+in Rails" landing page (plan R9) and newsletter distribution (R10) are JP's to
+write.
 
 ## Demos
 

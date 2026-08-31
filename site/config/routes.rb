@@ -4,7 +4,17 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
 
   get "docs", to: redirect("/docs/getting-started")
-  get "docs/:page", to: "docs#show", as: :doc, constraints: { page: /[a-z0-9-]+/ }
+  # `(.:format)` adds the `.md` variant (DocsController serves raw markdown for
+  # it); the page constraint excludes dots, so `storage.md` parses as
+  # page="storage", format=md.
+  get "docs/:page(.:format)", to: "docs#show", as: :doc, constraints: { page: /[a-z0-9-]+/ }
+
+  # Discoverability endpoints, rendered from the doc/demo lists so they can't
+  # drift (and so the canonical host is one ENV-driven value everywhere).
+  get "robots.txt", to: "meta#robots"
+  get "sitemap.xml", to: "meta#sitemap"
+  get "llms.txt", to: "meta#llms"
+  get "llms-full.txt", to: "meta#llms_full"
 
   get "demos", to: "demos#index"
   # A bare demo URL mints a room and redirects, so every visitor lands

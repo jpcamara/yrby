@@ -6,7 +6,16 @@ class DocsController < ApplicationController
     return head :not_found if @page.nil?
 
     cache_publicly
-    render :show
+    respond_to do |format|
+      format.html { render :show }
+      # The raw markdown, for `Accept: text/markdown` and `/docs/:page.md` —
+      # the format coding agents read best. Nearly free: DocPage already holds
+      # the source.
+      format.md do
+        render plain: @page.markdown_with_frontmatter(canonical_url("/docs/#{@page.slug}")),
+               content_type: "text/markdown"
+      end
+    end
   end
 
   private

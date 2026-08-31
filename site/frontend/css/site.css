@@ -450,4 +450,99 @@
   .demo-list li span {
     @apply mt-1.5 block text-sm text-zinc-400;
   }
+
+  /* -------------------------------------------------------------------------
+   * "The lines you add." The flagship samples (hero, Lexxy quickstart) render
+   * context dimmed and the lines you actually type at full brightness with a
+   * 2px accent gutter — so a sample answers "what do I type?" at a glance.
+   * Near-monochrome on purpose: the one accent belongs on the gutter, not
+   * scattered across syntax tokens.
+   * ---------------------------------------------------------------------- */
+  .code-annotated {
+    @apply my-0 text-zinc-500;
+  }
+
+  .code-annotated .cl {
+    @apply block border-l-2 border-transparent pl-3 whitespace-pre;
+  }
+
+  .code-annotated .cl.add {
+    @apply text-zinc-100;
+    border-left-color: var(--color-accent-strong);
+  }
+
+  /* -------------------------------------------------------------------------
+   * The wire-flow diagram (home, "Acked means stored"): mono type, not an
+   * illustration.
+   * ---------------------------------------------------------------------- */
+  .wire {
+    background-color: var(--color-panel) !important;
+    @apply overflow-x-auto rounded-xl border border-zinc-800 px-5 py-4
+           font-mono text-[0.78rem] leading-relaxed whitespace-pre text-zinc-400;
+  }
+
+  /* -------------------------------------------------------------------------
+   * The plain three-way comparison (home, "Nothing new to deploy"): factual,
+   * no logos, no red Xs. The yrby column carries the accent.
+   * ---------------------------------------------------------------------- */
+  .compare {
+    @apply border-collapse;
+  }
+
+  .compare th,
+  .compare td {
+    @apply border border-zinc-800 px-3 py-2 text-left align-top text-zinc-400;
+  }
+
+  .compare th {
+    @apply bg-zinc-900 font-semibold text-zinc-200;
+  }
+
+  .compare .accent-col {
+    @apply bg-rose-500/5 text-zinc-200;
+  }
+
+  .compare thead .accent-col {
+    @apply text-accent;
+  }
+
+  /* -------------------------------------------------------------------------
+   * The named caret — the wordmark's mark, and the presence carets in the demo
+   * still. Accent by default; the peer caret's sky is caged to demo panes.
+   * `prefers-reduced-motion` stops the blink.
+   * ---------------------------------------------------------------------- */
+  .caret {
+    color: var(--color-accent-strong);
+    @apply inline-block;
+    animation: caret-blink 1.1s step-end infinite;
+  }
+
+  .peer-caret {
+    color: #7dd3fc;
+  }
+
+  @keyframes caret-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caret {
+      animation: none;
+    }
+  }
+
+  /* -------------------------------------------------------------------------
+   * Skip-to-content: off-screen until focused, then a normal accent chip at the
+   * top-left. Keyboard and screen-reader users get past the header nav in one
+   * tab.
+   * ---------------------------------------------------------------------- */
+  .skip-link {
+    @apply sr-only;
+  }
+
+  .skip-link:focus {
+    @apply not-sr-only fixed top-3 left-3 z-50 rounded-lg bg-accent-strong px-4
+           py-2 text-sm font-semibold text-white;
+  }
 }

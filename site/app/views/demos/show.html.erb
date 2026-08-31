@@ -1,4 +1,10 @@
 <% content_for :title, "#{@demo.title} — yrby demos" %>
+<%# Room URLs are per-visitor and ephemeral: never index them, and point the
+    canonical at the demos index so any that leak out don't compete with it. %>
+<% content_for :canonical, canonical_url("/demos") %>
+<% content_for :head do %>
+  <meta name="robots" content="noindex, nofollow">
+<% end %>
 
 <div class="demo">
   <header class="demo-header">

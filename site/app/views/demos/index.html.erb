@@ -16,7 +16,9 @@
   <ul class="demo-list">
     <% @demos.each do |demo| %>
       <li>
-        <%= link_to demo.title, demo_path(demo.slug) %>
+        <%# nofollow: each launch mints a fresh, per-visitor room — not a page
+            for a crawler to follow (robots.txt disallows the room paths too). %>
+        <%= link_to demo.title, demo_path(demo.slug), rel: "nofollow" %>
         <code><%= demo.shape %></code>
         <span><%= demo.blurb %></span>
       </li>

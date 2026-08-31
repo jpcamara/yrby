@@ -7,8 +7,24 @@ class PagesTest < ActionDispatch::IntegrationTest
     get "/"
 
     assert_response :success
-    assert_includes response.body, "yrby makes Rails a real Yjs backend"
+    assert_includes response.body, "Collaborative editing that lives in your database"
     assert_includes response.headers["cache-control"], "public"
+  end
+
+  test "the home page carries the canonical, Open Graph, and JSON-LD tags" do
+    get "/"
+
+    assert_includes response.body, %(<link rel="canonical")
+    assert_includes response.body, %(property="og:image")
+    assert_includes response.body, %(name="twitter:card" content="summary_large_image")
+    assert_includes response.body, %("@type": "SoftwareSourceCode")
+  end
+
+  test "the flagship sample marks the lines you add" do
+    get "/"
+
+    assert_includes response.body, "code-annotated"
+    assert_includes response.body, %(<span class="cl add">)
   end
 
   test "every docs page renders" do
@@ -47,6 +63,42 @@ class PagesTest < ActionDispatch::IntegrationTest
 
     assert_includes response.body, "<h2"
     assert_includes response.body, "<code>"
+  end
+
+  test "a docs page serves raw markdown for the .md route" do
+    get "/docs/storage.md"
+
+    assert_response :success
+    assert_equal "text/markdown", response.media_type
+    assert_includes response.body, "# Storage"
+    assert_includes response.body, "Canonical:"
+  end
+
+  test "a docs page serves markdown by content negotiation" do
+    get "/docs/storage", headers: { "Accept" => "text/markdown" }
+
+    assert_response :success
+    assert_equal "text/markdown", response.media_type
+    assert_includes response.body, "# Storage"
+  end
+
+  test "the docs page carries its markdown alternate and TechArticle JSON-LD" do
+    get "/docs/storage"
+
+    assert_includes response.body, %(rel="alternate" type="text/markdown")
+    assert_includes response.body, %("@type": "TechArticle")
+    assert_includes response.body, %("@type": "BreadcrumbList")
+  end
+
+  test "the docs TOC anchors match the ids in the rendered HTML" do
+    page = DocPage.find("storage")
+    html = page.html
+
+    page.sections.each do |section|
+      anchor = section[1]
+
+      assert_includes html, %(id="#{anchor}"), "TOC anchor ##{anchor} has no matching heading id"
+    end
   end
 
   test "the docs nav lists every page" do

@@ -1,4 +1,30 @@
-<% content_for :title, "#{@page.title} — yrby" %>
+<% doc_canonical = canonical_url("/docs/#{@page.slug}") %>
+<% content_for :title, @page.seo_title %>
+<% content_for :description, @page.description %>
+<% content_for :og_type, "article" %>
+<% content_for :canonical, doc_canonical %>
+
+<% content_for :head do %>
+  <link rel="alternate" type="text/markdown" href="<%= doc_canonical %>.md">
+  <%= json_ld_tag(
+        "@context" => "https://schema.org",
+        "@type" => "TechArticle",
+        "headline" => @page.seo_title,
+        "description" => @page.description,
+        "url" => doc_canonical,
+        "author" => { "@type" => "Person", "name" => "JP Camara", "url" => "https://jpcamara.com" },
+        "isPartOf" => { "@type" => "WebSite", "name" => "yrby", "url" => canonical_host }
+      ) %>
+  <%= json_ld_tag(
+        "@context" => "https://schema.org",
+        "@type" => "BreadcrumbList",
+        "itemListElement" => [
+          { "@type" => "ListItem", "position" => 1, "name" => "yrby", "item" => canonical_host },
+          { "@type" => "ListItem", "position" => 2, "name" => "Docs", "item" => canonical_url("/docs/getting-started") },
+          { "@type" => "ListItem", "position" => 3, "name" => @page.nav, "item" => doc_canonical }
+        ]
+      ) %>
+<% end %>
 
 <div class="gap-12 lg:grid lg:grid-cols-[13rem_minmax(0,1fr)]">
   <aside class="mb-10 text-sm lg:sticky lg:top-20 lg:mb-0 lg:max-h-[calc(100dvh-7rem)] lg:self-start lg:overflow-y-auto">
