@@ -62,8 +62,9 @@ end</code></pre>
   <p>
     The site you are reading is a Rails app in the yrby repo
     (<a href="https://github.com/jpcamara/yrby/tree/main/site"><code>site/</code></a>).
-    It runs on the published gems, has no database and no Redis, and keeps every
-    demo document in process memory behind the channel's two hooks. Its README
-    covers the store, the throttle design, and what it costs to host.
+    Its demo rooms run the canonical stack these docs teach —
+    <code>Y::Document.load_state</code> / <code>Y::Document.append</code> on
+    SQLite — behind the channel's two hooks. Its README covers the store, the
+    throttle design, and what it costs to host.
   </p>
 </section>

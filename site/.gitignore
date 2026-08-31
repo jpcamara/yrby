@@ -32,3 +32,7 @@
 # an application: its lock file is checked in, and CI and the Dockerfile both
 # install from it.
 !Gemfile.lock
+
+# SQLite databases (storage/ itself is the volume mount point in production)
+/storage/*.sqlite3
+/storage/*.sqlite3-*

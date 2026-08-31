@@ -2,6 +2,7 @@ require_relative "boot"
 
 require "rails"
 require "active_model/railtie"
+require "active_record/railtie"
 require "action_controller/railtie"
 require "action_view/railtie"
 require "action_cable/engine"
@@ -9,12 +10,6 @@ require "rails/test_unit/railtie"
 
 require "bundler"
 Bundler.require(*Rails.groups)
-
-# yrby-rails is `require: false` in the Gemfile. Requiring the gem loads its
-# Rails engine, which autoloads Y::Document and Y::DocumentUpdate from
-# app/models; those are Active Record classes and this app has no Active Record.
-# The channel concern is independent of them, so require it directly.
-require "y/action_cable"
 
 # Plain require, not autoload: the Rack::Attack initializer reads these
 # constants while the app is still booting, which is exactly when autoloading is

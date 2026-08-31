@@ -73,6 +73,6 @@ class DemosTest < ActionDispatch::IntegrationTest
   test "visiting a demo page does not create a room" do
     get "/demos/tiptap/room1"
 
-    assert_equal 0, RoomStore.current.live_rooms, "rooms are created by the channel, not the page"
+    assert_equal 0, Y::Document.count, "documents are created by the channel, not the page"
   end
 end

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Prepare the SQLite database on the mounted volume, then hand off to CMD.
+# db:prepare creates the file and runs migrations on first boot and is a no-op
+# after that, so deploys and restarts are safe unattended.
+set -euo pipefail
+
+if [[ "$*" == *"thrust"* ]]; then
+  ./bin/rails db:prepare
+fi
+
+exec "$@"

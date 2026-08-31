@@ -72,6 +72,14 @@ ENV ANYCABLE_MAX_MESSAGE_SIZE="131072"
 # rather than whatever proxy sits in front.
 ENV ANYCABLE_HEADERS="cookie,x-forwarded-for"
 
+# Cap request bodies at the proxy. Every public route is a GET, so 64 KB is
+# generous. This does NOT constrain AnyCable's RPC calls: the embedded Go
+# server dials Falcon's port directly (ANYCABLE_RPC_HOST above) as an outbound
+# HTTP client, and Rails posts broadcasts to Go's own 8090 listener — neither
+# path traverses thrust's public handler, which is the only place
+# MAX_REQUEST_BODY applies (thruster internal/service.go).
+ENV MAX_REQUEST_BODY="65536"
+
 # ANYCABLE_SECRET and SECRET_KEY_BASE are supplied at runtime. The first
 # configures both halves of AnyCable: the HTTP RPC key and the broadcast key are
 # derived from it on the Ruby side and the Go side alike.
@@ -84,9 +92,13 @@ COPY --from=assets /build/public /rails/public
 # database and no secrets are needed for this; the dummy key is discarded.
 RUN SECRET_KEY_BASE=dummy bundle exec rails assets:precompile
 
+# storage/ is the SQLite volume mount point; the rails user must own it so
+# db:prepare can create the database file on a fresh volume.
 RUN useradd rails --create-home --shell /bin/bash && \
-    chown -R rails:rails log tmp public
+    chown -R rails:rails db log storage tmp public
 USER rails:rails
+
+ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 
 EXPOSE 3000
 

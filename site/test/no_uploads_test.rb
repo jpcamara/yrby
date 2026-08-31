@@ -7,8 +7,10 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     assert_not defined?(ActiveStorage), "Active Storage should not be in this app's bundle at all"
   end
 
-  test "no framework beyond the six this app requires is loaded" do
-    %w[ActiveRecord ActionMailer ActionMailbox ActionText ActiveJob].each do |framework|
+  test "Active Record is loaded (it is the document store), the rest are not" do
+    assert Object.const_defined?("ActiveRecord"), "ActiveRecord backs Y::Document; it must be loaded"
+
+    %w[ActionMailer ActionMailbox ActionText ActiveJob].each do |framework|
       assert_not Object.const_defined?(framework), "#{framework} should not be loaded"
     end
   end

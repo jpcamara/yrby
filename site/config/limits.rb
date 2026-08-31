@@ -12,9 +12,9 @@
 #   2. ConnectionLimiter     concurrent WebSockets per IP   (connection.rb)
 #   3. TokenBucket           frames per second per client   (document_channel.rb)
 #   4. frame size cap        bytes per frame                (document_channel.rb)
-#   5. document size cap     bytes per room, total          (room_store.rb)
-#   6. room caps             peers per room, rooms per box  (room_store.rb)
-#   7. idle eviction         rooms dropped when untouched   (room_sweeper.rb)
+#   5. document size cap     bytes per room, total          (rooms.rb)
+#   6. room caps             peers per room, rooms on disk  (rooms.rb)
+#   7. idle eviction         stale rooms deleted            (room_sweeper.rb)
 #
 # Layer 0 runs in Go, in the embedded anycable-go inside the thrust proxy, and
 # is configured by environment variable rather than from here; the value is
@@ -76,35 +76,45 @@ module Limits
   FRAME_DROPS_BEFORE_CLOSE = 200
 
   # --- Documents and rooms ---------------------------------------------------
+  #
+  # The store is Y::Document on SQLite, so these caps bound disk and content,
+  # not RAM — nothing authoritative is held in process memory between messages.
+  # Compaction is the gem's own (Y::Document.compact_every, default 64 tail
+  # rows), so there is no compaction constant here.
 
   # Total bytes of CRDT state held for one room: the compacted snapshot plus the
   # uncompacted tail. A demo document — a page of rich text, a few dozen
   # spreadsheet cells — is tens of kilobytes with its history. 512 KiB is about
   # ten times that. A room at the cap stops accepting document writes and says
-  # so on the page; it does not grow until the process dies.
+  # so on the page; it does not grow until the disk fills.
   MAX_DOCUMENT_BYTES = 512 * 1024
 
-  # Rooms held in memory at once. 200 x MAX_DOCUMENT_BYTES is a 100 MB ceiling
-  # on the store, which sits inside a 1 GB machine alongside Rails and the
-  # connection overhead above.
-  MAX_LIVE_ROOMS = 200
+  # Documents on disk at once. 2000 x MAX_DOCUMENT_BYTES is a 1 GB ceiling on
+  # the database file, comfortable on any volume. Raised 10x from the in-memory
+  # store's 200: rooms now accumulate for a day rather than 20 minutes, and the
+  # resource they consume is disk.
+  MAX_LIVE_ROOMS = 2000
 
   # Peers in one room. More than a dozen carets in a demo document is unreadable
   # anyway, and each peer is another fan-out target for every update.
   MAX_PEERS_PER_ROOM = 12
 
-  # Updates appended before the room's log is folded into one snapshot. Same
-  # default Y::Document uses (64), halved: this store replays the whole log on
-  # every load, so a shorter tail keeps loads cheap.
-  COMPACT_EVERY = 32
+  # How stale the cached per-room size may get before it is re-read from the
+  # database. Appends bump the cache immediately (Rooms#note_append), so
+  # staleness only ever means over-estimating — the refresh exists to pick up
+  # compaction, which shrinks the true size. See Rooms#document_full?.
+  SIZE_CACHE_TTL = 30 # seconds
 
-  # A room with no peers and no writes for this long is dropped from memory.
-  # Long enough that closing a tab and coming back with the link still finds the
-  # document; short enough that an abandoned room is not held all day.
-  ROOM_IDLE_TTL = 20 * 60 # seconds
+  # A room with no writes and nobody in it for this long is deleted, rows and
+  # all. This is a content decision now, not a memory one: rooms are public and
+  # anonymous, and "temporary" is a promise the site makes about them. A day
+  # means a link shared in the morning still works after dinner, and nothing
+  # anyone pastes outlives the day.
+  ROOM_IDLE_TTL = 24 * 60 * 60 # seconds
 
-  # How often the sweeper looks for idle rooms.
-  SWEEP_INTERVAL = 60 # seconds
+  # How often the sweeper looks. Eviction at day granularity does not need a
+  # sweep a minute.
+  SWEEP_INTERVAL = 5 * 60 # seconds
 
   # --- Caching ---------------------------------------------------------------
 

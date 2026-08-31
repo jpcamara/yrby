@@ -1,9 +1,10 @@
 # yrby site
 
 The documentation and live-demo site for [yrby](https://github.com/jpcamara/yrby).
-A Rails app with no database, no Redis, and no shared state — every demo room is
-a Yjs document in one process's memory, behind the channel's `on_load` and
-`on_change` hooks.
+A Rails app whose demo rooms run the exact storage stack the docs teach:
+`Y::Document.load_state` / `Y::Document.append` — the gem's own models — on a
+SQLite file. No Postgres, no Redis, and nothing authoritative in process memory
+between messages.
 
 WebSockets are served by [anycable-thruster](https://github.com/anycable/thruster):
 Thruster with anycable-go embedded in the proxy. `thrust bin/serve` runs the
@@ -17,12 +18,13 @@ works, it works from a fresh `gem install`.
 
 ```
 site/
-├── app/lib/           the store, the limiters, the demo list, the docs model
+├── app/lib/           the caps, the limiters, the demo list, the docs model
 ├── app/channels/      DocumentChannel and the connection
 ├── config/limits.rb   every rate, size, and count limit, with its reasoning
+├── db/                the vendored yrby:tables migration + schema
 ├── docs/              the documentation pages, as markdown
 ├── frontend/          bun build for the demo bundles + the e2e harness
-└── test/              store, throttles, controllers
+└── test/              caps, throttles, sweeper, controllers
 ```
 
 ## Running it
@@ -69,36 +71,50 @@ PORT=3888 node site_e2e.mjs
 kill "$(cat /tmp/site.pid)"
 ```
 
-Nothing here needs Postgres or Redis, including the tests.
+Nothing here needs Postgres or Redis, including the tests — the database is a
+SQLite file under `storage/`, created by `db:prepare` (boot_server.sh runs it).
 
 ## The store
 
-`app/lib/room_store.rb` is the whole storage layer: a `Hash` of rooms, each
-holding a compacted snapshot plus a tail of raw updates.
+The store is the one the docs teach, verbatim:
 
 ```ruby
-on_load  { |key|         RoomStore.current.load(key) }
-on_change { |key, update| RoomStore.current.append(key, update) }
+on_load { |key| Y::Document.load_state(key) }
+on_change do |key, update|
+  Y::Document.append(key, update)
+  Rooms.current.note_append(key, update.bytesize) # the site's size cap
+end
 ```
 
-`load` replays the snapshot and the tail into a fresh `Y::Doc` and returns
-`encode_state_as_update`, which is lossless: an update that arrived before the
-update it depends on stays as a pending struct and still heals when the missing
-one lands. Every 32 appends the tail is folded into `compacted_state_update` —
-and folding is skipped while `doc.pending?`, because a snapshot must not carry a
-gap. That is the same rule the bundled `Y::Document` store follows, for the same
-reason.
+`Y::Document` and `Y::DocumentUpdate` ship in the yrby-rails gem; the vendored
+`yrby:tables` migration in `db/migrate` creates their tables on SQLite (one
+file under `storage/`, on a mounted volume in production). Everything that used
+to be hand-rolled here is now the gem's: loads are lossless (a causally-gapped
+update rides along as a pending struct and heals), compaction folds the tail
+every 64 rows with gapped rows quarantined rather than dropped, and nothing
+authoritative is held in process memory between messages — an idle room costs a
+few rows on disk and ~zero RAM.
 
-Rooms are ephemeral by design. They are dropped after 20 minutes with nobody in
-them, and lost entirely when the process restarts. A browser still holding the
-document re-seeds the server through the ordinary sync handshake, so a room
-whose tab is open survives a restart; a room whose tabs are all closed does not.
+That last property is the point of the change. The store-backed concern
+rebuilds state from the database per message, so the number of rooms is bounded
+by disk, not by what one Ruby process can hold. It also makes the site a live
+demonstration of the documented API instead of a bespoke store: what the
+[Storage](/docs/storage) page describes is literally what is running.
+
+What the site adds around the hooks lives in `app/lib/rooms.rb` — seats, caps,
+and a cached size check — and `app/lib/room_sweeper.rb`, the TTL eviction.
+
+Rooms are temporary by policy, not by accident of memory. Documents survive
+restarts and deploys now (they are rows on a volume); the sweeper deletes rooms
+untouched for 24 hours. That TTL is a content decision — these are public,
+anonymous, unmoderated documents, and "temporary" is a promise the site makes
+about them — so it stays even though RAM no longer forces it.
 
 ## The stack
 
 ```
-browser ──ws──► thrust (Go) ──HTTP RPC──► Falcon ──► DocumentChannel ──► RoomStore
-        ──http─►    │                                                    (memory)
+browser ──ws──► thrust (Go) ──HTTP RPC──► Falcon ──► DocumentChannel ──► Y::Document
+        ──http─►    │                                                    (SQLite)
                     └──► Falcon (pages)
 ```
 
@@ -125,19 +141,16 @@ in production shape.
 ### Why one process
 
 Falcon runs with `--count 1`, always; `bin/serve` refuses to boot with anything
-else (Falcon's default is one worker per CPU, and every worker would get its own
-copy of the store — the same room URL landing on different documents depending
-on which worker took the request, with no error anywhere). The store is a Hash
-in that worker's memory. One machine on Fly, one container under Kamal, for the
-same reason. **This app scales up, not out**, and that is deliberate for a demo
-site: it is the cheapest honest way to show the channel working, and it keeps
-the store small enough to read in one file.
-
-That is a property of this store, not of yrby. Swapping `RoomStore` for a shared
-one is all a multi-process deployment needs — the channel is unchanged, and
-AnyCable is already the multi-process-shaped transport. See
-[Storage](https://github.com/jpcamara/yrby/blob/main/README.md#actioncable-integration)
-in the repo README.
+else. Worth saying plainly: **with SQLite behind the hooks, single-process is no
+longer a correctness requirement for the documents.** The store is shared on
+disk, broadcasts already fan out through the embedded Go server, and WAL-mode
+SQLite handles concurrent processes on one box — the gem's store-backed design
+is exactly what makes scaling out possible. What still assumes one process is
+the throttle bookkeeping: Rooms' seats and size cache, ConnectionLimiter, and
+Rack::Attack's counters are all process memory, and two workers would each
+enforce their own half-sized caps. One process keeps the accounting honest and
+the app simple, and a demo site does not need more. Scaling out for real means
+moving those counters to a shared cache (and probably the database to Postgres).
 
 Because sockets terminate in Go, a fresh channel instance is built for every
 command and instance variables do not survive between them. Everything the
@@ -150,14 +163,14 @@ site is a working example of it.
 ### Concurrency safety
 
 Under Falcon the RPC requests are fibers, mostly on one thread, switching at IO
-and scheduler yields rather than preemptively. The mutexes stay anyway:
-`RoomStore`, `ConnectionLimiter`, and the sweeper all take explicit locks — the
-store's mutex guards the room table, each room has its own for its state, and
-the two are never held in an order that could deadlock. A fiber can yield
-anywhere IO happens, the reactor is free to serve requests concurrently, the
-sweeper is a real `Thread`, and an uncontended mutex costs nothing. The code is
-correct under Puma's preemptive threads too, which is what the test suite runs
-it under.
+and scheduler yields rather than preemptively. Document writes are the
+database's problem now — SQLite in WAL mode with Rails' busy timeout — but the
+site's own bookkeeping (`Rooms`' seats and size cache, `ConnectionLimiter`)
+still takes explicit locks: a fiber can yield anywhere IO happens, the reactor
+is free to serve requests concurrently, the sweeper is a real `Thread`, and an
+uncontended mutex costs nothing. DB reads happen outside the locks so a fiber
+never yields into SQLite while holding one. The code is correct under
+preemptive threads too, which is what the test suite runs it under.
 
 ## Throttling
 
@@ -177,8 +190,8 @@ it; the table below is the summary.
 | 4. Frame size | bytes per frame | 128 KiB | yrby's own default is 8 MiB, sized for a real app's initial `SyncStep2`. Demo documents are tiny. |
 | 5. Document size | bytes per room | 512 KiB | About ten times a realistic demo document. At the cap the room goes read-only and says so. |
 | 6. Room caps | peers per room | 12 | More than a dozen carets is unreadable, and each peer is another fan-out target. |
-| 6. Room caps | live rooms, process-wide | 200 | 200 x 512 KiB is a 100 MB ceiling on the store. |
-| 7. Eviction | idle time before a room is dropped | 20 minutes | Long enough that closing a tab and coming back with the link still finds the document. |
+| 6. Room caps | documents on disk | 2000 | 2000 x 512 KiB bounds the database file at about 1 GB — a disk cap now, not RAM. |
+| 7. Eviction | idle time before a room is deleted | 24 hours | A content decision: rooms are public and anonymous, and "temporary" is a promise. A link shared in the morning still works after dinner. |
 
 There is no cable-handshake throttle in Rack::Attack any more. `/cable` never
 passes through Rack — the embedded Go server answers it in the proxy — so a
@@ -206,15 +219,26 @@ token bucket sits in `receive` in front of `sync_receive`.
 document size cap is to raise from `on_change`. That is wrong here: a raising
 `on_change` rejects the update without acking it, and an unacked update is
 retransmitted forever, because the protocol has no negative ack. So the channel
-checks `full?` *before* handing the frame to yrby, drops it there, and transmits
+checks the cap *before* handing the frame to yrby, drops it there, and transmits
 a one-time `{ "notice": "document_full" }` that the page turns into "open a new
-room". The store's own `DocumentFull` is a backstop for a bug, not the routine
-path. Awareness frames still flow in a frozen room, so presence keeps working.
+room". Awareness frames still flow in a frozen room, so presence keeps working.
+
+The cap's implementation changed with the store. The true size — snapshot bytes
+plus tail bytes — is a SUM over rows, too expensive per frame and too slow to
+poll (a flood could append megabytes between polls). So `Rooms` keeps a cached
+size per room that `note_append` bumps the moment each update is recorded,
+which holds the cap tight at any write rate with no query on the hot path; the
+database is re-read only when the cache entry is stale (30 s), to pick up
+compaction. Compaction only shrinks the true size, so between refreshes the
+cache can only over-estimate — the safe direction for a cap. Worst case, a
+just-compacted room stays read-only a few extra seconds.
 
 **Idle eviction is what keeps ordinary traffic away from the room cap.** Every
 visitor mints a room and most are abandoned within a minute. Without the sweeper
-(`app/lib/room_sweeper.rb`, one thread, a sweep a minute) the 200-room ceiling
-would be reached by normal use rather than by abuse.
+(`app/lib/room_sweeper.rb`, one thread, a sweep every five minutes) the
+2000-document ceiling would be reached by normal use rather than by abuse. A
+room is stale when it has no write inside the TTL and nobody in it; occupied
+rooms are never evicted.
 
 **No uploads, anywhere.** The site accepts no files. A public, anonymous write
 surface plus a file endpoint is a free file host, and every one of the throttles
@@ -222,9 +246,10 @@ above is about bounding what a stranger can spend — bytes on disk or in an
 object store are not a resource this app should be handing out at all. So the
 policy is structural rather than a limit to tune:
 
-- Active Storage is not installed. The Gemfile lists the six Rails frameworks
-  this app requires instead of the `rails` meta-gem, so there is no upload
-  engine in the image and nothing to mount by accident.
+- Active Storage is not installed. The Gemfile lists the Rails frameworks this
+  app requires — Active Record among them, for the document store — instead of
+  the `rails` meta-gem, so there is no upload engine in the image and nothing
+  to mount by accident.
 - There are no upload routes, no direct-upload endpoints, and no multipart
   handling.
 - The rich-text demo is Tiptap's StarterKit only. There is no Image extension,
@@ -261,20 +286,17 @@ they're bound to a room, and the room is where the state is.
 
 Both deployment configs are here; they are alternatives, not a stack.
 
-**Fly.io** (`fly.toml`): one `shared-cpu-1x` machine with 1 GB, `auto_stop_machines`
-and `auto_start_machines` on, and `min_machines_running = 0`. Scale to zero fits
-a demo that is idle most of the time, and it interacts with the in-memory store
-in exactly the way you would expect: a stopped machine has lost every room.
-`auto_stop_machines = "suspend"` keeps the memory image, so a resumed machine
-still has them and comes back in well under a second, but a full stop is always
-possible and must be assumed. Ephemeral rooms make that acceptable; nothing you
-would miss belongs in this app. Roughly **$2-4/month** at low traffic, most of
-it the 1 GB of memory while the machine is awake.
+**Fly.io** (`fly.toml`): one `shared-cpu-1x` machine with 1 GB and a 1 GB
+volume for the database, `auto_stop_machines` and `auto_start_machines` on, and
+`min_machines_running = 0`. Scale to zero fits a demo that is idle most of the
+time, and with the documents in SQLite on the volume a stopped machine loses
+nothing: a returning visitor's link still works, and rooms expire on the
+sweeper's clock, not the machine's. Roughly **$2-4/month** at low traffic.
 
 **A VPS with Kamal** (`config/deploy.yml`): one host, one container, kamal-proxy
-terminating TLS. A Hetzner CX22 (2 vCPU, 4 GB) is about **€4/month** flat, and
-holds far more concurrent connections than the machine above. No scale to zero,
-so rooms survive between visitors, and you own the box and its updates.
+terminating TLS, the database on a named Docker volume. A Hetzner CX22 (2 vCPU,
+4 GB) is about **€4/month** flat, holds far more concurrent connections than the
+machine above, and you own the box and its updates.
 
 **Cloudflare's free tier in front of either.** It is worth doing for both
 reasons: the docs pages become a CDN hit and never reach the app, and the free
@@ -284,19 +306,23 @@ just leave the cable path uncached, which it is, because those responses are
 `no-store`. Set `ANYCABLE_ALLOWED_ORIGINS` once the domain is settled so the
 handshake is locked to it; that check runs in the Go server, not in Rails.
 
-Either way it is one machine and one container, and there is no configuration in
-which it is more than that. `WEB_CONCURRENCY=1` plus a store in that worker's
-memory means this app scales up, not out. For a demo site that is the right
-trade: a bigger box is a one-line change, and everything a reader is here to see
-works the same on one process as on fifty.
+Either way it is one machine and one container: the database volume attaches to
+one box, and the throttle counters assume one process. For a demo site that is
+the right trade — a bigger box is a one-line change, and everything a reader is
+here to see works the same on one process as on fifty.
 
-I would deploy this on Fly. The app is one process either way, and the thing
-that actually differs is what you spend attention on: Fly's config is the whole
-operational surface, where the VPS is a host to keep patched. Scale to zero also
-matches the traffic shape — a docs site with occasional demo visitors — and the
-in-memory store gives it up cheaply, because these rooms are meant to be thrown
-away. The VPS wins if the demos ever need to hold hundreds of simultaneous
-connections, where 4 GB for €4 is hard to argue with.
+Both configs stay in the repo; the site is deployed with Kamal on Hetzner. The
+€4 box's 4 GB and steady disk suit a database-backed app better than paying for
+wake-ups, and no scale-to-zero means no cold starts in front of a demo. Fly
+remains the config to grab if you want the same site with zero server
+ownership.
+
+One proxy-level cap worth noting: `MAX_REQUEST_BODY=65536` in thrust's
+environment. Every public route is a GET, so 64 KB of request body is generous.
+It does not constrain AnyCable — the embedded Go server dials Falcon's port
+directly for RPC and takes broadcasts on its own listener, so neither path
+crosses thrust's public handler. Verified against thruster's source
+(`internal/service.go`): the body cap wraps only the inbound proxy.
 
 ## Capacity
 
@@ -307,11 +333,12 @@ Where that comes from: a held socket lives in anycable-go, not in Ruby. It is a
 goroutine plus its read and write buffers, on the order of 10 KB, so 500 of them
 is 5-10 MB. Ruby holds nothing per connection between messages — the channel
 object is built for a command and thrown away — so an idle client costs Rails
-zero. Rails plus the yrby native extension is 150-200 MB resident, and the
-store's own ceiling is 200 rooms at 512 KiB, so 100 MB. That is roughly 300 MB
-of worst case inside a 1 GB machine, with the rest as headroom for the CRDT work
-itself: applying an update allocates, and `on_load` replays a room's log into a
-fresh `Y::Doc` on every handshake.
+zero. Documents cost RAM only while being loaded or applied: they live in
+SQLite, and the room caps (2000 documents at 512 KiB) bound the database file
+at about 1 GB of disk, not memory. What stays resident is Rails plus the yrby
+native extension, 150-200 MB. The rest of a 1 GB machine is headroom for the
+CRDT work in flight: applying an update allocates, and `on_load` replays a
+room's snapshot and tail into a fresh `Y::Doc` per handshake.
 
 So the 500 cap is not where memory runs out. It is a deliberately conservative
 number, set so the failure mode at load is a refused connection rather than a
@@ -322,8 +349,9 @@ CPU is the real limit, and it is Ruby's. Every document frame is an RPC call
 into the Falcon reactor and a native CRDT apply. yrby releases the GVL for that
 work — the fiber scheduler keeps serving while the native code runs — but 500
 people typing at once on one shared vCPU is not a thing this machine does
-well. Presence is the
-part that does not count: awareness is whispered client-to-client by Go and
+well. SQLite adds a
+write per update and a read per load on the same box, which at demo scale is
+noise under WAL. Presence is the part that does not count: awareness is whispered client-to-client by Go and
 never reaches Ruby, which is exactly the traffic that would otherwise scale with
 pointer movement. Realistically this is comfortable holding several hundred
 *connected* clients with a few dozen actively editing, which is what a demo site
@@ -392,9 +420,10 @@ things it does differently from one:
 
 - No authentication. Rooms are public and anonymous, and anyone with the link
   can edit.
-- No durability. There is no database; documents live in memory and are
-  deliberately thrown away.
-- One process. Everything above follows from that.
+- No accounts and no ownership. Any document is writable by anyone holding its
+  link, and the sweeper deletes it after a day untouched.
+- One process, one box. The throttle accounting assumes it, and the demo does
+  not need more.
 
 `examples/actioncable-demo` in this repo is the other end: Postgres, AnyCable,
 multi-process, and the full test and load suites.

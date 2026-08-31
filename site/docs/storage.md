@@ -149,32 +149,23 @@ server restarts as long as some client still has it.
 
 ## The store this site runs on
 
-For documents shared across clients on a single-process deployment, the same two
-hooks over a process-wide Hash work instead. That is what this site does. It has
-no database and no Redis, and every demo room is a document in the memory of one
-Puma worker. WebSockets terminate in an embedded anycable-go, which calls the
-channel back over HTTP RPC.
+This site's own demo rooms run the canonical stack on this page, verbatim, on
+SQLite:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
 
-  on_load   { |key|         RoomStore.current.load(key) }
-  on_change { |key, update| RoomStore.current.append(key, update) }
+  on_load   { |key|         Y::Document.load_state(key) }
+  on_change { |key, update| Y::Document.append(key, update) }
 end
 ```
 
-The store keeps a compacted snapshot plus a tail of raw updates per room. `load`
-replays the snapshot and the tail into a fresh `Y::Doc` and returns
-`encode_state_as_update`, so pending survives. Every 32 appends it folds the
-tail into `compacted_state_update` — and skips while `doc.pending?`, because a
-snapshot must not carry a gap.
-
-That version stops being coherent the moment you scale past one process: a
-second worker would serve different documents under the same key. The transport
-would cope — AnyCable is multi-process by design — but the store would not. It
-is the right shape for ephemeral demo rooms and the wrong shape for anything you
-would miss. Rooms here are dropped after 20 minutes idle and lost on restart.
+Nothing about the models cares that the database is SQLite — the same channel
+runs unchanged against Postgres in `examples/actioncable-demo`. What the site
+adds around the hooks is only caps (peers per room, documents on disk, bytes
+per document) and a sweeper that deletes rooms untouched for a day, because
+public anonymous documents should be temporary.
 
 Because the channel runs under AnyCable, it is also a worked example of the
 constraint in [AnyCable and multi-process](/docs/anycable): a fresh channel

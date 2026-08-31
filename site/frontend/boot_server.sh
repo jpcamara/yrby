@@ -61,6 +61,13 @@ export ANYCABLE_MAX_MESSAGE_SIZE="${ANYCABLE_MAX_MESSAGE_SIZE:-131072}"
 # the visitor rather than the proxy.
 export ANYCABLE_HEADERS="${ANYCABLE_HEADERS:-cookie,x-forwarded-for}"
 
+# Same public-body cap the deploys set. Everything public is a GET; the RPC and
+# broadcast paths dial ports directly and never pass through thrust's handler.
+export MAX_REQUEST_BODY="${MAX_REQUEST_BODY:-65536}"
+
+# The store is SQLite; make sure the schema exists before the stack boots.
+bin/rails db:prepare >> "$LOG" 2>&1
+
 bundle exec thrust bin/serve > "$LOG" 2>&1 &
 echo $! > "$PIDFILE"
 

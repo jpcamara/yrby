@@ -7,7 +7,6 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   KEY = "tiptap/room1".freeze
 
   setup do
-    RoomStore.current = RoomStore.new
     stub_connection(connection_id: "c1")
     @closes = []
     # ConnectionStub has no close; the flooding path calls it.
@@ -27,7 +26,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     subscribe id: KEY
 
     assert_predicate subscription, :confirmed?
-    assert_equal 1, RoomStore.current.peers(KEY)
+    assert_equal 1, Rooms.current.peers(KEY)
     assert transmissions.any? { |m| m["update"].present? }, "expected a SyncStep1 handshake"
   end
 
@@ -35,7 +34,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     subscribe id: "../../etc/passwd"
 
     assert_predicate subscription, :rejected?
-    assert_equal 0, RoomStore.current.live_rooms
+    assert_equal 0, Y::Document.count
   end
 
   test "an unknown demo slug is rejected" do
@@ -53,40 +52,41 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   test "unsubscribing gives the seat back" do
     subscribe id: KEY
 
-    assert_equal 1, RoomStore.current.peers(KEY)
+    assert_equal 1, Rooms.current.peers(KEY)
 
     unsubscribe
 
-    assert_equal 0, RoomStore.current.peers(KEY)
+    assert_equal 0, Rooms.current.peers(KEY)
   end
 
   test "a full room refuses the subscription" do
-    RoomStore.current = RoomStore.new(max_peers: 1)
-    RoomStore.current.join(KEY)
+    Rooms.current = Rooms.new(max_peers: 1)
+    Rooms.current.join(KEY)
 
     subscribe id: KEY
 
     assert_predicate subscription, :rejected?
   end
 
-  test "the process room cap refuses a subscription to a new room" do
-    RoomStore.current = RoomStore.new(max_rooms: 1)
-    RoomStore.current.join("tiptap/taken")
+  test "the room cap refuses a subscription that would mint a new document" do
+    Rooms.current = Rooms.new(max_rooms: 1)
+    Y::Document.append("tiptap/taken", Updates::HELLO)
 
     subscribe id: KEY
 
     assert_predicate subscription, :rejected?
   end
 
-  test "an update is recorded and acked" do
+  test "an update is recorded to the database and acked" do
     subscribe id: KEY
     send_update(Updates::HELLO, id: 7)
 
     assert_equal [7], acks
     doc = Y::Doc.new
-    doc.apply_update(RoomStore.current.load(KEY))
+    doc.apply_update(Y::Document.load_state(KEY))
 
     assert_equal "hello world", doc.read_text("content")
+    assert_equal 1, Y::DocumentUpdate.count
   end
 
   test "a frame over the size cap is dropped without an ack" do
@@ -96,7 +96,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     perform :receive, "update" => oversized, "id" => 9
 
     assert_empty acks
-    assert_equal 0, RoomStore.current.bytes(KEY)
+    assert_equal 0, Y::DocumentUpdate.count
   end
 
   test "an update inside the size cap is accepted" do
@@ -142,21 +142,22 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "a room at its byte cap stops accepting writes and says so" do
-    RoomStore.current = RoomStore.new(max_document_bytes: Updates::HELLO.bytesize)
+    Rooms.current = Rooms.new(max_document_bytes: Updates::HELLO.bytesize)
     subscribe id: KEY
     send_update(Updates::HELLO, id: 1)
 
     assert_equal [1], acks
-    assert RoomStore.current.full?(KEY)
+    assert Rooms.current.document_full?(KEY)
 
     send_update(Updates::HELLO, id: 2)
 
     assert_equal [1], acks, "the second update must not be acked"
     assert_equal ["document_full"], notices
+    assert_equal 1, Y::DocumentUpdate.count, "the refused update must not be recorded"
   end
 
   test "the full-room notice is sent once, not on every dropped frame" do
-    RoomStore.current = RoomStore.new(max_document_bytes: 1)
+    Rooms.current = Rooms.new(max_document_bytes: 1)
     subscribe id: KEY
     3.times { |i| send_update(Updates::HELLO, id: i) }
 
@@ -164,11 +165,11 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "presence still flows in a room that has stopped accepting writes" do
-    RoomStore.current = RoomStore.new(max_document_bytes: Updates::HELLO.bytesize)
+    Rooms.current = Rooms.new(max_document_bytes: Updates::HELLO.bytesize)
     subscribe id: KEY
     send_update(Updates::HELLO, id: 1)
 
-    assert RoomStore.current.full?(KEY)
+    assert Rooms.current.document_full?(KEY)
 
     assert_broadcasts("yrby:#{KEY}", 1) do
       perform :receive, "update" => Updates.awareness_frame

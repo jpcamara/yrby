@@ -21,7 +21,7 @@
       This room is yours until you share it. Open a second window (or send the
       link) and edit in both — that is the demo. Rooms are public, capped at
       <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB of
-      document, and dropped after <%= Limits::ROOM_IDLE_TTL / 60 %> minutes idle.
+      document, and deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours untouched.
     </p>
 
     <%= render "demos/#{@demo.slug}_intro" %>

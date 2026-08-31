@@ -250,9 +250,10 @@ jobs:
 
   # The docs/demo site (site/). A separate Rails app on the PUBLISHED gems and
   # npm package, so this job also checks that what the site documents is what a
-  # reader can install. No Postgres and no Redis: the store is process memory and
-  # the WebSocket server is the anycable-go embedded in the thrust proxy, which
-  # ships inside the anycable-thruster gem — nothing to install separately.
+  # reader can install. No Postgres and no Redis services: the store is the
+  # gem's own Y::Document models on SQLite, and the WebSocket server is the
+  # anycable-go embedded in the thrust proxy, which ships inside the
+  # anycable-thruster gem — nothing to install separately.
   site:
     name: Site (docs + demos)
     runs-on: ubuntu-latest

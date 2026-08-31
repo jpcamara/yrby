@@ -1,22 +1,30 @@
 # The collaborative document channel.
 #
-# The yrby half is the four lines under `include Y::ActionCable`: two hooks and
-# two one-line actions. Everything else in this file exists because the rooms
-# are public and anonymous, so `receive` is an open write surface (layers 3-6 of
-# config/limits.rb).
+# The yrby half is exactly what the docs teach: `include Y::ActionCable`, and
+# the two hooks pointed at the gem's own storage models on SQLite. Everything
+# else in this file exists because the rooms are public and anonymous, so
+# `receive` is an open write surface (the throttle layers in config/limits.rb).
 #
 # Sockets terminate in the anycable-go embedded in thrust, which calls this
-# channel over HTTP RPC served by Falcon. That has one consequence worth knowing before reading
-# further: a fresh channel instance is built for every command, so an instance
-# variable set in `subscribed` is gone by the time `receive` runs. Everything
-# that has to survive between commands is declared with `state_attr_accessor`,
-# which travels as JSON in the RPC exchange. `params[:id]` is passed to
-# `sync_receive` for the same reason.
+# channel over HTTP RPC served by Falcon. That has one consequence worth
+# knowing before reading further: a fresh channel instance is built for every
+# command, so an instance variable set in `subscribed` is gone by the time
+# `receive` runs. Everything that has to survive between commands is declared
+# with `state_attr_accessor`, which travels as JSON in the RPC exchange.
+# `params[:id]` is passed to `sync_receive` for the same reason.
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
 
-  on_load { |key| RoomStore.current.load(key) }
-  on_change { |key, update| RoomStore.current.append(key, update) }
+  # The canonical store, verbatim from the README. Y::Document keeps nothing
+  # authoritative in process memory: load replays the snapshot plus the tail,
+  # append records one delta, and the gem's own compaction (every 64 rows by
+  # default) folds the tail with pending rows quarantined, not dropped.
+  # note_append keeps the site's size cap current without a query per frame.
+  on_load { |key| Y::Document.load_state(key) }
+  on_change do |key, update|
+    Y::Document.append(key, update)
+    Rooms.current.note_append(key, update.bytesize)
+  end
 
   # Largest frame this channel will decode. yrby drops anything bigger before
   # base64 decode and again after, so a client can't force a large allocation or
@@ -54,7 +62,7 @@ class DocumentChannel < ApplicationCable::Channel
   def unsubscribed
     return unless seat
 
-    RoomStore.current.leave(params[:id].to_s)
+    Rooms.current.leave(params[:id].to_s)
     self.seat = false
   end
 
@@ -81,14 +89,15 @@ class DocumentChannel < ApplicationCable::Channel
   private
 
   # A room already at MAX_DOCUMENT_BYTES goes read-only rather than growing.
-  # The frame is dropped here, before it reaches `on_change`, so the store's own
-  # DocumentFull guard stays a backstop and the update is never recorded
-  # half-way. Awareness frames still flow, so presence keeps working in a frozen
-  # room. The client keeps the dropped update queued and retries it, which is
-  # what any dropped frame does in this protocol; the notice below is how the
-  # page knows to stop and open a new room.
+  # The frame is dropped here, before it reaches `on_change`, so the update is
+  # never recorded half-way — raising from `on_change` would reject without
+  # acking, and an unacked update is retransmitted forever. Awareness frames
+  # still flow, so presence keeps working in a frozen room. The client keeps
+  # the dropped update queued and retries it, which is what any dropped frame
+  # does in this protocol; the notice below is how the page knows to stop and
+  # open a new room.
   def refuse_write?(key)
-    return false unless RoomStore.current.full?(key)
+    return false unless Rooms.current.document_full?(key)
 
     unless notified
       self.notified = true
@@ -114,7 +123,7 @@ class DocumentChannel < ApplicationCable::Channel
   end
 
   def take_seat(key)
-    case RoomStore.current.join(key)
+    case Rooms.current.join(key)
     when :ok
       self.seat = true
     when :room_full
