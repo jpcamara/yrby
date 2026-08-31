@@ -12,10 +12,16 @@ Rails.application.configure do
   # picked up within the hour, or immediately once a CDN purge is wired up.
   config.public_file_server.headers = { "cache-control" => "public, max-age=#{1.hour.to_i}" }
 
-  # Behind Fly's proxy, Kamal's proxy, or Cloudflare — all of which terminate TLS.
-  config.assume_ssl = true
-  config.force_ssl = true
-  config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
+  # Behind Fly's proxy, Kamal's proxy, or Cloudflare — all of which terminate
+  # TLS. FORCE_SSL=false runs production over plain http for a LAN or
+  # self-hosted box with no TLS in front (a Raspberry Pi on the home network);
+  # everything else about production — eager loading, no reloader, quiet logs —
+  # is exactly what a slow single-board machine wants.
+  unless ENV["FORCE_SSL"] == "false"
+    config.assume_ssl = true
+    config.force_ssl = true
+    config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
+  end
 
   config.log_tags = [:request_id]
   config.logger = ActiveSupport::TaggedLogging.logger($stdout)

@@ -260,13 +260,27 @@
   }
 
   .note {
-    @apply absolute h-20 w-30 cursor-grab rounded-lg p-1 shadow-lg
+    /* touch-action: none, or the browser claims touch pointer-moves for
+       scrolling and dragging a note on a phone loses a tug-of-war. */
+    @apply absolute h-20 w-30 cursor-grab touch-none rounded-lg shadow-lg
            shadow-black/40;
   }
 
+  /* The drag affordance. The textarea is exempt from dragging (it is for
+     typing), so without a handle only the note's edges drag. */
+  .note-grip {
+    @apply flex h-4 cursor-grab items-center justify-center rounded-t-lg
+           bg-black/10;
+  }
+
+  .note-grip::before {
+    content: "⋯";
+    @apply -mt-1 text-sm leading-none text-black/40;
+  }
+
   .note textarea {
-    @apply h-full w-full resize-none border-0 bg-transparent text-[13px]
-           leading-snug text-zinc-900 outline-none;
+    @apply h-[calc(100%-1rem)] w-full resize-none border-0 bg-transparent
+           px-1 pb-1 text-[13px] leading-snug text-zinc-900 outline-none;
   }
 
   /* -------------------------------------------------------------------------

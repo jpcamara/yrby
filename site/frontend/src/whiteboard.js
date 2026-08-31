@@ -51,6 +51,9 @@ function render() {
       el = document.createElement("div")
       el.className = "note"
       el.dataset.id = id
+      const grip = document.createElement("div")
+      grip.className = "note-grip"
+      el.appendChild(grip)
       const ta = document.createElement("textarea")
       ta.addEventListener("input", () => m.set("text", ta.value))
       el.appendChild(ta)
