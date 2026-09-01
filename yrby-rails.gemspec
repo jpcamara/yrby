@@ -24,6 +24,8 @@ Gem::Specification.new do |spec|
     "lib/yrby/**/*.rb",
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
+    "lib/y/collaborative.rb",
+    "lib/y/collaborative/**/*.rb",
     "app/**/*.rb",
     "lib/generators/**/*",
     "LICENSE",
@@ -48,6 +50,10 @@ Gem::Specification.new do |spec|
   # activerecord either way; listed because the gem uses it directly.
   spec.add_dependency "actioncable", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
+  # The collaborative-document layer: collaborative_document_tag renders
+  # through Action View, and the sgid flow mints/locates signed GlobalIDs.
+  spec.add_dependency "actionview", ">= 7.1"
+  spec.add_dependency "globalid", ">= 1.0"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"

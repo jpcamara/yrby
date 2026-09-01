@@ -42,11 +42,10 @@ class FormFieldsChannel < ApplicationCable::Channel
     false
   end
 
-  # Invalid, stale, or wrong-purpose tokens return nil and are rejected by
-  # subscribed.
+  # The token only verifies for the field-set document it was minted for
+  # (the purpose is pinned, not read from params). Invalid, stale, or
+  # tampered tokens return nil and are rejected by subscribed.
   def record
-    @record ||= GlobalID::Locator.locate_signed(params[:sgid], for: Y::Forms.sgid_purpose)
-  rescue ActiveRecord::RecordNotFound
-    nil
+    @record ||= Y::Collaborative.locate(params[:sgid], Y::Forms::DOCUMENT_NAME)
   end
 end

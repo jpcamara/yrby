@@ -37,9 +37,9 @@ class FormFieldsChannel < ApplicationCable::Channel
     true
   end
 
+  # The token only verifies for the field-set document it was minted for
+  # (the purpose is pinned, not read from params).
   def record
-    @record ||= GlobalID::Locator.locate_signed(params[:sgid], for: Y::Forms.sgid_purpose)
-  rescue ActiveRecord::RecordNotFound
-    nil
+    @record ||= Y::Collaborative.locate(params[:sgid], Y::Forms::DOCUMENT_NAME)
   end
 end

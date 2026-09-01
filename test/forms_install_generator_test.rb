@@ -16,8 +16,8 @@ class FormsInstallGeneratorTest < Rails::Generators::TestCase
 
     assert_file "app/channels/form_fields_channel.rb" do |channel|
       assert_match "include Y::ActionCable", channel
-      assert_match "GlobalID::Locator.locate_signed", channel
-      assert_match "Y::Forms.sgid_purpose", channel, "the token is scoped to the field-set purpose"
+      assert_match "Y::Collaborative.locate(params[:sgid], Y::Forms::DOCUMENT_NAME)", channel,
+                   "the token resolves through the base sgid flow, pinned to the field-set purpose"
       assert_match "collaborative_fields?", channel, "the record must declare collaborative fields"
       assert_match "find_or_create_collaborative_fields_document", channel
       assert_match "refresh_collaborative_fields", channel,

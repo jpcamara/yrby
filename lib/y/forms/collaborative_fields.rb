@@ -6,8 +6,13 @@ require "json"
 module Y
   module Forms
     # Adds a Y::Document-backed set of collaborative form fields to a model.
+    # A thin adapter over Y::Collaborative: has_collaborative_fields
+    # declares one collaborative document named "fields" whose materialize
+    # step reads each declared field through its tier and assigns the
+    # column.
     module CollaborativeFields
       extend ActiveSupport::Concern
+      include Y::Collaborative
 
       module ClassMethods
         # Declares which attributes collaborate and resolves a tier for each:
@@ -23,12 +28,11 @@ module Y
           end
           self.collaborative_field_tiers = collaborative_field_tiers.merge(tiers).freeze
 
-          # encrypted: true stores CRDT state through Y::EncryptedDocument.
-          # Encrypting the materialized columns themselves is the model's own
-          # +encrypts+ declaration.
-          document_class = encrypted ? "Y::EncryptedDocument" : "Y::Document"
-          has_one :collaborative_fields_document, -> { where(name: Y::Forms::DOCUMENT_NAME) },
-                  class_name: document_class, as: :record, inverse_of: :record, dependent: :destroy
+          # The base owns the association, the sgid flow, and the refresh
+          # shell; the block is this gem's whole contribution to it.
+          has_collaborative_document(Y::Forms::DOCUMENT_NAME, encrypted: encrypted) do |doc, record|
+            record.send(:assign_collaborative_fields, doc)
+          end
         end
 
         private
@@ -57,6 +61,8 @@ module Y
       end
 
       # The instance API, present only on models that declared fields.
+      # The field-set spellings delegate to the base's document API under
+      # the "fields" name.
       module Model
         extend ActiveSupport::Concern
 
@@ -69,35 +75,18 @@ module Y
         def collaborative_field?(name) = collaborative_field_tiers.key?(name.to_sym)
 
         # The document, if collaboration has started (nil until the first join).
-        def collaborative_document = collaborative_fields_document
+        def collaborative_fields_document = collaborative_document(Y::Forms::DOCUMENT_NAME)
 
         # Creates the document on first use. The association supplies the
         # class, so an encrypted field set gets a Y::EncryptedDocument.
         def find_or_create_collaborative_fields_document
-          collaborative_fields_document || begin
-            association(:collaborative_fields_document).klass.for(self, Y::Forms::DOCUMENT_NAME)
-            reload_collaborative_fields_document
-          end
+          find_or_create_collaborative_document(Y::Forms::DOCUMENT_NAME)
         end
 
-        # Reloads the document and writes the declared fields' current values
-        # into their columns while holding the record lock. Returns false
-        # when the document has no state.
-        def refresh_collaborative_fields
-          document = collaborative_fields_document
-          return false unless document
-
-          with_lock do
-            state = document.reload.load_state
-            break false if state.nil?
-
-            doc = Y::Doc.new
-            doc.apply_update(state)
-            assign_collaborative_fields(doc)
-            save!(validate: false) # collaboration updates should not run unrelated model validations
-            true
-          end
-        end
+        # Materializes the declared fields into their columns; the base
+        # shell holds the record lock and saves with validate: false.
+        # Returns false when the document has no state.
+        def refresh_collaborative_fields = refresh_collaborative_document(Y::Forms::DOCUMENT_NAME)
 
         private
 

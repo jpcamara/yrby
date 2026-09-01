@@ -75,9 +75,9 @@ function makeForm(t, { name = "Ada", color = "#112233" } = {}) {
   const consumer = fakeConsumer();
   const form = document.createElement("collaborative-form");
   form.consumer = consumer;
-  form.setAttribute("channel", "FormFieldsChannel");
-  form.setAttribute("sgid", `token-${name}`);
-  form.setAttribute("doc-key", "ticket-1-fields");
+  form.setAttribute("channel-name", "FormFieldsChannel");
+  form.setAttribute("channel-params", JSON.stringify({ sgid: `token-${name}`, field: "fields" }));
+  form.setAttribute("doc-id", "ticket-1-fields");
   form.setAttribute("name", name);
   form.setAttribute("color", color);
   form.innerHTML = FIELDS;
@@ -122,6 +122,7 @@ test("the form builds its provider from the attributes", (t) => {
   assert.deepEqual(JSON.parse(consumer.subscription.identifier), {
     channel: "FormFieldsChannel",
     sgid: "token-Ada",
+    field: "fields",
   });
   assert.equal(form.doc.guid, "ticket-1-fields");
   assert.deepEqual(form.awareness.getLocalState(), { name: "Ada", color: "#112233", field: null });

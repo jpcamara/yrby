@@ -17,3 +17,7 @@ gem "sqlite3", require: false
 gem "rubocop", require: false
 gem "rubocop-minitest", require: false
 gem "rubocop-rake", require: false
+
+# Test-only: the engine boot test runs the collaborative macros against real
+# Action Text in a booted Rails app (test/support/collaborative_boot_check.rb).
+gem "actiontext", require: false

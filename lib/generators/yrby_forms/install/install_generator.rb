@@ -40,7 +40,7 @@ module YrbyForms
             4. Install the yrby-forms npm package and import it from your
                JavaScript entry point (it registers the elements).
 
-          Optional: set presence names with `Y::Forms.identity`.
+          Optional: set presence names with `Y::Collaborative.identity`.
         NEXT
       end
     end

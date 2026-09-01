@@ -7,6 +7,51 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Collaborative attributes**: the record-bound document lifecycle is now
+  a reusable base in this gem, put on every model by the engine.
+  - `has_collaborative_document(name, encrypted: false, &materialize)`:
+    declares one `Y::Document` (or `Y::EncryptedDocument`) per record as
+    `collaborative_document_<name>` and registers the materialize block.
+    Instance API: `collaborative_document(name)`,
+    `find_or_create_collaborative_document(name)` (`Y::Document.for` with
+    adoption of a key-only row), `collaborative_sgid(name)`, and
+    `refresh_collaborative_document(name)` — reload the document under the
+    record lock, rebuild the `Y::Doc`, run the block
+    (`block.call(doc, record)`; returning false skips the save), and
+    `save!(validate: false)`. False when there is no state to materialize.
+  - `has_collaborative_rich_text(name, renderer: nil, **options, &block)`:
+    the rich-text convenience on the primitive. Declares
+    `has_rich_text` when Action Text is present (options pass through,
+    `encrypted:` included) and falls back to a plain column of the same
+    name otherwise; materializes the rendered HTML through the attribute
+    writer. Rendering defaults to `Y::Collaborative.rich_text_renderer`
+    (`Y::Lexxy`), settable once per app; `renderer:` or a block override it
+    per attribute. Renderers are called as `(doc, record:, name:)`.
+  - The signed-GlobalID flow, centralized:
+    `Y::Collaborative.sgid_purpose(name)` (`"yrby/<name>"`, the public
+    contract — a token minted for one attribute cannot locate another) and
+    `Y::Collaborative.locate(sgid, name)` (nil for invalid, tampered,
+    wrong-attribute, or gone-record tokens).
+  - `form.collaborative_document_tag(method, element:, channel: nil,
+    name: nil, color: nil, **attrs)`: the FormBuilder method editor helpers
+    build on. Emits the supplied custom element wired with `doc-id`,
+    `channel-name` (default `Y::Collaborative.channel_name`,
+    `"CollaborativeDocumentChannel"`), `channel-params` (signed token +
+    field, JSON), and the presence identity from
+    `Y::Collaborative.identity` / `collaborator_color`.
+  - `yrby:install` now also generates CollaborativeDocumentChannel, the
+    record-bound channel: locate by token, store through the record's
+    document association (so encrypted attributes decrypt), refresh after
+    every change. DocumentChannel (key-addressed) is generated unchanged.
+  - New gem dependencies: `actionview` and `globalid`.
+
+  The `yrby-forms` gem now rides this base as a thin adapter
+  (`has_collaborative_document :fields` plus a tier-aware materialize
+  block). `lexxy-realtime` duplicates this lifecycle today and will adopt
+  the base after this releases.
+
 ### Fixed
 
 - The `yrby:tables` migration template caps `y_documents.state` at

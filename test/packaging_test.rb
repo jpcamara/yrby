@@ -17,7 +17,8 @@ class PackagingTest < Minitest::Test
   def test_core_gem_excludes_the_actioncable_gems_files
     files = load_spec("yrby.gemspec").files
 
-    assert_empty files.grep(/action_cable|actioncable|yrby-rails|update_log/), "Rails-layer files ship in yrby-rails"
+    assert_empty files.grep(/action_cable|actioncable|yrby-rails|update_log|collaborative/),
+                 "Rails-layer files ship in yrby-rails"
   end
 
   def test_core_gem_excludes_the_forms_gems_files
@@ -32,6 +33,15 @@ class PackagingTest < Minitest::Test
     assert_empty files.grep(/forms|yrby_forms/), "forms files ship in yrby-forms"
   end
 
+  def test_rails_gem_ships_the_collaborative_base
+    files = load_spec("yrby-rails.gemspec").files
+
+    %w[lib/y/collaborative.rb lib/y/collaborative/form_builder.rb
+       lib/generators/yrby/install/templates/collaborative_document_channel.rb].each do |f|
+      assert_includes files, f
+    end
+  end
+
   def test_forms_gem_ships_its_own_essentials_and_nothing_else
     files = load_spec("yrby-forms.gemspec").files
 
@@ -41,7 +51,8 @@ class PackagingTest < Minitest::Test
        lib/generators/yrby_forms/install/templates/form_fields_channel.rb].each do |f|
       assert_includes files, f
     end
-    assert_empty files.grep(%r{action_cable|ext/|app/}), "core and Rails-layer files ship in their own gems"
+    assert_empty files.grep(%r{action_cable|collaborative[./]|ext/|app/}),
+                 "core and Rails-layer files ship in their own gems"
   end
 
   def test_core_gem_ships_its_own_essentials

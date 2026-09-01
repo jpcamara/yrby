@@ -601,6 +601,60 @@ oversized, or unknown frames are dropped. A bad frame can't crash the process: a
 Rust panic is caught at the FFI boundary and re-raised as a Ruby exception. And
 no single client can relay garbage that breaks the others in a room.
 
+#### Collaborative attributes
+
+Two Rails macros bind a document to a model attribute and keep a derived
+column in sync with it. The engine puts them on every model:
+
+```ruby
+class Post < ApplicationRecord
+  # The common case: materialize the document as HTML into an Action Text
+  # body (or a plain text column when Action Text isn't loaded).
+  has_collaborative_rich_text :body
+
+  # The primitive underneath: any document, any materialization. The block
+  # runs on refresh with the rebuilt Y::Doc and assigns whatever columns
+  # derive from it.
+  has_collaborative_document :outline do |doc, record|
+    record.outline = JSON.parse(doc.read_map("outline") || "{}")
+  end
+end
+```
+
+Both declare a `Y::Document` association per record
+(`collaborative_document_<name>`, via `Y::Document.for`;
+`encrypted: true` stores through `Y::EncryptedDocument`) and register the
+materialize step. `refresh_collaborative_document(:body)` reloads the
+document under the record lock, rebuilds it, runs the registered block,
+and saves with `validate: false` — false when the document has no state.
+`has_collaborative_rich_text` renders through
+`Y::Collaborative.rich_text_renderer` (default `Y::Lexxy`); set that once
+for the app, or pass `renderer:` / a block per attribute
+(`has_collaborative_rich_text(:body) { |doc| Y::Tiptap.new(doc).to_html }`).
+
+Access rides signed GlobalIDs, scoped per attribute:
+`record.collaborative_sgid(:body)` mints a token whose purpose is
+`Y::Collaborative.sgid_purpose(:body)` (`"yrby/body"`), and
+`Y::Collaborative.locate(sgid, :body)` trades it back for the record —
+nil for an invalid, tampered, or wrong-attribute token. A token minted
+for one attribute can never open another.
+
+The form side is one FormBuilder method the editor's element builds on:
+
+```erb
+<%= form.collaborative_document_tag :body, element: "my-editor-collaboration" %>
+```
+
+renders `<my-editor-collaboration>` wired with `doc-id`, `channel-name`
+(default `"CollaborativeDocumentChannel"`), `channel-params` (the signed
+token + field as JSON), and the presence `name`/`color` from
+`Y::Collaborative.identity`. `yrby:install` generates the matching
+CollaborativeDocumentChannel: locate by token, store through the record's
+document, refresh after every change. The `yrby-forms` gem is a thin
+adapter over this base (one `:fields` document, tier-aware materialize
+block), and rich-text editor packages plug in the same way by supplying
+their element name.
+
 #### Delivery guarantees
 
 The contract is the same at every scale: one process, or hundreds across many

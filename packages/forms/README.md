@@ -50,8 +50,9 @@ A consumer assigned directly on a `<collaborative-form>` element (the
 ## Element attributes
 
 ```html
-<collaborative-form channel="FormFieldsChannel" sgid="…"
-                    doc-key="ticket-1-fields" name="Ada" color="#22d3ee">
+<collaborative-form channel-name="FormFieldsChannel"
+                    channel-params='{"sgid":"…","field":"fields"}'
+                    doc-id="ticket-1-fields" name="Ada" color="#22d3ee">
   <collaborative-field name="status" tier="lww">
     <select name="ticket[status]">…</select>
   </collaborative-field>
@@ -61,10 +62,13 @@ A consumer assigned directly on a `<collaborative-form>` element (the
 </collaborative-form>
 ```
 
-`channel` names the server channel, `sgid` is the signed record token the
-channel authorizes, `doc-key` is the client-side document id, and `name` /
-`color` are the presence identity. Names are cosmetic; access is enforced
-server-side by the signed token and the channel's `authorized?`.
+`channel-name` names the server channel, `channel-params` is the JSON
+subscription params (the signed record token the channel authorizes, plus
+the field-set name), `doc-id` is the client-side document id, and `name` /
+`color` are the presence identity — the same wiring yrby-rails'
+`collaborative_document_tag` emits for every collaborative element. Names
+are cosmetic; access is enforced server-side by the signed token and the
+channel's `authorized?`.
 
 ## Styling
 

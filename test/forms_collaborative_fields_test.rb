@@ -12,8 +12,11 @@ require "y/forms"
 
 # The has_collaborative_fields macro: tier detection, the field-set document
 # association, and the materializer writing declared fields back to their
-# columns. Documents are built from Y.js fixture bytes (Y::Doc is read-only
-# from Ruby).
+# columns. The document lifecycle itself is the base's
+# (has_collaborative_document, exercised in collaborative_document_test);
+# here the assertions run through the field-set spellings that delegate to
+# it. Documents are built from Y.js fixture bytes (Y::Doc is read-only from
+# Ruby).
 class FormsCollaborativeFieldsTest < Minitest::Test
   class Ticket < ActiveRecord::Base
     self.table_name = "tickets"
@@ -131,7 +134,7 @@ class FormsCollaborativeFieldsTest < Minitest::Test
       has_collaborative_fields :summary, encrypted: true
     end
 
-    assert_equal Y::EncryptedDocument, klass.reflect_on_association(:collaborative_fields_document).klass
+    assert_equal Y::EncryptedDocument, klass.reflect_on_association(:collaborative_document_fields).klass
     record = klass.create!
 
     assert_instance_of Y::EncryptedDocument, record.find_or_create_collaborative_fields_document

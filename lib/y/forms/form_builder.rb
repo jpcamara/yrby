@@ -4,19 +4,15 @@ module Y
   module Forms
     # form.collaborative_fields wraps a block of inputs in the
     # <collaborative-form> element; form.collaborative_field wraps one input
-    # in <collaborative-field>. Y::Forms.identity supplies the presence name
-    # and color.
+    # in <collaborative-field>. The container wiring (doc id, channel,
+    # signed token, presence identity) comes from the base
+    # collaborative_document_tag; this module supplies the element names
+    # and the per-field tier attribute.
     module FormBuilder
       def collaborative_fields(&)
-        record = collaborative_record!
-        identity = Y::Forms.identity.call(@template)
-        name = identity[:name]
-        @template.content_tag("collaborative-form", @template.capture(&),
-                              "channel" => Y::Forms::CHANNEL_NAME,
-                              "sgid" => record.to_sgid(for: Y::Forms.sgid_purpose).to_s,
-                              "doc-key" => "#{record.model_name.param_key}-#{record.id}-#{Y::Forms::DOCUMENT_NAME}",
-                              "name" => name,
-                              "color" => identity[:color] || Y::Forms.collaborator_color(name))
+        collaborative_record!
+        collaborative_document_tag(Y::Forms::DOCUMENT_NAME.to_sym,
+                                   element: "collaborative-form", channel: Y::Forms::CHANNEL_NAME, &)
       end
 
       # Renders the stock input for the attribute's type inside the wrapper.

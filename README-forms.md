@@ -92,6 +92,13 @@ One `Y::Document` per record (named `"fields"`) holds the whole field set:
 - one `"fields/<name>"` Y.Text share per text-tier field — concurrent
   typing merges per character.
 
+The gem is a thin adapter over yrby-rails' collaborative-document base:
+`has_collaborative_fields` declares `has_collaborative_document :fields`
+with a materialize block that reads each declared field through its tier.
+The association, the signed-token flow, and the refresh shell all come from
+the base; this gem adds tier detection, the field elements, and the
+per-field reader.
+
 The generated FormFieldsChannel locates the record through the signed
 GlobalID the helper minted, appends every update to the document, and then
 calls `refresh_collaborative_fields`: under the record lock, the document is
@@ -109,7 +116,8 @@ channel logs it and the columns catch up on the next valid change.
 ## Authorization and identity
 
 Access is enforced server-side, twice: the form helper mints a signed
-GlobalID scoped to `Y::Forms.sgid_purpose`, so a token minted elsewhere
+GlobalID scoped to the field-set purpose (`Y::Collaborative.sgid_purpose`,
+`"yrby/fields"`), so a token minted for any other attribute or channel
 can't join a field set, and the generated channel's `authorized?` denies
 everyone until you implement it:
 
@@ -120,12 +128,12 @@ def authorized?
 end
 ```
 
-Presence names and colors come from `Y::Forms.identity`, called with the
-view context (the default reads `current_user`'s `name` / `username` /
-`handle`, falling back to `"Anonymous"`):
+Presence names and colors come from `Y::Collaborative.identity`, called
+with the view context (the default reads `current_user`'s `name` /
+`username` / `handle`, falling back to `"Anonymous"`):
 
 ```ruby
-Y::Forms.identity = ->(view) { { name: view.current_user.handle, color: nil } }
+Y::Collaborative.identity = ->(view) { { name: view.current_user.handle, color: nil } }
 ```
 
 Names are cosmetic; access is enforced. Presence metadata is written by the

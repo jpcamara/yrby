@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The core gem no longer packages `lib/generators`. The generators are
+  Rails-layer code (they generate channels and invoke Rails generator
+  machinery) and ship in `yrby-rails`, which already carried them; the
+  core gem's `lib/**/*.rb` glob was packaging a duplicate copy that could
+  shadow the yrby-rails one on the load path.
+
 ## [0.7.1] - 2026-08-19
 
 ### Fixed
