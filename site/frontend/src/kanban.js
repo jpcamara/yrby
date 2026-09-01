@@ -37,9 +37,49 @@ for (const [id, title] of COLUMNS) {
 }
 
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))
-const move = (m, dir) => {
-  const next = ORDER[ORDER.indexOf(m.get("column")) + dir]
-  if (next) m.set("column", next)
+// The column under a point, by hit-testing the column boxes. Used on drop.
+const columnUnder = (x, y) =>
+  ORDER.find((id) => {
+    const r = lists[id].parentElement.getBoundingClientRect()
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+  })
+
+const clearDropTargets = () =>
+  ORDER.forEach((id) => lists[id].parentElement.classList.remove("drop-target"))
+
+// Drag a card between columns from its grip. Moving a card is one
+// map.set("column", ...), so two people dragging different cards never
+// conflict. The grip carries touch-action: none so a touch drag doesn't fight
+// page scrolling; the card body still scrolls and selects.
+function makeCardDraggable(el, grip, m) {
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault()
+    const rect = el.getBoundingClientRect()
+    const offX = e.clientX - rect.left
+    const offY = e.clientY - rect.top
+    el.setPointerCapture(e.pointerId)
+    el.classList.add("dragging")
+    el.style.width = `${rect.width}px`
+
+    const onMove = (ev) => {
+      el.style.left = `${ev.clientX - offX}px`
+      el.style.top = `${ev.clientY - offY}px`
+      const over = columnUnder(ev.clientX, ev.clientY)
+      clearDropTargets()
+      if (over) lists[over].parentElement.classList.add("drop-target")
+    }
+    const onUp = (ev) => {
+      el.releasePointerCapture(e.pointerId)
+      el.removeEventListener("pointermove", onMove)
+      el.removeEventListener("pointerup", onUp)
+      clearDropTargets()
+      const over = columnUnder(ev.clientX, ev.clientY)
+      if (over && over !== m.get("column")) m.set("column", over)
+      else render() // dropped outside a column: snap back
+    }
+    el.addEventListener("pointermove", onMove)
+    el.addEventListener("pointerup", onUp)
+  })
 }
 
 function render() {
@@ -49,16 +89,14 @@ function render() {
     if (!list) return
     const el = document.createElement("div")
     el.className = "card"
-    el.innerHTML = `<span class="t">${esc(m.get("text"))}</span><span class="ctl">` +
-      `<button data-a="left" title="move left">←</button>` +
-      `<button data-a="right" title="move right">→</button>` +
-      `<button data-a="del" title="delete">×</button></span>`
-    el.querySelector('[data-a="left"]').onclick = () => move(m, -1)
-    el.querySelector('[data-a="right"]').onclick = () => move(m, 1)
+    el.innerHTML = `<span class="grip" title="drag to move" aria-hidden="true">⠿</span>` +
+      `<span class="t">${esc(m.get("text"))}</span>` +
+      `<button class="del" data-a="del" title="delete">×</button>`
     el.querySelector('[data-a="del"]').onclick = () => {
       const i = cards.toArray().indexOf(m)
       if (i >= 0) cards.delete(i, 1)
     }
+    makeCardDraggable(el, el.querySelector(".grip"), m)
     list.appendChild(el)
   })
 }
