@@ -49,22 +49,29 @@ The whole server side of a collaborative document is one channel.
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
 
+  # A key names one document — here "post/42/body", the body of one post.
+  # The hooks are that document's storage: rebuild it on join, record every
+  # change before it is acknowledged or broadcast.
   on_load   { |key|         Y::Document.load_state(key) }
   on_change { |key, update| Y::Document.append(key, update) }
 
-  def subscribed    = sync_subscribed(params[:id])
-  def receive(data) = sync_receive(data, params[:id])
+  def subscribed    = sync_subscribed("post/#{post.id}/body")
+  def receive(data) = sync_receive(data, "post/#{post.id}/body")
 
   private
 
-  # Required — everyone is denied until the channel says who may.
-  def authorized?(key) = current_user&.can_edit?(key)
+  def post = @post ||= Post.find(params[:id])
+
+  # Required — nobody syncs a document until the channel says who may.
+  def authorized?(_key) = post.editable_by?(current_user)
 end
 ```
 
-`on_load` rebuilds a document from storage. `on_change` records an update. Both
-are required, and both run in the channel instance, so they can use anything the
-channel can. Neither has to touch a database — see
+A key is just a name for one document; shape it however your app thinks —
+per record and attribute (`post/42/body`), per room, per anything. `on_load`
+rebuilds that document from storage and `on_change` records each update to it.
+Both are required, and both run in the channel instance, so they can use
+anything the channel can. Neither has to touch a database — see
 [Storage](/docs/storage).
 
 `authorized?` is how a subscriber gets in. `sync_subscribed` asks it before any

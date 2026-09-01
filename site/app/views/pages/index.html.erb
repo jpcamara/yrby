@@ -38,22 +38,7 @@
     </p>
 
     <div class="mt-8 max-w-2xl">
-      <%= code_block "ruby", <<~RUBY %>
-        class DocumentChannel < ApplicationCable::Channel
-          include Y::ActionCable
-
-          on_load   { |key|         Y::Document.load_state(key) }
-          on_change { |key, update| Y::Document.append(key, update) }
-
-          def subscribed    = sync_subscribed(params[:id])
-          def receive(data) = sync_receive(data, params[:id])
-
-          private
-
-          # Required — everyone is denied until the channel says who may.
-          def authorized?(key) = current_user&.can_edit?(key)
-        end
-      RUBY
+      <%= hero_channel_code %>
     </div>
 
     <p class="mt-5 font-mono text-sm text-zinc-500">
