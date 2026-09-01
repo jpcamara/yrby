@@ -226,6 +226,7 @@ Node process:
 doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
 doc.read_xml("root")          # => text of an XML root, one block per line
 doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
+doc.read_array("cards")       # => a Y.Array root as a JSON string; JSON.parse it
 ```
 
 ### Pending structs and gap-free state

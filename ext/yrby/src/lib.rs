@@ -200,6 +200,20 @@ impl RbDoc {
         })
     }
 
+    /// A `Y.Array` root serialized to a JSON array string (values recursive, in
+    /// array order). The counterpart to read_map for documents whose root is an
+    /// array — a board's cards, a sheet's rows. Callers parse the JSON (e.g.
+    /// `JSON.parse(doc.read_array("cards"))`). The serialization lives in
+    /// `read::array_json` (pure, Rust-tested).
+    fn read_array(&self, name: String) -> Option<String> {
+        let doc = &self.0;
+        nogvl(move || {
+            let txn = doc.transact();
+            let array = txn.get_array(name.as_str())?;
+            Some(read::array_json(&txn, &array))
+        })
+    }
+
     /// True if the doc holds un-integrable pending structs or a pending delete
     /// set — content that couldn't integrate because a causally-prior update is
     /// missing. Such content is a recovery buffer, not document state; it heals if
@@ -627,6 +641,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
     doc_class.define_method("read_map", method!(RbDoc::read_map, 1))?;
+    doc_class.define_method("read_array", method!(RbDoc::read_array, 1))?;
     doc_class.define_method("pending?", method!(RbDoc::pending, 0))?;
     doc_class.define_method(
         "compacted_state_update",

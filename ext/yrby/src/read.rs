@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, Array, GetString, Map, MapRef, Out, ReadTxn, Text, Xml, XmlFragment, XmlFragmentRef,
-    XmlOut, XmlTextRef,
+    Any, Array, ArrayRef, GetString, Map, MapRef, Out, ReadTxn, Text, Xml, XmlFragment,
+    XmlFragmentRef, XmlOut, XmlTextRef,
 };
 
 /// Read an XML-shaped root as text, one top-level block per line.
@@ -158,7 +158,8 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
     }
 }
 
-/// Read a `Y.Map` root as a JSON object string (keys sorted for stable output).
+/// Read a `Y.Map` root as a JSON object string (object keys sorted at every
+/// depth for stable, diffable output).
 ///
 /// The complement to `read_text`/`read_xml` for structured state — e.g. a shared
 /// "view state" map. Values are converted recursively: primitives pass through;
@@ -166,27 +167,61 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
 /// parses the JSON (yrs's own `Out::to_json` is crate-private, so we walk the
 /// `Out` variants ourselves here).
 pub fn map_json<T: ReadTxn>(txn: &T, map: &MapRef) -> String {
-    let mut pairs: Vec<(String, Any)> = map
-        .iter(txn)
-        .map(|(k, v)| (k.to_string(), out_to_any(txn, &v)))
-        .collect();
-    pairs.sort_by(|a, b| a.0.cmp(&b.0)); // deterministic key order
-    let mut out = String::from("{");
-    for (i, (k, v)) in pairs.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        // Any::to_json serializes from the start of the buffer (it doesn't
-        // append), so each piece goes into its own String, then concatenated.
-        out.push_str(&any_to_json(&Any::String(Arc::from(k.as_str())))); // JSON-escaped key
-        out.push(':');
-        out.push_str(&any_to_json(v));
+    let mut hm: HashMap<String, Any> = HashMap::new();
+    for (k, v) in map.iter(txn) {
+        hm.insert(k.to_string(), out_to_any(txn, &v));
     }
-    out.push('}');
-    out
+    any_to_json(&Any::Map(Arc::new(hm)))
 }
 
+/// A Y.Array's elements as a JSON array string, recursing through nested
+/// shared types exactly as `map_json` does (a Y.Map root and a Y.Array root are
+/// the two document shapes yrs can read from the top). Element order is the
+/// array's own order; nested object keys are sorted like map_json.
+pub fn array_json<T: ReadTxn>(txn: &T, array: &ArrayRef) -> String {
+    let items: Vec<Any> = array.iter(txn).map(|o| out_to_any(txn, &o)).collect();
+    any_to_json(&Any::Array(items.into()))
+}
+
+/// JSON-serialize an `Any` with object keys sorted at every depth. yrs's own
+/// `Any::to_json` iterates `Any::Map` (a `HashMap`) in arbitrary order, so a
+/// nested map would serialize unpredictably and differ run to run; sorting here
+/// makes the whole tree deterministic. Scalars defer to `Any::to_json`, which
+/// writes from the start of a buffer (it does not append) — hence each scalar
+/// gets its own fresh `String`.
 fn any_to_json(a: &Any) -> String {
+    match a {
+        Any::Array(items) => {
+            let mut out = String::from("[");
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&any_to_json(item));
+            }
+            out.push(']');
+            out
+        }
+        Any::Map(entries) => {
+            let mut pairs: Vec<(&String, &Any)> = entries.iter().collect();
+            pairs.sort_by(|a, b| a.0.cmp(b.0)); // deterministic key order
+            let mut out = String::from("{");
+            for (i, (key, value)) in pairs.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&scalar_json(&Any::String(Arc::from(key.as_str())))); // JSON-escaped key
+                out.push(':');
+                out.push_str(&any_to_json(value));
+            }
+            out.push('}');
+            out
+        }
+        scalar => scalar_json(scalar),
+    }
+}
+
+fn scalar_json(a: &Any) -> String {
     let mut s = String::new();
     a.to_json(&mut s);
     s
@@ -308,11 +343,87 @@ mod tests {
     }
 
     #[test]
+    fn map_json_sorts_nested_object_keys() {
+        // Nested maps sort their keys too, not just the root — yrs stores map
+        // entries in a HashMap, so without this the inner object serializes in
+        // arbitrary, run-varying order.
+        let doc = Doc::new();
+        let map = doc.get_or_insert_map("state");
+        {
+            let mut txn = doc.transact_mut();
+            let inner = map.insert(&mut txn, "user", MapPrelim::default());
+            inner.insert(&mut txn, "name", "Ada");
+            inner.insert(&mut txn, "active", true);
+            inner.insert(&mut txn, "id", 7_i64);
+        }
+        let txn = doc.transact();
+        assert_eq!(
+            map_json(&txn, &map),
+            r#"{"user":{"active":true,"id":7,"name":"Ada"}}"#
+        );
+    }
+
+    #[test]
     fn map_json_empty_is_object() {
         let doc = Doc::new();
         let map = doc.get_or_insert_map("state");
         let txn = doc.transact();
         assert_eq!(map_json(&txn, &map), "{}");
+    }
+
+    #[test]
+    fn array_json_serializes_primitives_in_order() {
+        let doc = Doc::new();
+        let array = doc.get_or_insert_array("rows");
+        {
+            let mut txn = doc.transact_mut();
+            array.push_back(&mut txn, "a");
+            array.push_back(&mut txn, 2_i64);
+            array.push_back(&mut txn, true);
+        }
+        let txn = doc.transact();
+        assert_eq!(array_json(&txn, &array), r#"["a",2,true]"#);
+    }
+
+    #[test]
+    fn array_json_recurses_into_nested_maps() {
+        // The kanban/spreadsheet shape: an array of Y.Maps. Each element must
+        // come through as its own object, keys sorted like map_json.
+        let doc = Doc::new();
+        let array = doc.get_or_insert_array("cards");
+        {
+            let mut txn = doc.transact_mut();
+            let card = array.push_back(&mut txn, MapPrelim::default());
+            card.insert(&mut txn, "text", "Ship it");
+            card.insert(&mut txn, "column", "done");
+        }
+        let txn = doc.transact();
+        assert_eq!(
+            array_json(&txn, &array),
+            r#"[{"column":"done","text":"Ship it"}]"#
+        );
+    }
+
+    #[test]
+    fn array_json_recurses_into_nested_arrays() {
+        let doc = Doc::new();
+        let array = doc.get_or_insert_array("grid");
+        {
+            let mut txn = doc.transact_mut();
+            let row = array.push_back(&mut txn, yrs::ArrayPrelim::default());
+            row.push_back(&mut txn, 1_i64);
+            row.push_back(&mut txn, 2_i64);
+        }
+        let txn = doc.transact();
+        assert_eq!(array_json(&txn, &array), r#"[[1,2]]"#);
+    }
+
+    #[test]
+    fn array_json_empty_is_array() {
+        let doc = Doc::new();
+        let array = doc.get_or_insert_array("rows");
+        let txn = doc.transact();
+        assert_eq!(array_json(&txn, &array), "[]");
     }
 
     #[test]
