@@ -15,7 +15,7 @@ import {
   columnOrderingFeature,
 } from "@tanstack/table-core"
 import { storeReactivityBindings } from "@tanstack/table-core/store-reactivity-bindings"
-import { connectRoom, uid, user } from "./room.js"
+import { connectRoom, uid, user, wireStoredPanel } from "./room.js"
 
 const COLUMNS = [["item", "Item"], ["qty", "Qty"], ["owner", "Owner"], ["notes", "Notes"]]
 const COL_IDS = COLUMNS.map((c) => c[0])
@@ -301,4 +301,5 @@ provider.whenSynced.then(() => {
 })
 
 render()
+wireStoredPanel(ydoc)
 provider.connect()

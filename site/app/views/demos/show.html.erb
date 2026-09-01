@@ -44,6 +44,27 @@
   </header>
 
   <%= render "demos/#{@demo.slug}" %>
+
+  <%# The server-side read panel, for every shape demo (the Rich text demo
+      carries its own note.body panel). Same behavior as that one: it fetches
+      when opened and stays live while open. read_text/read_xml return a
+      string; read_map/read_array return JSON. %>
+  <% if @demo.read %>
+    <% call = %{doc.#{"read_#{@demo.read.kind}"}(\"#{@demo.read.root}\")} %>
+    <details class="stored group mt-4 rounded-xl border border-zinc-800 bg-panel">
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-400 select-none group-open:border-b group-open:border-zinc-800 hover:text-zinc-200">
+        Server-side read — <code><%= call %></code>
+      </summary>
+      <div class="px-4 py-3">
+        <p class="mb-2 text-xs leading-5 text-zinc-500">
+          Fetched from <code>GET <%= demo_stored_path(@demo.slug, @room) %></code>
+          when opened. This is the document reconstructed in Ruby with
+          <code><%= call %></code> — no browser in the render path.
+        </p>
+        <pre id="stored-html" class="!my-0 max-h-64 text-[0.72rem]" data-url="<%= demo_stored_path(@demo.slug, @room) %>"><code>…</code></pre>
+      </div>
+    </details>
+  <% end %>
 </div>
 
 <%= javascript_include_tag "/#{@demo.slug}.js", defer: true, skip_pipeline: true %>

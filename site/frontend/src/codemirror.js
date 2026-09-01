@@ -8,7 +8,7 @@ import { EditorView, basicSetup } from "codemirror"
 import { javascript } from "@codemirror/lang-javascript"
 import { oneDark } from "@codemirror/theme-one-dark"
 import { yCollab } from "y-codemirror.next"
-import { connectRoom, user } from "./room.js"
+import { connectRoom, user, wireStoredPanel } from "./room.js"
 
 const mount = document.getElementById("editor")
 const ydoc = new Y.Doc()
@@ -35,4 +35,5 @@ provider.whenSynced.then(() => {
   }
 })
 
+wireStoredPanel(ydoc)
 provider.connect()

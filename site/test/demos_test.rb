@@ -129,4 +129,90 @@ class DemosTest < ActionDispatch::IntegrationTest
 
     assert_response :not_found
   end
+
+  # --- the shape demos' server-side read (DemosController#stored) ------------
+
+  test "the stored endpoint reads a Y.Text demo back as a string" do
+    Y::Document.append("codemirror/room1", Updates::CODE_TEXT)
+
+    get "/demos/codemirror/room1/stored"
+
+    assert_response :success
+    assert_equal "no-store", response.headers["cache-control"]
+    assert_equal "const x = 1", response.parsed_body["body"]
+  end
+
+  test "the stored endpoint reads a Y.XmlFragment demo back as block text" do
+    Y::Document.append("tiptap/room1", Updates::PROSEMIRROR_DEFAULT)
+
+    get "/demos/tiptap/room1/stored"
+
+    assert_response :success
+    assert_equal "<paragraph>hello</paragraph>", response.parsed_body["body"]
+  end
+
+  test "the stored endpoint reads a Y.Map demo back as JSON" do
+    Y::Document.append("whiteboard/room1", Updates::SHAPES_MAP)
+
+    get "/demos/whiteboard/room1/stored"
+
+    assert_response :success
+    assert_equal(
+      { "n1" => { "text" => "drag me", "x" => 40, "y" => 40 } },
+      JSON.parse(response.parsed_body["body"])
+    )
+  end
+
+  test "the stored endpoint reads a Y.Array demo back as JSON" do
+    Y::Document.append("kanban/room1", Updates::CARDS_ARRAY)
+
+    get "/demos/kanban/room1/stored"
+
+    assert_response :success
+    assert_equal(
+      [
+        { "id" => "1", "text" => "Design the API", "column" => "todo" },
+        { "id" => "2", "text" => "Ship it", "column" => "done" }
+      ],
+      JSON.parse(response.parsed_body["body"])
+    )
+  end
+
+  test "the stored endpoint keys nested object output stably (sorted)" do
+    Y::Document.append("spreadsheet/room1", Updates::ROWS_ARRAY)
+
+    get "/demos/spreadsheet/room1/stored"
+
+    assert_response :success
+    # Sorted keys at every depth, so the panel and any diff are deterministic.
+    assert_equal %([{"item":"Chairs","qty":"4"}]), response.parsed_body["body"]
+  end
+
+  test "the stored endpoint is empty-safe for a room with no document" do
+    get "/demos/kanban/nothere/stored"
+
+    assert_response :success
+    assert_nil response.parsed_body["body"]
+  end
+
+  test "the stored endpoint 404s for the lexxy demo, which uses body instead" do
+    get "/demos/lexxy/room1/stored"
+
+    assert_response :not_found
+  end
+
+  test "the stored endpoint rejects unknown demos and malformed rooms" do
+    get "/demos/wiki/room1/stored"
+    assert_response :not_found
+
+    get "/demos/kanban/#{"a" * 33}/stored"
+    assert_response :not_found
+  end
+
+  test "the stored endpoint does not create a document" do
+    get "/demos/kanban/room1/stored"
+
+    assert_response :success
+    assert_equal 0, Y::Document.count, "a read must not mint a row"
+  end
 end

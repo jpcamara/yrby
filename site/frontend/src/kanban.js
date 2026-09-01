@@ -4,7 +4,7 @@
 // conflict; deleting splices the array. The server knows nothing about "cards"
 // or "columns".
 import * as Y from "yjs"
-import { connectRoom, uid, user } from "./room.js"
+import { connectRoom, uid, user, wireStoredPanel } from "./room.js"
 
 const COLUMNS = [["todo", "To Do"], ["doing", "Doing"], ["done", "Done"]]
 const ORDER = COLUMNS.map((c) => c[0])
@@ -116,4 +116,5 @@ provider.whenSynced.then(() => {
 })
 
 render()
+wireStoredPanel(ydoc)
 provider.connect()

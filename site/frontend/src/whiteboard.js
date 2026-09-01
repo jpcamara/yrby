@@ -4,7 +4,7 @@
 // document as a record store and bind it to a Y.Map the same way, so this exact
 // provider drops under them. The server just syncs the Map.
 import * as Y from "yjs"
-import { connectRoom, uid, user } from "./room.js"
+import { connectRoom, uid, user, wireStoredPanel } from "./room.js"
 
 const canvas = document.getElementById("canvas")
 const ydoc = new Y.Doc()
@@ -81,4 +81,5 @@ provider.whenSynced.then(() => {
 })
 
 render()
+wireStoredPanel(ydoc)
 provider.connect()

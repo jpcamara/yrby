@@ -228,3 +228,96 @@ export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params }
   renderPresence(provider)
   return provider
 }
+
+// The "server-side read" panel every demo carries: a GET-only endpoint that
+// reconstructs the document in Ruby (read_text/read_xml/read_map/read_array, or
+// the Rich text demo's materialized note.body). It fetches when the panel opens
+// and stays live while open — each edit schedules a debounced re-fetch, so the
+// panel tracks what the server reads back as you type. The debounce waits for
+// the server to record the change and keeps continuous typing from hammering
+// the endpoint. No-op if the page has no panel.
+export function wireStoredPanel(ydoc) {
+  const stored = document.querySelector("#stored-html")
+  const details = document.querySelector("details.stored")
+  if (!stored || !details) return
+
+  // Indent markup for display. Block tags get their own line at their depth;
+  // text and inline tags stay on the line with their content, so a paragraph
+  // reads as one line while lists and tables nest. <pre> content is passed
+  // through untouched. Display-only — the endpoint returns the stored string.
+  // (Tokenizer limitation: a ">" inside a quoted attribute would split a tag;
+  // none of the demo renderers emit one.)
+  // The second alternation covers read_xml's ProseMirror mark names, which
+  // serialize as tags (<bold>, <italic>) but belong on the line with their text.
+  const INLINE = /^(a|abbr|b|bdi|bdo|br|cite|code|data|del|dfn|em|i|ins|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|u|var|wbr|bold|italic|strike|underline|link|highlight)$/
+  const VOID = /^(area|base|br|col|embed|hr|img|input|link|meta|source|track|wbr)$/
+  const prettyMarkup = (html) => {
+    const tokens = html.match(/<[^>]+>|[^<]+/g) || []
+    let out = ""
+    let depth = 0
+    let inPre = false
+    let last = "start"
+    const newline = () => {
+      if (out) out += "\n"
+      out += "  ".repeat(depth)
+    }
+    for (const token of tokens) {
+      const tag = (token.startsWith("<") && token.match(/^<\/?([a-zA-Z][\w-]*)/)?.[1].toLowerCase()) || null
+      if (inPre) {
+        out += token
+        if (tag === "pre" && token.startsWith("</")) { inPre = false; last = "close" }
+        continue
+      }
+      if (tag === null) { // text
+        if (token.trim()) { out += token; last = "text" }
+        continue
+      }
+      if (INLINE.test(tag)) { out += token; last = "text"; continue }
+      if (token.startsWith("</")) {
+        depth = Math.max(0, depth - 1)
+        if (last === "close") newline() // had block children: close on its own line
+        out += token
+        last = "close"
+      } else if (VOID.test(tag) || token.endsWith("/>")) {
+        newline()
+        out += token
+        last = "close"
+      } else {
+        newline()
+        out += token
+        if (tag === "pre") { inPre = true } else { depth++ }
+        last = "open"
+      }
+    }
+    return out
+  }
+
+  // read_map/read_array return compact JSON, the lexxy demo returns HTML, and
+  // read_xml returns tag-per-block markup; re-indent whichever this is for the
+  // panel. Plain text (read_text) displays as-is.
+  const pretty = (body) => {
+    try {
+      return JSON.stringify(JSON.parse(body), null, 2)
+    } catch {
+      return body.trimStart().startsWith("<") ? prettyMarkup(body) : body
+    }
+  }
+
+  const load = async () => {
+    try {
+      const response = await fetch(stored.dataset.url, { headers: { Accept: "application/json" } })
+      const { body } = await response.json()
+      stored.firstChild.textContent = body ? pretty(body) : "(empty — edit the document first)"
+    } catch {
+      stored.firstChild.textContent = "(could not load)"
+    }
+  }
+
+  let timer = null
+  ydoc.on("update", () => {
+    if (!details.open) return
+    clearTimeout(timer)
+    timer = setTimeout(load, 600)
+  })
+  details.addEventListener("toggle", () => { if (details.open) load() })
+}

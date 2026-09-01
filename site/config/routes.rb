@@ -22,6 +22,9 @@ Rails.application.routes.draw do
   get "demos/:demo", to: "demos#new_room", as: :demo
   # The Rich text demo's materialized column (see DemosController#body).
   get "demos/lexxy/:room/body", to: "demos#body", as: :demo_note_body
+  # Every other demo's server-side read: the document reconstructed in Ruby
+  # from stored state (see DemosController#stored).
+  get "demos/:demo/:room/stored", to: "demos#stored", as: :demo_stored
 
   # The room segment's shape is checked in the controller against
   # Demos::ROOM_FORMAT rather than here, so an odd link 404s instead of falling

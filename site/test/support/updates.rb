@@ -26,6 +26,16 @@ module Updates
     b64("AQEFAAQBB2NvbnRlbnQQY2xpZW50LTUtY29udGVudAA=")
   ].freeze
 
+  # One full document state per shape demo's root, for the server-side read
+  # endpoint (DemosController#stored). Captured from Y.js the same way as the
+  # rest of this file. The root name matches each demo's getText/getMap/
+  # getArray/getXmlFragment call.
+  CODE_TEXT = b64("AQGd1uTEAQAEAQRjb2RlC2NvbnN0IHggPSAxAA==")            # Y.Text "code"
+  SHAPES_MAP = b64("AQSsl66fCwAnAQZzaGFwZXMCbjEBKACsl66fCwABeAF9KCgArJeunwsAAXkBfSgoAKyXrp8LAAR0ZXh0AXcHZHJhZyBtZQA=") # Y.Map "shapes"
+  ROWS_ARRAY = b64("AQP9ofr4BgAHAQRyb3dzASgA/aH6+AYABGl0ZW0BdwZDaGFpcnMoAP2h+vgGAANxdHkBdwE0AA==") # Y.Array "rows"
+  CARDS_ARRAY = b64("AQiMovTdCAAHAQVjYXJkcwEoAIyi9N0IAAJpZAF3ATEoAIyi9N0IAAR0ZXh0AXcORGVzaWduIHRoZSBBUEkoAIyi9N0IAAZjb2x1bW4BdwR0b2Rvh4yi9N0IAAEoAIyi9N0IBAJpZAF3ATIoAIyi9N0IBAR0ZXh0AXcHU2hpcCBpdCgAjKL03QgEBmNvbHVtbgF3BGRvbmUA") # Y.Array "cards"
+  PROSEMIRROR_DEFAULT = b64("AQPi5JewCAAHAQdkZWZhdWx0AwlwYXJhZ3JhcGgHAOLkl7AIAAYEAOLkl7AIAQVoZWxsbwA=") # Y.XmlFragment "default"
+
   # A complete awareness frame (client 42, a user and a cursor). Presence is
   # relayed opaquely and never originated by the server, so this is a canned
   # frame rather than something built here.

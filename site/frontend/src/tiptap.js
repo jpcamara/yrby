@@ -6,7 +6,7 @@ import { Editor } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
 import Collaboration from "@tiptap/extension-collaboration"
 import CollaborationCursor from "@tiptap/extension-collaboration-cursor"
-import { connectRoom, user } from "./room.js"
+import { connectRoom, user, wireStoredPanel } from "./room.js"
 
 // Returning true from a ProseMirror paste/drop handler means "handled" — the
 // default insertion is skipped and the file goes nowhere.
@@ -91,4 +91,5 @@ provider.whenSynced.then(() => {
   wireToolbar(window.__yrby.editor)
 })
 
+wireStoredPanel(ydoc)
 provider.connect()

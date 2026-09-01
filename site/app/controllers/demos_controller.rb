@@ -41,6 +41,21 @@ class DemosController < ApplicationController
     render json: { body: note&.body }
   end
 
+  # The shape demos' counterpart to #body: the stored Y::Document, read back in
+  # Ruby with read_text/read_xml/read_map/read_array (no browser in the loop).
+  # Read-only and anonymous like #body — it loads the existing document but
+  # never creates one, so crawling room URLs can't mint rows.
+  def stored
+    demo = Demos.find(params[:demo])
+    return head :not_found if demo.nil? || demo.read.nil?
+
+    room = params[:room].to_s
+    return head :not_found unless Demos.valid_room?(room)
+
+    state = Y::Document.load_state(Demos.document_key(demo.slug, room))
+    render json: { body: Demos.read_stored(demo.read, state) }
+  end
+
   private
 
   def load_demo
