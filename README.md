@@ -43,17 +43,22 @@ The whole server side of a collaborative document is one channel:
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
 
+  # A key names one document — here "post/42/body", the body of one post.
+  # The hooks are that document's storage: rebuild it on join, record every
+  # change before it is acknowledged or broadcast.
   on_load   { |key|         Y::Document.load_state(key) }
   on_change { |key, update| Y::Document.append(key, update) }
 
-  def subscribed    = sync_subscribed(params[:id])
-  def receive(data) = sync_receive(data, params[:id])
+  def subscribed    = sync_subscribed("post/#{post.id}/body")
+  def receive(data) = sync_receive(data, "post/#{post.id}/body")
 
   private
 
-  # Required. Everyone is denied until the channel says who may sync;
+  def post = @post ||= Post.find(params[:id])
+
+  # Required. Nobody syncs a document until the channel says who may;
   # current_user comes from your cable connection's identified_by.
-  def authorized?(key) = current_user&.can_edit?(key)
+  def authorized?(_key) = post.editable_by?(current_user)
 end
 ```
 
