@@ -2,16 +2,21 @@
 # lexxy_realtime:install` writes, with this site's throttle layers on top
 # (RoomGuarded) and one loosening for public rooms (authorized?).
 #
-# The client does not name a document. It presents a signed GlobalID minted by
-# the server for one record and one field — LexxyRealtime.sgid_purpose scopes
-# the token to "lexxy_realtime/<field>", so a token minted elsewhere, for
-# another purpose, or for another field fails to locate the record and the
-# subscription is rejected. That flow is itself part of what this demo shows.
+# The client does not name a document. It presents a signed, field-scoped ROOM
+# token minted by the server (Note.room_token) — the verifier is keyed by
+# "lexxy_realtime/<field>", so a token minted for another field or a tampered
+# one fails to verify and the subscription is rejected. That field/purpose
+# scoping is part of what this demo shows; signing a room id rather than a record
+# id is what lets the page render without minting a Note row (a crawler would
+# otherwise create rows on GET, uncapped — see DemosController#show).
 #
-# Storage routes through the record's collaborative-document association, and
-# after every recorded update the body column is refreshed from the full
-# document via Y::Lexxy — the server-side render is why `note.body` is always
-# a current HTML snapshot with no browser involved.
+# The Note itself is created HERE, on subscribe, and only within the room budget
+# — the same reservation logic documents use — so creation is capacity-checked
+# instead of happening on an anonymous GET. Storage then routes through the
+# record's collaborative-document association, and after every recorded update
+# the body column is refreshed from the full document via Y::Lexxy — the
+# server-side render is why `note.body` is always a current HTML snapshot with no
+# browser involved.
 class NoteChannel < ApplicationCable::Channel
   include RoomGuarded
 
@@ -32,7 +37,7 @@ class NoteChannel < ApplicationCable::Channel
   end
 
   def subscribed
-    return reject unless record&.collaborative_rich_text?(field) && authorized?
+    return reject unless (note = seat_note) && note.collaborative_rich_text?(field) && authorized?
     return reject unless take_seat(prospective_key)
 
     sync_subscribed(record.find_or_create_collaborative_document(field).key)
@@ -52,19 +57,49 @@ class NoteChannel < ApplicationCable::Channel
 
   # In the generated template this is where the app's access check goes
   # (record.editable_by?(current_user)), and it defaults to false. These rooms
-  # are public by design — the sgid already proves the token was minted by
-  # this site for this record and field, and that is the whole access model
-  # for an anonymous demo.
+  # are public by design — the verified room token already proves the client was
+  # handed a token by this site for this field, and that is the whole access
+  # model for an anonymous demo.
   def authorized?
     true
   end
 
-  # Invalid, stale, or field-mismatched tokens return nil and are rejected by
-  # subscribed.
+  # The room the token was minted for, or nil for a missing/tampered/field-
+  # mismatched token. Memoized: every RPC command carries the token param, so
+  # each fresh channel instance re-derives it.
+  def room
+    return @room if defined?(@room)
+
+    @room = Note.verified_room(params[:token], field)
+  end
+
+  # The Note for this room, created on subscribe within the room budget. Every
+  # non-subscribe command (receive/on_load/on_change runs in its own RPC
+  # instance) only ever FINDS it — the row already exists by then, minted when
+  # the room was first subscribed.
   def record
-    @record ||= GlobalID::Locator.locate_signed(params[:sgid], for: Note.sgid_purpose(field))
-  rescue ActiveRecord::RecordNotFound
-    nil
+    return @record if defined?(@record)
+
+    @record = room && Note.find_by(room: room)
+  end
+
+  # Find the room's Note, or mint it if the room budget allows. A crawler
+  # fetching pages creates nothing; only a real subscribe reaches here, and only
+  # when there is budget for another room, so the row is capacity-checked. The
+  # authoritative reservation is still take_seat's `join` against the note's
+  # document key; this only keeps a row from being minted past the cap.
+  def seat_note
+    return nil unless room
+
+    @record = Note.find_by(room: room) || create_note_within_budget
+  end
+
+  def create_note_within_budget
+    return nil unless Rooms.current.room_available?
+
+    Note.create!(room: room)
+  rescue ActiveRecord::RecordNotUnique
+    Note.find_by(room: room) # a concurrent subscribe won the create
   end
 
   def field
@@ -73,8 +108,8 @@ class NoteChannel < ApplicationCable::Channel
 
   # The key the document WILL have, without creating it — Y::Document.for
   # derives "note/<id>/body" from the record binding. Seats and the room cap
-  # are checked against this before find_or_create mints the row, so a
-  # process at the cap refuses the join instead of creating the document
+  # are checked against this before find_or_create mints the document row, so
+  # a process at the cap refuses the join instead of creating the document
   # first and counting it after.
   def prospective_key
     "#{record.class.polymorphic_name.underscore}/#{record.id}/#{field}"

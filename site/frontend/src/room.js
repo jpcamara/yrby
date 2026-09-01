@@ -3,11 +3,14 @@
 //
 // The consumer comes from @anycable/web rather than @rails/actioncable because
 // the server is AnyCable: anycable-go, embedded in the thrust proxy, terminates
-// every socket. Its subscription exposes `whisper`, and yrby-client's provider
-// routes awareness through it when it is there — so cursor and presence traffic
-// is relayed client-to-client by Go and never reaches Ruby at all. Document
-// updates still go through the server, get recorded, and get acked. The two
-// consumers are otherwise interchangeable; the provider takes either.
+// every socket. AnyCable subscriptions expose `whisper` (a client-to-client
+// relay that never reaches Ruby), and yrby-client's provider rides it for
+// awareness when it is there. This demo deliberately hides `whisper` from the
+// provider (see countTransport): the rooms are public and anonymous, so a
+// whisper would be an unguarded path a raw peer could inject document frames
+// through. Awareness rides `send` instead — the same guarded path document
+// updates take — so every frame passes the server's throttle and validation.
+// The two consumers are otherwise interchangeable; the provider takes either.
 import { createConsumer } from "@anycable/web"
 import { ActionCableProvider } from "yrby-client"
 
@@ -73,26 +76,37 @@ function noticeAwareConsumer(consumer, { onNotice, onRejected }) {
 
 // Which path each frame took, exposed for the browser console and the e2e.
 //
-// yrby-client whispers awareness frames when the subscription offers
-// `whisper` and sends everything else. A whisper is relayed by anycable-go
-// between clients and never becomes an RPC call, so `whispers` climbing while
-// carets move is the visible proof that presence traffic is not costing Ruby
-// anything. Document updates stay on `send`: they have to be recorded and
-// acked.
+// The demo hides `whisper` from the provider (below), so both awareness and
+// document frames leave over `send` — the guarded server path. That is the
+// point of this counter now: `awarenessSends` climbing while carets move proves
+// presence rides the same guarded path as edits, not an unguarded client-to-
+// client relay. Awareness frames are told apart by their first byte
+// (MessageType.Awareness === 1 in the y-protocols framing yrby-client speaks).
+function isAwarenessPayload(payload) {
+  const update = payload && payload.update
+  if (typeof update !== "string") return false
+  try {
+    return atob(update).charCodeAt(0) === 1
+  } catch {
+    return false
+  }
+}
+
 function countTransport(subscription) {
-  const counts = { whispers: 0, sends: 0, canWhisper: typeof subscription.whisper === "function" }
+  const counts = { sends: 0, awarenessSends: 0, documentSends: 0, canWhisper: false }
   window.__yrbyTransport = counts
 
-  const whisper = subscription.whisper?.bind(subscription)
-  if (whisper) {
-    subscription.whisper = (payload) => {
-      counts.whispers++
-      return whisper(payload)
-    }
-  }
+  // Do not offer whisper to the provider: with it absent, yrby-client falls back
+  // to `send` for awareness, so presence goes through guarded_receive like every
+  // other frame. AnyCable's own whisper still exists on the raw subscription; the
+  // demo simply declines to use it. See the security note at the top of the file.
+  subscription.whisper = undefined
+
   const send = subscription.send.bind(subscription)
   subscription.send = (payload) => {
     counts.sends++
+    if (isAwarenessPayload(payload)) counts.awarenessSends++
+    else counts.documentSends++
     return send(payload)
   }
   return subscription

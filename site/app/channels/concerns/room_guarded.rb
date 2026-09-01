@@ -48,6 +48,26 @@ module RoomGuarded
     state_attr_accessor :seat, :notified
   end
 
+  # The demo does not use AnyCable whispers, and this is where it opts out.
+  #
+  # yrby's sync_subscribed enables a whisper stream for awareness under AnyCable
+  # (`stream_from awareness, whisper: true`). A whisper relays client-to-client
+  # through anycable-go and never reaches Rails, so on this public, anonymous,
+  # mutually-untrusting surface a raw client could whisper a `{update: <document
+  # frame>}` straight to its peers — past the token bucket, the size caps,
+  # persistence, and every validation the receive path runs. Stripping the
+  # whisper option means anycable-go never whisper-enables any of this channel's
+  # streams, so it drops every whisper on them (a malicious one included).
+  # Awareness instead rides the guarded `send` path: the client sends it, it
+  # reaches guarded_receive, and the server relays it to the room like any other
+  # frame (see guarded_receive). Whisper stays a first-class feature of the
+  # published yrby-client and yrby-rails for real authenticated apps; only the
+  # demo turns it off.
+  def stream_from(broadcasting, *args, **opts)
+    opts.delete(:whisper)
+    super
+  end
+
   private
 
   def take_seat(key)

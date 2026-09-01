@@ -35,8 +35,9 @@ channel params. The consumer type is deliberately loose, so the consumers from
 both `@rails/actioncable` and `@anycable/web` are directly assignable with no
 adapter and no casts. On AnyCable the client's subscription exposes `whisper`,
 and the provider uses it for awareness — cursor traffic is then relayed between
-clients by the AnyCable server and never reaches your Ruby code. This site does
-that; see [Presence](/docs/presence).
+clients by the AnyCable server and never reaches your Ruby code. This site's own
+demos are public, so they opt out of that and route awareness through the guarded
+server path instead; see [Presence](/docs/presence).
 
 ## Bind after the first sync
 

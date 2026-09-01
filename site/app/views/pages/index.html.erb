@@ -273,7 +273,7 @@ browser ◀── ack 42 ──────┘              (recorded first, the
       ["Parallel on MRI.", "CRDT work runs with the GVL released; a measured 2x wall-clock speedup applying large updates concurrently."],
       ["Hostile input handled.", "Every frame is validated before anything processes it. A bad frame is dropped; a native panic becomes a Ruby exception, not a crashed process."],
       ["Multi-process.", "Record-before-distribute holds across processes; any worker can serve any document from the shared store."],
-      ["AnyCable.", "The same channel concern, tested end to end against a real anycable-go gateway. Presence rides whispers and skips Ruby entirely."],
+      ["AnyCable.", "The same channel concern, tested end to end against a real anycable-go gateway. In an authenticated app, presence can ride AnyCable whispers and skip Ruby entirely."],
       ["Encrypted at rest.", "<code>Y::EncryptedDocument</code> stores state and updates through Active Record encryption, the way <code>ActionText::EncryptedRichText</code> does."]
     ].each do |title, body| %>
       <div class="rounded-xl border border-zinc-800 bg-panel p-4">

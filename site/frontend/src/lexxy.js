@@ -7,8 +7,9 @@
 // room.js builds the yrby-client provider (over @anycable/web, with the room
 // bar, presence chips, and full-room notice), and the element receives the doc
 // and provider instead of creating its own cable. The provider subscribes to
-// NoteChannel with the signed-GlobalID credentials the server rendered — the
-// sgid is scoped to this note and field, which is the whole access model.
+// NoteChannel with a signed, field-scoped room token the server rendered — the
+// token proves this site issued it for this field, and NoteChannel creates the
+// Note on subscribe (never on the page GET), which is the whole access model.
 import "@37signals/lexxy"
 // Lexxy's package exports only expose the JS entry; reach the stylesheet by
 // path. Bun bundles it (and lexxy-realtime's caret styles) into public/lexxy.css.
@@ -22,7 +23,7 @@ const editor = document.getElementById("editor") // <lexxy-editor attachments="f
 const ydoc = new Y.Doc()
 const provider = connectRoom(ydoc, editor, {
   channel: "NoteChannel",
-  params: { sgid: editor.dataset.sgid, field: editor.dataset.field },
+  params: { token: editor.dataset.token, field: editor.dataset.field },
 })
 
 window.__yrby = { provider, ydoc, user }

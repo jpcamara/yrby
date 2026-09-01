@@ -86,16 +86,41 @@ class ConnectionGuardTest < ActiveSupport::TestCase
     guard = ConnectionGuard.new(max_age: 60)
     guard.admit_subscription(CID, "tiptap/a", 0) # last seen at t=0, never released
 
-    assert_equal 0, guard.sweep(30), "still fresh before the TTL"
-    assert_equal 1, guard.sweep(61), "reaped past the TTL"
+    assert_equal 0, guard.sweep(30, rooms: Rooms.new, limiter: ConnectionLimiter.new), "still fresh before the TTL"
+    assert_equal 1, guard.sweep(61, rooms: Rooms.new, limiter: ConnectionLimiter.new), "reaped past the TTL"
     assert_equal 0, guard.count
   end
 
-  test "activity keeps a guard alive across the TTL" do
-    guard = ConnectionGuard.new(max_age: 60)
-    guard.admit_subscription(CID, "tiptap/a", 0)
-    guard.take_frame(CID, 55) # activity at t=55 refreshes seen_at
+  test "reaping a leaked connection frees its room seat and its connection slot" do
+    rooms = Rooms.new
+    limiter = ConnectionLimiter.new
+    _status, token = limiter.acquire("1.2.3.4")
+    rooms.join("tiptap/a") # the seat the leaked connection holds
 
-    assert_equal 0, guard.sweep(100), "seen at 55, so 100 is within the TTL of the last activity"
+    guard = ConnectionGuard.new(max_age: 60)
+    guard.register(CID, "1.2.3.4", token, 0)
+    guard.admit_subscription(CID, "tiptap/a", 0)
+
+    assert_equal 1, guard.sweep(61, rooms: rooms, limiter: limiter)
+    assert_equal 0, rooms.peers("tiptap/a"), "the seat is freed, so the room is joinable and evictable"
+    assert_empty rooms.occupied_keys
+    assert_equal 0, limiter.count("1.2.3.4"), "the connection slot is freed by its exact token"
+  end
+
+  test "a connection still emitting awareness is never reaped" do
+    rooms = Rooms.new
+    limiter = ConnectionLimiter.new
+    _status, token = limiter.acquire("1.2.3.4")
+    rooms.join("tiptap/a")
+
+    guard = ConnectionGuard.new(max_age: 60)
+    guard.register(CID, "1.2.3.4", token, 0)
+    guard.admit_subscription(CID, "tiptap/a", 0)
+    guard.take_frame(CID, 55) # an awareness (or document) frame at t=55 refreshes liveness
+
+    assert_equal 0, guard.sweep(100, rooms: rooms, limiter: limiter),
+                 "seen at 55, so 100 is within the TTL of the last frame"
+    assert_equal 1, rooms.peers("tiptap/a"), "the live connection keeps its seat"
+    assert_equal 1, limiter.count("1.2.3.4"), "and its slot"
   end
 end

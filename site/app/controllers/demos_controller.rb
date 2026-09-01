@@ -21,10 +21,12 @@ class DemosController < ApplicationController
     @document_key = Demos.document_key(@demo.slug, @room)
     return unless @demo.slug == "lexxy"
 
-    # The Rich text demo is record-based (lexxy-realtime's shape): one Note
-    # per room, and the page hands the client a signed GlobalID scoped to
-    # this record and field — the token NoteChannel authenticates.
-    @note = Note.find_or_create_by!(room: @room)
+    # The Rich text demo is record-based (lexxy-realtime's shape): one Note per
+    # room. The page does NOT create the Note — a GET is anonymous and
+    # uncapped, and a crawler fetching room URLs would mint rows without bound.
+    # It hands the client a signed, field-scoped room token instead; NoteChannel
+    # verifies it and creates the Note on subscribe, within the room budget.
+    @note_token = Note.room_token(@room, :body)
   end
 
   # The materialized column, as JSON. This is the part no other demo can

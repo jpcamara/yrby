@@ -79,10 +79,10 @@ class Rooms
       next unless @seats.key?(key)
 
       @seats[key] -= 1
-      if @seats[key] <= 0
-        @seats.delete(key)
-        @reserved.delete(key) # last occupant of a never-persisted room: free it
-      end
+      next if @seats[key].positive?
+
+      @seats.delete(key)
+      @reserved.delete(key) # last occupant of a never-persisted room: free it
     end
     nil
   end
@@ -90,6 +90,17 @@ class Rooms
   def peers(key) = @mutex.synchronize { @seats[key] }
 
   def occupied_keys = @mutex.synchronize { @seats.keys }
+
+  # Is there room in the budget for one more brand-new room right now? Persisted
+  # documents plus live reservations, against the cap — the same count `join`
+  # applies to a new key. NoteChannel uses it to gate lazily minting a Note row
+  # on subscribe: a Note's document key isn't known until the row exists (it
+  # embeds the id), so the budget is checked here before the row is created, and
+  # `join` takes the authoritative reservation once the key exists. A defense,
+  # not an invariant — losing a boundary race by one is fine.
+  def room_available?
+    Y::Document.count + @mutex.synchronize { @reserved.size } < @max_rooms
+  end
 
   # The document size cap. The true size is state bytes plus tail bytes in the
   # database, but querying it on every frame would put a SUM on the hot path —
@@ -154,8 +165,7 @@ class Rooms
   def claim_evictions(candidate_keys)
     @mutex.synchronize do
       candidate_keys.select do |key|
-        next false unless @seats[key].zero?
-        next false if @reserved.include?(key)
+        next false unless @seats[key].zero? && !@reserved.include?(key)
 
         @evicting << key
         true

@@ -148,15 +148,16 @@ const chips = (s) => js(s, `JSON.stringify([...document.querySelectorAll("#prese
 await waitFor("presence lists two people", async () => JSON.parse((await chips(B)) || "[]").length === 2)
 check("B sees two people in the room", JSON.parse(await chips(B)).length === 2)
 
-// ...and it got there as an AnyCable whisper, relayed between clients by the
-// embedded Go server. Awareness frames never become an RPC call, so cursor
-// traffic costs Ruby nothing. Document updates still go through `send`, because
-// they have to be recorded and acked.
+// ...and it got there over `send`, the guarded server path — NOT an AnyCable
+// whisper. This public demo hides whisper from the provider (see room.js), so
+// awareness rides the same throttled, validated path as document updates rather
+// than relaying client-to-client past the Rails guard. Presence still reaching
+// two chips (above) is the end-to-end proof it works over send.
 const transport = (s) => js(s, `JSON.stringify(window.__yrbyTransport)`)
 const counts = JSON.parse(await transport(A))
-check("the subscription offers whisper (AnyCable, not plain Action Cable)", counts.canWhisper === true)
-check(`presence went out as whispers, not sends (${counts.whispers} whispers)`, counts.whispers > 0)
-check(`document updates still went through send (${counts.sends} sends)`, counts.sends > 0)
+check("whisper is not offered to the provider on the public demo", counts.canWhisper === false)
+check(`awareness went out via send, not a whisper (${counts.awarenessSends} awareness sends)`, counts.awarenessSends > 0)
+check(`document updates went through send too (${counts.documentSends} document sends)`, counts.documentSends > 0)
 
 // --- 2) The room is the boundary ---------------------------------------------
 // A second room on the same demo is a different document, on the same process.

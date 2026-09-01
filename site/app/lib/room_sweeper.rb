@@ -37,15 +37,15 @@ module RoomSweeper
       evicted = sweep_documents(rooms, ttl)
       evicted.concat(sweep_notes(Time.current - ttl))
       Rails.logger.info("room-sweeper: evicted #{evicted.length} stale room(s)") if evicted.any?
-      reap_leaked_slots
+      reap_leaked_connections
       evicted
     rescue StandardError => e
       # A sweep failure must never take the thread down with it; the next tick
       # tries again.
       Rails.logger.error("room-sweeper: #{e.class}: #{e.message}")
-      # The slot reaps are the connection caps' only leak backstop; a failure in
-      # the room sweep above must not skip them, so run them in their own rescue.
-      reap_leaked_slots
+      # The connection reap is the caps' only leak backstop; a failure in the
+      # room sweep above must not skip it, so run it in its own rescue.
+      reap_leaked_connections
       []
     end
 
@@ -97,13 +97,14 @@ module RoomSweeper
       scope.pluck(:key)
     end
 
-    # Reap leaked connection slots and per-connection guards on the sweep
-    # cadence — their own backstop for a Disconnect RPC that never fired.
-    def reap_leaked_slots
-      ConnectionLimiter.current.sweep
+    # Reap connections whose Disconnect RPC never fired, on the sweep cadence.
+    # The guard is this node's liveness record: reaping one silent past the TTL
+    # releases its room seats (freeing peer slots and occupied_keys, so an
+    # abandoned room becomes evictable) and its connection slot, in one pass.
+    def reap_leaked_connections
       ConnectionGuard.current.sweep
     rescue StandardError => e
-      Rails.logger.error("room-sweeper (slot reap): #{e.class}: #{e.message}")
+      Rails.logger.error("room-sweeper (connection reap): #{e.class}: #{e.message}")
     end
 
     # The Rich text demo's Note records follow the same TTL. A note is touched

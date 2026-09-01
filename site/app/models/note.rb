@@ -13,15 +13,34 @@ class Note < ApplicationRecord
 
   has_collaborative_rich_text :body
 
-  # The signed-GlobalID purpose lexxy-realtime scopes its tokens with:
-  # LexxyRealtime.sgid_purpose(field) = "lexxy_realtime/<field>". Mirrored
-  # here because the gem's main module rides in its engine, which this app
-  # cannot load (see the Gemfile); the format is the gem's public contract —
-  # a token minted for another purpose or another field does not locate the
-  # record, so a body token cannot join anything else.
+  # lexxy-realtime scopes its signed GlobalIDs by purpose,
+  # LexxyRealtime.sgid_purpose(field) = "lexxy_realtime/<field>", so a token
+  # minted for one field cannot join another. This demo keeps that scoping but
+  # signs a ROOM id rather than a record id: the page must not mint a Note row
+  # on a GET (a crawler could then create rows without bound), so there is no
+  # record to build a GlobalID from at render time. The room token carries the
+  # same field/purpose scope; NoteChannel verifies it and creates the Note on
+  # subscribe, under the room budget (see DemosController#show, NoteChannel).
   def self.sgid_purpose(field) = "lexxy_realtime/#{field}"
 
-  def body_sgid = to_sgid(for: self.class.sgid_purpose(:body)).to_s
+  # A signed, field-scoped token for a room. The verifier is keyed by the
+  # purpose (which embeds the field), so a token minted for :body verifies only
+  # under :body — a token for one field cannot be replayed for another, the same
+  # guarantee the gem's sgid gives, minus the pre-created row.
+  def self.room_token(room, field)
+    room_verifier(field).generate(room.to_s)
+  end
+
+  # The room a token was minted for, or nil when the token is missing, tampered,
+  # minted for a different field/purpose, or carries a malformed room id.
+  def self.verified_room(token, field)
+    return nil unless token.is_a?(String)
+
+    room = room_verifier(field).verified(token)
+    room if room.is_a?(String) && Demos.valid_room?(room)
+  end
+
+  def self.room_verifier(field) = Rails.application.message_verifier(sgid_purpose(field))
 
   # The site accepts no uploads, and the editor has attachments disabled — but
   # a client that skips the page and speaks the protocol can still craft a

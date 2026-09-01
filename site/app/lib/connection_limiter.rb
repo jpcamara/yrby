@@ -10,18 +10,13 @@
 # "the oldest one for this IP" — without the token, releasing the wrong slot
 # lets the running count drift away from the real socket count, past both caps.
 #
-# A slot also carries the time it was acquired, for one reason: a leak. The
-# count is decremented by `release`, which fires from the Disconnect RPC — and
-# that RPC can fail to arrive (anycable-go drops a socket without delivering the
-# disconnect, a partition, a crashed edge). A leaked slot would then sit elevated
-# until the process restarts. `sweep` reaps slots older than CONNECTION_SLOT_TTL
-# so a leak self-heals; the RoomSweeper thread calls it on its cadence, and
-# `acquire` also drops an IP's own expired slots first, so a busy address heals
-# without waiting for the sweep. The TTL is only a leak backstop — a genuine demo
-# session is far shorter than an hour, so a live connection is rarely reaped —
-# and it can only *under*-count (free a slot a long-lived connection still uses),
-# never over-count, so the worst case is the per-IP cap running slightly loose,
-# never a wrongful rejection.
+# This is a pure token ledger: it counts, it does not decide when a slot is
+# stale. A slot is freed by `release` (from the Disconnect RPC) or, when that RPC
+# never arrives, by the ConnectionGuard sweep, which reaps a connection by
+# LIVENESS — the last server-visible frame — and releases the exact slot token.
+# Age is deliberately not a signal here: expiring a slot purely because it is old
+# would reap a connection that is genuinely still open (a long reader), which is
+# the leak the guard's liveness clock avoids.
 #
 # The real ceiling on sockets is ANYCABLE_MAX_CONN on the Go process, which owns
 # them; this limiter is the per-IP and soft process-wide cap in front of it.
@@ -32,15 +27,13 @@ class ConnectionLimiter
     def current = @current ||= new
   end
 
-  attr_reader :max_per_ip, :max_total, :max_age
+  attr_reader :max_per_ip, :max_total
 
   def initialize(max_per_ip: Limits::MAX_CONNECTIONS_PER_IP,
-                 max_total: Limits::MAX_CONNECTIONS,
-                 max_age: Limits::CONNECTION_SLOT_TTL)
+                 max_total: Limits::MAX_CONNECTIONS)
     @max_per_ip = max_per_ip
     @max_total = max_total
-    @max_age = max_age
-    @slots = Hash.new { |h, k| h[k] = {} } # ip => { token => acquired_at (monotonic) }
+    @slots = Hash.new { |h, k| h[k] = {} } # ip => Set of tokens
     @total = 0
     @mutex = Mutex.new
   end
@@ -48,14 +41,13 @@ class ConnectionLimiter
   # Returns [:ok, token], [:too_many_for_ip, nil], or [:too_many_connections,
   # nil]. On :ok the caller owns the slot named by `token` and must call
   # `release(ip, token)` when the connection closes.
-  def acquire(ip, now = monotonic)
+  def acquire(ip)
     @mutex.synchronize do
-      drop_expired(ip, now)
       next [:too_many_connections, nil] if @total >= @max_total
       next [:too_many_for_ip, nil] if @slots[ip].size >= @max_per_ip
 
       token = SecureRandom.uuid
-      @slots[ip][token] = now
+      @slots[ip][token] = true
       @total += 1
       [:ok, token]
     end
@@ -75,40 +67,9 @@ class ConnectionLimiter
     nil
   end
 
-  # Reap every IP's expired slots. Returns the number reclaimed.
-  def sweep(now = monotonic)
-    @mutex.synchronize do
-      reclaimed = @slots.keys.sum { |ip| drop_expired(ip, now) }
-      Rails.logger.info("connection-limiter: reclaimed #{reclaimed} leaked slot(s)") if reclaimed.positive?
-      reclaimed
-    end
-  end
-
-  def count(ip, now = monotonic)
-    @mutex.synchronize do
-      drop_expired(ip, now)
-      @slots[ip].size
-    end
+  def count(ip)
+    @mutex.synchronize { @slots[ip].size }
   end
 
   def total = @mutex.synchronize { @total }
-
-  private
-
-  # Caller holds the mutex. Removes ip's slots older than max_age, adjusts the
-  # running total, and prunes an emptied IP. Returns the count removed.
-  def drop_expired(ip, now)
-    slots = @slots[ip]
-    return 0 if slots.empty?
-
-    expired = slots.select { |_token, acquired_at| now - acquired_at >= @max_age }
-    return 0 if expired.empty?
-
-    expired.each_key { |token| slots.delete(token) }
-    @total -= expired.size
-    @slots.delete(ip) if slots.empty?
-    expired.size
-  end
-
-  def monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 end

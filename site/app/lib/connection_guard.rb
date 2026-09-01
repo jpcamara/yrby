@@ -23,9 +23,22 @@
 # and travels as a connection identifier, so it is the same string on every
 # command of a connection (and is available in channel tests). The guard is
 # dropped on the Disconnect RPC; `sweep` reaps a guard whose disconnect never
-# arrived, on the RoomSweeper's cadence, the same backstop ConnectionLimiter
-# uses. Reaping a still-live connection's guard only hands it a fresh budget
-# (a loosening), never a wrongful rejection — the safe direction.
+# arrived, on the RoomSweeper's cadence.
+#
+# The guard is also this node's LIVENESS record for a connection, and the only
+# safe leak backstop for its room seats and its connection slot. `seen_at` is
+# stamped on every server-visible frame — a document update OR an awareness
+# frame (awareness reaches Ruby now that the demo routes it through `send`
+# instead of a whisper). A live viewer, even one only reading, keeps its clock
+# fresh: yrby-client re-emits its awareness on a heartbeat (~every 15s, well
+# under the TTL), so an idle-but-open tab stays visibly alive. A connection
+# silent past CONNECTION_SLOT_TTL is therefore a genuine leak — the Disconnect
+# RPC never arrived — and the sweep reaps it: it releases the connection's room
+# seats (freeing the room's peer slot and dropping it from occupied_keys, so the
+# room sweeper can evict a truly-abandoned room) and its connection slot, then
+# forgets the guard. Reaping a still-live connection can only ever loosen a cap,
+# never wrongly reject — the safe direction — and anycable-go's own
+# ANYCABLE_MAX_CONN is the hard ceiling underneath all of this.
 class ConnectionGuard
   class << self
     attr_writer :current
@@ -37,7 +50,7 @@ class ConnectionGuard
   # memory, like the seats and the connection slots, and every connection lives
   # in this one node.
   class Guard
-    attr_accessor :seen_at
+    attr_accessor :seen_at, :ip, :slot_token
 
     def initialize(max_subscriptions:, now:)
       @max_subscriptions = max_subscriptions
@@ -48,6 +61,10 @@ class ConnectionGuard
       @keys = Set.new
       @seen_at = now
     end
+
+    # The rooms this connection is seated in — a snapshot the reaper releases
+    # when the guard is reaped without a Disconnect.
+    def seated_keys = @keys.to_a
 
     # :ok, :rate_limited past the subscribe bucket, :duplicate for a room this
     # connection is already in, or :too_many past the subscription cap. A
@@ -87,6 +104,19 @@ class ConnectionGuard
     @mutex = Mutex.new
   end
 
+  # Record a connection's identity (its throttle IP and slot token) at connect,
+  # so the sweep can free its connection slot if it leaks. Creates the guard —
+  # every accepted connection gets one — and stamps it live.
+  def register(connection_id, ip, slot_token, now = monotonic)
+    @mutex.synchronize do
+      g = guard(connection_id, now)
+      g.ip = ip
+      g.slot_token = slot_token
+      g.seen_at = now
+    end
+    nil
+  end
+
   def admit_subscription(connection_id, key, now = monotonic)
     @mutex.synchronize { guard(connection_id, now).admit_subscription(key, now) }
   end
@@ -122,20 +152,33 @@ class ConnectionGuard
     nil
   end
 
-  # Reap guards whose Disconnect never arrived. Returns the number reclaimed.
-  def sweep(now = monotonic)
-    @mutex.synchronize do
-      before = @guards.size
-      @guards.reject! { |_id, g| now - g.seen_at >= @max_age }
-      reclaimed = before - @guards.size
-      Rails.logger.info("connection-guard: reclaimed #{reclaimed} leaked guard(s)") if reclaimed.positive?
-      reclaimed
+  # Reap guards whose Disconnect never arrived, freeing each one's room seats and
+  # connection slot. Returns the number reclaimed. The silent guards are removed
+  # from the registry under the lock, then their seats and slots are released
+  # OUTSIDE it: `rooms` and `limiter` take their own mutexes, and holding this
+  # one across them would invite a lock-order deadlock. A removed guard is ours
+  # alone, so reading its keys without the lock is safe.
+  def sweep(now = monotonic, rooms: Rooms.current, limiter: ConnectionLimiter.current)
+    dead = @mutex.synchronize do
+      stale = @guards.select { |_id, g| now - g.seen_at >= @max_age }
+      stale.each_key { |id| @guards.delete(id) }
+      stale.values
     end
+    dead.each { |g| reclaim(g, rooms, limiter) }
+    Rails.logger.info("connection-guard: reclaimed #{dead.size} leaked connection(s)") if dead.any?
+    dead.size
   end
 
   def count = @mutex.synchronize { @guards.size }
 
   private
+
+  # Free a reaped connection's room seats and its connection slot. Called
+  # without the guard-registry lock (see sweep).
+  def reclaim(guard, rooms, limiter)
+    guard.seated_keys.each { |key| rooms.leave(key) }
+    limiter.release(guard.ip, guard.slot_token) if guard.ip && guard.slot_token
+  end
 
   # Caller holds the mutex.
   def guard(connection_id, now)

@@ -21,6 +21,10 @@ module ApplicationCable
       self.connection_id = SecureRandom.uuid
       self.client_ip = ip
       self.slot_token = token
+      # Register the connection's identity with the guard now, so if its
+      # Disconnect RPC never arrives the guard's liveness sweep can free this
+      # exact slot (and any room seats) — see ConnectionGuard.
+      ConnectionGuard.current.register(connection_id, ip, token)
     end
 
     def disconnect

@@ -264,13 +264,34 @@ after a freshness re-read, are the still-stale ones deleted. A snapshot delete
 could otherwise race a join or an append and delete a document out from under an
 active session.
 
-The same sweep reaps leaked connection slots and per-connection guards: the
-per-IP cap frees a slot on the Disconnect RPC, but that RPC can fail to arrive
-(a dropped socket, a partition), so a slot older than an hour is treated as
-leaked and reclaimed. Each slot carries a token, so a disconnect frees its own
-slot rather than the oldest one for the IP. Reaping only ever loosens the caps,
-never rejects wrongly, and the hard ceiling on real sockets is `ANYCABLE_MAX_CONN`
-on the Go process, which owns them.
+The same sweep reaps leaked connections. A seat and a connection slot are freed
+on the Disconnect RPC, but that RPC can fail to arrive (a dropped socket, a
+partition), and a leaked seat is worse than a leaked slot: it keeps a room
+occupied, so the sweeper won't evict it, and holds a peer slot forever. The
+backstop is *liveness*, not age. The per-connection guard records the last
+server-visible frame from each connection, and a connection silent past the TTL
+(an hour) is reaped — its room seats released (freeing the peer slots and
+`occupied_keys`, so an abandoned room becomes evictable) and its connection slot
+released by its exact token. The clock is refreshed by any frame, document or
+awareness — which is the point of routing awareness through `send` (below):
+yrby-client re-emits awareness on a heartbeat, so even an idle-but-open reader
+stays visibly alive and is never reaped, while a genuinely dead connection is.
+Reaping only ever loosens the caps, never rejects wrongly, and the hard ceiling
+on real sockets is `ANYCABLE_MAX_CONN` on the Go process, which owns them.
+
+**Awareness rides the guarded server path, not a whisper.** Under AnyCable,
+yrby-client can relay presence as a *whisper* — client-to-client through
+anycable-go, never touching Ruby — which is the right trade in an authenticated
+app where peers trust each other. This demo turns it off (the demo channels
+strip the whisper option, so anycable-go never whisper-enables a stream, and the
+page hides `whisper` from the provider so awareness leaves over `send`). The
+rooms are public and anonymous: a whisper would let one peer inject a raw
+`{ update: … }` document frame straight to the others, past the token bucket, the
+size caps, persistence, and every validation the receive path runs. Over `send`,
+every frame — awareness included — passes the guard; awareness is cheap there (a
+frame-bucket token, not a document write) and is what lets the leak reaper above
+see per-connection liveness. Whisper stays a first-class feature of the published
+`yrby-client` and `yrby-rails`; only the anonymous demo declines it.
 
 **No uploads, anywhere.** The site accepts no files. A public, anonymous write
 surface plus a file endpoint is a free file host, and every one of the throttles
@@ -432,13 +453,16 @@ CPU is the real limit, and it is Ruby's. Every document frame is an RPC call
 into the Falcon reactor and a native CRDT apply. yrby releases the GVL for that
 work — the fiber scheduler keeps serving while the native code runs — but 500
 people typing at once on one shared vCPU is not a thing this machine does
-well. SQLite adds a
-write per update and a read per load on the same box, which at demo scale is
-noise under WAL. Presence is the part that does not count: awareness is whispered client-to-client by Go and
-never reaches Ruby, which is exactly the traffic that would otherwise scale with
-pointer movement. Realistically this is comfortable holding several hundred
-*connected* clients with a few dozen actively editing, which is what a demo site
-sees.
+well. SQLite adds a write per update and a read per load on the same box, which
+at demo scale is noise under WAL. Presence costs Ruby too on this site, by
+design: the demo routes awareness through the guarded `send` path rather than an
+AnyCable whisper, so each awareness frame is an RPC and a relay broadcast — no
+SQLite write and no document apply, but not the free client-to-client path a
+whisper would take. That is the deliberate price of not handing anonymous peers
+an unguarded relay; the frame bucket caps it per connection, and an authenticated
+app that trusts its peers can put presence back on whispers and skip Ruby.
+Realistically this is comfortable holding several hundred *connected* clients
+with a few dozen actively editing, which is what a demo site sees.
 
 I have not load-tested this app at those numbers. The estimate is arithmetic
 from per-connection cost, not a measurement, and the split between what Go holds
@@ -500,7 +524,7 @@ Six pages, chosen for breadth of Yjs shape rather than for count:
 
 | Page | Shape | What it shows |
 |---|---|---|
-| Rich text | `Y.XmlFragment` | Lexxy over the published lexxy-realtime stack: sgid auth, a record-backed document, and the server rendering `note.body` via `Y::Lexxy` |
+| Rich text | `Y.XmlFragment` | Lexxy over the published lexxy-realtime stack: signed-token auth, a record-backed document, and the server rendering `note.body` via `Y::Lexxy` |
 | Tiptap | `Y.XmlFragment` | The same shape through Tiptap's own Collaboration extension |
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges; sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map — the shape canvas tools keep |
@@ -512,19 +536,22 @@ Six pages, chosen for breadth of Yjs shape rather than for count:
 The Lexxy page runs the published `lexxy-realtime` gem (0.7.0) and npm package
 (0.6.0) the way a real app would, not a special demo build:
 
-- **The record shape.** Each room is a `Note` (find-or-created by room id).
+- **The record shape.** Each room is a `Note`, created on subscribe by
+  `NoteChannel` (never on the page GET).
   `has_collaborative_rich_text :body` comes from the gem's Collaborative
   concern, which capability-detects Action Text — this app has none, so the
   concern takes its plain-column path and `refresh_collaborative_rich_text`
   writes the `Y::Lexxy`-rendered HTML straight into `notes.body`. The page's
   "Stored HTML" panel reads that column back over a GET-only JSON endpoint:
   server-rendered markup, no browser in the loop.
-- **The auth shape.** The page mints a signed GlobalID scoped to
-  `lexxy_realtime/body` — the gem's purpose format — and `NoteChannel` (the
-  generated channel template plus this site's throttle layers) locates the
-  record through it. A token for another purpose or field does not locate,
-  and the subscription is rejected. `authorized?` returns true because the
-  rooms are public; the sgid scoping is intact and tested.
+- **The auth shape.** The page does not create the `Note` — a GET is anonymous
+  and uncapped, so a crawler could otherwise mint rows without bound. It mints a
+  signed, field-scoped room token — the gem's `lexxy_realtime/body` purpose
+  format — and `NoteChannel` (the generated channel template plus this site's
+  throttle layers) verifies it and creates the `Note` on subscribe, within the
+  room budget. A token for another field does not verify, and the subscription
+  is rejected. `authorized?` returns true because the rooms are public; the
+  field scoping is intact and tested.
 - **The composition API.** The client uses the npm README's "create the
   provider yourself" path: `room.js` builds the yrby-client provider (over
   `@anycable/web`, with the room bar and full-room notice), and the

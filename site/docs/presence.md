@@ -84,5 +84,9 @@ import { createConsumer } from "@anycable/web"
 ```
 
 That is the difference between presence costing your Ruby process one call per
-pointer move and costing it nothing. This site runs that way, and its end-to-end
-test counts whispers and sends separately to prove it.
+pointer move and costing it nothing — worth it in an authenticated app where
+peers trust each other. This site's demos are public and anonymous, so they
+deliberately turn the whisper off and route awareness through the guarded server
+`send` instead: a whisper relays client-to-client past the server's throttle and
+validation, which is not something a room full of strangers should have. The
+end-to-end test asserts presence still works over `send`.

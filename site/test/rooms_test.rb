@@ -168,6 +168,20 @@ class RoomsTest < ActiveSupport::TestCase
     assert_equal expected, rooms.send(:query_size, KEY)
   end
 
+  test "room_available? reflects persisted rows plus live reservations against the cap" do
+    rooms = Rooms.new(max_rooms: 2)
+
+    assert_predicate rooms, :room_available?, "empty, under the cap"
+
+    rooms.join("tiptap/a") # one reservation
+
+    assert_predicate rooms, :room_available?, "one of two used"
+
+    Y::Document.append("tiptap/b", Updates::HELLO) # one persisted row
+
+    assert_not rooms.room_available?, "one persisted + one reserved fills a cap of two"
+  end
+
   test "occupied_keys lists rooms with someone in them" do
     rooms = Rooms.new
     rooms.join("tiptap/a")

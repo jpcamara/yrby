@@ -18,6 +18,13 @@
 #   5. document size cap     bytes per room, total          (rooms.rb)
 #   6. room caps             peers per room, rooms on disk  (rooms.rb)
 #   7. idle eviction         stale rooms deleted            (room_sweeper.rb)
+#   7. leak reaping          silent connections reaped      (connection_guard.rb)
+#
+# Awareness/presence rides the same guarded `send` path (layer 3 onward) as
+# document frames: the demo does not use AnyCable whispers, which would relay
+# client-to-client past every layer here (see README "Throttling" and
+# RoomGuarded). That is also what lets layer 7's leak reaper see per-connection
+# liveness and free a leaked connection's seats and slot.
 #
 # Layer 0 runs in Go, in the embedded anycable-go inside the thrust proxy, and
 # is configured by environment variable rather than from here; the value is
@@ -78,12 +85,16 @@ module Limits
   # what runs out first. Env override for load testing, as above.
   MAX_CONNECTIONS = Integer(ENV.fetch("MAX_CONNECTIONS", 500))
 
-  # How long a connection slot may sit before the limiter reaps it as leaked.
-  # `release` normally frees a slot the moment the Disconnect RPC fires; this is
-  # the backstop for when that RPC never arrives (a dropped socket, a
-  # partition). An hour is far longer than a genuine demo session, so a real
-  # connection is rarely reaped while still open — and reaping only ever loosens
-  # the cap, never rejects wrongly (see ConnectionLimiter).
+  # How long a connection may be SILENT before the guard reaps it as leaked,
+  # freeing its room seats and its connection slot. `release` normally frees a
+  # slot the moment the Disconnect RPC fires; this is the backstop for when that
+  # RPC never arrives (a dropped socket, a partition). It is a LIVENESS TTL, not
+  # an age: every server-visible frame — a document update or an awareness frame,
+  # both of which reach Rails now that the demo routes awareness through `send`
+  # rather than a whisper — refreshes the clock. yrby-client re-emits awareness
+  # on a heartbeat (~every 15s), well under this hour, so even an idle-but-open
+  # reader stays alive to the reaper; only a truly dead connection is reaped. See
+  # ConnectionGuard.
   CONNECTION_SLOT_TTL = 60 * 60 # seconds
 
   # --- Frames ----------------------------------------------------------------
