@@ -579,6 +579,25 @@ class DocumentChannel < ApplicationCable::Channel
 end
 ```
 
+For documents that hang off a record, `Y::Collaborative` (included into
+Active Record by the engine) provides the token flow `authorized?` wants:
+the page mints a signed GlobalID scoped to one attribute, and the channel
+trades it back for the record — so clients never name documents at all.
+
+```erb
+<%# the view names the document, signed %>
+<%= tag.div data: { sgid: post.collaborative_sgid(:body) } %>
+```
+
+```ruby
+# the channel trades the token back for the record
+def authorized?(_key) = record.present? && record.editable_by?(current_user)
+def record = @record ||= Y::Collaborative.locate(params[:sgid], :body)
+```
+
+A token minted for `:body` verifies only under `:body`'s purpose
+(`"yrby/body"`); tampered, expired, or wrong-attribute tokens locate nothing.
+
 The concern is store-backed. A handshake is answered from `on_load`; document
 changes are recorded through `on_change`, then broadcast. Nothing
 authoritative is kept in ActionCable process memory, so

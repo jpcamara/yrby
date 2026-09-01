@@ -7,6 +7,17 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Y::Collaborative`: the signed handshake for record-backed documents,
+  included into ActiveRecord::Base by the engine. A page mints
+  `record.collaborative_sgid(:body)`; the channel trades it back with
+  `Y::Collaborative.locate(params[:sgid], :body)` — a signed GlobalID scoped
+  to one attribute, so a token minted for one field cannot open another.
+  This is the standard way to implement `authorized?` for record-backed
+  documents (and the flow lexxy-realtime already uses, now provided by
+  yrby-rails itself).
+
 ### Changed
 
 - **Breaking:** subscriptions are refused until the channel defines
