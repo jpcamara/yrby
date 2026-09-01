@@ -39,7 +39,10 @@
     <%= yield :head %>
   </head>
 
-  <body class="flex min-h-dvh flex-col">
+  <%# overflow-x-clip: the backstop against any residual wide element — the
+      page never scrolls horizontally; wide content scrolls inside its own
+      overflow-x-auto container. %>
+  <body class="flex min-h-dvh flex-col overflow-x-clip">
     <a href="#main" class="skip-link">Skip to content</a>
     <header class="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/85 backdrop-blur">
       <div class="mx-auto flex max-w-5xl items-center gap-6 px-5 py-3">

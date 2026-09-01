@@ -67,8 +67,10 @@
 @layer components {
   pre {
     background-color: var(--color-panel) !important;
-    @apply my-5 overflow-x-auto rounded-xl border border-zinc-800 px-5 py-4
-           text-[0.8rem] leading-relaxed;
+    /* max-w-full + the smaller phone size keep a long line scrolling inside
+       the block instead of stretching the page. */
+    @apply my-5 max-w-full overflow-x-auto rounded-xl border border-zinc-800
+           px-5 py-4 text-[0.7rem] leading-relaxed sm:text-[0.8rem];
   }
 
   pre code {
@@ -130,7 +132,9 @@
   }
 
   .docs-body table {
-    @apply my-5 w-full border-collapse text-sm;
+    /* block + overflow: a wide table scrolls inside itself on a phone
+       instead of stretching the page. */
+    @apply my-5 block w-full border-collapse overflow-x-auto text-sm;
   }
 
   .docs-body th {
@@ -328,11 +332,15 @@
    * Kanban (#board; columns and cards are JS-built).
    * ---------------------------------------------------------------------- */
   #board {
-    @apply flex items-start gap-4;
+    /* On a phone three columns don't fit: the board scrolls sideways within
+       itself (the body clips overflow, so a too-wide board would otherwise
+       leave its third column cut off and unreachable). */
+    @apply flex items-start gap-4 overflow-x-auto pb-2;
   }
 
   .col {
-    @apply min-h-32 flex-1 rounded-xl border border-zinc-800 bg-panel p-3;
+    @apply min-h-32 w-56 flex-none rounded-xl border border-zinc-800 bg-panel
+           p-3 sm:w-auto sm:flex-1;
   }
 
   /* The active drop target while a card is being dragged over it. */
@@ -402,7 +410,10 @@
   }
 
   #grid {
-    @apply border-separate border-spacing-0 bg-panel text-[13px];
+    /* block + overflow: the grid scrolls sideways within itself on a phone
+       (the body clips overflow, so extra columns would otherwise be cut off). */
+    @apply block overflow-x-auto border-separate border-spacing-0 bg-panel
+           text-[13px];
   }
 
   #grid th {
