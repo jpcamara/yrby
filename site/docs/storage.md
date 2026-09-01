@@ -126,6 +126,11 @@ class ScratchpadChannel < ApplicationCable::Channel
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  # The scratchpad lives on this connection — every subscriber gets their own.
+  def authorized?(_key) = true
 end
 ```
 

@@ -55,12 +55,14 @@ class NoteChannel < ApplicationCable::Channel
 
   private
 
+  # The gem's fail-closed seam: sync_subscribed rejects unless this returns
+  # true (subscribed also asks first, so a refused client never takes a seat).
   # In the generated template this is where the app's access check goes
   # (record.editable_by?(current_user)), and it defaults to false. These rooms
   # are public by design — the verified room token already proves the client was
   # handed a token by this site for this field, and that is the whole access
   # model for an anonymous demo.
-  def authorized?
+  def authorized?(_key = nil)
     true
   end
 

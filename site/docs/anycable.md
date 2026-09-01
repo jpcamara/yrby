@@ -77,6 +77,10 @@ class ScratchpadChannel < ApplicationCable::Channel
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  def authorized?(_key) = true # per-connection scratchpad — every subscriber gets their own
 end
 ```
 

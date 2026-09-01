@@ -40,10 +40,12 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # The same access model as the Rich text demo's NoteChannel: clients never
-  # name a document; they present the signed grant the page rendered, and the
-  # key is whatever that token verifies to. Nothing connects without one.
-  def authorized?
+  # The gem's fail-closed seam (sync_subscribed rejects unless this returns
+  # true; subscribed also asks first, so a refused client never takes a seat).
+  # The access model is the Rich text demo's: clients never name a document;
+  # they present the signed grant the page rendered, and the key is whatever
+  # that token verifies to. Nothing connects without one.
+  def authorized?(_key = nil)
     key.present?
   end
 

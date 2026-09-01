@@ -40,15 +40,15 @@ gem "falcon", ">= 0.55"
 # any_cable broadcast adapter, channel state, and whispers.
 gem "anycable-rails", "~> 1.6"
 
-# yrby-rails, from RubyGems — the published gem a reader can install today. It
-# brings the channel concern AND the storage models: the site's documents are
-# Y::Document rows, the exact stack the docs teach.
-gem "yrby-rails", "~> 0.6"
-
-# yrby core is pointed at this checkout, not RubyGems, only because the shape
-# demos' server-side read panels use Doc#read_array, which isn't in a published
-# release yet. Move this back to `gem "yrby", "~> 0.8"` once read_array ships.
+# Both gems point at this checkout, not RubyGems, only because the site runs
+# unreleased API: the shape demos' read panels use Doc#read_array (yrby core)
+# and the channels use the fail-closed authorized? seam (yrby-rails). Move
+# these back to version requirements once those ship (yrby ~> 0.8,
+# yrby-rails ~> 0.7). yrby-rails brings the channel concern AND the storage
+# models: the site's documents are Y::Document rows, the exact stack the
+# docs teach.
 gem "yrby", path: ".."
+gem "yrby-rails", path: ".."
 
 # The flagship integration: collaborative Lexxy editing over yrby. require:
 # false, deliberately — the gem's engine requires the lexxy gem, whose own

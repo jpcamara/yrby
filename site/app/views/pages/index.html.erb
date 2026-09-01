@@ -44,6 +44,11 @@
 
           def subscribed    = sync_subscribed(params[:id])
           def receive(data) = sync_receive(data, params[:id])
+
+          private
+
+          # Required — everyone is denied until the channel says who may.
+          def authorized?(key) = current_user&.can_edit?(key)
         end
       RUBY
     </div>

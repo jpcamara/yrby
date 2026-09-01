@@ -13,8 +13,6 @@ class DocumentChannel < ApplicationCable::Channel
   on_change { |key, update| Y::Document.append(key, update) }    # record, then broadcast
 
   def subscribed
-    return reject unless authorized?(params[:id])
-
     sync_subscribed params[:id]
   end
 
@@ -24,7 +22,8 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # Everyone is denied until you wire this to your app's auth.
+  # Everyone is denied until you wire this to your app's auth —
+  # sync_subscribed rejects the subscription unless it returns true.
   def authorized?(_document_key) = false
 end
 ```
@@ -48,6 +47,34 @@ share the same store and cable adapter.
 Pass the key on every action (`sync_receive(data, params[:id])`). Under AnyCable
 each RPC command gets a fresh channel instance, so an instance variable set in
 `subscribed` is gone by the time `receive` runs.
+
+## Authorization
+
+`sync_subscribed` calls `authorized?(key)` before it opens a stream or serves
+any state, and the concern's default returns `false`: a channel that never
+defines the method rejects every subscriber, and the rejection log says how to
+fix it. Authorization is a decision the channel makes, never something it gets
+by omission.
+
+Override the method with your app's actual check. It runs in the channel, so
+the connection's identity is available:
+
+```ruby
+private
+
+def authorized?(key)
+  current_user&.can_edit?(key)
+end
+```
+
+A document that is genuinely public gets an explicit `def authorized?(_key) =
+true` — visible in the code, greppable in review. A subscriber that is refused
+never reaches `receive`: without a confirmed subscription the cable routes
+nothing to the channel, so one gate covers reads and writes.
+
+What to check is up to you. Live demos on this site hand the page a signed,
+server-minted token naming exactly one document and verify it here, so clients
+never name documents at all — a good fit when subscribers are anonymous.
 
 ## Record before distribute
 

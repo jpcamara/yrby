@@ -54,6 +54,11 @@ class DocumentChannel < ApplicationCable::Channel
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  # Required — everyone is denied until the channel says who may.
+  def authorized?(key) = current_user&.can_edit?(key)
 end
 ```
 
@@ -62,7 +67,10 @@ are required, and both run in the channel instance, so they can use anything the
 channel can. Neither has to touch a database — see
 [Storage](/docs/storage).
 
-The generated channel denies everyone until you wire `authorized?` to your app.
+`authorized?` is how a subscriber gets in. `sync_subscribed` asks it before any
+stream opens or state is served, and the default answer is no — a channel that
+never defines it rejects everyone, and the log says so. Return `true`
+deliberately for documents that are genuinely public.
 
 ## The browser side
 

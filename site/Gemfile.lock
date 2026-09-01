@@ -9,6 +9,13 @@ PATH
     yrby (0.7.1-x86_64-darwin)
     yrby (0.7.1-x86_64-linux)
     yrby (0.7.1-x86_64-linux-musl)
+    yrby-rails (0.6.1)
+      actioncable (>= 7.1)
+      activerecord (>= 7.1)
+      activesupport (>= 7.1)
+      base64 (~> 0.2)
+      railties (>= 7.1)
+      yrby (>= 0.7.0)
 
 GEM
   remote: https://rubygems.org/
@@ -406,13 +413,6 @@ GEM
       base64
       websocket-extensions (>= 0.1.0)
     websocket-extensions (0.1.5)
-    yrby-rails (0.6.1)
-      actioncable (>= 7.1)
-      activerecord (>= 7.1)
-      activesupport (>= 7.1)
-      base64 (~> 0.2)
-      railties (>= 7.1)
-      yrby (>= 0.7.0)
     zeitwerk (2.8.3)
 
 PLATFORMS
@@ -447,7 +447,7 @@ DEPENDENCIES
   sqlite3 (>= 2.1)
   tzinfo-data
   yrby!
-  yrby-rails (~> 0.6)
+  yrby-rails!
 
 CHECKSUMS
   action_text-trix (2.1.19) sha256=7012f59421009cf284aa651294896414d653a61a2417c9b8714c8476d2f74009
@@ -608,7 +608,7 @@ CHECKSUMS
   yrby (0.7.1-x86_64-darwin)
   yrby (0.7.1-x86_64-linux)
   yrby (0.7.1-x86_64-linux-musl)
-  yrby-rails (0.6.1) sha256=14cd88c872ab969397f58079589d3939b1effe1c735bf0aa722cb939df79d4a3
+  yrby-rails (0.6.1)
   zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
 
 BUNDLED WITH
