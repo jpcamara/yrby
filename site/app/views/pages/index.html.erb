@@ -1,5 +1,5 @@
 <% content_for :title, "yrby — real-time collaborative editing for Rails" %>
-<% content_for :description, "Real-time collaborative editing for Rails that lives in your database. Documents sync over Action Cable and persist through Active Record, then render back into your model as HTML — no Node process, no third-party service. Rails collaborative editing, Yjs in Rails, collaborative rich text." %>
+<% content_for :description, "Real-time collaborative editing for Rails that lives in your database. Documents sync over Action Cable and their state persists through Active Record; render them back to HTML in Ruby, no Node process and no third-party service. Rails collaborative editing, Yjs in Rails, collaborative rich text." %>
 
 <% content_for :head do %>
   <%= json_ld_tag(
@@ -28,10 +28,10 @@
       Collaborative editing that lives in your database.
     </h1>
     <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
-      Live documents sync over Action Cable and persist through Active Record.
-      After every change the server renders the document back into
-      <code>post.body</code> as plain HTML, so search, mailers, and everything
-      downstream keep working. No Node process. No third-party service.
+      Documents sync over Action Cable, and their state lives in your own
+      database through Active Record. Those two hooks are the whole server
+      side — no Node process to run, no third-party service holding your data.
+      Your Rails app is the collaborative backend.
     </p>
 
     <div class="mt-8 max-w-2xl">
@@ -82,18 +82,17 @@
   </aside>
 </section>
 
-<%# ---- post.body stays a normal attribute ------------------------------ %>
+<%# ---- Read it back as HTML ---------------------------------------------- %>
 <section class="border-t border-zinc-800/70 py-14">
   <h2 class="text-2xl font-semibold tracking-tight text-zinc-100">
-    <code class="text-2xl">post.body</code> stays a normal attribute.
+    Read the document back as HTML, in Ruby.
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
-    After each change, the channel renders the collaborative document to HTML on
-    the server and saves it through the standard Action Text writer. The markup
-    is byte-identical to what the editor itself would submit — CI checks it
-    byte-for-byte against documents captured from a real editor. Search indexes
-    it. Mailers render it. Anything that reads <code>post.body</code> reads the
-    current document.
+    A stored CRDT document isn't an opaque blob. yrby renders it to HTML on the
+    server, byte-identical to what the editor itself would save — CI checks it
+    byte-for-byte against documents captured from a real editor. The renderers
+    know the full Lexxy and Tiptap node sets, take rules for your app's custom
+    nodes, and run in Ruby, with no headless browser anywhere.
   </p>
   <div class="mt-6 max-w-2xl">
     <%= code_block "ruby", <<~RUBY %>
@@ -104,11 +103,13 @@
     RUBY
   </div>
   <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
-    The renderers know the full Lexxy and Tiptap node sets, take rules for your
-    app's custom nodes, and run in Ruby. No headless browser anywhere.
+    Materialize that into a normal column and the rest of your app never learns
+    collaboration exists — search indexes it, mailers render it, read-only views
+    show it. lexxy-realtime does exactly that, keeping the attribute current
+    after every change.
   </p>
   <p class="mt-4">
-    <%= link_to "See it land in the database, live →", demo_path("lexxy"), rel: "nofollow",
+    <%= link_to "See the stored HTML, live →", demo_path("lexxy"), rel: "nofollow",
                 class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
   </p>
 </section>
