@@ -38,9 +38,13 @@ collab.doc = ydoc
 collab.provider = provider
 editor.appendChild(collab)
 
-// The "stored HTML" panel: fetch the materialized note.body column when the
-// details element opens (and refresh on every open). GET-only, no browser in
-// the render path — the HTML it shows was produced by Y::Lexxy in Ruby.
+// The "stored HTML" panel: the materialized note.body column, GET-only, with no
+// browser in the render path — the HTML it shows was produced by Y::Lexxy in
+// Ruby. It fetches when the panel opens and stays live while it's open: every
+// edit (local or remote) schedules a debounced re-fetch, so the panel tracks
+// the server-rendered column as you type. The debounce both waits for the
+// server to record and materialize the change and keeps continuous typing from
+// hammering the endpoint.
 const stored = document.querySelector("#stored-html")
 const details = document.querySelector("details.stored")
 async function loadStored() {
@@ -52,6 +56,14 @@ async function loadStored() {
     stored.firstChild.textContent = "(could not load)"
   }
 }
+
+let refreshTimer = null
+function scheduleStoredRefresh() {
+  if (!details?.open) return
+  clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(loadStored, 600)
+}
+ydoc.on("update", scheduleStoredRefresh)
 details?.addEventListener("toggle", () => { if (details.open) loadStored() })
 
 provider.connect() // YrbyProvider-style: no auto-connect
