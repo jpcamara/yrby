@@ -30,6 +30,14 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   #     def receive(data)
   #       sync_receive(data)
   #     end
+  #
+  #     private
+  #
+  #     # Required. The default refuses everyone; nothing syncs until the
+  #     # channel says who may. Return true deliberately for public documents.
+  #     def authorized?(key)
+  #       current_user&.member_of?(key)
+  #     end
   #   end
   #
   # There is no unsubscribe hook: the server keeps no per-connection document or
@@ -107,11 +115,17 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
-    # Call from `subscribed`. Streams broadcasts for this document and
-    # transmits the server's opening handshake (SyncStep1 from the store).
+    # Call from `subscribed`. Authorizes the subscriber (see #authorized?),
+    # then streams broadcasts for this document and transmits the server's
+    # opening handshake (SyncStep1 from the store). Rejects and returns false
+    # when authorized? refuses — including always, until the channel defines it.
     def sync_subscribed(key)
       @sync_key = key.to_s
       sync_validate_required_hooks!
+      unless authorized?(@sync_key)
+        sync_reject_unauthorized
+        return false
+      end
 
       # The document stream is never whisper-enabled; under AnyCable we also
       # subscribe an awareness stream with `whisper: true`, scoping the client-to-
@@ -178,6 +192,35 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     private
+
+    # Whether this subscriber may sync the document named by `key`. The
+    # default refuses everyone: authorization is an explicit decision a
+    # channel makes, not something it gets by omission. Override it:
+    #
+    #   def authorized?(key)
+    #     current_user&.member_of?(key)
+    #   end
+    #
+    # Runs before any stream is opened or state served, with the connection's
+    # context available (current_user, params, ...). Return true deliberately
+    # for documents that are genuinely public.
+    def authorized?(_key)
+      false
+    end
+
+    # The subscription was refused. When the refusal came from the default
+    # authorized? (the channel never defined one), say how to fix it — that is
+    # the difference between fail-closed and mysteriously broken.
+    def sync_reject_unauthorized
+      logger.info do
+        hint = if method(:authorized?).owner == Sync
+                 "; no authorized? defined — define authorized?(key) in this channel, " \
+                   "returning true deliberately for public documents"
+               end
+        "[yrby] subscription rejected key=#{@sync_key.inspect}#{hint}"
+      end
+      reject
+    end
 
     # Reliable delivery: acknowledge an accepted update back to the sending
     # connection. An ack-aware client tags each outgoing update with an "id"

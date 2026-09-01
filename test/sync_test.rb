@@ -4,6 +4,7 @@ require "test_helper"
 require_relative "fixtures/yjs_fixtures"
 require "y/action_cable"
 require "logger"
+require "stringio"
 require "digest"
 
 class SyncTest < Minitest::Test
@@ -22,16 +23,18 @@ class SyncTest < Minitest::Test
     doc.encode_state_as_update
   end
 
-  def helper_for(store: [], recorder: nil, transmits: [], broadcasts: [])
+  def helper_for(store: [], recorder: nil, transmits: [], broadcasts: [], authorized: true)
     test = self
     recorder ||= ->(_key, update) { store << update }
     loader = ->(_key) { test.doc_state(store) }
     klass = Class.new do
       include Y::ActionCable::Sync
 
-      attr_accessor :transmits, :broadcasts, :streams, :logger
+      attr_accessor :transmits, :broadcasts, :streams, :logger, :rejected
 
       def transmit(data) = transmits << data
+
+      def reject = self.rejected = true
 
       def stream_from(name, **opts, &)
         streams << [name, opts, !block_given?]
@@ -39,6 +42,10 @@ class SyncTest < Minitest::Test
 
       define_method(:sync_distribute) { |encoded| broadcasts << encoded }
     end
+    # Most tests exercise the sync protocol, not authorization; opting the
+    # helper in keeps them on the happy path. authorized: false leaves the
+    # concern's fail-closed default in place.
+    klass.define_method(:authorized?) { |_key| true } if authorized
     klass.on_load(&loader)
     klass.on_change(&recorder)
     helper = klass.new
@@ -80,6 +87,53 @@ class SyncTest < Minitest::Test
 
     refute_nil sub.on_load
     refute_nil sub.on_change
+  end
+
+  def test_subscription_is_refused_until_the_channel_defines_authorized
+    helper = helper_for(authorized: false)
+
+    refute helper.sync_subscribed("doc")
+    assert helper.rejected, "the default authorized? must reject"
+    assert_empty helper.streams, "no stream may open before authorization"
+    assert_empty helper.transmits, "no state may be served before authorization"
+  end
+
+  def test_the_default_rejection_says_how_to_fix_it
+    log = StringIO.new
+    helper = helper_for(authorized: false)
+    helper.logger = Logger.new(log)
+
+    helper.sync_subscribed("doc")
+
+    assert_match(/authorized\?/, log.string)
+    assert_match(/public documents/, log.string)
+  end
+
+  def test_a_channel_authorized_override_gets_the_key_and_can_refuse
+    seen = nil
+    helper = helper_for
+    helper.define_singleton_method(:authorized?) do |key|
+      seen = key
+      false
+    end
+    log = StringIO.new
+    helper.logger = Logger.new(log)
+
+    refute helper.sync_subscribed("doc-7")
+
+    assert_equal "doc-7", seen
+    assert helper.rejected
+    # An app that decided "no" needs no lecture about defining authorized?.
+    refute_match(/define authorized\?/, log.string)
+  end
+
+  def test_an_authorized_subscription_proceeds
+    helper = helper_for
+    helper.define_singleton_method(:authorized?) { |_key| true }
+    helper.sync_subscribed("doc")
+
+    refute helper.rejected
+    assert_equal 1, helper.transmits.length, "the opening handshake went out"
   end
 
   def test_max_frame_bytes_default_override_and_disable

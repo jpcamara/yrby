@@ -7,6 +7,27 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** subscriptions are refused until the channel defines
+  `authorized?(key)`. `sync_subscribed` now calls it before any stream is
+  opened or state served, and the concern's default returns `false` — a
+  channel authorizes subscribers by decision, not by omission. Add the
+  method to every channel that includes `Y::ActionCable`:
+
+  ```ruby
+  private
+
+  def authorized?(key)
+    current_user&.can_edit?(key)
+  end
+  ```
+
+  Return `true` deliberately for public documents. When the default is what
+  rejected (no override defined), the log says exactly that. The
+  `yrby:install` channel template already generated this method; it now
+  relies on `sync_subscribed` for the reject instead of doing its own.
+
 ### Fixed
 
 - The `yrby:tables` migration template caps `y_documents.state` at

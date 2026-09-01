@@ -17,8 +17,6 @@ class DocumentChannel < ApplicationCable::Channel
   on_change { |key, update| Y::Document.append(key, update) }
 
   def subscribed
-    return reject unless authorized?(params[:id])
-
     sync_subscribed(params[:id])
   end
 
@@ -26,10 +24,12 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # Everyone is denied until you fill this in. Wire it to your app's auth:
+  # Everyone is denied until you fill this in — sync_subscribed rejects the
+  # subscription unless this returns true. Wire it to your app's auth:
   # identify current_user on the cable connection, then check they may read
-  # and write this document. Don't lean on on_change raising for access
-  # control; that path exists for store failures.
+  # and write this document. Return true deliberately for public documents.
+  # Don't lean on on_change raising for access control; that path exists for
+  # store failures.
   def authorized?(_document_key)
     false
   end

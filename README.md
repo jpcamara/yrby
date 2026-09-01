@@ -48,6 +48,12 @@ class DocumentChannel < ApplicationCable::Channel
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  # Required. Everyone is denied until the channel says who may sync;
+  # current_user comes from your cable connection's identified_by.
+  def authorized?(key) = current_user&.can_edit?(key)
 end
 ```
 
@@ -558,8 +564,6 @@ class DocumentChannel < ApplicationCable::Channel
   on_change { |key, update| Y::Document.append(key, update) } # record, then broadcast
 
   def subscribed
-    return reject unless authorized?(params[:id])
-
     sync_subscribed params[:id]
   end
 
@@ -569,7 +573,8 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # Everyone is denied until you wire this to your app's auth.
+  # Everyone is denied until you wire this to your app's auth —
+  # sync_subscribed rejects the subscription unless it returns true.
   def authorized?(_document_key) = false
 end
 ```
@@ -791,6 +796,11 @@ class ScratchpadChannel < ApplicationCable::Channel
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  # The scratchpad lives on this connection — every subscriber gets their own.
+  def authorized?(_key) = true
 end
 ```
 
@@ -816,6 +826,10 @@ class ScratchpadChannel < ApplicationCable::Channel
 
   def subscribed    = sync_subscribed(params[:id])
   def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  def authorized?(_key) = true # per-connection scratchpad, see above
 end
 ```
 
