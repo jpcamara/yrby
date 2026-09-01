@@ -18,39 +18,63 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   def notices = transmissions.filter_map { |m| m["notice"] }
 
+  # Signs an arbitrary key, bypassing room_token's slug/room shape, so tests
+  # can prove the channel re-validates what a token carries.
+  def token_for(key) = Demos.verifier.generate(key)
+
   def send_update(update, id:)
     perform :receive, "update" => Updates.frame(update), "id" => id
   end
 
-  test "a valid document key subscribes and gets the opening handshake" do
-    subscribe id: KEY
+  test "a signed token subscribes and gets the opening handshake" do
+    subscribe token: Demos.room_token("tiptap", "room1")
 
     assert_predicate subscription, :confirmed?
     assert_equal 1, Rooms.current.peers(KEY)
     assert transmissions.any? { |m| m["update"].present? }, "expected a SyncStep1 handshake"
   end
 
-  test "a key outside the demo namespace is rejected" do
-    subscribe id: "../../etc/passwd"
+  test "a raw document key is rejected — clients cannot name documents" do
+    subscribe id: KEY
 
     assert_predicate subscription, :rejected?
     assert_equal 0, Y::Document.count
   end
 
-  test "an unknown demo slug is rejected" do
-    subscribe id: "wiki/room1"
+  test "a missing token is rejected" do
+    subscribe
 
     assert_predicate subscription, :rejected?
   end
 
-  test "an over-long room id is rejected" do
-    subscribe id: "tiptap/#{"a" * 33}"
+  test "a tampered token is rejected" do
+    subscribe token: "#{Demos.room_token("tiptap", "room1")}x"
+
+    assert_predicate subscription, :rejected?
+    assert_equal 0, Y::Document.count
+  end
+
+  test "a signed token for a key outside the demo namespace is rejected" do
+    subscribe token: token_for("../../etc/passwd")
+
+    assert_predicate subscription, :rejected?
+    assert_equal 0, Y::Document.count
+  end
+
+  test "a signed token for an unknown demo slug is rejected" do
+    subscribe token: token_for("wiki/room1")
+
+    assert_predicate subscription, :rejected?
+  end
+
+  test "a signed token for an over-long room id is rejected" do
+    subscribe token: token_for("tiptap/#{"a" * 33}")
 
     assert_predicate subscription, :rejected?
   end
 
   test "unsubscribing gives the seat back" do
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
 
     assert_equal 1, Rooms.current.peers(KEY)
 
@@ -63,7 +87,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     Rooms.current = Rooms.new(max_peers: 1)
     Rooms.current.join(KEY)
 
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
 
     assert_predicate subscription, :rejected?
   end
@@ -74,7 +98,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     ConnectionGuard.current = ConnectionGuard.new(max_subscriptions: 1)
     ConnectionGuard.current.admit_subscription("c1", "tiptap/elsewhere")
 
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
 
     assert_predicate subscription, :rejected?
     assert_equal 0, Rooms.current.peers(KEY), "no seat taken"
@@ -85,13 +109,13 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     Rooms.current = Rooms.new(max_rooms: 1)
     Y::Document.append("tiptap/taken", Updates::HELLO)
 
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
 
     assert_predicate subscription, :rejected?
   end
 
   test "an update is recorded to the database and acked" do
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
     send_update(Updates::HELLO, id: 7)
 
     assert_equal [7], acks
@@ -103,7 +127,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "a frame over the size cap is dropped without an ack" do
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
     oversized = Base64.strict_encode64("x" * (Limits::MAX_FRAME_BYTES + 1))
 
     perform :receive, "update" => oversized, "id" => 9
@@ -113,7 +137,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "an update inside the size cap is accepted" do
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
 
     assert_operator Updates.frame(Updates::HELLO).bytesize, :<, DocumentChannel::MAX_ENCODED_BYTES
     send_update(Updates::HELLO, id: 1)
@@ -122,7 +146,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "frames past the token bucket are dropped" do
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
     # Three times the burst, sent as fast as the test can. The bucket refills
     # while that runs, so the exact number that gets through depends on the wall
     # clock; what is fixed is that the burst is honoured and the rest is not.
@@ -134,7 +158,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "a client that keeps flooding has its connection closed" do
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
     # The burst is spent first, then every frame is a drop. One short of the
     # threshold the connection is still up. (The bucket refills as the test
     # runs, so the count can only lag, never lead.)
@@ -156,7 +180,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   test "a room at its byte cap stops accepting writes and says so" do
     Rooms.current = Rooms.new(max_document_bytes: Updates::HELLO.bytesize)
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
     send_update(Updates::HELLO, id: 1)
 
     assert_equal [1], acks
@@ -171,7 +195,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   test "the full-room notice is sent once, not on every dropped frame" do
     Rooms.current = Rooms.new(max_document_bytes: 1)
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
     3.times { |i| send_update(Updates::HELLO, id: i) }
 
     assert_equal 1, notices.length
@@ -179,7 +203,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   test "presence still flows in a room that has stopped accepting writes" do
     Rooms.current = Rooms.new(max_document_bytes: Updates::HELLO.bytesize)
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
     send_update(Updates::HELLO, id: 1)
 
     assert Rooms.current.document_full?(KEY)
@@ -190,7 +214,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "a frame that is not base64 is dropped without an ack" do
-    subscribe id: KEY
+    subscribe token: Demos.room_token("tiptap", "room1")
 
     perform :receive, "update" => "not base64 !!!", "id" => 3
 

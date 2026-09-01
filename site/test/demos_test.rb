@@ -37,6 +37,19 @@ class DemosTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "every shape demo page hands the client a signed document grant" do
+    Demos::ALL.reject { |d| d.slug == "lexxy" }.each do |demo|
+      get "/demos/#{demo.slug}/room1"
+
+      token = response.body[/data-token="([^"]+)"/, 1]
+
+      assert_predicate token, :present?, "#{demo.slug} page carries no token"
+      # The token IS the subscription: it verifies to exactly this document key,
+      # the same access model the lexxy page's Note token gives.
+      assert_equal "#{demo.slug}/room1", Demos.verified_key(token)
+    end
+  end
+
   test "a demo page is never cached" do
     get "/demos/tiptap/room1"
 

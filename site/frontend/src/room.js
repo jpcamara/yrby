@@ -189,12 +189,12 @@ export function renderPresence(provider) {
 }
 
 // Builds the provider for this page's room and wires the shared chrome. The
-// document key comes from the mount element's data attribute, which the server
-// rendered from the URL. Channel and params default to the shape demos'
-// DocumentChannel; the Lexxy page overrides both to reach NoteChannel with its
-// signed-GlobalID credentials.
+// client never names its document: it presents the signed token the server
+// rendered into the mount element, and the channel derives the key from that —
+// the same access model on every demo. Channel and params default to the shape
+// demos' DocumentChannel; the Lexxy page overrides both to reach NoteChannel
+// with its field-scoped token.
 export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params } = {}) {
-  const documentKey = mount.dataset.documentKey
   const consumer = noticeAwareConsumer(createConsumer(cableUrl()), {
     onNotice: () =>
       showNotice(
@@ -205,7 +205,7 @@ export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params }
       showNotice("Could not join this room. It may be full, or the site may be at capacity."),
   })
 
-  const provider = new ActionCableProvider(ydoc, consumer, channel, params || { id: documentKey })
+  const provider = new ActionCableProvider(ydoc, consumer, channel, params || { token: mount.dataset.token })
   provider.awareness.setLocalStateField("user", user)
   provider.awareness.on("update", () => renderPresence(provider))
 

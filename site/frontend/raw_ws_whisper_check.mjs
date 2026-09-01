@@ -23,8 +23,16 @@ const pexec = promisify(execFile)
 const PORT = process.env.PORT || 3888
 const BASE = `http://127.0.0.1:${PORT}`
 const ORIGIN = BASE
-const ROOM = `tiptap/rawws-${Date.now().toString(36)}`
-const IDENTIFIER = JSON.stringify({ channel: "DocumentChannel", id: ROOM })
+const ROOM_ID = `rawws-${Date.now().toString(36)}`
+const ROOM = `tiptap/${ROOM_ID}`
+
+// DocumentChannel subscribes by signed grant, not by key: fetch the demo page
+// the way a browser would and lift the token it rendered. Even this hostile
+// client has to go through the front door to name a document.
+const page = await fetch(`${BASE}/demos/tiptap/${ROOM_ID}`).then((r) => r.text())
+const TOKEN = page.match(/data-token="([^"]+)"/)?.[1]
+if (!TOKEN) { console.log("FAIL: could not lift a room token from the demo page"); process.exit(1) }
+const IDENTIFIER = JSON.stringify({ channel: "DocumentChannel", token: TOKEN })
 
 // A real HELLO document sync frame (messageSync/Update), and a real awareness
 // frame (messageAwareness) — the exact base64 payloads a browser puts on the wire.

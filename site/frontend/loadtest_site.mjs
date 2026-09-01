@@ -32,13 +32,13 @@ const m = { opened: 0, subscribed: 0, sent: 0, acked: 0, recv: 0, edits: 0, erro
 const pingSent = new Map()
 
 class Client {
-  constructor(room, idx, pinger) {
+  constructor(room, idx, pinger, token) {
     this.room = room
     this.pinger = pinger // the room's designated pinger sends pings; peers time them
     this.frameId = 0
     this.key = `${SLUG}/${room}`
     this.doc = new Y.Doc()
-    this.identifier = JSON.stringify({ channel: "DocumentChannel", id: this.key })
+    this.identifier = JSON.stringify({ channel: "DocumentChannel", token })
     this.subscribed = new Promise((r) => (this._sub = r))
     this.ping = this.doc.getMap("ping")
     if (!pinger) {
@@ -103,10 +103,18 @@ const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) =>
 
 async function main() {
   console.log(`load: ${CLIENTS} clients / ${ROOMS} rooms / ${RATE} edits/s/client / ${DURATION / 1000}s -> ${WS}`)
+  // DocumentChannel subscribes by signed grant: one page fetch per room lifts
+  // the token every client in that room presents.
+  const tokens = []
+  for (let r = 0; r < ROOMS; r++) {
+    const page = await fetch(`${BASE}/demos/${SLUG}/lt-${r}`).then((res) => res.text())
+    tokens[r] = page.match(/data-token="([^"]+)"/)?.[1]
+    if (!tokens[r]) throw new Error(`no room token on the lt-${r} demo page`)
+  }
   const clients = []
   for (let i = 0; i < CLIENTS; i++) {
     // the first client in each room is its pinger; the rest time the pings
-    clients.push(new Client(`lt-${i % ROOMS}`, i, i < ROOMS))
+    clients.push(new Client(`lt-${i % ROOMS}`, i, i < ROOMS, tokens[i % ROOMS]))
     if (i % 25 === 24) await sleep(60) // ramp, don't SYN-flood the accept queue
   }
   await Promise.race([Promise.all(clients.map((c) => c.subscribed)), sleep(20000)])

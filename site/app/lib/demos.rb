@@ -81,6 +81,26 @@ module Demos
 
     def new_room = SecureRandom.urlsafe_base64(8)
 
+    # The signed grant for a shape demo's document — the same access model the
+    # Rich text demo gets from Note.room_token, generalized. The page GET is
+    # where a key is judged (known demo, well-formed room) and the token is the
+    # proof: DocumentChannel accepts only what verified_key returns, so a raw
+    # cable client cannot name a document the server never rendered a page for.
+    def room_token(slug, room)
+      verifier.generate(document_key(slug, room))
+    end
+
+    # The document key a token grants, or nil when the token is missing,
+    # tampered, or carries a key that no longer matches the demo list.
+    def verified_key(token)
+      return nil unless token.is_a?(String)
+
+      key = verifier.verified(token)
+      key if key.is_a?(String) && valid_key?(key)
+    end
+
+    def verifier = Rails.application.message_verifier("demos/documents")
+
     # The document reconstructed in Ruby from stored state — the server-side
     # read the "no browser in the loop" panel shows. `state` is the merged
     # update from Y::Document.load_state; nil means the room has no document

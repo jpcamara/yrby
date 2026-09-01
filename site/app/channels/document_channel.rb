@@ -8,7 +8,7 @@
 #
 # Sockets terminate in the anycable-go embedded in thrust, which calls this
 # channel over HTTP RPC served by Falcon — a fresh channel instance per
-# command, so `params[:id]` is passed to every call and per-subscription state
+# command, so params ride along on every call and per-subscription state
 # lives in `state_attr_accessor` (see RoomGuarded).
 class DocumentChannel < ApplicationCable::Channel
   include RoomGuarded
@@ -24,18 +24,33 @@ class DocumentChannel < ApplicationCable::Channel
   on_change { |key, update| Y::Document.append(key, update) }
 
   def subscribed
-    key = params[:id].to_s
-    return reject unless Demos.valid_key?(key)
+    return reject unless authorized?
     return reject unless take_seat(key)
 
     sync_subscribed(key)
   end
 
   def unsubscribed
-    release_seat(params[:id].to_s)
+    release_seat(key.to_s)
   end
 
   def receive(data)
-    guarded_receive(data, params[:id].to_s)
+    guarded_receive(data, key.to_s)
+  end
+
+  private
+
+  # The same access model as the Rich text demo's NoteChannel: clients never
+  # name a document; they present the signed grant the page rendered, and the
+  # key is whatever that token verifies to. Nothing connects without one.
+  def authorized?
+    key.present?
+  end
+
+  # Derived from the token on every command — each RPC call builds a fresh
+  # channel instance, and verifying the signature is cheaper than carrying the
+  # key as channel state.
+  def key
+    @key ||= Demos.verified_key(params[:token])
   end
 end

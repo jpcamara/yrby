@@ -19,14 +19,21 @@ class DemosController < ApplicationController
     return head :not_found unless Demos.valid_room?(@room)
 
     @document_key = Demos.document_key(@demo.slug, @room)
-    return unless @demo.slug == "lexxy"
 
-    # The Rich text demo is record-based (lexxy-realtime's shape): one Note per
-    # room. The page does NOT create the Note — a GET is anonymous and
-    # uncapped, and a crawler fetching room URLs would mint rows without bound.
-    # It hands the client a signed, field-scoped room token instead; NoteChannel
-    # verifies it and creates the Note on subscribe, within the room budget.
-    @note_token = Note.room_token(@room, :body)
+    if @demo.slug == "lexxy"
+      # The Rich text demo is record-based (lexxy-realtime's shape): one Note
+      # per room. The page does NOT create the Note — a GET is anonymous and
+      # uncapped, and a crawler fetching room URLs would mint rows without
+      # bound. It hands the client a signed, field-scoped room token instead;
+      # NoteChannel verifies it and creates the Note on subscribe, within the
+      # room budget.
+      @note_token = Note.room_token(@room, :body)
+    else
+      # The shape demos carry the same access model: a signed grant for this
+      # document, minted here and verified by DocumentChannel. No token, no
+      # subscription — the channel never accepts a client-named key.
+      @room_token = Demos.room_token(@demo.slug, @room)
+    end
   end
 
   # The materialized column, as JSON. This is the part no other demo can
