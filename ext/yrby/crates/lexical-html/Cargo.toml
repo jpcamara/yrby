@@ -3,7 +3,7 @@ name = "lexical-yjs-html"
 description = "Render Lexical-shaped yrs documents to HTML, no browser or Node required"
 repository = "https://github.com/jpcamara/yrby"
 readme = "README.md"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 authors = ["JP Camara <johnpcamara@gmail.com>"]
@@ -14,4 +14,4 @@ categories = ["text-processing", "web-programming"]
 [dependencies]
 yrs = { version = "0.27", features = ["sync"] }
 serde_json = "1.0"
-yjs-html-core = { path = "../html-core", version = "0.1.1" }
+yjs-html-core = { path = "../html-core", version = "0.1.2" }
