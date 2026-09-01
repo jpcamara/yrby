@@ -14,6 +14,7 @@ PATH
       activerecord (>= 7.1)
       activesupport (>= 7.1)
       base64 (~> 0.2)
+      globalid (>= 1.0)
       railties (>= 7.1)
       yrby (>= 0.7.0)
 

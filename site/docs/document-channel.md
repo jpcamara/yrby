@@ -72,9 +72,30 @@ true` — visible in the code, greppable in review. A subscriber that is refused
 never reaches `receive`: without a confirmed subscription the cable routes
 nothing to the channel, so one gate covers reads and writes.
 
-What to check is up to you. Live demos on this site hand the page a signed,
-server-minted token naming exactly one document and verify it here, so clients
-never name documents at all — a good fit when subscribers are anonymous.
+For documents that hang off a record, the gem provides the token flow
+`authorized?` wants: `Y::Collaborative` (included into Active Record by the
+engine). The page mints a signed GlobalID scoped to one attribute, and the
+channel trades it back for the record — clients never name documents at all.
+
+```erb
+<%# the view names the document, signed %>
+<%= tag.div data: { sgid: post.collaborative_sgid(:body) } %>
+```
+
+```ruby
+# the channel trades the token back for the record
+def authorized?(_key) = record.present? && record.editable_by?(current_user)
+def record = @record ||= Y::Collaborative.locate(params[:sgid], :body)
+```
+
+A token minted for `:body` verifies only under `:body`'s purpose
+(`"yrby/body"`); tampered, expired, and wrong-attribute tokens locate nothing.
+
+The same idea works without records: the live demos on this site sign the
+document key itself with a `Rails.application.message_verifier` (their rooms
+are created lazily, so there is no record to sign at render time) and their
+`authorized?` accepts only what the token verifies to — a good fit when
+subscribers are anonymous.
 
 ## Record before distribute
 
