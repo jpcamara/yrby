@@ -1,7 +1,7 @@
 <% content_for :head do %>
   <%# Lexxy's editor styles plus lexxy-realtime's caret styles, bundled by bun
       alongside the page's JS (see frontend/src/lexxy.js). %>
-  <link rel="stylesheet" href="/lexxy.css">
+  <link rel="stylesheet" href="<%= busted "/lexxy.css" %>">
 <% end %>
 
 <%# attachments="false" is Lexxy's own editor option (a default-preset key,

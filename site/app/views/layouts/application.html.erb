@@ -35,7 +35,7 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <%# Built by `bun run build:css` (Tailwind v4); served as a plain static
         file, like the demo bundles. %>
-    <link rel="stylesheet" href="/site.css">
+    <link rel="stylesheet" href="<%= busted "/site.css" %>">
     <%= yield :head %>
   </head>
 

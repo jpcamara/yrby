@@ -1,4 +1,18 @@
 module ApplicationHelper
+  # The bundles are plain public/ files (no asset pipeline), served with
+  # max-age=3600 — without a fingerprint a deploy leaves browsers running last
+  # hour's JS. This appends a content digest, memoized per process in
+  # production: the files can only change across a restart, which resets the
+  # memo. In development the digest is recomputed so the watch rebuild shows up
+  # on reload.
+  BUNDLE_DIGESTS = Hash.new do |cache, path|
+    file = Rails.public_path.join(path.delete_prefix("/"))
+    digest = File.exist?(file) ? Digest::MD5.file(file).hexdigest.first(8) : "missing"
+    Rails.env.production? ? cache[path] = digest : digest
+  end
+
+  def busted(path) = "#{path}?v=#{BUNDLE_DIGESTS[path]}"
+
   # A server-highlighted code block for hand-written snippets (the home page's
   # hero and showcase). Same pipeline and theme as the docs pages, so every
   # code block on the site is the one surface.
