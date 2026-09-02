@@ -60,7 +60,7 @@ class SyncTest < Minitest::Test
     transmits.filter_map { |t| t["ack"] if t.is_a?(Hash) && t.key?("ack") }
   end
 
-  def test_sync_requires_loader_and_recorder
+  def test_sync_requires_loader_and_recorder_without_the_rails_default
     no_loader = Class.new do
       include Y::ActionCable::Sync
 
@@ -72,8 +72,20 @@ class SyncTest < Minitest::Test
       on_load { |_key| nil }
     end
 
-    assert_match(/on_load/, assert_raises(Y::Error) { no_loader.new.sync_subscribed("doc") }.message)
-    assert_match(/on_change/, assert_raises(Y::Error) { no_recorder.new.sync_subscribed("doc") }.message)
+    # Outside a yrby-rails app there is no Y::Document default, and the
+    # concern fails closed. Stubbed by hand (no minitest/mock in this suite)
+    # rather than relied on, because the full suite loads the models into
+    # this process.
+    sync = Y::ActionCable::Sync
+    sync.singleton_class.alias_method(:real_default_hook, :default_hook)
+    sync.define_singleton_method(:default_hook) { |_name| nil }
+    begin
+      assert_match(/on_load/, assert_raises(Y::Error) { no_loader.new.sync_subscribed("doc") }.message)
+      assert_match(/on_change/, assert_raises(Y::Error) { no_recorder.new.sync_subscribed("doc") }.message)
+    ensure
+      sync.singleton_class.alias_method(:default_hook, :real_default_hook)
+      sync.singleton_class.remove_method(:real_default_hook)
+    end
   end
 
   def test_config_is_inherited_by_subclasses

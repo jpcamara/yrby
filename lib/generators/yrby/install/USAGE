@@ -1,11 +1,10 @@
 Description:
-    Creates a DocumentChannel speaking the y-websocket protocol, backed by
-    the gem's document storage (Y::Document + Y::DocumentUpdate), and the
-    migration for its tables.
+    Creates the migration for the gem's document storage (Y::Document +
+    Y::DocumentUpdate). The models and the Y::DocumentChannel that syncs
+    through them ship in the gem; nothing else lands in the app.
 
 Example:
     bin/rails generate yrby:install
 
     This will create:
-        app/channels/document_channel.rb
         db/migrate/XXXXXXXX_create_y_tables.rb

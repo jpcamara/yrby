@@ -9,6 +9,26 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Y::DocumentChannel`, shipped in the gem the way Turbo ships
+  `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a
+  page rendered (`{ grant:, name: }`); the channel trades the grant back for
+  its record, derives the document, and stores through `Y::Document` — there
+  is no channel to generate or write. Missing, tampered, wrong-attribute,
+  and destroyed-record grants are rejected.
+
+- `collaborative_document_tag(record, name, **options)`, included into
+  Action View by the engine: renders the mount element carrying the signed
+  grant, the attribute name, and the channel name as data attributes.
+  Render it only where the request is already authorized to collaborate on
+  the record — possession of the grant is what the channel checks, the same
+  model as `turbo_stream_from`'s signed stream names.
+
+- Default storage: a channel that declares no `on_load`/`on_change` now
+  gets `Y::Document` storage automatically (the Action Text posture — the
+  gem's tables are the default, the hooks are the seam for pointing storage
+  elsewhere). Outside a yrby-rails app the concern still fails closed until
+  hooks are declared.
+
 - `Y::Collaborative`: the signed handshake for record-backed documents,
   included into ActiveRecord::Base by the engine. A page mints
   `record.collaborative_sgid(:body)`; the channel trades it back with
@@ -35,9 +55,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```
 
   Return `true` deliberately for public documents. When the default is what
-  rejected (no override defined), the log says exactly that. The
-  `yrby:install` channel template already generated this method; it now
-  relies on `sync_subscribed` for the reject instead of doing its own.
+  rejected (no override defined), the log says exactly that.
+
+- `yrby:install` no longer generates a channel — the gem ships
+  `Y::DocumentChannel`, so install lands only the storage migration. Apps
+  that want their own channel (custom storage, room-keyed documents) write
+  one with `include Y::ActionCable`; the README shows the shape the old
+  template had.
 
 ### Fixed
 

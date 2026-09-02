@@ -11,17 +11,14 @@ class InstallGeneratorTest < Rails::Generators::TestCase
   destination File.expand_path("../tmp/generator-destination", __dir__)
   setup :prepare_destination
 
-  def test_generates_the_channel_over_gem_owned_storage
+  def test_generates_no_app_code
     run_generator
 
-    assert_file "app/channels/document_channel.rb" do |channel|
-      assert_match(/include Y::ActionCable\b/, channel)
-      assert_match("Y::Document.load_state(key)", channel)
-      assert_match("Y::Document.append(key, update)", channel)
-      assert_match(/def authorized\?/, channel)
-      assert_match(/false/, channel, "authorization denies everyone by default")
-    end
-    assert_no_file "app/models/yrby_document_update.rb" # models ship in the gem
+    # The channel (Y::DocumentChannel) and the models ship in the gem, the
+    # way Turbo ships Turbo::StreamsChannel — install lands only the
+    # migration.
+    assert_no_file "app/channels/document_channel.rb"
+    assert_no_file "app/models/yrby_document_update.rb"
   end
 
   def test_generates_the_storage_migration

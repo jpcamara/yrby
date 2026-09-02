@@ -23,6 +23,7 @@ Gem::Specification.new do |spec|
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
     "lib/y/collaborative.rb",
+    "lib/y/collaborative/**/*.rb",
     "app/**/*.rb",
     "lib/generators/**/*",
     "LICENSE",
@@ -50,6 +51,8 @@ Gem::Specification.new do |spec|
   # Y::Collaborative's signed tokens. Rails apps get globalid through
   # activejob, but activerecord alone does not depend on it.
   spec.add_dependency "globalid", ">= 1.0"
+  # collaborative_document_tag renders through Action View's tag builder.
+  spec.add_dependency "actionview", ">= 7.1"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"

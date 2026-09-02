@@ -37,29 +37,39 @@ the GVL released, so it parallelizes on MRI. Incoming frames are validated
 before anything processes them, and multi-process and AnyCable setups are
 tested end to end. ([Thread Safety](#thread-safety))
 
-The whole server side of a collaborative document is one channel:
+The whole integration is one view helper, rendered where the page is
+already authorized to edit the record:
+
+```erb
+<%= collaborative_document_tag @post, :body %>
+```
+
+The tag renders a signed grant for exactly that record and attribute — the
+way `turbo_stream_from` signs its stream names. The gem's own
+`Y::DocumentChannel` verifies the grant on subscribe and records every
+change as `Y::Document` rows before acknowledging it. Clients never name
+documents, and there is no channel to write.
+
+Connect the document to any editor that speaks Yjs:
+
+```js
+import * as Y from "yjs"
+import { createConsumer } from "@rails/actioncable"
+import { ActionCableProvider } from "yrby-client"
+
+const el = document.querySelector("[data-collaborative-document]")
+const ydoc = new Y.Doc()
+const provider = new ActionCableProvider(ydoc, createConsumer(),
+  el.dataset.channel, { grant: el.dataset.grant, name: el.dataset.name })
+provider.connect()
+```
+
+And the document is rows in your database, readable without a browser:
 
 ```ruby
-class DocumentChannel < ApplicationCable::Channel
-  include Y::ActionCable
-
-  # A key names one document — here "post/42/body", the body of one post.
-  # The hooks are that document's storage: rebuild it on join, record every
-  # change before it is acknowledged or broadcast.
-  on_load   { |key|         Y::Document.load_state(key) }
-  on_change { |key, update| Y::Document.append(key, update) }
-
-  def subscribed    = sync_subscribed("post/#{post.id}/body")
-  def receive(data) = sync_receive(data, "post/#{post.id}/body")
-
-  private
-
-  def post = @post ||= Post.find(params[:id])
-
-  # Required. Nobody syncs a document until the channel says who may;
-  # current_user comes from your cable connection's identified_by.
-  def authorized?(_key) = post.editable_by?(current_user)
-end
+doc = Y::Doc.new
+doc.apply_update(Y::Document.for(post, :body).load_state)
+doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
 Install the gem and the npm package:
@@ -67,6 +77,8 @@ Install the gem and the npm package:
 ```
 gem install yrby-rails # depends on yrby
 npm install yrby-client
+
+bin/rails yrby:install && bin/rails db:migrate
 ```
 
 ## Contents
@@ -510,10 +522,11 @@ Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
 
 ### ActionCable Integration
 
-In a Rails app, one generator creates the channel and the migration:
+In a Rails app, one generator creates the storage migration — the models
+and `Y::DocumentChannel` ship in the gem:
 
 ```bash
-bin/rails generate yrby:install
+bin/rails yrby:install
 bin/rails db:migrate
 ```
 
@@ -533,7 +546,7 @@ The models ship in the gem, the way Action Text owns
   the merged `state` snapshot, CRDT state only; derived data (rendered
   HTML, search text) is the application's job, typically in the channel's
   on_change. `.load_state(key)` / `.append(key, update)` are the store
-  calls the generated channel uses.
+  calls the channel concern defaults to.
 - **`Y::DocumentUpdate`**: the uncompacted tail, one delta per row,
   compacted into `state` and deleted once the tail reaches `compact_every`
   (default 64). Loading reads the snapshot plus the current tail; an

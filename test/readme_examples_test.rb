@@ -35,6 +35,12 @@ class ReadmeExamplesTest < Minitest::Test
     data = Y::Doc.new.sync_step1
     frame = Y.wrap_update(update)
     note = Struct.new(:content).new
+    post_class = Class.new(ActiveRecord::Base) do
+      self.table_name = "pages"
+      def self.name = "Page" # record binding derives keys from the class name
+    end
+    post = post_class.create!(title: "readme")
+    Y::Document.for(post, :body).append(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
     store = Class.new do
       def replay(_id) = YjsFixtures::TwoDocsMerged::DOC1_UPDATE
       def record!(_id, _update) = nil
