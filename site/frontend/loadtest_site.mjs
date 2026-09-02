@@ -54,7 +54,9 @@ class Client {
       encoding.writeVarUint(e, MSG_SYNC); syncProtocol.writeUpdate(e, u)
       this._send(e)
     })
-    this.ws = new WebSocket(WS, ["actioncable-v1-json"])
+    // Origin rides along explicitly: the deploy enforces allowed origins at
+    // the socket, and Node sends none by default.
+    this.ws = new WebSocket(WS, { protocols: ["actioncable-v1-json"], headers: { Origin: BASE } })
     this.ws.onopen = () => { m.opened++ }
     this.ws.onmessage = (ev) => this._msg(JSON.parse(ev.data))
     this.ws.onerror = () => { m.errors++ }
