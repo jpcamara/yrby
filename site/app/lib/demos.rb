@@ -7,14 +7,14 @@ module Demos
 
   # How the server reads a demo's document back with no browser: the root name
   # and its shape. `kind` maps straight to a Doc reader (read_text/read_xml/
-  # read_map/read_array). The Rich text demo has no reader here — it stores a
+  # read_map/read_array). The Lexxy demo has no reader here — it stores a
   # materialized note.body column and is read through DemosController#body.
   Reader = Data.define(:root, :kind)
 
   ALL = [
     Demo.new(
       slug: "lexxy",
-      title: "Rich text",
+      title: "Lexxy",
       shape: "Y.XmlFragment",
       blurb: "A Lexxy editor over lexxy-realtime; the server renders the document into the record's column as you type.",
       read: nil
@@ -82,7 +82,7 @@ module Demos
     def new_room = SecureRandom.urlsafe_base64(8)
 
     # The signed grant for a shape demo's document — the same access model the
-    # Rich text demo gets from Note.room_token, generalized. The page GET is
+    # Lexxy demo gets from Note.room_token, generalized. The page GET is
     # where a key is judged (known demo, well-formed room) and the token is the
     # proof: DocumentChannel accepts only what verified_key returns, so a raw
     # cable client cannot name a document the server never rendered a page for.

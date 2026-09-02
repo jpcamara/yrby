@@ -21,7 +21,7 @@ class DemosController < ApplicationController
     @document_key = Demos.document_key(@demo.slug, @room)
 
     if @demo.slug == "lexxy"
-      # The Rich text demo is record-based (lexxy-realtime's shape): one Note
+      # The Lexxy demo is record-based (lexxy-realtime's shape): one Note
       # per room. The page does NOT create the Note — a GET is anonymous and
       # uncapped, and a crawler fetching room URLs would mint rows without
       # bound. It hands the client a signed, field-scoped room token instead;

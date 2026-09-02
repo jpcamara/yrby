@@ -1,4 +1,4 @@
-# The record behind the Rich text (Lexxy) demo. One Note per room, minted by
+# The record behind the Lexxy demo. One Note per room, minted by
 # the demo controller (find_or_create_by room id).
 #
 # has_collaborative_rich_text comes from lexxy-realtime's Collaborative

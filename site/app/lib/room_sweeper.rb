@@ -107,7 +107,7 @@ module RoomSweeper
       Rails.logger.error("room-sweeper (connection reap): #{e.class}: #{e.message}")
     end
 
-    # The Rich text demo's Note records follow the same TTL. A note is touched
+    # The Lexxy demo's Note records follow the same TTL. A note is touched
     # by every materialization (refresh_collaborative_rich_text saves it), so
     # updated_at tracks writes; a note whose document still exists is left to
     # the document sweep above (deleting the note would destroy a document the

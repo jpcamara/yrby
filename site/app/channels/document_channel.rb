@@ -42,7 +42,7 @@ class DocumentChannel < ApplicationCable::Channel
 
   # The gem's fail-closed seam (sync_subscribed rejects unless this returns
   # true; subscribed also asks first, so a refused client never takes a seat).
-  # The access model is the Rich text demo's: clients never name a document;
+  # The access model is the Lexxy demo's: clients never name a document;
   # they present the signed grant the page rendered, and the key is whatever
   # that token verifies to. Nothing connects without one.
   def authorized?(_key = nil)
