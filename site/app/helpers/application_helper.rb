@@ -44,32 +44,22 @@ module ApplicationHelper
     %(<pre class="code-annotated"><code>#{lines.join}</code></pre>).html_safe
   end
 
-  # The hero's channel sample. Defined here rather than inline: an ERB
-  # template compiles its text into escaped string appends, and a heredoc
-  # inside an output tag captures those compiled lines — apostrophes come out
-  # as \' and any inner ERB delimiter leaks compiler internals. In a plain
-  # Ruby file the heredoc is just a string.
-  def hero_channel_code
+  # The hero's samples. Defined here rather than inline: an ERB template
+  # compiles its text into escaped string appends, and a heredoc inside an
+  # output tag captures those compiled lines — apostrophes come out as \' and
+  # any inner ERB delimiter leaks compiler internals. In a plain Ruby file
+  # the heredoc is just a string.
+  def hero_tag_line
+    added_lines_code(<<~ERB, add: ["collaborative_document_tag"])
+      <%= collaborative_document_tag @post, :body %>
+    ERB
+  end
+
+  def hero_read_back_code
     code_block "ruby", <<~'RUBY'
-      class DocumentChannel < ApplicationCable::Channel
-        include Y::ActionCable
-
-        # A key names one document — here "post/42/body", the body of one
-        # post. The hooks are that document's storage: rebuild it on join,
-        # record every change before it is acknowledged or broadcast.
-        on_load   { |key|         Y::Document.load_state(key) }
-        on_change { |key, update| Y::Document.append(key, update) }
-
-        def subscribed    = sync_subscribed("post/#{post.id}/body")
-        def receive(data) = sync_receive(data, "post/#{post.id}/body")
-
-        private
-
-        def post = @post ||= Post.find(params[:id])
-
-        # Required — nobody syncs a document until the channel says who may.
-        def authorized?(_key) = post.editable_by?(current_user)
-      end
+      doc = Y::Doc.new
+      doc.apply_update(Y::Document.for(@post, :body).load_state)
+      Y::Lexxy.new(doc).to_html  # or read_text / read_map / read_array
     RUBY
   end
 

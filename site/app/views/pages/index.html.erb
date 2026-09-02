@@ -32,19 +32,33 @@
     </h1>
     <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
       Documents sync over Action Cable, and their state lives in your own
-      database through Active Record. Those two hooks are the whole server
-      side — no Node process to run, no third-party service holding your data.
-      Your Rails app is the collaborative backend.
+      database through Active Record. One view helper is the whole
+      integration — no Node process to run, no third-party service holding
+      your data. Your Rails app is the collaborative backend.
     </p>
 
-    <div class="mt-8 max-w-2xl">
-      <%= hero_channel_code %>
+    <div class="mt-8 max-w-2xl space-y-4">
+      <div>
+        <p class="mb-1 font-mono text-xs text-zinc-500">app/views/posts/edit.html.erb</p>
+        <%= hero_tag_line %>
+      </div>
+      <div>
+        <p class="mb-1 font-mono text-xs text-zinc-500">and the document is rows in your database, readable without a browser</p>
+        <%= hero_read_back_code %>
+      </div>
     </div>
+
+    <p class="mt-4 max-w-2xl text-sm leading-6 text-zinc-500">
+      The tag renders a signed grant for exactly that record and attribute —
+      the way <code>turbo_stream_from</code> signs its stream names. The gem's
+      own channel verifies the grant and records every change before acking.
+      Clients never name documents; there is no channel to write.
+    </p>
 
     <p class="mt-5 font-mono text-sm text-zinc-500">
       <span class="text-accent">gem "yrby-rails"</span>
       &nbsp;·&nbsp;
-      <span class="text-accent">bin/rails generate yrby:install</span>
+      <span class="text-accent">bin/rails yrby:install</span>
     </p>
 
     <div class="mt-6 flex flex-wrap items-center gap-3">

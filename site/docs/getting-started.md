@@ -29,67 +29,60 @@ Ruby 3.4 or newer. The release workflow builds precompiled gems for Ruby 3.4 and
 macOS arm64. Installing a matching platform gem needs no Rust; a source build
 needs [Rust](https://rustup.rs).
 
-## Generate the channel
+## Install the storage
 
-One generator writes the channel and the migration.
+One generator lands the migration. The models and the channel ship in the
+gem, the way Action Text owns `ActionText::RichText`.
 
 ```bash
-bin/rails generate yrby:install
+bin/rails yrby:install
 bin/rails db:migrate
 ```
 
-The migration creates `y_documents` and `y_document_updates`. The models ship in
-the gem, the way Action Text owns `ActionText::RichText`.
-
 ## The server side
 
-The whole server side of a collaborative document is one channel.
+There isn't one to write. Render a collaborative document where the page is
+already authorized to edit the record:
 
-```ruby
-class DocumentChannel < ApplicationCable::Channel
-  include Y::ActionCable
-
-  # A key names one document — here "post/42/body", the body of one post.
-  # The hooks are that document's storage: rebuild it on join, record every
-  # change before it is acknowledged or broadcast.
-  on_load   { |key|         Y::Document.load_state(key) }
-  on_change { |key, update| Y::Document.append(key, update) }
-
-  def subscribed    = sync_subscribed("post/#{post.id}/body")
-  def receive(data) = sync_receive(data, "post/#{post.id}/body")
-
-  private
-
-  def post = @post ||= Post.find(params[:id])
-
-  # Required — nobody syncs a document until the channel says who may.
-  def authorized?(_key) = post.editable_by?(current_user)
-end
+```erb
+<%= collaborative_document_tag @post, :body %>
 ```
 
-A key is just a name for one document; shape it however your app thinks —
-per record and attribute (`post/42/body`), per room, per anything. `on_load`
-rebuilds that document from storage and `on_change` records each update to it.
-Both are required, and both run in the channel instance, so they can use
-anything the channel can. Neither has to touch a database — see
-[Storage](/docs/storage).
+The tag renders a signed grant for exactly that record and attribute — the
+way `turbo_stream_from` signs its stream names. The gem's own
+`Y::DocumentChannel` verifies the grant on subscribe and records every
+change as `Y::Document` rows before acknowledging it. Clients never name
+documents: a missing, tampered, or wrong-attribute grant is rejected, and so
+is one whose record no longer exists. Authorization happened when your
+controller decided to render the tag; the grant carries that decision to the
+socket.
 
-`authorized?` is how a subscriber gets in. `sync_subscribed` asks it before any
-stream opens or state is served, and the default answer is no — a channel that
-never defines it rejects everyone, and the log says so. Return `true`
-deliberately for documents that are genuinely public.
+And the document is rows in your database, readable without a browser:
+
+```ruby
+doc = Y::Doc.new
+doc.apply_update(Y::Document.for(@post, :body).load_state)
+doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
+```
+
+Custom storage, room-keyed documents, or your own authorization scheme mean
+writing a channel with the same concern `Y::DocumentChannel` uses — a few
+lines, covered in [The document channel](/docs/document-channel).
 
 ## The browser side
 
-`yrby-client`'s `ActionCableProvider` connects anything that speaks Yjs.
+`yrby-client`'s `ActionCableProvider` connects anything that speaks Yjs. The
+tag carries everything the client needs as data attributes.
 
 ```js
 import * as Y from "yjs"
 import { createConsumer } from "@rails/actioncable"
 import { ActionCableProvider } from "yrby-client"
 
+const el = document.querySelector("[data-collaborative-document]")
 const ydoc = new Y.Doc()
-const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChannel", { id: "post/1/body" })
+const provider = new ActionCableProvider(ydoc, createConsumer(),
+  el.dataset.channel, { grant: el.dataset.grant, name: el.dataset.name })
 provider.connect()
 
 await provider.whenSynced

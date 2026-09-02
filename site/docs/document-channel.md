@@ -1,16 +1,31 @@
 # The document channel
 
+## The one the gem ships
+
+Most apps never write a channel. `Y::DocumentChannel` ships in `yrby-rails`
+the way `Turbo::StreamsChannel` ships in turbo-rails: clients subscribe to it
+with the signed grant that `collaborative_document_tag` rendered, the channel
+trades the grant back for its record, and every change is recorded as
+`Y::Document` rows before it is acknowledged. A missing, tampered, or
+wrong-attribute grant is rejected, and so is one whose record no longer
+exists. See [Getting started](/docs/getting-started).
+
+The rest of this page is for building your own — the same concern
+`Y::DocumentChannel` uses, for when you need custom storage, room-keyed
+documents that have no record, or an authorization scheme of your own.
+
+## Build your own
+
 `include Y::ActionCable` (from the `yrby-rails` gem) is the channel
 integration: the y-websocket protocol, document sync plus awareness/presence,
-over Action Cable and AnyCable.
+over Action Cable and AnyCable. A key names one document — shape it however
+your app thinks: per record and attribute (`post/42/body`), per room, per
+anything.
 
 ```ruby
 # app/channels/document_channel.rb
 class DocumentChannel < ApplicationCable::Channel
   include Y::ActionCable
-
-  on_load   { |key| Y::Document.load_state(key) }                # rebuild from storage
-  on_change { |key, update| Y::Document.append(key, update) }    # record, then broadcast
 
   def subscribed
     sync_subscribed params[:id]
@@ -28,10 +43,20 @@ class DocumentChannel < ApplicationCable::Channel
 end
 ```
 
+Storage defaults to the gem's `Y::Document` models. Declare the two hooks to
+point it anywhere else:
+
+```ruby
+  on_load   { |key| Y::Document.load_state(key) }                # rebuild from storage
+  on_change { |key, update| Y::Document.append(key, update) }    # record, then broadcast
+```
+
 ## The two hooks
 
-`on_load` and `on_change` are required. If either is missing, the channel fails
-before it can acknowledge or broadcast edits.
+`on_load` and `on_change` default to `Y::Document` storage when yrby-rails'
+models are installed; declaring either replaces the default. Outside a
+yrby-rails app there is no default, and the channel fails before it can
+acknowledge or broadcast edits until both are declared.
 
 `on_load` is called with a key and returns a binary Y.js update, or nil for a
 fresh document. `on_change` is called with a key and the exact CRDT delta, and

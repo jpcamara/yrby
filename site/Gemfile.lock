@@ -11,6 +11,7 @@ PATH
     yrby (0.7.1-x86_64-linux-musl)
     yrby-rails (0.6.1)
       actioncable (>= 7.1)
+      actionview (>= 7.1)
       activerecord (>= 7.1)
       activesupport (>= 7.1)
       base64 (~> 0.2)
