@@ -11,6 +11,17 @@ class PagesTest < ActionDispatch::IntegrationTest
     assert_includes response.headers["cache-control"], "public"
   end
 
+  test "the lexxy page renders the quickstart and is cacheable" do
+    get "/lexxy"
+
+    assert_response :success
+    assert_includes response.body, "Lexxy, collaborative."
+    assert_includes response.body, "has_collaborative_rich_text"
+    assert_includes response.body, "collaborative_rich_textarea"
+    assert_includes response.body, %(<link rel="canonical" href="https://yrby.example.com/lexxy">)
+    assert_includes response.headers["cache-control"], "public"
+  end
+
   test "the home page carries the canonical, Open Graph, and JSON-LD tags" do
     get "/"
 

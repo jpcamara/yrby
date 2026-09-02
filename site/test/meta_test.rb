@@ -22,6 +22,7 @@ class MetaTest < ActionDispatch::IntegrationTest
     assert_equal "application/xml", response.media_type
     assert_includes response.body, "<loc>"
     DocPage.all.each { |entry| assert_includes response.body, "/docs/#{entry.slug}</loc>" }
+    assert_includes response.body, "/lexxy</loc>"
   end
 
   test "llms.txt lists the doc pages as .md URLs with the append-.md pointer" do

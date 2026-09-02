@@ -1,5 +1,6 @@
 Rails.application.routes.draw do
   root "pages#index"
+  get "lexxy", to: "pages#lexxy"
 
   get "up" => "rails/health#show", as: :rails_health_check
 

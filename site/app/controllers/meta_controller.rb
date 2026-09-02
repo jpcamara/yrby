@@ -25,7 +25,7 @@ class MetaController < ApplicationController
   # shape, so no lastmod machinery — a fresh domain needs the sitemap to be
   # found at all, not to be precise about mtimes.
   def sitemap
-    urls = [canonical_host, canonical_url("/demos")] +
+    urls = [canonical_host, canonical_url("/lexxy"), canonical_url("/demos")] +
            DocPage.all.map { |entry| canonical_url("/docs/#{entry.slug}") }
     xml = +%(<?xml version="1.0" encoding="UTF-8"?>\n)
     xml << %(<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n)
@@ -43,12 +43,13 @@ class MetaController < ApplicationController
     body = <<~LLMS
       # yrby
 
-      Real-time collaborative editing for Rails that lives in your database.
-      Documents sync over Action Cable and persist through Active Record; after
-      every change the server renders the document back into the model as HTML,
-      byte-identical to the editor's own serializer. No Node process, no
-      third-party service. If you use Lexxy, lexxy-realtime wires it up with a
-      model macro, a form helper, and a generator.
+      Real-time collaborative editing that runs in Ruby and Rails, with
+      document state in your own database. Documents sync over Action Cable
+      and persist through Active Record; after every change the server renders
+      the document back into the model as HTML, byte-identical to the editor's
+      own serializer. No Node process, no third-party service. If you use
+      Lexxy, lexxy-realtime wires it up with a model macro, a form helper, and
+      a generator: #{canonical_host}/lexxy
 
       For any page on this site, append .md to the URL to get a plain markdown
       version optimized for LLMs. A concatenation of every docs page is at
