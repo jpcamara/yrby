@@ -131,6 +131,7 @@ process:
 doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
 doc.read_xml("root")          # => text of an XML root, one block per line
 doc.read_map("state")         # => a Y.Map root as a JSON string
+doc.read_array("cards")       # => a Y.Array root as a JSON string
 ```
 
 For HTML that matches an editor's own serializer byte for byte, see

@@ -89,34 +89,39 @@
   </aside>
 </section>
 
-<%# ---- Read it back as HTML ---------------------------------------------- %>
+<%# ---- Read it back in Ruby ---------------------------------------------- %>
 <section class="border-t border-zinc-800/70 py-14">
   <h2 class="text-2xl font-semibold tracking-tight text-zinc-100">
-    Read the document back as HTML, in Ruby.
+    Read the document back, in Ruby.
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
-    A stored CRDT document isn't an opaque blob. yrby renders it to HTML on the
-    server, byte-identical to what the editor itself would save — CI checks it
-    byte-for-byte against documents captured from a real editor. The renderers
-    know the full Lexxy and Tiptap node sets, take rules for your app's custom
-    nodes, and run in Ruby, with no headless browser anywhere.
+    A stored CRDT document isn't an opaque blob — and it isn't only HTML.
+    Whatever shape the document holds, Ruby reads it back with no browser
+    anywhere: plain text from a <code>Y.Text</code>, JSON from
+    <code>Y.Map</code> and <code>Y.Array</code> roots. Rich text gets
+    first-class renderers: <code>Y::Lexxy</code> and <code>Y::Tiptap</code>
+    render to HTML byte-identical to what the editor itself would save —
+    CI checks them against documents captured from real editors — and take
+    rules for your app's custom nodes.
   </p>
   <div class="mt-6 max-w-2xl">
     <%= code_block "ruby", <<~RUBY %>
       doc = Y::Doc.new
       doc.apply_update(Y::Document.load_state(key))
 
-      Y::Lexxy.new(doc).to_html  # byte-identical to the editor's serializer
+      doc.read_text("code")      # Y.Text -> plain text
+      doc.read_array("cards")    # Y.Array -> JSON (read_map for Y.Map roots)
+      Y::Lexxy.new(doc).to_html  # rich text, byte-identical to the editor
     RUBY
   </div>
   <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
-    Materialize that into a normal column and the rest of your app never learns
-    collaboration exists — search indexes it, mailers render it, read-only views
-    show it. lexxy-realtime does exactly that, keeping the attribute current
-    after every change.
+    Materialize the HTML into a normal column and the rest of your app never
+    learns collaboration exists — search indexes it, mailers render it,
+    read-only views show it. lexxy-realtime does exactly that, keeping the
+    attribute current after every change.
   </p>
   <p class="mt-4">
-    <%= link_to "See the stored HTML, live →", demo_path("lexxy"), rel: "nofollow",
+    <%= link_to "Every demo shows its server-side read, live →", demos_path,
                 class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
   </p>
 </section>
