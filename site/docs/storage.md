@@ -37,9 +37,21 @@ edit the generated migration and point `Y::Document.table_name` /
 
 `Y::EncryptedDocument` stores `state` and update payloads through Active Record
 encryption on the same tables, the way `ActionText::EncryptedRichText` does.
-Point the channel's `on_load`/`on_change` at it instead and configure your app's
-encryption keys. Use one access path per document: rows written encrypted read
-back as ciphertext through the plain classes.
+Declare it on the model — encryption is a property of the attribute's storage,
+never something a page or client chooses:
+
+```ruby
+class Post < ApplicationRecord
+  has_collaborative_document :body, encrypted: true
+end
+```
+
+`Y::DocumentChannel` consults the declaration and routes every load and append
+for that attribute through the encrypted class; undeclared attributes keep
+plain `Y::Document`. In a channel of your own, point `on_load`/`on_change` at
+`Y::EncryptedDocument` instead. Either way, configure your app's encryption
+keys and use one access path per document: rows written encrypted read back as
+ciphertext through the plain classes.
 
 ## Writing your own store
 
