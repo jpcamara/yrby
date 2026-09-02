@@ -13,25 +13,32 @@ npm install yrby-client
 `yjs` and `y-protocols` are optional peer dependencies. Install them alongside
 it — you already have them if you have an editor binding.
 
-## ActionCableProvider
+## The `<yrby-document>` element
 
-Against the gem-shipped `Y::DocumentChannel`, everything the client needs is
-on the tag `collaborative_document_tag` rendered:
+`collaborative_document_tag` renders an auto-connecting element; importing it
+registers it and connection needs no per-feature JavaScript:
 
 ```js
-import * as Y from "yjs"
-import { createConsumer } from "@rails/actioncable" // or "@anycable/web"
-import { ActionCableProvider } from "yrby-client"
+import "yrby-client/element"
 
-const el = document.querySelector("[data-collaborative-document]")
-const ydoc = new Y.Doc()
-const provider = new ActionCableProvider(ydoc, createConsumer(),
-  el.dataset.channel, { grant: el.dataset.grant, name: el.dataset.name })
-provider.connect()
+document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
+  bindYourEditor(target.doc) // fires after the first catch-up
+})
 ```
 
-Against a channel you wrote yourself, the params are whatever that channel
-reads — a document key, a room token, anything:
+The element subscribes itself to the gem-shipped `Y::DocumentChannel` with the
+tag's signed grant (a `channel` attribute overrides the name), keeps its
+`Y.Doc` across DOM moves and Turbo restores, and exposes `doc`, `provider`,
+and `whenSynced`. All elements on a page share one consumer — created from
+`@rails/actioncable` by default; on AnyCable assign
+`YrbyDocumentElement.consumer = createCable()` once before the elements
+connect.
+
+## ActionCableProvider
+
+The provider underneath the element, for wiring things up yourself. Against a
+channel you wrote, the params are whatever that channel reads — a document
+key, a room token, anything:
 
 ```js
 const provider = new ActionCableProvider(

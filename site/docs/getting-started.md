@@ -71,27 +71,24 @@ lines, covered in [The document channel](/docs/document-channel).
 
 ## The browser side
 
-`yrby-client`'s `ActionCableProvider` connects anything that speaks Yjs. The
-tag carries everything the client needs as data attributes.
+The tag is an auto-connecting element, the way `turbo_stream_from`'s is.
+Importing it once is the whole wiring; your code receives the synced document
+and hands it to any editor that speaks Yjs:
 
 ```js
-import * as Y from "yjs"
-import { createConsumer } from "@rails/actioncable"
-import { ActionCableProvider } from "yrby-client"
+import "yrby-client/element"
 
-const el = document.querySelector("[data-collaborative-document]")
-const ydoc = new Y.Doc()
-const provider = new ActionCableProvider(ydoc, createConsumer(),
-  el.dataset.channel, { grant: el.dataset.grant, name: el.dataset.name })
-provider.connect()
-
-await provider.whenSynced
-// now hand ydoc to an editor binding
+document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
+  bindYourEditor(target.doc) // any Yjs editor binding
+})
 ```
 
-Bind after the first sync, not before. Most editor bindings seed an empty
-document when they mount, so binding early makes each client insert its own
-competing top-level node. See [The JavaScript client](/docs/javascript-client).
+`yrby:synced` fires after the first catch-up with the server — bind there, not
+before. Most editor bindings seed an empty document when they mount, so
+binding early makes each client insert its own competing top-level node. On
+AnyCable, assign the shared consumer once before the elements connect
+(`YrbyDocumentElement.consumer = createCable()`). See
+[The JavaScript client](/docs/javascript-client).
 
 ## What yrby covers
 
