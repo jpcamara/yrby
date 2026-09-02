@@ -7,7 +7,7 @@ class PagesTest < ActionDispatch::IntegrationTest
     get "/"
 
     assert_response :success
-    assert_includes response.body, "Collaborative editing that lives in your database"
+    assert_includes response.body, "Collaborative editing that runs in Ruby and Rails"
     assert_includes response.headers["cache-control"], "public"
   end
 
