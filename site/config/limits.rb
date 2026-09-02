@@ -39,7 +39,7 @@ module Limits
   # is one HTML request plus static assets (which are not counted). 60/minute
   # leaves a wide margin over human browsing and still caps a scraper at one
   # request per second.
-  PAGE_REQUESTS = 60
+  PAGE_REQUESTS = Integer(ENV.fetch("PAGE_REQUESTS", 60))
   PAGE_PERIOD = 60 # seconds
 
   # There is no cable throttle here. /cable never passes through Rack — the
@@ -169,7 +169,7 @@ module Limits
 
   # Peers in one room. More than a dozen carets in a demo document is unreadable
   # anyway, and each peer is another fan-out target for every update.
-  MAX_PEERS_PER_ROOM = 12
+  MAX_PEERS_PER_ROOM = Integer(ENV.fetch("MAX_PEERS_PER_ROOM", 12))
 
   # How stale the cached per-room size may get before it is re-read from the
   # database. Appends bump the cache immediately (Rooms#note_append), so

@@ -138,19 +138,22 @@ suite boots under both Puma and Falcon deliberately, and this site is the Falcon
 deployment of that pair, running the same extension inside the fiber scheduler
 in production shape.
 
-### Why one process
+### Why one process (by default)
 
-Falcon runs with `--count 1`, always; `bin/serve` refuses to boot with anything
-else. Worth saying plainly: **with SQLite behind the hooks, single-process is no
-longer a correctness requirement for the documents.** The store is shared on
-disk, broadcasts already fan out through the embedded Go server, and WAL-mode
-SQLite handles concurrent processes on one box — the gem's store-backed design
-is exactly what makes scaling out possible. What still assumes one process is
-the throttle bookkeeping: Rooms' seats and size cache, ConnectionLimiter, and
-Rack::Attack's counters are all process memory, and two workers would each
-enforce their own half-sized caps. One process keeps the accounting honest and
-the app simple, and a demo site does not need more. Scaling out for real means
-moving those counters to a shared cache (and probably the database to Postgres).
+Falcon runs with `--count 1` unless told otherwise. Worth saying plainly:
+**with SQLite behind the hooks, single-process is not a correctness
+requirement for the documents.** The store is shared on disk, broadcasts
+already fan out through the embedded Go server, and WAL-mode SQLite handles
+concurrent processes on one box — the gem's store-backed design is exactly
+what makes scaling out possible. What still assumes one process is the
+throttle bookkeeping: Rooms' seats and size cache, ConnectionLimiter, and
+Rack::Attack's counters are all process memory, and N workers each enforce
+their own copy, loosening the effective caps toward N×. One process keeps the
+accounting honest, and a demo site does not need more. `FALCON_COUNT` opts
+into forked workers, and `FALCON_THREADS` with it selects Falcon's hybrid
+container (forks × threads) — for load tests and deployments that accept
+approximate caps. Scaling out with exact caps means moving those counters to
+a shared cache (and probably the database to Postgres).
 
 Because sockets terminate in Go, a fresh channel instance is built for every
 command and instance variables do not survive between them. Everything the
