@@ -27,18 +27,16 @@ module Yrby
 
                  <%= collaborative_document_tag @post, :body %>
 
-            3. Install the yrby-client npm package and connect the document
-               to any editor that speaks Yjs:
+            3. Install the yrby-client npm package. The tag is an
+               auto-connecting element; your code receives the synced
+               document and hands it to any editor that speaks Yjs:
 
-                 import * as Y from "yjs"
-                 import { createConsumer } from "@rails/actioncable"
-                 import { ActionCableProvider } from "yrby-client"
+                 import "yrby-client/element"
 
-                 const el = document.querySelector("[data-collaborative-document]")
-                 const ydoc = new Y.Doc()
-                 const provider = new ActionCableProvider(ydoc, createConsumer(),
-                   el.dataset.channel, { grant: el.dataset.grant, name: el.dataset.name })
-                 provider.connect()
+                 document.querySelector("yrby-document")
+                   .addEventListener("yrby:synced", ({ target }) => {
+                     bindYourEditor(target.doc)
+                   })
 
           The README's Editors section links working integrations for
           Tiptap, Lexxy, Rhino Editor, and CodeMirror.

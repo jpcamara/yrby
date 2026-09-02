@@ -7,33 +7,27 @@ module Y
     #
     #   <%= collaborative_document_tag @post, :body %>
     #
-    # renders a div carrying everything a client needs to join that one
-    # document through the gem-shipped Y::DocumentChannel:
+    # renders the auto-connecting element:
     #
-    #   <div data-collaborative-document
-    #        data-grant="<signed sgid>" data-name="body"
-    #        data-channel="Y::DocumentChannel"></div>
+    #   <yrby-document grant="<signed sgid>" name="body"></yrby-document>
+    #
+    # Importing "yrby-client/element" registers it; it subscribes itself to
+    # the gem-shipped Y::DocumentChannel — the way turbo_stream_from's element
+    # subscribes itself to Turbo::StreamsChannel — and hands your code the
+    # synced Y.Doc through its `doc` property and `yrby:synced` event.
     #
     # The grant is a signed GlobalID scoped to this record and attribute
-    # (record.collaborative_sgid(name)) — the same idea as turbo_stream_from's
-    # signed stream names. Render the tag only where the request is already
-    # authorized to collaborate on the record; possession of the grant is what
-    # the channel checks.
+    # (record.collaborative_sgid(name)). Render the tag only where the request
+    # is already authorized to collaborate on the record; possession of the
+    # grant is what the channel checks.
     #
-    # Extra options pass through to the div (a block becomes its content), so
-    # the tag can be the mount point an editor binds to:
+    # Extra options pass through to the element (a block becomes its content),
+    # so it can wrap the mount point an editor binds to:
     #
     #   <%= collaborative_document_tag @post, :body, id: "editor" %>
     module Helper
-      def collaborative_document_tag(record, name, **options, &)
-        data = {
-          collaborative_document: true,
-          grant: record.collaborative_sgid(name),
-          name: name,
-          channel: "Y::DocumentChannel"
-        }.merge(options.delete(:data) || {})
-
-        tag.div(**options, data: data, &)
+      def collaborative_document_tag(record, name, **, &)
+        tag.yrby_document(**, grant: record.collaborative_sgid(name), name: name, &)
       end
     end
   end

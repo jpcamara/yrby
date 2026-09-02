@@ -50,18 +50,16 @@ way `turbo_stream_from` signs its stream names. The gem's own
 change as `Y::Document` rows before acknowledging it. Clients never name
 documents, and there is no channel to write.
 
-Connect the document to any editor that speaks Yjs:
+The tag is an auto-connecting element — importing it once is the whole wiring,
+and your code receives the synced document to hand to any editor that speaks
+Yjs:
 
 ```js
-import * as Y from "yjs"
-import { createConsumer } from "@rails/actioncable"
-import { ActionCableProvider } from "yrby-client"
+import "yrby-client/element"
 
-const el = document.querySelector("[data-collaborative-document]")
-const ydoc = new Y.Doc()
-const provider = new ActionCableProvider(ydoc, createConsumer(),
-  el.dataset.channel, { grant: el.dataset.grant, name: el.dataset.name })
-provider.connect()
+document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
+  bindYourEditor(target.doc) // any Yjs editor binding
+})
 ```
 
 And the document is rows in your database, readable without a browser:

@@ -37,6 +37,35 @@ Written in **TypeScript** and ships bundled type declarations, so TS projects ge
 full types (typed options, methods, and errors) with no `@types` package — and
 plain-JS projects use the same compiled ESM with nothing extra to install.
 
+## `<yrby-document>` (the easiest path)
+
+The auto-connecting element behind yrby-rails' `collaborative_document_tag`,
+the way `<turbo-cable-stream-source>` sits behind `turbo_stream_from`. The tag
+renders it with a signed grant; importing the element once is the whole
+wiring:
+
+```js
+import "yrby-client/element";
+
+document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
+  bindYourEditor(target.doc); // any Yjs editor binding; fires after the first catch-up
+});
+```
+
+The element owns connect/reconnect against the gem-shipped
+`Y::DocumentChannel` (a `channel` attribute overrides the name), keeps its
+`Y.Doc` across DOM moves and Turbo restores, and exposes `doc`, `provider`,
+and `whenSynced`. All elements on a page share one consumer — created from
+`@rails/actioncable` (an optional peer dependency) by default; on AnyCable
+assign your own once before the elements connect:
+
+```js
+import { YrbyDocumentElement } from "yrby-client/element";
+import { createCable } from "@anycable/web";
+
+YrbyDocumentElement.consumer = createCable();
+```
+
 ## ActionCableProvider (the easy path)
 
 ```js
