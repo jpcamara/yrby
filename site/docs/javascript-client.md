@@ -15,19 +15,31 @@ it — you already have them if you have an editor binding.
 
 ## ActionCableProvider
 
+Against the gem-shipped `Y::DocumentChannel`, everything the client needs is
+on the tag `collaborative_document_tag` rendered:
+
 ```js
 import * as Y from "yjs"
 import { createConsumer } from "@rails/actioncable" // or "@anycable/web"
 import { ActionCableProvider } from "yrby-client"
 
+const el = document.querySelector("[data-collaborative-document]")
 const ydoc = new Y.Doc()
+const provider = new ActionCableProvider(ydoc, createConsumer(),
+  el.dataset.channel, { grant: el.dataset.grant, name: el.dataset.name })
+provider.connect()
+```
+
+Against a channel you wrote yourself, the params are whatever that channel
+reads — a document key, a room token, anything:
+
+```js
 const provider = new ActionCableProvider(
   ydoc,
   createConsumer(),
   "DocumentChannel",
   { id: "post/1/body" },
 )
-provider.connect()
 ```
 
 The constructor takes the document, the consumer, the channel name, and the

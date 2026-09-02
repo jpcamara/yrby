@@ -143,8 +143,8 @@
     A Node sync server is a second runtime to deploy, monitor, scale, and
     authenticate against. A hosted service puts your documents on someone else's
     servers, priced per user. yrby is a gem. The sync server is your Rails app,
-    the store is your database, and auth is your channel's
-    <code>authorized?</code>.
+    the store is your database, and auth is the signed grant your own page
+    renders.
   </p>
   <div class="mt-6 overflow-x-auto">
     <table class="compare min-w-full text-sm">
@@ -164,7 +164,7 @@
         <tr>
           <td>Second runtime, own persistence, auth bridged over tokens</td>
           <td>Documents live off-site, per-MAU pricing, another vendor in the request path</td>
-          <td class="accent-col">One channel, your Postgres, your <code>authorized?</code></td>
+          <td class="accent-col">One gem, your Postgres, your page's signed grant</td>
         </tr>
         <tr>
           <td>HTML out means a headless editor</td>
@@ -229,8 +229,9 @@ browser ◀── ack 42 ──────┘              (recorded first, the
   </div>
 
   <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
-    Implement <code>authorized?</code> in the generated channel — everyone is
-    denied until you do. Then open the form in two browsers and type.
+    Implement <code>authorized?</code> in the channel lexxy-realtime
+    generates — everyone is denied until you do. Then open the form in two
+    browsers and type.
   </p>
   <p class="mt-4">
     <%= link_to "lexxy-realtime quick start →", doc_path("getting-started"),

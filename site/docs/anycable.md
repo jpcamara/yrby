@@ -52,8 +52,9 @@ def subscribed    = sync_subscribed(params[:id])
 def receive(data) = sync_receive(data, params[:id])
 ```
 
-That is why the generated channel is written this way even though a plain Action
-Cable app could get away with an ivar.
+That is why every channel example is written this way — and why the gem's own
+`Y::DocumentChannel` re-derives its document from the grant on every command —
+even though a plain Action Cable app could get away with an ivar.
 
 **Connection-scoped state has to be declared.** If you are keeping an ephemeral
 document on the connection rather than in a database, declare it as channel

@@ -20,7 +20,7 @@ created later converge on one document.
 The row also holds the merged `state` snapshot — CRDT state only. Derived data
 (rendered HTML, search text) is the application's job, typically in the
 channel's `on_change`. `.load_state(key)` and `.append(key, update)` are the
-store calls the generated channel uses.
+store calls the channel concern defaults to.
 
 **`Y::DocumentUpdate`** is the uncompacted tail, one delta per row, compacted
 into `state` and deleted once the tail reaches `compact_every` (default 64).
