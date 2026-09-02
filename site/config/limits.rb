@@ -131,8 +131,8 @@ module Limits
   # frame), so a flood sheds instead of wedging the database. Awareness is never
   # counted here. Generous for real use — a full room typing flat out is a few
   # dozen writes a second — and a hard shelf under abuse.
-  DOCUMENT_WRITES_PER_SECOND = 400
-  DOCUMENT_WRITE_BURST = 800
+  DOCUMENT_WRITES_PER_SECOND = Integer(ENV.fetch("DOCUMENT_WRITES_PER_SECOND", 400))
+  DOCUMENT_WRITE_BURST = Integer(ENV.fetch("DOCUMENT_WRITE_BURST", 800))
 
   # Token bucket per subscription. Typing produces a handful of frames a second;
   # dragging a whiteboard note or moving a caret produces awareness frames at
