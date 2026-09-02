@@ -8,6 +8,7 @@ require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 require_relative "../app/models/y/encrypted_document"
 require_relative "../app/models/y/encrypted_document_update"
+require "y/collaborative"
 
 # Runs the ```ruby blocks from README.md against the real gem, so an
 # example that drifts from the API fails the suite. Each block evaluates
@@ -54,6 +55,10 @@ class ReadmeExamplesTest < Minitest::Test
         def params = {}
         def reject = nil
       end
+    end
+    class ApplicationRecord < ActiveRecord::Base
+      self.abstract_class = true
+      include Y::Collaborative
     end
   RUBY
 

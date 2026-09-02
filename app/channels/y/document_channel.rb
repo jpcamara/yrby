@@ -14,14 +14,20 @@ module Y
   # decision to the socket. A missing, tampered, expired, or wrong-attribute
   # grant — or one whose record no longer exists — is rejected.
   #
-  # Storage is the concern's Y::Document default: state rebuilds from your
-  # database on join, and every change is recorded there before it is
-  # acknowledged or broadcast. Point storage elsewhere by writing your own
-  # channel (see the yrby-rails README).
+  # Storage follows the record's declaration: an attribute the model marked
+  # `has_collaborative_document :name, encrypted: true` routes every load and
+  # append through Y::EncryptedDocument; undeclared attributes use plain
+  # Y::Document. State rebuilds from your database on join, and every change
+  # is recorded there before it is acknowledged or broadcast. Anything else
+  # (custom stores, room-keyed documents) means writing your own channel
+  # (see the yrby-rails README).
   # ::ActionCable, explicitly — inside module Y a bare ActionCable resolves
   # to the gem's own Y::ActionCable concern.
   class DocumentChannel < ::ActionCable::Channel::Base
     include Y::ActionCable
+
+    on_load { |key| storage.load_state(key) }
+    on_change { |key, update| storage.append(key, update) }
 
     def subscribed = sync_subscribed(document&.key)
 
@@ -38,7 +44,14 @@ module Y
     end
 
     def document
-      record && Y::Document.for(record, params[:name].to_s)
+      record && storage.for(record, params[:name].to_s)
+    end
+
+    # One access path per document: the class the model declared for this
+    # attribute decides the cryptography — for the binding, every load, and
+    # every append alike.
+    def storage
+      record ? record.class.collaborative_document_class(params[:name]) : Y::Document
     end
   end
 end

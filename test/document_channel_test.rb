@@ -7,6 +7,8 @@ require "action_cable"
 require "y/action_cable"
 require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
+require_relative "../app/models/y/encrypted_document"
+require_relative "../app/models/y/encrypted_document_update"
 require "y/collaborative"
 require "global_id"
 
@@ -30,6 +32,16 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     self.table_name = "pages"
     include GlobalID::Identification
     include Y::Collaborative
+  end
+
+  # An attribute the model declared encrypted: the channel must route every
+  # load and append for it through Y::EncryptedDocument.
+  class SecretPage < ActiveRecord::Base
+    self.table_name = "pages"
+    include GlobalID::Identification
+    include Y::Collaborative
+
+    has_collaborative_document :body, encrypted: true
   end
 
   def setup
@@ -91,5 +103,43 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     subscribe grant: token, name: "body"
 
     assert_predicate subscription, :rejected?
+  end
+
+  # -- storage follows the model's declaration --------------------------------
+
+  def test_the_storage_class_comes_from_the_declaration
+    assert_equal Y::EncryptedDocument, SecretPage.collaborative_document_class(:body)
+    assert_equal Y::Document, SecretPage.collaborative_document_class(:other), "undeclared attributes stay plain"
+    assert_equal Y::Document, Page.collaborative_document_class(:body)
+  end
+
+  def test_an_encrypted_attribute_stores_ciphertext_and_still_syncs
+    secret = SecretPage.create!(title: "classified")
+    subscribe grant: secret.collaborative_sgid(:body), name: "body"
+
+    assert_predicate subscription, :confirmed?
+
+    update = YjsFixtures::TwoDocsMerged::DOC1_UPDATE
+    perform :receive, "update" => Base64.strict_encode64(Y.wrap_update(update)), "id" => 4
+
+    assert_includes transmissions, { "ack" => 4 }
+
+    document = Y::EncryptedDocument.find_by!(record: secret, name: "body")
+    doc = Y::Doc.new
+    doc.apply_update(document.load_state)
+
+    refute_empty doc.read_text("content").to_s, "the encrypted path round-trips the document"
+
+    # The safety property: the recorded bytes are ciphertext at rest, so the
+    # plain classes read back garbage, never the document. One access path
+    # per document.
+    raw = Y::DocumentUpdate.find_by!(document_id: document.id).payload
+
+    refute_equal update, raw, "the stored payload must not be the plaintext delta"
+    assert_raises(StandardError, "the plain path reads ciphertext, not a document") do
+      Y::Document.load_state(document.key)
+    end
+  ensure
+    SecretPage.delete_all
   end
 end

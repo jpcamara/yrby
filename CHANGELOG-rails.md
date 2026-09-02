@@ -29,6 +29,14 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   elsewhere). Outside a yrby-rails app the concern still fails closed until
   hooks are declared.
 
+- `has_collaborative_document :name, encrypted: true` — the model declares
+  which storage class backs an attribute, and `Y::DocumentChannel` follows
+  the declaration: every load and append for a declared-encrypted attribute
+  routes through `Y::EncryptedDocument`, so the bytes are ciphertext at
+  rest and unreadable through the plain classes. Encryption is a property
+  of the attribute's storage; nothing a page renders or a client sends can
+  influence it. Undeclared attributes keep plain `Y::Document`.
+
 - `Y::Collaborative`: the signed handshake for record-backed documents,
   included into ActiveRecord::Base by the engine. A page mints
   `record.collaborative_sgid(:body)`; the channel trades it back with

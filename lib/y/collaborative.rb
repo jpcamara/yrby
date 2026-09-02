@@ -47,6 +47,39 @@ module Y
       end
     end
 
+    included do
+      # Per-attribute storage declarations, class name => resolved lazily so
+      # declaring a model never forces the engine's models to load first.
+      class_attribute :collaborative_document_classes,
+                      instance_accessor: false, default: {}.freeze
+    end
+
+    class_methods do
+      # Declares which storage class backs one collaborative attribute.
+      # Encryption is a property of the attribute's storage, so it is
+      # declared here on the model — never by the page or the client:
+      #
+      #   has_collaborative_document :body, encrypted: true
+      #
+      # Y::DocumentChannel consults this declaration and routes every load
+      # and append for the attribute through Y::EncryptedDocument, which
+      # stores state and update payloads under Active Record encryption.
+      # Undeclared attributes keep plain Y::Document storage.
+      def has_collaborative_document(name, encrypted: false) # rubocop:disable Naming/PredicatePrefix
+        self.collaborative_document_classes = collaborative_document_classes.merge(
+          name.to_sym => (encrypted ? "Y::EncryptedDocument" : "Y::Document")
+        ).freeze
+      end
+
+      # The storage class for one attribute — the declared one, or plain
+      # Y::Document. Everything server-side must go through this one class
+      # per attribute: rows written encrypted read back as ciphertext
+      # through the plain classes.
+      def collaborative_document_class(name)
+        (collaborative_document_classes[name.to_sym] || "Y::Document").constantize
+      end
+    end
+
     # A signed token a channel can trade back for this record with
     # Y::Collaborative.locate — but only for this attribute.
     def collaborative_sgid(name)
