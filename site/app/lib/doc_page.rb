@@ -16,46 +16,45 @@ class DocPage
   PAGES = [
     Entry.new(
       slug: "getting-started", nav: "Getting started", source: "install",
-      seo_title: "Getting started — Yjs in Rails with yrby",
-      description: "Add real-time collaborative editing to a Rails app with yrby: install the gems, generate " \
-                   "the sync channel, and connect a browser. Yjs in Rails, y-crdt Ruby, Rails Yjs backend."
+      seo_title: "Getting started: Yjs in Rails with yrby",
+      description: "Add real-time collaborative editing to a Rails app with yrby: install " \
+                   "the gems, run the generator, render one tag, and connect a browser."
     ),
     Entry.new(
       slug: "document-channel", nav: "The document channel", source: "actioncable-integration",
-      seo_title: "The document channel — Yjs sync over Action Cable · yrby",
-      description: "How yrby syncs Yjs documents over Action Cable: the document channel, update fan-out, and " \
-                   "reliable delivery. ActionCable Yjs, Action Cable collaborative editing."
+      seo_title: "The document channel: Yjs sync over Action Cable · yrby",
+      description: "How yrby syncs Yjs documents over Action Cable: the channel " \
+                   "the gem ships, building your own, authorization, and the delivery guarantees."
     ),
     Entry.new(
       slug: "storage", nav: "Storage", source: "actioncable-integration",
-      seo_title: "Storage — Yjs documents in ActiveRecord · yrby",
-      description: "Persist Yjs documents in ActiveRecord with yrby: Y::Document and Y::DocumentUpdate, " \
-                   "compaction, encryption, and custom stores. Yjs persistence ActiveRecord, store Yjs documents Rails."
+      seo_title: "Storage: Yjs documents in Active Record · yrby",
+      description: "How yrby persists Yjs documents in Active Record: Y::Document " \
+                   "and Y::DocumentUpdate, compaction, encryption, and writing your own store."
     ),
     Entry.new(
       slug: "javascript-client", nav: "The JavaScript client", source: "reliable-delivery-acks",
-      seo_title: "The JavaScript client — a Yjs provider for Rails · yrby",
-      description: "The yrby-client ActionCableProvider: a Yjs provider for Rails that connects any editor over " \
-                   "Action Cable, with reliable delivery and acks. Yjs provider Rails, Yjs websocket client Rails."
+      seo_title: "The JavaScript client: a Yjs provider for Rails · yrby",
+      description: "The yrby-client browser package: the yrby-document element, the " \
+                   "ActionCableProvider, connection status, and reliable delivery with acks."
     ),
     Entry.new(
       slug: "presence", nav: "Presence", source: "reliable-delivery-acks",
-      seo_title: "Presence — live cursors and awareness in Rails · yrby",
-      description: "Live cursors and awareness in Rails with yrby: presence over Action Cable, whispered through " \
-                   "AnyCable so cursor traffic costs Ruby nothing. Yjs presence cursors Rails."
+      seo_title: "Presence: live cursors and awareness in Rails · yrby",
+      description: "Live cursors and awareness with yrby: publishing identity, reading " \
+                   "the room, editor bindings, and whispering presence over AnyCable."
     ),
     Entry.new(
       slug: "rendering", nav: "Server-side rendering", source: "rendering-to-html",
-      seo_title: "Server-side rendering — Yjs documents to HTML in Ruby · yrby",
-      description: "Render Yjs documents to HTML in Ruby with yrby, byte-identical to the editor's own serializer " \
-                   "and with no headless browser. Render Yjs to HTML, Yjs server-side rendering Ruby."
+      seo_title: "Server-side rendering: Yjs documents to HTML in Ruby · yrby",
+      description: "Render Yjs documents to HTML in Ruby with yrby, matching the editor's " \
+                   "own serializer byte for byte, with rules for custom nodes and marks."
     ),
     Entry.new(
       slug: "anycable", nav: "AnyCable and multi-process", source: "multi-process-deployments",
       seo_title: "AnyCable and multi-process deployments · yrby",
-      description: "Run yrby's collaborative editing across processes with AnyCable: the unchanged channel, " \
-                   "gateway config, and cross-process delivery guarantees. AnyCable Yjs, " \
-                   "Rails websockets scale collaborative."
+      description: "Running yrby across processes and on AnyCable: broadcast adapters, " \
+                   "rebuilding from the store, channel state, whispers, and threads."
     )
   ].freeze
 
@@ -115,7 +114,7 @@ class DocPage
   def description = entry.description || "yrby documentation: #{title}."
 
   # Level-2 headings, for the in-page contents list. Read from the RENDERED
-  # HTML, so the anchors are the exact ids Commonmarker generated — a
+  # HTML, so the anchors are the exact ids Commonmarker generated, a
   # re-slugify here could drift from the real ids and produce dead links.
   def sections
     @sections ||= Nokogiri::HTML5.fragment(html).css("h2[id]").map { |h| [h.text, h["id"]] }
@@ -137,7 +136,7 @@ class DocPage
   end
 
   # The raw markdown, with a small metadata front-block, for the `.md` route and
-  # `Accept: text/markdown` — the shape coding agents read best. The body keeps
+  # `Accept: text/markdown`, the shape coding agents read best. The body keeps
   # its own `#` title; the front-block adds the description, the canonical URL,
   # and the pointer to the authoritative README section.
   def markdown_with_frontmatter(canonical_url)

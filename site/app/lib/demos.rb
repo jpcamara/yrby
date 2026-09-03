@@ -7,7 +7,7 @@ module Demos
 
   # How the server reads a demo's document back with no browser: the root name
   # and its shape. `kind` maps straight to a Doc reader (read_text/read_xml/
-  # read_map/read_array). The Lexxy demo has no reader here — it stores a
+  # read_map/read_array). The Lexxy demo has no reader here: it stores a
   # materialized note.body column and is read through DemosController#body.
   Reader = Data.define(:root, :kind)
 
@@ -16,7 +16,7 @@ module Demos
       slug: "lexxy",
       title: "Lexxy",
       shape: "Y.XmlFragment",
-      blurb: "A Lexxy editor over lexxy-realtime; the server renders the document into the record's column as you type.",
+      blurb: "A Lexxy editor on lexxy-realtime. The server renders the document into the record's column as you type.",
       read: nil
     ),
     Demo.new(
@@ -30,21 +30,21 @@ module Demos
       slug: "spreadsheet",
       title: "Spreadsheet",
       shape: "Y.Array of row Y.Maps, cells nested",
-      blurb: "Cell-level merges, plus sorting that stays out of the document.",
+      blurb: "Cells merge independently, and sorting stays out of the document.",
       read: Reader.new(root: "rows", kind: :array)
     ),
     Demo.new(
       slug: "whiteboard",
       title: "Whiteboard",
       shape: "Y.Map",
-      blurb: "Draggable notes as a map of records — the shape canvas tools keep.",
+      blurb: "Draggable notes as a map of records, the same shape canvas tools use.",
       read: Reader.new(root: "shapes", kind: :map)
     ),
     Demo.new(
       slug: "kanban",
       title: "Kanban",
       shape: "Y.Array",
-      blurb: "Cards in a list, moved with a single map write so moves never conflict.",
+      blurb: "Cards in a list. A move is a single map write, so moves don't conflict.",
       read: Reader.new(root: "cards", kind: :array)
     ),
     Demo.new(
@@ -81,7 +81,7 @@ module Demos
 
     def new_room = SecureRandom.urlsafe_base64(8)
 
-    # The signed grant for a shape demo's document — the same access model the
+    # The signed grant for a shape demo's document, the same access model the
     # Lexxy demo gets from Note.room_token, generalized. The page GET is
     # where a key is judged (known demo, well-formed room) and the token is the
     # proof: DocumentChannel accepts only what verified_key returns, so a raw
@@ -101,7 +101,7 @@ module Demos
 
     def verifier = Rails.application.message_verifier("demos/documents")
 
-    # The document reconstructed in Ruby from stored state — the server-side
+    # The document reconstructed in Ruby from stored state, the server-side
     # read the "no browser in the loop" panel shows. `state` is the merged
     # update from Y::Document.load_state; nil means the room has no document
     # yet. read_text/read_xml return a string, read_map/read_array a JSON

@@ -1,22 +1,23 @@
 # The JavaScript client
 
-`yrby-client` is the browser half: a ready-made Action Cable / AnyCable
-provider, a transport-agnostic protocol session, and a reliable-delivery core
-(ack-tracked queue, sync-since-last-ack, retransmit and reconnect replay). It is
-written in TypeScript with bundled types, ships ESM and CommonJS, and is usable
-from plain JS.
+`yrby-client` is the browser half. It has a ready-made Action Cable and AnyCable
+provider, a protocol session that doesn't care which transport carries it, and
+the reliable-delivery core: an ack-tracked queue, sync since the last ack, and
+retransmit and replay on reconnect. It is written in TypeScript, ships its own
+types, and comes as both ESM and CommonJS. You can use it from plain JS.
 
 ```
 npm install yrby-client
 ```
 
-`yjs` and `y-protocols` are optional peer dependencies. Install them alongside
-it — you already have them if you have an editor binding.
+`yjs` and `y-protocols` are optional peer dependencies. Install them next to it.
+If you have an editor binding, you already have both.
 
 ## The `<yrby-document>` element
 
-`collaborative_document_tag` renders an auto-connecting element; importing it
-registers it and connection needs no per-feature JavaScript:
+`collaborative_document_tag` renders an element that connects on its own.
+Importing the element registers it, and after that there is no connection code
+to write per feature:
 
 ```js
 import "yrby-client/element"
@@ -26,19 +27,19 @@ document.querySelector("yrby-document").addEventListener("yrby:synced", ({ targe
 })
 ```
 
-The element subscribes itself to the gem-shipped `Y::DocumentChannel` with the
-tag's signed grant (a `channel` attribute overrides the name), keeps its
-`Y.Doc` across DOM moves and Turbo restores, and exposes `doc`, `provider`,
-and `whenSynced`. All elements on a page share one consumer — created from
-`@rails/actioncable` by default; on AnyCable assign
-`YrbyDocumentElement.consumer = createCable()` once before the elements
+The element subscribes to the gem's `Y::DocumentChannel` with the grant from
+the tag. Set a `channel` attribute to use a different channel name. It keeps
+its `Y.Doc` across DOM moves and Turbo restores, and it exposes `doc`,
+`provider`, and `whenSynced`. All the elements on a page share one consumer,
+which comes from `@rails/actioncable` by default. On AnyCable, assign
+`YrbyDocumentElement.consumer = createCable()` once, before the elements
 connect.
 
 ## ActionCableProvider
 
-The provider underneath the element, for wiring things up yourself. Against a
-channel you wrote, the params are whatever that channel reads — a document
-key, a room token, anything:
+This is the provider the element uses underneath. Use it directly when you are
+wiring things up yourself. With a channel you wrote, the params are whatever
+that channel reads: a document key, a room token, anything you like.
 
 ```js
 const provider = new ActionCableProvider(
@@ -50,13 +51,13 @@ const provider = new ActionCableProvider(
 ```
 
 The constructor takes the document, the consumer, the channel name, and the
-channel params. The consumer type is deliberately loose, so the consumers from
-both `@rails/actioncable` and `@anycable/web` are directly assignable with no
-adapter and no casts. On AnyCable the client's subscription exposes `whisper`,
-and the provider uses it for awareness — cursor traffic is then relayed between
-clients by the AnyCable server and never reaches your Ruby code. This site's own
-demos are public, so they opt out of that and route awareness through the guarded
-server path instead; see [Presence](/docs/presence).
+channel params. The consumer type is loose, so consumers from
+`@rails/actioncable` and `@anycable/web` both work as they are, with no adapter
+and no casts. On AnyCable the subscription has a `whisper` method, and the
+provider uses it for awareness. Cursor traffic then goes between clients
+through the AnyCable server and never reaches your Ruby code. This site's demos
+are public, so they skip that and send awareness through the guarded server
+path instead. See [Presence](/docs/presence).
 
 ## Bind after the first sync
 
@@ -66,19 +67,19 @@ await provider.whenSynced
 // now hand ydoc to the editor binding
 ```
 
-`whenSynced` resolves once the document has first caught up with the server.
-Most editor bindings seed an empty document when they mount, so binding before
-the server's state arrives makes each client insert its own top-level node and
-remote content gets clobbered the moment a second person edits.
+`whenSynced` resolves once the document has caught up with the server for the
+first time. Most editor bindings seed an empty document when they mount. If you
+bind before the server's state arrives, each client inserts its own top-level
+node, and remote content gets clobbered the moment a second person edits.
 
-It resolves immediately if the first catch-up has already happened, even while
-the transport is down, and stays resolved across later reconnects. It does not
-re-fire, which is what makes it the right place to seed starter content: a
-document someone deliberately emptied stays empty.
+If the first catch-up already happened, it resolves immediately, even while the
+transport is down. It stays resolved across later reconnects and never fires
+again. That makes it the right place to seed starter content: a document
+someone emptied stays empty.
 
 ## Connection status
 
-Four states, folded into one signal:
+There are four states, all reported through one signal:
 
 | Status | Meaning |
 |---|---|
@@ -87,8 +88,8 @@ Four states, folded into one signal:
 | `synced` | caught up |
 | `disconnected` | torn down via `disconnect()` or `destroy()` |
 
-A dropped transport that Action Cable will retry shows as `connecting`, not
-`disconnected`.
+If the transport drops and Action Cable is going to retry, the status is
+`connecting`. `disconnected` only means you tore it down yourself.
 
 ```js
 const off = provider.onStatusChange(({ status }) => {
@@ -97,26 +98,26 @@ const off = provider.onStatusChange(({ status }) => {
 ```
 
 `onStatusChange` returns an unsubscribe function. `provider.status` is the
-current value and `provider.synced` is true once caught up.
+current value, and `provider.synced` is true once the document has caught up.
 
 ## Reliable delivery
 
-`provider.hasPending` is true while there are unacknowledged local updates in
-flight. The provider keeps the unacked local tail in a queue and sends the
-merged tail as a single causally-complete delta, tagged with the highest
-sequence in the batch. One `{ ack: id }` from the server cumulatively confirms
-everything up to it.
+`provider.hasPending` is true while local updates are still waiting for an ack.
+The provider queues the unacked local updates and sends them merged into one
+causally complete delta, tagged with the highest sequence number in the batch.
+One `{ ack: id }` from the server confirms everything up to that id.
 
-A resend that already landed is a harmless no-op, because applying a CRDT update
-twice does nothing. On reconnect the queue is replayed, which is also how a
-causal gap on the server heals: the missing dependency is an update some client
-still holds unacked.
+If a resend arrives for an update the server already has, nothing happens,
+because applying a CRDT update twice does nothing. On reconnect the queue is
+replayed. That replay is also how a causal gap on the server heals: the missing
+update is one some client still holds unacked, and that client keeps sending
+it.
 
 ## Seeding from an HTTP response
 
-`applyRemoteUpdate` applies a bootstrap or restore update without re-sending it
-to the server as a local edit. Call it once per chunk of already-durable state,
-before `connect()`.
+`applyRemoteUpdate` applies a bootstrap or restore update without sending it
+back to the server as a local edit. Call it once per chunk of state the server
+already has, before `connect()`.
 
 ```js
 provider.applyRemoteUpdate(fromBase64(initialState))
@@ -124,17 +125,18 @@ priorUpdates.forEach((u) => provider.applyRemoteUpdate(fromBase64(u)))
 provider.connect()
 ```
 
-A bare `Y.applyUpdate` would be picked up as a local change and re-broadcast.
+If you call `Y.applyUpdate` directly instead, the provider sees it as a local
+change and sends it to the server again.
 
 ## Teardown
 
 `disconnect()` tears down the subscription and clears this client's presence.
 `destroy()` does that and releases the provider.
 
-One thing to know about reconnecting by hand: `disconnect()` removes this
-client's awareness entry, and `setLocalStateField` is a no-op while the local
-state is null. An explicit `connect()` after a `disconnect()` has to republish
-the identity, or this browser stays invisible to its peers.
+One thing to know if you reconnect by hand: `disconnect()` removes this
+client's awareness entry, and `setLocalStateField` does nothing while the local
+state is null. So after a `disconnect()` and a `connect()`, you have to publish
+the identity again, or this browser stays invisible to its peers.
 
 ```js
 provider.onStatusChange(({ status }) => {
@@ -146,15 +148,15 @@ provider.onStatusChange(({ status }) => {
 
 ## Bundling: one copy of yjs
 
-Two copies of `yjs` in one bundle is the failure that costs the most time to
-find. The provider's `import "yjs"` resolves to one copy while the editor
-binding uses another; Yjs's "already imported" guard trips, constructor checks
-fail, and y-prosemirror throws "Method unimplemented" applying remote updates.
-The editor never renders incoming content, and the next local keystroke clobbers
-it. Nothing about the symptom points at module resolution.
+Two copies of `yjs` in one bundle is the bug that takes the longest to find.
+The provider's `import "yjs"` resolves to one copy and the editor binding uses
+another. Yjs's "already imported" guard trips, constructor checks fail, and
+y-prosemirror throws "Method unimplemented" when it applies remote updates. The
+editor never renders incoming content, and the next local keystroke overwrites
+it. None of the symptoms mention module resolution.
 
-Pin the shared singletons — `yjs`, `y-protocols`, `lib0` — to one canonical path
-in your bundler config. This site's
+Pin the shared packages (`yjs`, `y-protocols`, `lib0`) to one path in your
+bundler config. This site's
 [`build.mjs`](https://github.com/jpcamara/yrby/blob/main/site/frontend/build.mjs)
-does it with a small Bun resolve plugin; the same idea is `resolve.dedupe` in
-Vite and `resolve.alias` in webpack.
+does it with a small Bun resolve plugin. In Vite the equivalent is
+`resolve.dedupe`, and in webpack it is `resolve.alias`.

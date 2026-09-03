@@ -2,9 +2,9 @@
 <html lang="en" class="bg-zinc-950">
   <head>
     <%
-      page_title = content_for(:title).presence || "yrby — collaborative editing that runs in Ruby and Rails"
+      page_title = content_for(:title).presence || "yrby: collaborative editing that runs in Ruby and Rails"
       page_desc  = content_for(:description).presence ||
-        "Real-time collaborative editing for Rails that persists to your database. Live documents sync over Action Cable and render back into your model as HTML — no Node process, no third-party service. Rails collaborative editing, Yjs in Rails, collaborative rich text."
+        "Real-time collaborative editing for Rails. Documents sync over Action Cable, are stored in your database through Active Record, and render back to HTML in Ruby. There is no Node process to run and no third-party service."
       page_canonical = content_for(:canonical).presence || canonical_url
     %>
     <title><%= page_title %></title>
@@ -13,7 +13,7 @@
     <meta name="theme-color" content="#09090b">
     <link rel="canonical" href="<%= page_canonical %>">
 
-    <%# Open Graph — how the site unfurls in Slack, Discord, X, Mastodon, and
+    <%# Open Graph: how the site unfurls in Slack, Discord, X, Mastodon, and
         every link preview. og:image is the one static card in public/. %>
     <meta property="og:site_name" content="yrby">
     <meta property="og:title" content="<%= page_title %>">
@@ -39,7 +39,7 @@
     <%= yield :head %>
   </head>
 
-  <%# overflow-x-clip: the backstop against any residual wide element — the
+  <%# overflow-x-clip: the backstop against any residual wide element. The
       page never scrolls horizontally; wide content scrolls inside its own
       overflow-x-auto container. %>
   <body class="flex min-h-dvh flex-col overflow-x-clip">

@@ -1,11 +1,12 @@
-<% content_for :title, "Demos — yrby" %>
+<% content_for :title, "Demos · yrby" %>
 
 <section class="mx-auto max-w-3xl">
   <h1 class="text-3xl font-semibold tracking-tight text-zinc-100">Demos</h1>
   <p class="mt-4 leading-7 text-zinc-400">
-    Every demo runs on one <code>DocumentChannel</code>. The server never looks
-    inside the document; it records the CRDT update, acks it, and relays it. What
-    changes from page to page is only the Yjs shape the browser binds to.
+    Every demo runs on the same <code>DocumentChannel</code>. The server
+    doesn't look inside the document. It records each CRDT update,
+    acknowledges it, and relays it. The only thing that changes from demo
+    to demo is the Yjs shape the browser binds to.
   </p>
   <p class="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-3 text-sm leading-6 text-amber-200/90">
     Rooms are public and temporary. Opening a demo puts you in a room of your
@@ -16,7 +17,7 @@
   <ul class="demo-list">
     <% @demos.each do |demo| %>
       <li>
-        <%# nofollow: each launch mints a fresh, per-visitor room — not a page
+        <%# nofollow: each launch mints a fresh, per-visitor room, not a page
             for a crawler to follow (robots.txt disallows the room paths too). %>
         <%= link_to demo.title, demo_path(demo.slug), rel: "nofollow" %>
         <code><%= demo.shape %></code>

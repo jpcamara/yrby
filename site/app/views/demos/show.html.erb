@@ -1,4 +1,4 @@
-<% content_for :title, "#{@demo.title} — yrby demos" %>
+<% content_for :title, "#{@demo.title} · yrby demos" %>
 <%# Room URLs are per-visitor and ephemeral: never index them, and point the
     canonical at the demos index so any that leak out don't compete with it. %>
 <% content_for :canonical, canonical_url("/demos") %>
@@ -28,10 +28,10 @@
               class="cursor-pointer rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500">Open a second window</button>
     </div>
     <p class="roombar-note mt-2 text-xs leading-5 text-zinc-500">
-      This room is yours until you share it. Open a second window (or send the
-      link) and edit in both — that is the demo. Rooms are public, capped at
+      This room is yours until you share it. Open a second window, or send
+      someone the link, and edit in both. Rooms are public, capped at
       <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB of
-      document, and deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours untouched.
+      document, and deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours without activity.
     </p>
 
     <div class="mt-4 max-w-2xl space-y-3 text-sm leading-6 text-zinc-400 [&_a]:text-accent">
@@ -53,13 +53,13 @@
     <% call = %{doc.#{"read_#{@demo.read.kind}"}(\"#{@demo.read.root}\")} %>
     <details class="stored group mt-4 rounded-xl border border-zinc-800 bg-panel">
       <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-400 select-none group-open:border-b group-open:border-zinc-800 hover:text-zinc-200">
-        Server-side read — <code><%= call %></code>
+        Server-side read: <code><%= call %></code>
       </summary>
       <div class="px-4 py-3">
         <p class="mb-2 text-xs leading-5 text-zinc-500">
           Fetched from <code>GET <%= demo_stored_path(@demo.slug, @room) %></code>
-          when opened. This is the document reconstructed in Ruby with
-          <code><%= call %></code> — no browser in the render path.
+          when you open this panel. This is the document rebuilt in Ruby with
+          <code><%= call %></code>. No browser was involved.
         </p>
         <pre id="stored-html" class="!my-0 max-h-64 text-[0.72rem]" data-url="<%= demo_stored_path(@demo.slug, @room) %>"><code>…</code></pre>
       </div>

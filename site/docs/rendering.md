@@ -1,12 +1,13 @@
 # Server-side rendering
 
-Schema-pinned renderers turn a collaborative document into HTML on the server,
-with no Node process and no headless editor. Each is an editor-specific class,
-byte-for-byte with that editor's own serializer, built on a core base that any
-other editor extends with rules: `Y::Tiptap` on `Y::ProseMirror` for ProseMirror
-documents, and `Y::Lexxy` (the [Lexxy](https://github.com/basecamp/lexxy)
-editor) on `Y::Lexical`. Each returns `nil` for a root that belongs to the other
-schema.
+The renderers turn a collaborative document into HTML on the server. No Node
+process and no headless editor are involved. Each renderer is a class for one
+specific editor, and it matches that editor's own serializer byte for byte.
+`Y::Tiptap` renders ProseMirror documents and is built on `Y::ProseMirror`.
+`Y::Lexxy` renders documents from the [Lexxy](https://github.com/basecamp/lexxy)
+editor and is built on `Y::Lexical`. Those base classes are the extension
+point: another editor on the same engine extends one of them with rules. Each
+renderer returns `nil` for a root that belongs to the other schema.
 
 ## Y::Tiptap
 
@@ -16,24 +17,25 @@ tiptap.to_html            # the "default" fragment (Tiptap's default root)
 tiptap.to_html("content") # or another XML root
 ```
 
-The output matches Tiptap's own `getHTML()`, checked byte-for-byte in the tests
-against a document captured from a real editor. It follows
-[`tiptap-php`](https://github.com/ueberdosis/tiptap-php) and reads both name
-styles editors use: Tiptap's `bulletList`/`bold` and prosemirror-schema-basic's
-`bullet_list`/`strong`.
+The output matches Tiptap's own `getHTML()`. The tests check that byte for byte
+against a document captured from a real editor. The implementation follows
+[`tiptap-php`](https://github.com/ueberdosis/tiptap-php), and it reads both
+naming styles editors use: Tiptap's `bulletList` and `bold`, and
+prosemirror-schema-basic's `bullet_list` and `strong`.
 
-It covers paragraphs, headings, blockquotes, bullet/ordered/task lists, code
-blocks, links, images, mentions, details, hard breaks, horizontal rules, tables,
-text styles (color, font family), and every text mark. A table renders as
-semantic `<table><tbody>`, without the column-width styling Tiptap's editor view
-adds.
+It covers paragraphs, headings, blockquotes, bullet, ordered, and task lists,
+code blocks, links, images, mentions, details, hard breaks, horizontal rules,
+tables, text styles (color and font family), and every text mark. A table
+renders as a plain `<table><tbody>`. The column-width styling Tiptap's editor
+view adds is left out.
 
-The support is layered. `Y::ProseMirror` covers core ProseMirror natively
-(prosemirror-schema-basic plus the prosemirror-tables family) and Tiptap's
-extension nodes — task lists, mentions, the details family — are `Y::Tiptap`'s
-rule set (`Y::Tiptap::NODES`), built on the extension API below. Marks stay in
-the base: mark rendering (nesting order, `textStyle` CSS, `code` exclusivity)
-runs through native text-run machinery that node rules don't reach.
+The support comes in two layers. `Y::ProseMirror` handles core ProseMirror
+natively: prosemirror-schema-basic plus the prosemirror-tables family. Tiptap's
+extension nodes (task lists, mentions, the details family) are a rule set,
+`Y::Tiptap::NODES`, written on the extension API described below. Marks live in
+the base class. Mark rendering covers nesting order, the CSS on `textStyle`, and
+the exclusivity of `code`, and it runs through the native text-run code that
+node rules can't reach.
 
 ## Y::Lexxy
 
@@ -43,30 +45,32 @@ lexxy.to_html            # the "root" fragment (Lexical's default root name)
 lexxy.to_html("notepad") # or another XML root
 ```
 
-The HTML is identical to what a `lexxy-editor` submits to Rails (its `value`),
-checked byte-for-byte against a document captured from a real editor. Stock
-Lexical has no canonical serializer — every editor configures its own — so the
-editor-specific class carries the editor's name, and `Y::Lexical` is the
-core-Lexical base for any other Lexical editor to extend with rules.
+The HTML is identical to what a `lexxy-editor` submits to Rails as its `value`.
+The tests check that byte for byte against a document captured from a real
+editor. Stock Lexical has no canonical serializer, because every editor
+configures its own. That's why the class is named after the editor. `Y::Lexical`
+is the core Lexical base, and any other Lexical editor extends it with rules.
 
-It handles the whole Lexxy 0.9.x node set: paragraphs, headings, every text
-format and their combinations, links, the four list types and nesting,
+It handles every node in the Lexxy 0.9.x set: paragraphs, headings, every text
+format and their combinations, links, the four list types with nesting,
 blockquotes, code blocks, tabs and soft breaks, horizontal rules, tables with
-header cells, image galleries, and ActionText attachments (uploads and mentions
-both emit `<action-text-attachment>` elements that ActionText can re-render).
+header cells, image galleries, and ActionText attachments. Uploads and mentions
+both come out as `<action-text-attachment>` elements, which ActionText can
+re-render.
 
-In both renderers an unknown node keeps its content: text and nested blocks fall
-back to readable markup rather than disappearing.
+In both renderers an unknown node keeps its content. Its text and nested blocks
+still come out as readable markup.
 
 ## Custom nodes and marks
 
-The built-in schemas are pinned to what Tiptap and Lexxy ship, but apps add
-their own node types. Both renderers take rules for them. A rule is checked
-before the built-in schema, so it can add a node type or replace how a built-in
-renders.
+The built-in schemas match what Tiptap and Lexxy ship. Apps add their own node
+types on top of that, and both renderers take rules for them. A rule is checked
+before the built-in schema, so a rule can add a node type or change how a
+built-in one renders.
 
-Rules register in a block, one `rules.node` call per type. A declarative rule is
-markup as data, rendered natively.
+Rules register in a block, one `rules.node` call per type. A declarative rule
+describes the markup as a tag, attributes, and a content mode, and the renderer
+emits it natively.
 
 ```ruby
 tiptap = Y::Tiptap.new(doc) do |rules|
@@ -76,19 +80,20 @@ tiptap = Y::Tiptap.new(doc) do |rules|
 end
 ```
 
-`tag` names the element. `attrs` values are templates: a string is a literal, a
-symbol reads that attribute off the node, an array concatenates both kinds; an
-attribute that resolves empty is left out. `text` (same template form) emits
-literal text content. `contains` declares what lives inside the node: `:inline`
-(formatted text, the default), `:blocks` (child block nodes, a container), or
-`:none` (a leaf). `void: true` skips the closing tag.
+`tag` names the element. The values in `attrs` are templates. A string is a
+literal. A symbol reads that attribute off the node. An array concatenates a mix
+of the two. An attribute that resolves to an empty value is left out. `text`
+takes the same template form and emits literal text content. `contains` says
+what lives inside the node: `:inline` for formatted text, `:blocks` for child
+block nodes, or `:none` for a leaf. `:inline` is the default. `void: true` skips
+the closing tag.
 
 ## Ask the document, don't guess
 
 You don't have to guess any of those names or shapes. Editors store types and
-attributes under names you'd never predict — Rhino's strike mark is
-`rhino-strike`, Lexical prefixes its own props `__` — so ask a real document
-instead. Make one in your editor using your custom node, then:
+attributes under names you wouldn't predict. Rhino's strike mark is
+`rhino-strike`, and Lexical prefixes its own props with `__`. A real document
+will tell you. Make one in your editor that uses your custom node, then:
 
 ```ruby
 Y::Tiptap.new(doc).node_types
@@ -98,13 +103,14 @@ Y::Tiptap.new(doc).node_types
 #      "paragraph" => { ..., "handled" => "builtin" } }
 ```
 
-`handled` nil marks the types that still need a rule; `attrs` are the stored
-names your templates and blocks will read; `children` plus `text` is how you
-pick `contains:` (child block types to `:blocks`; text to `:inline`).
+A `handled` of nil marks a type that still needs a rule. `attrs` lists the
+stored attribute names your templates and blocks will read. `children` and
+`text` tell you which `contains:` to pick: child block types mean `:blocks`, and
+text means `:inline`.
 
 ## Blocks
 
-When markup-as-data isn't enough, give the node a block.
+When a declarative rule can't express the markup, give the node a block.
 
 ```ruby
 lexical = Y::Lexical.new(doc) do |rules|
@@ -115,19 +121,19 @@ lexical = Y::Lexical.new(doc) do |rules|
 end
 ```
 
-The block gets the node's type, its stored attributes, `node.content` (the
-children, already rendered to HTML), and `node.child_types`, the node's
-element/block children by type, in document order. `child_types` answers the
-structural questions attributes can't: how many images a gallery holds, or
-whether a list item carries a nested list. Whatever the block returns is spliced
-into the output as-is — it is trusted HTML, so escape any values you
-interpolate. To set the content mode for a callback, give the node both:
+The block gets the node's type and its stored attributes. `node.content` is the
+node's children, already rendered to HTML. `node.child_types` lists the node's
+element and block children by type, in document order. That answers the
+structural questions attributes don't: how many images a gallery holds, or
+whether a list item has a nested list. Whatever the block returns is spliced
+into the output as is. It's treated as trusted HTML, so escape any values you
+interpolate. To set the content mode for a block, pass both:
 `rules.node "embed", contains: :blocks do |node| ... end`.
 
-Callbacks never run while the document is locked. The render finishes first
-(inside one read transaction, GVL released), then the blocks run and their
-output is spliced in, so a callback can safely read or even write the same doc,
-or hit the database.
+Blocks never run while the document is locked. The render finishes first, inside
+one read transaction with the GVL released. Then the blocks run and their output
+is spliced in. That's why a block can safely read the same doc, write to it, or
+hit the database.
 
 ```ruby
 tiptap = Y::Tiptap.new(doc) do |rules|
@@ -140,12 +146,12 @@ tiptap = Y::Tiptap.new(doc) do |rules|
 end
 ```
 
-With no callback rules, `to_html` skips the splicing entirely.
+If no rule has a block, `to_html` skips the splicing step.
 
-Blocks are the escape hatch for everything the declarative form can't say, and
-they are proven sufficient: `Y::Lexxy` and `Y::Tiptap` are themselves built on
-this API. Simple nodes are declarative hashes; everything with logic is a plain
-method mapped by node type, and the fixture tests hold their output
+Blocks cover everything the declarative form can't. `Y::Lexxy` and `Y::Tiptap`
+are built on this same API, so it has already been used for two complete editor
+schemas. Their simple nodes are declarative hashes. Every node with logic is a
+plain method mapped by node type, and the fixture tests hold that output
 byte-identical to a live editor's.
 
 ## Custom marks
@@ -158,14 +164,15 @@ tiptap = Y::Tiptap.new(doc) do |rules|
 end
 ```
 
-Symbol refs resolve against the mark's own attributes. A custom mark wraps
-outside every built-in mark; several on one run nest alphabetically. A rule for
-a built-in mark name (`"bold"`) replaces its built-in tag.
+Symbols resolve against the mark's own attributes. A custom mark wraps outside
+every built-in mark. When several custom marks land on one run, they nest
+alphabetically by name. A rule for a built-in mark name like `"bold"` replaces
+that mark's tag.
 
 ## Overriding a shipped rule
 
-Rendering Lexxy uploads as real image markup instead of the
-`<action-text-attachment>` elements ActionText re-renders:
+This rule renders Lexxy uploads as real image markup. The shipped rule emits the
+`<action-text-attachment>` elements that ActionText re-renders:
 
 ```ruby
 lexxy = Y::Lexxy.new(doc) do |rules|
@@ -180,8 +187,8 @@ lexxy = Y::Lexxy.new(doc) do |rules|
 end
 ```
 
-Or dropping the empty paragraphs an editor keeps around the cursor, since
-`node.content` arrives already rendered:
+This one drops the empty paragraphs an editor keeps around the cursor. It works
+because `node.content` arrives already rendered:
 
 ```ruby
 lexical = Y::Lexical.new(doc) do |rules|

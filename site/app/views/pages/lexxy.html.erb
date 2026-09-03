@@ -1,5 +1,5 @@
-<% content_for :title, "Lexxy — collaborative rich text for Rails" %>
-<% content_for :description, "Make Basecamp's Lexxy editor collaborative with lexxy-realtime: a model macro, a form helper, and a generator. Real-time multiplayer rich text in Rails, with the document rendered back into your record's column as HTML — powered by yrby." %>
+<% content_for :title, "Lexxy: collaborative rich text for Rails" %>
+<% content_for :description, "Make Basecamp's Lexxy editor collaborative with lexxy-realtime: a model macro, a form helper, and a generator. Real-time rich text editing in Rails, with the document rendered back into your record's column as HTML. Built on yrby." %>
 <% content_for :canonical, canonical_url("/lexxy") %>
 
 <section class="pt-6 pb-14 sm:pt-14">
@@ -7,10 +7,10 @@
     Lexxy, collaborative.
   </h1>
   <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
-    Lexxy is Basecamp's rich text editor for Rails — the successor to the
-    Action Text editor. <code>lexxy-realtime</code> makes it multiplayer: a
-    model macro, a form helper, and a generator. Two people type in the same
-    field and both see every keystroke, with named carets.
+    Lexxy is Basecamp's rich text editor for Rails, the successor to the
+    Action Text editor. <code>lexxy-realtime</code> makes it collaborative
+    with a model macro, a form helper, and a generator. Two people can
+    type in the same field and see each other's keystrokes and carets.
   </p>
 
   <div class="mt-8 max-w-2xl space-y-4">
@@ -29,9 +29,9 @@
   </div>
 
   <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
-    Implement <code>authorized?</code> in the channel the generator writes —
-    everyone is denied until you do. Then open the form in two browsers and
-    type.
+    Implement <code>authorized?</code> in the channel the generator wrote.
+    Until you do, every subscriber is denied. Then open the form in two
+    browsers and type.
   </p>
 </section>
 
@@ -40,13 +40,13 @@
     <code>post.body</code> stays a normal attribute.
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
-    The live document is CRDT state in your database (yrby's
-    <code>Y::Document</code> rows). After every recorded change,
-    lexxy-realtime renders it back to HTML with <code>Y::Lexxy</code> —
-    byte-identical to what the editor itself would save — and writes it into
-    the attribute. Search indexes it, mailers render it, read-only views show
-    it; the rest of your app never learns collaboration exists. No browser
-    anywhere in the render path.
+    The live document is CRDT state in your database, stored as yrby's
+    <code>Y::Document</code> rows. After each recorded change,
+    lexxy-realtime renders it to HTML with <code>Y::Lexxy</code> and
+    writes the result into the attribute. The HTML matches what the editor
+    itself would save, byte for byte. Search indexes it, mailers render
+    it, and read-only views show it, the same as any other column. No
+    browser is involved in rendering it.
   </p>
   <p class="mt-4">
     <%= link_to "Watch the stored HTML update live →", demo_path("lexxy"), rel: "nofollow",
@@ -59,11 +59,11 @@
     Access is a signed grant, per field.
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
-    The form helper mints a signed GlobalID scoped to exactly that record and
-    attribute; the channel trades it back for the record and asks your
-    <code>authorized?</code>. A token minted for <code>:body</code> cannot
-    open any other field, a tampered one locates nothing, and clients never
-    name documents.
+    The form helper signs a GlobalID scoped to that record and attribute. The
+    channel looks the record up from it and calls your
+    <code>authorized?</code>. A token for <code>:body</code> can't open
+    any other field, and a tampered token doesn't resolve to anything. The
+    page decides which document the client gets.
   </p>
 </section>
 
@@ -72,12 +72,12 @@
     Your custom nodes survive.
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
-    Registered custom Lexical nodes sync like everything else. The server
-    renderer takes rules for them
-    (<code>has_collaborative_rich_text :body, nodes: { ... }</code>), and
-    nodes without a rule degrade readably — their text always survives into
-    the stored HTML, and a warning names the types it saw so CI can catch an
-    unmapped node.
+    Custom Lexical nodes you've registered sync like everything else. The
+    server renderer takes rules for them
+    (<code>has_collaborative_rich_text :body, nodes: { ... }</code>). A
+    node without a rule still renders its text into the stored HTML, and
+    the renderer logs a warning naming the node types it didn't recognize,
+    so CI can catch one you forgot to map.
   </p>
   <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
     Encrypted fields work the way Action Text's do:
@@ -91,13 +91,13 @@
     Under the hood, it's yrby.
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
-    lexxy-realtime is the Lexxy-shaped layer over the same stack this site
-    documents: the y-websocket protocol over Action Cable or AnyCable,
-    record-before-ack durability, and server-side rendering in Ruby. Importmap
-    apps get everything from the gem; bundler apps add the
-    <code>lexxy-realtime</code> npm package. Either way the collaboration
-    bundle shares Lexxy's own embedded Lexical, so there is exactly one editor
-    runtime on the page.
+    lexxy-realtime is a thin layer over the stack this site documents: the
+    y-websocket protocol over Action Cable or AnyCable, changes recorded
+    before they're acknowledged, and server-side rendering in Ruby.
+    Importmap apps get everything from the gem. Apps with a bundler add
+    the <code>lexxy-realtime</code> npm package. In both cases the
+    collaboration code uses the Lexical build that Lexxy already ships, so
+    the page has one editor runtime.
   </p>
   <div class="mt-5 space-y-1 font-mono text-sm text-zinc-500">
     <p><span class="text-accent">bundle add lexxy-realtime</span> &nbsp;·&nbsp; <span class="text-accent">bin/rails generate lexxy_realtime:install</span></p>
