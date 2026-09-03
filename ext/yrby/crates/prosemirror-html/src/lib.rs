@@ -1,40 +1,45 @@
-//! Native HTML rendering of ProseMirror/Tiptap documents from the yrs collab
-//! structure — no Node process, no headless editor.
+//! HTML for ProseMirror and Tiptap documents, rendered from the Yjs
+//! structure the editor syncs. No Node process and no headless editor.
 //!
-//! The y-prosemirror binding stores a document in a Y.XmlFragment: block nodes
-//! are Y.XmlElement (the tag is the node type, its attributes are the node
-//! attrs), and text is Y.XmlText whose per-run formatting attributes are the
-//! marks. Node and mark names come from the editor's schema, so this accepts
-//! both spellings in use: Tiptap's camelCase (`bulletList`, `bold`) and the
-//! prosemirror-schema-basic snake_case (`bullet_list`, `strong`).
+//! The y-prosemirror binding stores a document in a `Y.XmlFragment`. Block
+//! nodes are `Y.XmlElement`s: the tag is the node type and the attributes
+//! are the node attrs. Text is `Y.XmlText`, and each run's formatting
+//! attributes are its marks. Node and mark names come from the editor's
+//! schema, so both spellings are accepted: Tiptap's camelCase (`bulletList`,
+//! `bold`) and prosemirror-schema-basic's snake_case (`bullet_list`,
+//! `strong`).
 //!
-//! This renders **core ProseMirror**: the prosemirror-schema-basic node set
-//! plus the prosemirror-tables family — paragraphs, headings, blockquotes,
-//! code blocks, bullet/ordered lists, images, hard breaks, horizontal rules,
-//! and tables (semantic `<table><tbody>…`, without the `<colgroup>`/
-//! `min-width` styling editor views inject). Tiptap's extension nodes — task
-//! lists, mentions, the details family — live in the Ruby layer as the
-//! `Y::Tiptap` renderer's rule set, built on the same extension API apps use
-//! (`Y::ProseMirror` is the core base class). Output follows
-//! `ueberdosis/tiptap-php`, and with `Y::Tiptap`'s rules it matches Tiptap's
-//! own `getHTML()` byte for byte on the captured fixtures — that guarantee
-//! is held at the Ruby layer; the native tests pin core output as goldens
-//! where a fixture contains Tiptap-only nodes.
+//! This renders core ProseMirror: the prosemirror-schema-basic node set plus
+//! the prosemirror-tables family. That is paragraphs, headings, blockquotes,
+//! code blocks, bullet and ordered lists, images, hard breaks, horizontal
+//! rules, and tables as semantic `<table><tbody>…`, without the
+//! `<colgroup>` and `min-width` styling an editor view injects. Tiptap's
+//! extension nodes (task lists, mentions, the details family) live in the
+//! Ruby layer as the `Y::Tiptap` renderer's rule set, built on the same
+//! extension API applications use. `Y::ProseMirror` is the core base class.
+//! The output follows `ueberdosis/tiptap-php`. With `Y::Tiptap`'s rules it
+//! matches Tiptap's own `getHTML()` byte for byte on the captured fixtures.
+//! That guarantee is held at the Ruby layer. Where a fixture contains
+//! Tiptap-only nodes, the tests here pin core output as goldens.
 //!
-//! Marks stay native on purpose: mark serialization is text-run machinery
-//! (nesting order, textStyle's CSS, code's exclusivity), which the rule
-//! system can't express. The built-in set covers schema-basic's marks and
-//! Tiptap's — nesting outermost-first: link, a textStyle span, bold, italic,
-//! strike, underline, highlight, then subscript/superscript. `code` excludes
-//! the other formatting marks, so a code run is `<code>` alone — though a
+//! Marks stay native on purpose. Mark serialization is text-run machinery
+//! (nesting order, textStyle's CSS, code's exclusivity) that the rule system
+//! cannot express. The built-in set covers schema-basic's marks and
+//! Tiptap's, nested outermost-first: link, a textStyle span, bold, italic,
+//! strike, underline, highlight, then subscript and superscript. `code`
+//! excludes the other formatting marks, so a code run is `<code>` alone. A
 //! link still wraps it (see `render_run`).
 //!
-//! Custom nodes and marks: apps register rules by node type and mark name
-//! (see `render_rules`). A node rule is consulted before the built-in arms, so
-//! it can extend the schema or override a built-in; a mark rule claims its
-//! mark from the built-in wraps and wraps outside everything, link included.
-//! Declarative rules render here; callback rules emit `Segment::Deferred` for
-//! the caller to fill in after the render.
+//! A node type with no rule still renders its text and child blocks, just
+//! unwrapped.
+//!
+//! Applications register custom nodes and marks as rules keyed by node type
+//! and mark name (see `render_rules`). A node rule is consulted before the
+//! built-in arms, so it can extend the schema or replace a built-in. A mark
+//! rule claims its mark from the built-in wraps and wraps outside
+//! everything, link included. Declarative rules render here. Callback rules
+//! emit `Segment::Deferred` for the caller to fill in after the render
+//! returns.
 
 // README examples are living code: compile-checked on every cargo test.
 #[cfg(doctest)]

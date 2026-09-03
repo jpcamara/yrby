@@ -1,10 +1,10 @@
 # lexical-yjs-html
 
-Renders a [Lexical](https://lexical.dev) document to HTML straight from its
-Yjs form, using [yrs](https://crates.io/crates/yrs). No browser, no Node. It
-handles core Lexical: paragraphs, headings, quotes, code blocks, lists,
-tables, links, and text formatting. The tests check output byte-for-byte
-against documents captured from a real editor.
+Renders a [Lexical](https://lexical.dev) document to HTML from its Yjs
+representation, using [yrs](https://crates.io/crates/yrs). It covers core
+Lexical: paragraphs, headings, quotes, code blocks, lists, tables, links, and
+the full text-format model. The tests pin the output byte-for-byte to
+fixtures captured from a live editor.
 
 ## Usage
 
@@ -14,8 +14,8 @@ lexical-yjs-html = "0.1"
 yrs = { version = "0.27", features = ["sync"] }
 ```
 
-Feed it a Yjs update. That is bytes from your store, a provider, or
-`Y.encodeStateAsUpdate` in the browser.
+The input is a Yjs update: bytes from a durable store, from a provider, or
+from `Y.encodeStateAsUpdate` in the browser.
 
 ```rust,no_run
 use yrs::updates::decoder::Decode;
@@ -36,13 +36,14 @@ let html = lexical_yjs_html::render(&txn, &fragment);
 ```
 
 One doc can hold several fragments. Pass the root name your editor binds.
-`render` returns `None` when the fragment isn't Lexical-shaped.
+`render` returns `None` when the fragment is not Lexical-shaped.
 
 ## Declarative rules
 
-For a node type the built-in schema doesn't know, write a rule: a tag,
-attribute templates, and a content slot. Declarative rules render in the
-transaction, no callback:
+A rule tells the renderer how to draw a node type the built-in schema does
+not know. A rule is a tag, attribute templates, and a content slot.
+Declarative rules render inside the document transaction. Nothing calls
+back into your code.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -69,21 +70,23 @@ let html = flatten(segments).into_html().expect("no callback rules");
 // <aside class="callout callout--warning">…</aside>
 ```
 
-An attribute template mixes literal parts (`lit`) with stored attributes
-(`ref`), and drops out when it resolves empty. `content` is `inline` for
-formatted text, `blocks` for child blocks, or `none` for a leaf; `inline`
-is the default. `void: true` drops the closing tag. Point a rule at a
-built-in type to override it. This crate has no marks tier. Lexical keeps
-formatting in the text model, and that renders on its own. For marks, use
-[`prosemirror-yjs-html`](https://crates.io/crates/prosemirror-yjs-html).
+An attribute template joins literal parts (`lit`) and stored-attribute
+references (`ref`). An attribute that resolves empty is omitted. `content`
+is `"inline"` for formatted text, `"blocks"` for child block nodes, or
+`"none"` for a leaf. `"inline"` is the default. `"void": true` skips the
+closing tag. A rule for a built-in type replaces how that type renders.
+This crate has no marks tier. Lexical keeps formatting inside its text
+model, and the renderer handles that natively.
+[`prosemirror-yjs-html`](https://crates.io/crates/prosemirror-yjs-html) has
+the marks side.
 
 ## Callback rules
 
-Some nodes need real work, like a database lookup. Mark the rule
-`callback` and the renderer hands them back to you. Deferred nodes come
-back as segments with their type, attributes as JSON, and rendered
-children. The render never runs your code. You splice the result in after
-it returns:
+A rule marked `callback` hands the node to your code. Use it for nodes that
+need logic or a database lookup. Deferred nodes come back as segments with
+their type, their stored attributes as JSON, and their children already
+rendered. The render never runs your code. You splice the result in after
+it returns.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -121,15 +124,15 @@ let segments = render_segments(&txn, &fragment, &rules).expect("Lexical-shaped")
 let html = splice(segments);
 ```
 
-`Rules`, `Segment`, and `flatten` are re-exported here. Depend on this
-crate; [`yjs-html-core`](https://crates.io/crates/yjs-html-core) is
-internal.
+`Rules`, `Segment`, and `flatten` are re-exported here.
+[`yjs-html-core`](https://crates.io/crates/yjs-html-core) is an internal
+implementation crate.
 
 ## Schema discovery
 
-Editors name their types and attributes however they like, and Lexical
-prefixes its own props with `__`. `collect_node_types` reports what a
-document actually holds:
+Editors store types and attributes under their own names. Lexical prefixes
+its own props with `__`. `collect_node_types` reports what a real document
+holds:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};

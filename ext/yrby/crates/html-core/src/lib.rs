@@ -1,21 +1,21 @@
-//! Custom render rules and segmented output — the extensibility core shared
-//! by both HTML renderers.
+//! The custom render rules and segmented output that both HTML renderers
+//! share.
 //!
-//! Callers register per-node rules. Two tiers:
+//! Callers register a rule per node. There are two tiers:
 //!
-//! - **Declarative rules** (tag, attributes, text, content slot) compile to
-//!   [`NodeRule`]/[`MarkRule`] here and render natively, inside the document
+//! - A declarative rule (tag, attributes, text, content slot) compiles to a
+//!   [`NodeRule`] or [`MarkRule`] and renders natively, inside the document
 //!   transaction, at full speed. This covers the tiptap-php `renderHTML`
 //!   shape: markup as data.
-//! - **Callback rules** defer to the caller. Rendering never runs app code
-//!   while the document is locked — the renderer emits [`Segment::Deferred`]
-//!   entries carrying the node's type, attributes (as JSON), and its
-//!   already-rendered children, and the caller fills them in after the
-//!   render returns. (In the Ruby gem, that caller is the app's block, run
-//!   once the transaction has closed and the GVL is held again.)
+//! - A callback rule defers to the caller. The renderer never runs
+//!   application code while the document is locked. It emits
+//!   [`Segment::Deferred`] entries with the node type, the attributes as
+//!   JSON, and the already-rendered children, and the caller fills them in
+//!   after the render returns. In the Ruby gem that caller is the app's
+//!   block, run once the transaction has closed and the GVL is held again.
 //!
-//! Rules arrive as one JSON document (see `parse`), so the same format
-//! serves any binding or caller.
+//! Rules arrive as one JSON document (see `parse`), so one format serves
+//! every binding and caller.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use yrs::{Any, Out, ReadTxn, Xml};
