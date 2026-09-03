@@ -217,6 +217,44 @@ class RenderingRulesTest < Minitest::Test
     assert_nil Y::Lexical.new(Y::Doc.new).node_types("nope")
   end
 
+  # The degradation report: node_types filtered down to the names to_html
+  # will quietly degrade — "handled" nil.
+  def test_unknown_types_lists_what_to_html_degrades
+    assert_includes Y::Lexical.new(lexical_doc).unknown_types, "action_text_attachment"
+    assert_empty Y::Lexxy.new(lexical_doc).unknown_types,
+                 "Y::Lexxy's schema covers its own fixture"
+
+    pm = Y::ProseMirror.new(prosemirror_doc("prosemirror_mention"))
+
+    assert_includes pm.unknown_types, "mention"
+    refute_includes pm.unknown_types, "paragraph"
+    assert_empty Y::Tiptap.new(prosemirror_doc("prosemirror_mention")).unknown_types
+
+    covered = Y::Lexical.new(lexical_doc, nodes: { "action_text_attachment" => { tag: "div" } })
+
+    refute_includes covered.unknown_types, "action_text_attachment"
+
+    assert_empty Y::Lexical.new(Y::Doc.new).unknown_types("nope"),
+                 "a missing or non-Lexical root has nothing to degrade"
+  end
+
+  # Stored attributes are collaborator input; the schema's own rules escape
+  # what they interpolate. Legitimate editor values (booleans, integers)
+  # render byte-identically — the parity fixtures pin that.
+  def test_lexxy_list_items_escape_stored_attributes
+    node = Y::RenderRules::Node.new(
+      type: "listitem",
+      attrs: { "__checked" => %("><script>x), "__value" => 1 },
+      content: "item",
+      child_types: []
+    )
+    html = Y::Lexxy.list_item(node)
+
+    assert_includes html, 'aria-checked="&quot;&gt;&lt;script&gt;x"'
+    assert_includes html, 'value="1"'
+    refute_includes html, %("><script>)
+  end
+
   def test_rules_hold_up_under_concurrent_renders
     renderer = Y::Lexical.new(
       lexical_doc,

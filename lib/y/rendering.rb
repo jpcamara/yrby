@@ -241,6 +241,18 @@ module Y
       json = root.nil? ? @native.node_types : @native.node_types(root)
       json && JSON.parse(json)
     end
+
+    # The node types to_html degrades: present in the document, handled by
+    # neither the built-in schema nor a registered rule. An unknown
+    # container or inline wrapper renders its children without its own
+    # markup (text is never dropped); an unknown decorator renders nothing,
+    # so content living only in its attributes drops out of the HTML. Empty
+    # when every type is handled — or when the root is missing or not
+    # Lexical-shaped, where to_html returns nil and nothing degrades.
+    def unknown_types(root = nil)
+      types = node_types(root)
+      types ? types.filter_map { |type, info| type if info["handled"].nil? } : []
+    end
   end
 
   class ProseMirror
@@ -275,6 +287,19 @@ module Y
     def node_types(root = nil)
       json = root.nil? ? @native.node_types : @native.node_types(root)
       json && JSON.parse(json)
+    end
+
+    # The node types to_html degrades: present in the document, handled by
+    # neither the built-in schema nor a registered rule. An unknown node
+    # renders its text and children without its own markup; one whose
+    # content lives only in its attributes renders nothing. Marks are
+    # separate and not listed here — an unknown mark renders its text
+    # unformatted. Empty when every type is handled — or when the root is
+    # missing or not ProseMirror-shaped, where to_html returns nil and
+    # nothing degrades.
+    def unknown_types(root = nil)
+      types = node_types(root)
+      types ? types.filter_map { |type, info| type if info["handled"].nil? } : []
     end
   end
 

@@ -1,11 +1,11 @@
 # prosemirror-yjs-html
 
-Renders a [ProseMirror](https://prosemirror.net) document to HTML straight
-from its Yjs form, using [yrs](https://crates.io/crates/yrs). No browser, no
-Node. It handles prosemirror-schema-basic and the prosemirror-tables family,
-and reads both naming styles editors use: Tiptap's `bulletList`/`bold` and
-prosemirror-schema-basic's `bullet_list`/`strong`. The tests check output
-byte-for-byte against documents captured from a real Tiptap editor.
+Renders a [ProseMirror](https://prosemirror.net) document to HTML from its
+Yjs representation, using [yrs](https://crates.io/crates/yrs). It covers
+prosemirror-schema-basic plus the prosemirror-tables family. It reads both
+naming styles editors use: Tiptap's `bulletList` and `bold`, and
+prosemirror-schema-basic's `bullet_list` and `strong`. The tests pin the
+output byte-for-byte to fixtures captured from a live Tiptap editor.
 
 ## Usage
 
@@ -15,8 +15,8 @@ prosemirror-yjs-html = "0.1"
 yrs = { version = "0.27", features = ["sync"] }
 ```
 
-Feed it a Yjs update. That is bytes from your store, a provider, or
-`Y.encodeStateAsUpdate` in the browser.
+The input is a Yjs update: bytes from a durable store, from a provider, or
+from `Y.encodeStateAsUpdate` in the browser.
 
 ```rust,no_run
 use yrs::updates::decoder::Decode;
@@ -37,13 +37,13 @@ let html = prosemirror_yjs_html::render(&txn, &fragment);
 ```
 
 One doc can hold several fragments. Pass the root name your editor binds.
-`render` returns `None` when the fragment isn't ProseMirror-shaped.
+`render` returns `None` when the fragment is not ProseMirror-shaped.
 
 ## Declarative rules
 
-For a node type the built-in schema doesn't know, write a rule: a tag,
-attribute templates, and a content slot. Declarative rules render in the
-transaction, no callback:
+A rule tells the renderer how to draw a node type the built-in schema does
+not know. A rule is a tag, attribute templates, and a content slot.
+Declarative rules render inside the document transaction with no callback.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -70,17 +70,18 @@ let html = flatten(segments).into_html().expect("no callback rules");
 // <aside class="callout callout--warning">…</aside>
 ```
 
-An attribute template mixes literal parts (`lit`) with stored attributes
-(`ref`), and drops out when it resolves empty. `content` is `inline` for
-formatted text, `blocks` for child blocks, or `none` for a leaf; `inline`
-is the default. `void: true` drops the closing tag. Point a rule at a
-built-in type to override it.
+An attribute template joins literal parts (`lit`) and stored-attribute
+references (`ref`). An attribute that resolves empty is omitted. `content`
+is `"inline"` for formatted text, `"blocks"` for child block nodes, or
+`"none"` for a leaf. `"inline"` is the default. `"void": true` skips the
+closing tag. A rule for a built-in type replaces how that type renders.
 
 ## Mark rules
 
-ProseMirror has two kinds of thing. Nodes are structure: paragraphs,
-lists, tables. Marks annotate runs of text: bold, links, comments. A mark
-rule registers under `"marks"` and wraps the runs that carry it:
+A ProseMirror document has nodes and marks. Nodes are structure:
+paragraphs, lists, tables. Marks annotate runs of text: bold, links,
+comments. A mark rule registers under `"marks"` and wraps the text runs
+that carry it.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -106,25 +107,25 @@ let html = flatten(segments).into_html().expect("no callback rules");
 // <span data-comment-id="c42">…</span>, wrapped outside the built-in marks.
 ```
 
-Built-in marks nest in a fixed order: subscript and superscript innermost,
-then highlight, underline, strike, italic, bold, a `textStyle` span, and
-link on the outside. `code` renders alone among the formatting marks, the
-way Tiptap's Code mark does. A custom mark wraps outside every built-in.
-Several custom marks on one run nest alphabetically by name, so the output
-doesn't depend on registration order. A rule named for a built-in mark
-(`bold`) replaces its markup and keeps the exclusivity.
+Built-in marks nest in a fixed order. Subscript and superscript are
+innermost, then highlight, underline, strike, italic, bold, a `textStyle`
+span, and link on the outside. `code` renders alone among the formatting
+marks, matching Tiptap's Code mark. A custom mark wraps outside every
+built-in. Several custom marks on one run nest alphabetically by name, so
+output never depends on registration order. A rule for a built-in mark name
+(`"bold"`) replaces its markup and keeps its exclusivity behavior.
 
 ## Callback rules
 
-Some nodes need real work, like a database lookup. Mark the rule
-`callback` and the renderer hands them back to you. Deferred nodes come
-back as segments with their type, attributes as JSON, and rendered
-children. The render never runs your code. You splice the result in after
-it returns:
+A rule marked `callback` hands the node to your code. Use it for nodes that
+need logic or a database lookup. Deferred nodes come back as segments with
+their type, their stored attributes as JSON, and their children already
+rendered. The render never runs your code. You splice the result in after
+it returns.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use prosemirror_yjs_html::{render_segments, Rules, Segment};
+use prosemirror_yjs_html::{escape_attr, escape_text, render_segments, Rules, Segment};
 
 fn splice(segments: Vec<Segment>) -> String {
     segments
@@ -138,9 +139,13 @@ fn splice(segments: Vec<Segment>) -> String {
                         let attrs: serde_json::Value =
                             serde_json::from_str(&attrs_json).unwrap();
                         let id = attrs["id"].as_str().unwrap_or("unknown");
-                        // Look the user up, build trusted markup, escape
-                        // anything you interpolate.
-                        format!(r#"<a class="mention" href="/users/{id}">@{id}</a>"#)
+                        // Attribute values are document data, written by
+                        // collaborators: escape everything you interpolate.
+                        format!(
+                            r#"<a class="mention" href="/users/{}">@{}</a>"#,
+                            escape_attr(id),
+                            escape_text(id)
+                        )
                     }
                     _ => children,
                 }
@@ -158,15 +163,15 @@ let segments = render_segments(&txn, &fragment, &rules).expect("ProseMirror-shap
 let html = splice(segments);
 ```
 
-`Rules`, `Segment`, and `flatten` are re-exported here. Depend on this
-crate; [`yjs-html-core`](https://crates.io/crates/yjs-html-core) is
-internal.
+`Rules`, `Segment`, and `flatten` are re-exported here.
+[`yjs-html-core`](https://crates.io/crates/yjs-html-core) is an internal
+implementation crate.
 
 ## Schema discovery
 
-Editors name their types and attributes however they like. Rhino Editor's
-strike mark, for one, is `rhino-strike`. `collect_node_types` reports what
-a document actually holds:
+Editors store types and attributes under their own names. Rhino Editor's
+strike mark, for example, is `rhino-strike`. `collect_node_types` reports
+what a real document holds:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -183,8 +188,12 @@ for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default()
 }
 ```
 
-Anything where `is_builtin` is false needs a rule. Without one, the node
-still renders its text and child blocks, just unwrapped.
+Types where `is_builtin` is false need a rule. Without one, the render
+degrades instead of erroring. An unknown node renders its text and child
+blocks without the node's own markup. A node whose content lives only in
+its attributes renders nothing. An unknown mark is ignored, and its text
+renders unformatted. Run a real document through `collect_node_types` to
+find the types that still need rules.
 
 ## License
 
