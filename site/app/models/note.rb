@@ -25,7 +25,7 @@ class Note < ApplicationRecord
 
   # A signed, field-scoped token for a room. The verifier is keyed by the
   # purpose (which embeds the field), so a token minted for :body verifies only
-  # under :body — a token for one field cannot be replayed for another, the same
+  # under :body: a token for one field cannot be replayed for another, the same
   # guarantee the gem's sgid gives, minus the pre-created row.
   def self.room_token(room, field)
     room_verifier(field).generate(room.to_s)
@@ -42,7 +42,7 @@ class Note < ApplicationRecord
 
   def self.room_verifier(field) = Rails.application.message_verifier(sgid_purpose(field))
 
-  # The site accepts no uploads, and the editor has attachments disabled — but
+  # The site accepts no uploads, and the editor has attachments disabled, but
   # a client that skips the page and speaks the protocol can still craft a
   # document containing attachment nodes (a data: URL in an attachment's url
   # attribute is a smuggled file). Y::Lexxy's default schema would render them

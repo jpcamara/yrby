@@ -7,7 +7,7 @@ class MetaController < ApplicationController
 
   # Index the docs and the demos landing pages; keep crawlers out of the demo
   # rooms. `GET /demos/:demo` mints a fresh room and redirects, so a crawler
-  # that followed those links would manufacture unlimited unique URLs — the
+  # that followed those links would manufacture unlimited unique URLs, the
   # room-mint trap. Disallowing each slug prefix closes both the mint and the
   # room pages while leaving the /demos index crawlable.
   def robots
@@ -22,7 +22,7 @@ class MetaController < ApplicationController
   end
 
   # The real URL set: home, the demos index, and every doc page. Static in
-  # shape, so no lastmod machinery — a fresh domain needs the sitemap to be
+  # shape, so no lastmod machinery: a fresh domain needs the sitemap to be
   # found at all, not to be precise about mtimes.
   def sitemap
     urls = [canonical_host, canonical_url("/lexxy"), canonical_url("/demos")] +

@@ -3,7 +3,7 @@
 #
 # ConnectionLimiter caps how many sockets an address holds. This caps what one
 # socket can spend once it is open, and it is keyed to the connection rather
-# than to a subscription on purpose — the flaws it closes are all about a socket
+# than to a subscription on purpose: the flaws it closes are all about a socket
 # that opens many subscriptions:
 #
 #   subscriptions  a hard count, so one socket can't subscribe to thousands of
@@ -13,7 +13,7 @@
 #                  churn subscribe/unsubscribe to cycle through rooms.
 #   frames         ONE frame bucket for the whole connection. A per-subscription
 #                  bucket resets on every subscribe and multiplies with the
-#                  number of subscriptions — a socket could reset its burst by
+#                  number of subscriptions, a socket could reset its burst by
 #                  re-subscribing, or run N buckets' worth of rate at once. One
 #                  bucket per socket has neither hole.
 #   one seat/room  a connection may hold at most one seat in a given room, so it
@@ -27,17 +27,17 @@
 #
 # The guard is also this node's LIVENESS record for a connection, and the only
 # safe leak backstop for its room seats and its connection slot. `seen_at` is
-# stamped on every server-visible frame — a document update OR an awareness
+# stamped on every server-visible frame, a document update OR an awareness
 # frame (awareness reaches Ruby now that the demo routes it through `send`
 # instead of a whisper). A live viewer, even one only reading, keeps its clock
 # fresh: yrby-client re-emits its awareness on a heartbeat (~every 15s, well
 # under the TTL), so an idle-but-open tab stays visibly alive. A connection
-# silent past CONNECTION_SLOT_TTL is therefore a genuine leak — the Disconnect
-# RPC never arrived — and the sweep reaps it: it releases the connection's room
+# silent past CONNECTION_SLOT_TTL is therefore a genuine leak (the Disconnect
+# RPC never arrived), and the sweep reaps it: it releases the connection's room
 # seats (freeing the room's peer slot and dropping it from occupied_keys, so the
 # room sweeper can evict a truly-abandoned room) and its connection slot, then
 # forgets the guard. Reaping a still-live connection can only ever loosen a cap,
-# never wrongly reject — the safe direction — and anycable-go's own
+# never wrongly reject, the safe direction, and anycable-go's own
 # ANYCABLE_MAX_CONN is the hard ceiling underneath all of this.
 class ConnectionGuard
   class << self
@@ -62,7 +62,7 @@ class ConnectionGuard
       @seen_at = now
     end
 
-    # The rooms this connection is seated in — a snapshot the reaper releases
+    # The rooms this connection is seated in, a snapshot the reaper releases
     # when the guard is reaped without a Disconnect.
     def seated_keys = @keys.to_a
 
@@ -105,8 +105,8 @@ class ConnectionGuard
   end
 
   # Record a connection's identity (its throttle IP and slot token) at connect,
-  # so the sweep can free its connection slot if it leaks. Creates the guard —
-  # every accepted connection gets one — and stamps it live.
+  # so the sweep can free its connection slot if it leaks. Creates the guard 
+  # (every accepted connection gets one) and stamps it live.
   def register(connection_id, ip, slot_token, now = monotonic)
     @mutex.synchronize do
       g = guard(connection_id, now)

@@ -5,11 +5,11 @@
 # them bounds the *sum* across all clients, and at the intended caps that sum
 # can still outrun what one SQLite file absorbs before SQLITE_BUSY starts
 # starving page requests. This is the aggregate shelf: over it, a document frame
-# is shed (the client keeps the update queued and retries — the same shape as
+# is shed (the client keeps the update queued and retries, the same shape as
 # any other dropped frame), so a flood degrades write throughput instead of
 # wedging the database under lock contention.
 #
-# One token bucket, process memory, mutex-guarded — the same one-node assumption
+# One token bucket, process memory, mutex-guarded, the same one-node assumption
 # as everything else here. Awareness never reaches it; only document writes are
 # counted, checked after the frame is classified and before it is persisted.
 class WriteBudget

@@ -22,7 +22,7 @@ class DemosController < ApplicationController
 
     if @demo.slug == "lexxy"
       # The Lexxy demo is record-based (lexxy-realtime's shape): one Note
-      # per room. The page does NOT create the Note — a GET is anonymous and
+      # per room. The page does NOT create the Note: a GET is anonymous and
       # uncapped, and a crawler fetching room URLs would mint rows without
       # bound. It hands the client a signed, field-scoped room token instead;
       # NoteChannel verifies it and creates the Note on subscribe, within the
@@ -31,7 +31,7 @@ class DemosController < ApplicationController
     else
       # The shape demos carry the same access model: a signed grant for this
       # document, minted here and verified by DocumentChannel. No token, no
-      # subscription — the channel never accepts a client-named key.
+      # subscription: the channel never accepts a client-named key.
       @room_token = Demos.room_token(@demo.slug, @room)
     end
   end
@@ -50,7 +50,7 @@ class DemosController < ApplicationController
 
   # The shape demos' counterpart to #body: the stored Y::Document, read back in
   # Ruby with read_text/read_xml/read_map/read_array (no browser in the loop).
-  # Read-only and anonymous like #body — it loads the existing document but
+  # Read-only and anonymous like #body, it loads the existing document but
   # never creates one, so crawling room URLs can't mint rows.
   def stored
     demo = Demos.find(params[:demo])

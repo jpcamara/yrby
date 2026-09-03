@@ -7,13 +7,13 @@
 #
 # Each slot has a token, minted by `acquire` and released by that exact token.
 # Identity matters: `disconnect` releases the slot its own `connect` took, not
-# "the oldest one for this IP" — without the token, releasing the wrong slot
+# "the oldest one for this IP", without the token, releasing the wrong slot
 # lets the running count drift away from the real socket count, past both caps.
 #
 # This is a pure token ledger: it counts, it does not decide when a slot is
 # stale. A slot is freed by `release` (from the Disconnect RPC) or, when that RPC
 # never arrives, by the ConnectionGuard sweep, which reaps a connection by
-# LIVENESS — the last server-visible frame — and releases the exact slot token.
+# LIVENESS, the last server-visible frame, and releases the exact slot token.
 # Age is deliberately not a signal here: expiring a slot purely because it is old
 # would reap a connection that is genuinely still open (a long reader), which is
 # the leak the guard's liveness clock avoids.

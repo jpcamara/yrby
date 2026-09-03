@@ -1,4 +1,4 @@
-# The throttle layers every collaborative channel on this site shares — the
+# The throttle layers every collaborative channel on this site shares, the
 # rooms are public and anonymous, so `receive` is an open write surface
 # whichever channel it reaches (layers 2-6 of config/limits.rb).
 #
@@ -54,7 +54,7 @@ module RoomGuarded
   # (`stream_from awareness, whisper: true`). A whisper relays client-to-client
   # through anycable-go and never reaches Rails, so on this public, anonymous,
   # mutually-untrusting surface a raw client could whisper a `{update: <document
-  # frame>}` straight to its peers — past the token bucket, the size caps,
+  # frame>}` straight to its peers, past the token bucket, the size caps,
   # persistence, and every validation the receive path runs. Stripping the
   # whisper option means anycable-go never whisper-enables any of this channel's
   # streams, so it drops every whisper on them (a malicious one included).
@@ -154,7 +154,7 @@ module RoomGuarded
   # process-wide write budget (shed a flood before it reaches SQLite) and the
   # per-room byte cap (a room at MAX_DOCUMENT_BYTES goes read-only). Both drop
   # the frame here, before it reaches `on_change`, so the update is never
-  # recorded half-way — raising from `on_change` would reject without acking,
+  # recorded half-way: raising from `on_change` would reject without acking,
   # and an unacked update is retransmitted forever. Awareness frames never reach
   # this path, so presence keeps working in a shed or frozen room. The client
   # keeps a dropped update queued and retries it; the notice below is how the

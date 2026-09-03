@@ -1,6 +1,6 @@
 module ApplicationHelper
   # The bundles are plain public/ files (no asset pipeline), served with
-  # max-age=3600 — without a fingerprint a deploy leaves browsers running last
+  # max-age=3600: without a fingerprint a deploy leaves browsers running last
   # hour's JS. This appends a content digest, memoized per process in
   # production: the files can only change across a restart, which resets the
   # memo. In development the digest is recomputed so the watch rebuild shows up
@@ -39,14 +39,14 @@ module ApplicationHelper
       klass = added ? "cl add" : "cl"
       %(<span class="#{klass}">#{ERB::Util.html_escape(line.empty? ? " " : line)}</span>)
     end
-    # Each `.cl` is a block, so lines are joined with nothing — a literal newline
+    # Each `.cl` is a block, so lines are joined with nothing: a literal newline
     # between them would render as a blank line under white-space: pre.
     %(<pre class="code-annotated"><code>#{lines.join}</code></pre>).html_safe
   end
 
   # The hero's samples. Defined here rather than inline: an ERB template
   # compiles its text into escaped string appends, and a heredoc inside an
-  # output tag captures those compiled lines — apostrophes come out as \' and
+  # output tag captures those compiled lines: apostrophes come out as \' and
   # any inner ERB delimiter leaks compiler internals. In a plain Ruby file
   # the heredoc is just a string.
   def hero_tag_line

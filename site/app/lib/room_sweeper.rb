@@ -1,6 +1,6 @@
 # Deletes stale documents from the store.
 #
-# With SQLite behind the channel, eviction is no longer about memory — an idle
+# With SQLite behind the channel, eviction is no longer about memory: an idle
 # room costs a few rows on disk and nothing in RAM. What it is about now is
 # content: these are public, anonymous, unmoderated documents, and "temporary"
 # is a promise the site makes about them. The TTL is that promise. A room
@@ -9,7 +9,7 @@
 # "Untouched" means no write and no compaction inside the TTL: appends stamp
 # y_document_updates.created_at and compaction stamps y_documents.updated_at,
 # so a document is stale only when both are old. Occupied rooms are never
-# evicted, however quiet — someone is looking at them.
+# evicted, however quiet: someone is looking at them.
 #
 # One plain Ruby thread in the server process, started once at boot. It does
 # nothing but sleep between sweeps; under Falcon it runs alongside the fiber
@@ -56,7 +56,7 @@ module RoomSweeper
     # under a live session (and cascading to update rows written in that window).
     # So eviction is now a claim. The stale set is only a *candidate* list; the
     # room bookkeeping decides, atomically with its seat check, which candidates
-    # have no occupant and no reservation, and marks them evicting — after which
+    # have no occupant and no reservation, and marks them evicting, after which
     # a racing join is refused (:evicting) and a racing write can't re-open them.
     # We then re-read the database for the claimed keys (a write that landed
     # after the candidate query but before the claim leaves a fresh update row)
@@ -78,7 +78,7 @@ module RoomSweeper
         Y::Document.where(key: evictable).destroy_all if evictable.any?
         evictable
       ensure
-        # Drop the evicting mark on every claimed key — deleted ones and the
+        # Drop the evicting mark on every claimed key, deleted ones and the
         # ones the freshness re-read spared alike, so a spared room is joinable
         # again.
         claimed.each { |key| rooms.forget(key) }
@@ -111,8 +111,8 @@ module RoomSweeper
     # by every materialization (refresh_collaborative_rich_text saves it), so
     # updated_at tracks writes; a note whose document still exists is left to
     # the document sweep above (deleting the note would destroy a document the
-    # occupancy check may be protecting). Once the document is gone — swept
-    # above, or never created — a stale note is just an orphaned row.
+    # occupancy check may be protecting). Once the document is gone, swept
+    # above, or never created, a stale note is just an orphaned row.
     def sweep_notes(cutoff)
       stale = Note.where(updated_at: ...cutoff).where.missing(:collaborative_document_body)
       keys = stale.pluck(:room).map { |room| "note:#{room}" }

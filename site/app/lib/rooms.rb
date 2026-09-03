@@ -1,6 +1,6 @@
 # Room bookkeeping around the real store.
 #
-# The documents themselves live in SQLite through the gem's own models — the
+# The documents themselves live in SQLite through the gem's own models, the
 # channel's hooks are `Y::Document.load_state` / `Y::Document.append`, the
 # canonical stack the docs teach. What that stack deliberately does not have is
 # a notion of "rooms with limits", so this class carries the site's caps:
@@ -13,11 +13,11 @@
 # Seats and the size cache are process memory, which is exactly right for them:
 # a seat dies with its connection, and every connection lives in this one
 # node's embedded Go server. They are bookkeeping about the live process, not
-# state worth persisting — the documents are in the database.
+# state worth persisting: the documents are in the database.
 #
 # The room cap counts more than persisted rows. A document is not created until
 # a room's first append, but a subscription holds a seat from the moment it
-# joins — so a flood of `subscribe` commands for distinct valid keys would all
+# joins, so a flood of `subscribe` commands for distinct valid keys would all
 # be admitted (each key's row is still absent) and then mint a document apiece,
 # walking past the cap. So a brand-new seated key is a *reservation*: it counts
 # against the cap until its document exists (first append) or its last occupant
@@ -25,7 +25,7 @@
 #
 # Concurrency: shared across the RPC requests, which under Falcon are fibers
 # switching at IO and scheduler yields, plus the sweeper thread. The mutex
-# stays for the same reasons RoomStore's did — the reactor can serve requests
+# stays for the same reasons RoomStore's did: the reactor can serve requests
 # concurrently, and an uncontended mutex costs nothing. DB reads happen outside
 # the lock so a fiber never yields into SQLite while holding it.
 class Rooms
@@ -92,26 +92,26 @@ class Rooms
   def occupied_keys = @mutex.synchronize { @seats.keys }
 
   # Is there room in the budget for one more brand-new room right now? Persisted
-  # documents plus live reservations, against the cap — the same count `join`
+  # documents plus live reservations, against the cap, the same count `join`
   # applies to a new key. NoteChannel uses it to gate lazily minting a Note row
   # on subscribe: a Note's document key isn't known until the row exists (it
   # embeds the id), so the budget is checked here before the row is created, and
   # `join` takes the authoritative reservation once the key exists. A defense,
-  # not an invariant — losing a boundary race by one is fine.
+  # not an invariant: losing a boundary race by one is fine.
   def room_available?
     Y::Document.count + @mutex.synchronize { @reserved.size } < @max_rooms
   end
 
   # The document size cap. The true size is state bytes plus tail bytes in the
-  # database, but querying it on every frame would put a SUM on the hot path —
+  # database, but querying it on every frame would put a SUM on the hot path, 
   # and querying it every few seconds would leave a flood window: at the frame
   # cap a hostile client can append megabytes between refreshes.
   #
   # So the cache works the other way round. `reserve_write` adds each accepted
-  # update's bytes to the cached size the moment it is admitted — before it is
-  # persisted — which keeps the cap tight under any write rate with no query at
+  # update's bytes to the cached size the moment it is admitted, before it is
+  # persisted, which keeps the cap tight under any write rate with no query at
   # all. The DB is only consulted when the entry is stale (SIZE_CACHE_TTL) or
-  # missing — to pick up compaction, which only ever shrinks the true size.
+  # missing, to pick up compaction, which only ever shrinks the true size.
   # Between refreshes the cache can only over-estimate, and over-estimating a
   # cap is the safe direction: worst case a just-compacted room stays read-only
   # a few extra seconds.
@@ -120,7 +120,7 @@ class Rooms
   end
 
   # Atomically admit one document write of `bytes` and account for it, or
-  # refuse. Prospective — it reserves `current + bytes` and rejects when that
+  # refuse. Prospective: it reserves `current + bytes` and rejects when that
   # would exceed the cap, so the update that *crosses* the cap is the one turned
   # away, not the one after it. The reservation happens under the lock, so two
   # writes racing toward the cap can't both be admitted. `cached_size` may read
@@ -137,7 +137,7 @@ class Rooms
       # triggers a DB re-read to pick up compaction.
       @sizes[key] = [live + bytes, entry ? entry[1] : monotonic]
       # A write proves the document now exists (append creates the row), so the
-      # key is no longer a pending reservation — it counts as a real row.
+      # key is no longer a pending reservation: it counts as a real row.
       @reserved.delete(key)
       true
     end
@@ -179,7 +179,7 @@ class Rooms
 
   # Caller holds the mutex. A brand-new key (no seat, no persisted document, no
   # existing reservation) has to fit under the cap and is then reserved; every
-  # other join — an existing seat, an existing document — is always admitted.
+  # other join (an existing seat, an existing document) is always admitted.
   def admit_new_room?(key, new_room, persisted)
     return true unless @seats[key].zero? && new_room && !@reserved.include?(key)
     return false if persisted + @reserved.size >= @max_rooms

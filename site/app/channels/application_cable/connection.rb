@@ -23,7 +23,7 @@ module ApplicationCable
       self.slot_token = token
       # Register the connection's identity with the guard now, so if its
       # Disconnect RPC never arrives the guard's liveness sweep can free this
-      # exact slot (and any room seats) — see ConnectionGuard.
+      # exact slot (and any room seats), see ConnectionGuard.
       ConnectionGuard.current.register(connection_id, ip, token)
     end
 
@@ -38,12 +38,12 @@ module ApplicationCable
 
     private
 
-    # The real client address, derived with the app's trusted-proxy set — NOT
+    # The real client address, derived with the app's trusted-proxy set, NOT
     # `request.remote_ip`.
     #
     # On the AnyCable connect path the request env is built by the RPC handler,
     # not by the Rack middleware stack, so ActionDispatch::RemoteIp never runs
-    # and `request.remote_ip` falls back to Rack's default IP logic — which
+    # and `request.remote_ip` falls back to Rack's default IP logic, which
     # trusts every private range, including 192.168/16. That is exactly the range
     # trusted_proxies deliberately excludes (the Pi's LAN), so on Rack's defaults
     # a LAN client could forge an X-Forwarded-For and land as any address it

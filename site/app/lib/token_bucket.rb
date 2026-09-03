@@ -7,7 +7,7 @@
 #
 # `capacity` tokens accumulate at `refill_per_second`, one token per frame. A
 # client under the rate never notices. A client over it has frames dropped,
-# which for a document update means the client keeps it queued and retries —
+# which for a document update means the client keeps it queued and retries, 
 # the same shape as any other dropped frame in the protocol.
 #
 # The bucket does not live in the channel object. Sockets terminate in

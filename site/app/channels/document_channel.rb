@@ -7,7 +7,7 @@
 # public and anonymous.
 #
 # Sockets terminate in the anycable-go embedded in thrust, which calls this
-# channel over HTTP RPC served by Falcon — a fresh channel instance per
+# channel over HTTP RPC served by Falcon, a fresh channel instance per
 # command, so params ride along on every call and per-subscription state
 # lives in `state_attr_accessor` (see RoomGuarded).
 class DocumentChannel < ApplicationCable::Channel
@@ -49,7 +49,7 @@ class DocumentChannel < ApplicationCable::Channel
     key.present?
   end
 
-  # Derived from the token on every command — each RPC call builds a fresh
+  # Derived from the token on every command: each RPC call builds a fresh
   # channel instance, and verifying the signature is cheaper than carrying the
   # key as channel state.
   def key
