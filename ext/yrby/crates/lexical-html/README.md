@@ -1,9 +1,9 @@
 # lexical-yjs-html
 
-Renders the Yjs representation of a [Lexical](https://lexical.dev) document
-to HTML, using [yrs](https://crates.io/crates/yrs). Covers core Lexical:
-paragraphs, headings, quotes, code blocks, lists, tables, links, and the
-full text-format model. The tests pin the output byte-for-byte against
+Renders a [Lexical](https://lexical.dev) document to HTML from its Yjs
+representation, using [yrs](https://crates.io/crates/yrs). It covers core
+Lexical: paragraphs, headings, quotes, code blocks, lists, tables, links, and
+the full text-format model. The tests pin the output byte-for-byte to
 fixtures captured from a live editor.
 
 ## Usage
@@ -14,8 +14,8 @@ lexical-yjs-html = "0.1"
 yrs = { version = "0.27", features = ["sync"] }
 ```
 
-The input is a Yjs update: bytes from a durable store, a provider, or
-`Y.encodeStateAsUpdate` in the browser.
+The input is a Yjs update: bytes from a durable store, from a provider, or
+from `Y.encodeStateAsUpdate` in the browser.
 
 ```rust,no_run
 use yrs::updates::decoder::Decode;
@@ -35,15 +35,15 @@ let html = lexical_yjs_html::render(&txn, &fragment);
 //    isn't Lexical-shaped (e.g. a ProseMirror document).
 ```
 
-An editor may hold several fragments under one doc; pass whichever root
-name your editor binds. `render` returns `None` when the fragment's shape
-is not Lexical's.
+One doc can hold several fragments. Pass the root name your editor binds.
+`render` returns `None` when the fragment is not Lexical-shaped.
 
 ## Declarative rules
 
-A rule describes how a node type the built-in schema does not know should
-render: a tag, attribute templates, and a content slot. Declarative rules
-render inside the document transaction with no callback:
+A rule tells the renderer how to draw a node type the built-in schema does
+not know. A rule is a tag, attribute templates, and a content slot.
+Declarative rules render inside the document transaction. Nothing calls
+back into your code.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -70,22 +70,23 @@ let html = flatten(segments).into_html().expect("no callback rules");
 // <aside class="callout callout--warning">…</aside>
 ```
 
-Attribute templates concatenate literal parts (`lit`) and stored-attribute
-references (`ref`); an attribute that resolves empty is omitted. `content`
-is `"inline"` (formatted text, the default), `"blocks"` (child block
-nodes), or `"none"` (a leaf). `"void": true` skips the closing tag. A rule
-for a built-in type replaces how that type renders. There is no marks tier
-in this crate: Lexical folds formatting into its text model, which renders
-natively. [`prosemirror-yjs-html`](https://crates.io/crates/prosemirror-yjs-html)
-has the marks side.
+An attribute template joins literal parts (`lit`) and stored-attribute
+references (`ref`). An attribute that resolves empty is omitted. `content`
+is `"inline"` for formatted text, `"blocks"` for child block nodes, or
+`"none"` for a leaf. `"inline"` is the default. `"void": true` skips the
+closing tag. A rule for a built-in type replaces how that type renders.
+This crate has no marks tier. Lexical keeps formatting inside its text
+model, and the renderer handles that natively.
+[`prosemirror-yjs-html`](https://crates.io/crates/prosemirror-yjs-html) has
+the marks side.
 
 ## Callback rules
 
-A rule marked `callback` defers rendering to your code, for nodes that
-need logic or a database lookup. Deferred nodes come back as segments
-carrying their type, stored attributes as JSON, and already-rendered
-children. The render itself never runs your code; you splice the result
-after it returns:
+A rule marked `callback` hands the node to your code. Use it for nodes that
+need logic or a database lookup. Deferred nodes come back as segments with
+their type, their stored attributes as JSON, and their children already
+rendered. The render never runs your code. You splice the result in after
+it returns.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -127,15 +128,15 @@ let segments = render_segments(&txn, &fragment, &rules).expect("Lexical-shaped")
 let html = splice(segments);
 ```
 
-The rules surface (`Rules`, `Segment`, `flatten`) is re-exported here;
+`Rules`, `Segment`, and `flatten` are re-exported here.
 [`yjs-html-core`](https://crates.io/crates/yjs-html-core) is an internal
 implementation crate.
 
 ## Schema discovery
 
-Editors store types and attributes under their own names, and Lexical
-prefixes its own props with `__`. `collect_node_types` reports what a real
-document holds:
+Editors store types and attributes under their own names. Lexical prefixes
+its own props with `__`. `collect_node_types` reports what a real document
+holds:
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
@@ -153,12 +154,12 @@ for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default()
 ```
 
 Types where `is_builtin` is false need a rule. Without one, the render
-degrades instead of erroring, and never drops text: an unknown container
-or inline wrapper (a mark-style node) renders its children with no
-wrapping markup, and an unknown decorator renders nothing — content that
-lives only in the decorator's attributes drops out of the HTML silently.
-Render a real document through `collect_node_types` to find the types
-that still need rules.
+degrades instead of erroring, and it never drops text. An unknown container
+or inline wrapper (a mark-style node) renders its children with no wrapping
+markup. An unknown decorator renders nothing, so content that lives only in
+the decorator's attributes drops out of the HTML silently. Run a real
+document through `collect_node_types` to find the types that still need
+rules.
 
 ## License
 
