@@ -3,12 +3,6 @@ PATH
   specs:
     yrby (0.7.1)
       rb_sys (~> 0.9)
-    yrby (0.7.1-aarch64-linux)
-    yrby (0.7.1-aarch64-linux-musl)
-    yrby (0.7.1-arm64-darwin)
-    yrby (0.7.1-x86_64-darwin)
-    yrby (0.7.1-x86_64-linux)
-    yrby (0.7.1-x86_64-linux-musl)
     yrby-rails (0.6.1)
       actioncable (>= 7.1)
       actionview (>= 7.1)
