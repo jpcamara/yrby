@@ -2,8 +2,19 @@ require "test_helper"
 
 # Layer 1: per-IP HTTP throttling.
 class RackAttackTest < ActionDispatch::IntegrationTest
-  setup { Rack::Attack.cache.store.clear }
-  teardown { Rack::Attack.cache.store.clear }
+  # Rack::Attack counts in fixed windows keyed by the clock, so a run that
+  # straddles a period boundary loses its count and the request that should be
+  # the one over the limit comes back unthrottled. Freeze the clock: these
+  # tests are about the rule, not about when the window rolls over.
+  setup do
+    Rack::Attack.cache.store.clear
+    freeze_time
+  end
+
+  teardown do
+    travel_back
+    Rack::Attack.cache.store.clear
+  end
 
   test "page requests are throttled per IP with a clear 429" do
     Limits::PAGE_REQUESTS.times do
