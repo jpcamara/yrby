@@ -43,7 +43,7 @@ class SecurityHeadersTest < ActionDispatch::IntegrationTest
   end
 
   test "no page over plain http sends HSTS" do
-    # The test/dev stack runs without force_ssl, exactly like the plain-http Pi;
+    # The test/dev stack runs without force_ssl, like a plain-http LAN box;
     # HSTS must be absent there (it is only correct once TLS is terminated).
     get "/docs/getting-started"
 

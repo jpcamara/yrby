@@ -32,5 +32,5 @@ Rails.application.configure do
 end
 
 # Rails already sends nosniff and Referrer-Policy by default, and — once
-# force_ssl is on — HSTS, so the plain-http Pi (FORCE_SSL=false) never sends
+# force_ssl is on: HSTS, so a plain-http box (FORCE_SSL=false) never sends
 # Strict-Transport-Security, which is exactly right.

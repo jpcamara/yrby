@@ -5,7 +5,7 @@
 // propagation latency (edit -> visible on a peer), saturation (sent vs acked),
 // and errors.
 //
-//   BASE=http://192.168.1.161:4321 CLIENTS=200 ROOMS=20 DURATION=30 RATE=2 \
+//   BASE=http://192.168.1.10:4321 CLIENTS=200 ROOMS=20 DURATION=30 RATE=2 \
 //     node loadtest_site.mjs
 //
 // RATE = edits/sec PER client. Keys use a real demo slug so the channel's

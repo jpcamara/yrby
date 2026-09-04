@@ -64,7 +64,7 @@ module Site
     #
     # Cross-site WebSocket hijacking is the risk it closes — without it, any page
     # anywhere can open a socket to this cable in a visitor's browser. ENV-driven
-    # because the deploy host isn't knowable here: the Pi is reached by IP over
+    # because the deploy host isn't knowable here: a LAN box is reached by IP over
     # http, prod by https://<domain>. ALLOWED_ORIGINS is a comma-separated list
     # of full origins (scheme://host[:port]); Rails matches the Origin header
     # against them exactly.

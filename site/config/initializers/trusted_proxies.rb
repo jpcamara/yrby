@@ -10,7 +10,7 @@
 # Setting `trusted_proxies` explicitly REPLACES Rails' defaults (it does not add
 # to them — verified against ActionDispatch::RemoteIp), and that is deliberately
 # used here: the list below trusts the Cloudflare edge and the container-internal
-# hops, but NOT 192.168.0.0/16. That exclusion is the point. The Pi's clients are
+# hops, but NOT 192.168.0.0/16. That exclusion is the point. A LAN box's clients are
 # on 192.168.x, and ActionDispatch strips trusted hops from the X-Forwarded-For
 # chain and takes the rightmost address that remains — so if the LAN were
 # trusted, a LAN client could set its own X-Forwarded-For and land as the

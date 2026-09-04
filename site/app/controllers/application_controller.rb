@@ -3,7 +3,7 @@ class ApplicationController < ActionController::Base
 
   # The absolute base URL for canonical tags, the sitemap, Open Graph, JSON-LD,
   # and llms.txt. ENV-driven, and deliberately not derived from the request:
-  # Cloudflare and the plain-http Pi origin mean the request host varies, but
+  # Cloudflare and a plain-http LAN origin mean the request host varies, but
   # the canonical host must be one value. The default is the deploy.yml
   # placeholder: set CANONICAL_HOST to the real domain before launch (see the
   # README).

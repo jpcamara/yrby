@@ -10,7 +10,7 @@ require "test_helper"
 class TrustedProxiesTest < ActiveSupport::TestCase
   CLOUDFLARE_IP = "104.16.1.1".freeze # inside 104.16.0.0/13
   CLIENT_IP = "203.0.113.7".freeze    # TEST-NET-3, a public client
-  LAN_IP = "192.168.1.161".freeze     # the Pi's LAN — deliberately untrusted
+  LAN_IP = "192.168.1.10".freeze      # a LAN client, deliberately untrusted
 
   # Resolve request.ip the way the running stack does: the RemoteIp middleware
   # built with the app's trusted_proxies, handed a peer and X-Forwarded-For.
@@ -35,7 +35,7 @@ class TrustedProxiesTest < ActiveSupport::TestCase
     assert_equal CLIENT_IP, resolved_ip(peer: CLOUDFLARE_IP, xff: "1.2.3.4, #{CLIENT_IP}, #{CLOUDFLARE_IP}")
   end
 
-  test "on the Pi (LAN, no Cloudflare) the LAN client is used, forged XFF ignored" do
+  test "on a LAN box (no Cloudflare) the LAN client is used, forged XFF ignored" do
     # kamal-proxy forwards from loopback and appends the LAN client; 192.168/16
     # is NOT trusted, so the LAN address is the rightmost-untrusted entry and a
     # client-prepended fake is ignored.

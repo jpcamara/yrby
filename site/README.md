@@ -409,7 +409,7 @@ actually trusts.
 Set `CANONICAL_HOST` in the same deploy env, to the site's real origin
 (e.g. `https://yrby.dev`). It is the one host used in canonical tags, Open
 Graph/Twitter URLs, the sitemap, JSON-LD, and llms.txt — deliberately not
-derived from the request, because Cloudflare and the plain-http Pi origin make
+derived from the request, because Cloudflare and a plain-http LAN origin make
 the request host vary while the canonical host must not. **It defaults to the
 `yrby.example.com` placeholder; the SEO tags are wrong until you set it.**
 

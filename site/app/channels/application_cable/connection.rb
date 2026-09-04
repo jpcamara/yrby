@@ -45,7 +45,7 @@ module ApplicationCable
     # not by the Rack middleware stack, so ActionDispatch::RemoteIp never runs
     # and `request.remote_ip` falls back to Rack's default IP logic, which
     # trusts every private range, including 192.168/16. That is exactly the range
-    # trusted_proxies deliberately excludes (the Pi's LAN), so on Rack's defaults
+    # trusted_proxies deliberately excludes (a home or office LAN), so on Rack's defaults
     # a LAN client could forge an X-Forwarded-For and land as any address it
     # likes, defeating the per-IP cap. Re-deriving here with TrustedProxies::
     # RANGES applies the same rule the HTTP layer uses: a forwarded IP is only
