@@ -1,0 +1,10 @@
+Description:
+    Installs collaborative form fields: a FormFieldsChannel syncing each
+    record's field-set document, and the storage migration (via yrby:tables).
+
+Example:
+    bin/rails generate yrby_forms:install
+
+    This will create:
+        app/channels/form_fields_channel.rb
+        db/migrate/XXXXXXXX_create_y_tables.rb

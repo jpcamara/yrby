@@ -1,11 +1,15 @@
 Description:
-    Creates a DocumentChannel speaking the y-websocket protocol, backed by
-    the gem's document storage (Y::Document + Y::DocumentUpdate), and the
-    migration for its tables.
+    Creates two channels speaking the y-websocket protocol, backed by the
+    gem's document storage (Y::Document + Y::DocumentUpdate), and the
+    migration for its tables. CollaborativeDocumentChannel serves
+    record-bound documents (has_collaborative_document /
+    has_collaborative_rich_text, authenticated by signed GlobalID);
+    DocumentChannel serves free-standing documents addressed by key.
 
 Example:
     bin/rails generate yrby:install
 
     This will create:
+        app/channels/collaborative_document_channel.rb
         app/channels/document_channel.rb
         db/migrate/XXXXXXXX_create_y_tables.rb

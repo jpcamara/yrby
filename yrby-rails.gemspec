@@ -17,17 +17,21 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
 
+  # The yrby-forms files are excluded the same way the core gem excludes
+  # this gem's: they ship in yrby-forms only.
   spec.files = Dir[
     "lib/yrby-rails.rb",
     "lib/yrby/**/*.rb",
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
+    "lib/y/collaborative.rb",
+    "lib/y/collaborative/**/*.rb",
     "app/**/*.rb",
     "lib/generators/**/*",
     "LICENSE",
     "README.md",
     "CHANGELOG-rails.md"
-  ]
+  ] - Dir["lib/yrby/forms/**/*", "lib/generators/yrby_forms{,/**/*}"]
   spec.require_paths = ["lib"]
 
   spec.metadata["source_code_uri"] = spec.homepage
@@ -46,6 +50,10 @@ Gem::Specification.new do |spec|
   # activerecord either way; listed because the gem uses it directly.
   spec.add_dependency "actioncable", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
+  # The collaborative-document layer: collaborative_document_tag renders
+  # through Action View, and the sgid flow mints/locates signed GlobalIDs.
+  spec.add_dependency "actionview", ">= 7.1"
+  spec.add_dependency "globalid", ">= 1.0"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"

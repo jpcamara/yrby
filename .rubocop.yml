@@ -10,6 +10,7 @@ AllCops:
     # ERB, not Ruby — the migration template interpolates the AR version.
     - "lib/generators/yrby/install/templates/**/*"
     - "lib/generators/yrby/tables/templates/**/*"
+    - "lib/generators/yrby_forms/install/templates/**/*"
     - "ext/**/*"          # Rust extension
     - "tmp/**/*"
     - "vendor/**/*"
@@ -69,6 +70,7 @@ Naming/FileName:
     - "lib/yrby.rb"
     - "lib/yrby-rails.rb"
     - "lib/yrby-decoder.rb"
+    - "lib/yrby-forms.rb"
 
 Style/ClassAndModuleChildren:
   Exclude:

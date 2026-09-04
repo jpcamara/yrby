@@ -24,6 +24,22 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     assert_no_file "app/models/yrby_document_update.rb" # models ship in the gem
   end
 
+  def test_generates_the_record_bound_channel_over_the_collaborative_api
+    run_generator
+
+    assert_file "app/channels/collaborative_document_channel.rb" do |channel|
+      assert_match(/include Y::ActionCable\b/, channel)
+      assert_match("Y::Collaborative.locate(params[:sgid], params[:field])", channel,
+                   "the token resolves through the base sgid flow, scoped to the claimed field")
+      assert_match("collaborative_document?, params[:field]", channel, "the record must declare the attribute")
+      assert_match("find_or_create_collaborative_document(params[:field])", channel,
+                   "storage routes through the record so encrypted attributes decrypt")
+      assert_match("refresh_collaborative_document(params[:field])", channel,
+                   "the channel materializes updates through the record API")
+      assert_match("def authorized?\n    false", channel, "authorization defaults to false")
+    end
+  end
+
   def test_generates_the_storage_migration
     run_generator
 

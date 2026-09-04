@@ -100,6 +100,8 @@ const ENTRIES = [
   // Y.Array of row Y.Maps whose cells are nested Y.Maps; TanStack Table (headless)
   // holds the sorting/column order, which stays out of the document.
   { entry: "src/spreadsheet.js", name: "spreadsheet.js" },
+  // yrby-forms: the packaged elements over a real Rails form (tickets page).
+  { entry: "src/form_fields.js", name: "form_fields.js" },
 ]
 
 async function buildEntry({ entry, name, plugins }) {

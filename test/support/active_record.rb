@@ -41,5 +41,24 @@ unless defined?(YRBY_AR_BOOTED)
     create_table :pages do |t|
       t.string :title
     end
+
+    # A host-app model for the collaborative-document tests
+    # (has_collaborative_rich_text against a plain column).
+    create_table :notes do |t|
+      t.string :title
+      t.text :body
+    end
+
+    # A host-app model for the yrby-forms tests (has_collaborative_fields),
+    # with one column per tier-detection case.
+    create_table :tickets do |t|
+      t.string :title
+      t.string :status
+      t.integer :priority
+      t.boolean :urgent
+      t.date :due_on
+      t.string :summary
+      t.text :description
+    end
   end
 end

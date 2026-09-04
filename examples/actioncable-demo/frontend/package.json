@@ -33,7 +33,8 @@
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.20",
-    "yrby-client": "file:../../../packages/client"
+    "yrby-client": "file:../../../packages/client",
+    "yrby-forms": "file:../../../packages/forms"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

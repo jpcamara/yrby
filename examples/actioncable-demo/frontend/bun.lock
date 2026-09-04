@@ -31,6 +31,7 @@
         "y-protocols": "^1.0.6",
         "yjs": "^13.6.20",
         "yrby-client": "file:../../../packages/client",
+        "yrby-forms": "file:../../../packages/forms",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -1322,6 +1323,8 @@
 
     "yrby-client": ["yrby-client@file:../../../packages/client", { "dependencies": { "lib0": "^0.2.117" }, "devDependencies": { "typescript": "^5.6.0", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }],
 
+    "yrby-forms": ["yrby-forms@file:../../../packages/forms", { "dependencies": { "@rails/actioncable": "^8.0.0", "yrby-client": "^0.5.0" }, "devDependencies": { "jsdom": "^25.0.0", "typescript": "^5.6.0", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" } }],
+
     "zeed-dom": ["zeed-dom@0.15.1", "", { "dependencies": { "css-what": "^6.1.0", "entities": "^5.0.0" } }, "sha512-dtZ0aQSFyZmoJS0m06/xBN1SazUBPL5HpzlAcs/KcRW0rzadYw12deQBjeMhGKMMeGEp7bA9vmikMLaO4exBcg=="],
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
@@ -1459,6 +1462,8 @@
     "rhino-editor/prosemirror-view": ["prosemirror-view@1.28.3", "", { "dependencies": { "prosemirror-model": "^1.16.0", "prosemirror-state": "^1.0.0", "prosemirror-transform": "^1.1.0" } }, "sha512-YnJxLRzIaCNEt3VKiy+PBxtpwsCbjrfiBKIgHJeqbKhdeP8bU2qL4ngdGmxp9K4+06cZG5bE9vipuhP+KUl+BQ=="],
 
     "web-component-define/@lit/reactive-element": ["@lit/reactive-element@1.6.3", "", { "dependencies": { "@lit-labs/ssr-dom-shim": "^1.0.0" } }, "sha512-QuTgnG52Poic7uM1AN5yJ09QMe0O28e10XzSvWDz02TJiiKee4stsiownEIadWm8nYzyDAyT+gKzUoZmiWQtsQ=="],
+
+    "yrby-forms/yrby-client": ["yrby-client@0.5.0", "", { "dependencies": { "lib0": "^0.2.117" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }, "sha512-04cX0ixPRGY401P60TMdg71xNOK48uBHJGTDM9hTnskertLql7eoxTxxxl8ZnthoG5EDAuGTfSl29fDNjwBAJA=="],
 
     "zeed-dom/entities": ["entities@5.0.0", "", {}, "sha512-BeJFvFRJddxobhvEdm5GqHzRV/X+ACeuw0/BuuxsCh1EUZcAIz8+kYmBp/LrQuloy6K1f3a0M7+IhmZ7QnkISA=="],
 
