@@ -1,4 +1,4 @@
-//! Pure content-reading helpers over yrs shared types — no magnus/Ruby, so they
+//! Pure content-reading helpers over yrs shared types, with no magnus/Ruby, so they
 //! can be unit-tested directly in Rust (like `protocol.rs`). The binding layer in
 //! `lib.rs` is a thin wrapper that opens a transaction and calls these.
 
@@ -18,7 +18,7 @@ use yrs::{
 ///   (`<paragraph>…`). `get_string` already recurses these (tags included; the
 ///   caller strips them), so we keep that path.
 /// - **Lexical** (Lexxy) stores every node as a `Y.XmlText`, and nests child
-///   blocks (list items, table cells, nested lists) as *embedded* `Y.XmlText`s —
+///   blocks (list items, table cells, nested lists) as *embedded* `Y.XmlText`s,
 ///   which `get_string` silently omits, dropping all that content. So for a
 ///   Lexical block we walk its content (`Text::diff`) instead: text runs build a
 ///   line, inline children (links) join it, and nested block children flush the
@@ -34,7 +34,7 @@ pub fn xml_blocks_text<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> String
                 // them (tags kept, caller strips). A Lexical decorator is an
                 // XmlElement *with* a `__type`: attachments carry readable text
                 // (a mention's plain text, an upload's caption); the rest
-                // (horizontal rule) have none — skip rather than emit their
+                // (horizontal rule) have none: skip rather than emit their
                 // `<UNDEFINED …>` serialization.
                 if e.get_attribute(txn, "__type").is_none() {
                     out.push(e.get_string(txn));
@@ -161,7 +161,7 @@ fn walk_lexical_block<T: ReadTxn>(txn: &T, t: &XmlTextRef, out: &mut Vec<String>
 /// Read a `Y.Map` root as a JSON object string (object keys sorted at every
 /// depth for stable, diffable output).
 ///
-/// The complement to `read_text`/`read_xml` for structured state — e.g. a shared
+/// The complement to `read_text`/`read_xml` for structured state, e.g. a shared
 /// "view state" map. Values are converted recursively: primitives pass through;
 /// nested `Y.Map`/`Y.Array` recurse; `Y.Text`/XML values stringify. The caller
 /// parses the JSON (yrs's own `Out::to_json` is crate-private, so we walk the
@@ -187,7 +187,7 @@ pub fn array_json<T: ReadTxn>(txn: &T, array: &ArrayRef) -> String {
 /// `Any::to_json` iterates `Any::Map` (a `HashMap`) in arbitrary order, so a
 /// nested map would serialize unpredictably and differ run to run; sorting here
 /// makes the whole tree deterministic. Scalars defer to `Any::to_json`, which
-/// writes from the start of a buffer (it does not append) — hence each scalar
+/// writes from the start of a buffer (it does not append), hence each scalar
 /// gets its own fresh `String`.
 fn any_to_json(a: &Any) -> String {
     match a {
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn map_json_sorts_nested_object_keys() {
-        // Nested maps sort their keys too, not just the root — yrs stores map
+        // Nested maps sort their keys too, not just the root: yrs stores map
         // entries in a HashMap, so without this the inner object serializes in
         // arbitrary, run-varying order.
         let doc = Doc::new();
@@ -476,8 +476,8 @@ mod tests {
     #[test]
     fn lexxy_full_schema_doc_extracts_attachment_text_too() {
         // The full-schema capture (see lexical_html.rs): attachments must now
-        // contribute readable text — a mention's plain text inline, an
-        // upload's caption as its own line — while the divider stays silent.
+        // contribute readable text (a mention's plain text inline, an
+        // upload's caption as its own line) while the divider stays silent.
         use yrs::updates::decoder::Decode;
         use yrs::{Transact, Update};
         let bytes = include_bytes!("../crates/lexical-html/src/fixtures/lexxy_full.bin");

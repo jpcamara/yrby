@@ -168,7 +168,7 @@ impl RbDoc {
         let doc = &self.0;
         nogvl(move || {
             // Exactly ONE transaction per call. Opening a second while the
-            // first is still held deadlocks against a waiting writer — and
+            // first is still held deadlocks against a waiting writer, and
             // inside nogvl that hang can't be interrupted.
             let txn = doc.transact();
             txn.get_text(name.as_str()).map(|t| t.get_string(&txn))
@@ -202,7 +202,7 @@ impl RbDoc {
 
     /// A `Y.Array` root serialized to a JSON array string (values recursive, in
     /// array order). The counterpart to read_map for documents whose root is an
-    /// array — a board's cards, a sheet's rows. Callers parse the JSON (e.g.
+    /// array: a board's cards, a sheet's rows. Callers parse the JSON (e.g.
     /// `JSON.parse(doc.read_array("cards"))`). The serialization lives in
     /// `read::array_json` (pure, Rust-tested).
     fn read_array(&self, name: String) -> Option<String> {
@@ -215,7 +215,7 @@ impl RbDoc {
     }
 
     /// True if the doc holds un-integrable pending structs or a pending delete
-    /// set — content that couldn't integrate because a causally-prior update is
+    /// set: content that couldn't integrate because a causally-prior update is
     /// missing. Such content is a recovery buffer, not document state; it heals if
     /// the missing dependency later arrives. A pure read.
     fn pending(&self) -> bool {
@@ -225,7 +225,7 @@ impl RbDoc {
 
     /// Like `encode_state_as_update` (full state), but **gap-free**: it excludes
     /// any pending (un-integrable) structs and pending delete set. Use this when
-    /// persisting or serving state that other peers will apply — serving pending
+    /// persisting or serving state that other peers will apply. Serving pending
     /// content poisons their sync. Non-destructive: this doc keeps its pending, so
     /// a genuine gap still heals if its dependency arrives. (`encode_state_as_update`
     /// stays lossless for raw-update recovery.)
@@ -351,12 +351,12 @@ impl RbDoc {
 }
 
 // ============================================================================
-// Y::Lexical — schema-pinned rendering of Lexical/Lexxy documents
+// Y::Lexical: schema-pinned rendering of Lexical/Lexxy documents
 // ============================================================================
 
 /// A Lexical view over a `Y::Doc`. The schema knowledge lives here rather
 /// than on the schema-agnostic `Doc`: core Lexical natively, everything else
-/// through the render rules compiled at construction (see `render_rules` —
+/// through the render rules compiled at construction (see `render_rules`;
 /// the `Y::Lexxy` facade's rule set arrives that way). Holds a cheap clone of
 /// the doc (yrs `Doc` is an Arc handle), so it reads live state.
 ///
@@ -371,7 +371,7 @@ struct RbLexical {
 }
 
 impl RbLexical {
-    /// `Y::NativeLexical.new(doc, rules_json)` — the Y::Lexical facade
+    /// `Y::NativeLexical.new(doc, rules_json)`; the Y::Lexical facade
     /// compiles its `nodes:` config to the rules JSON.
     fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
         Ok(RbLexical {
@@ -381,7 +381,7 @@ impl RbLexical {
     }
 
     /// Render the document's XML root (default `"root"`, Lexical's standard
-    /// collab root name) natively — no Node process or headless editor. The
+    /// collab root name) natively, with no Node process or headless editor. The
     /// native side renders core Lexical plus whatever the rules cover; with
     /// the rule set `Y::Lexxy` passes, output matches Lexxy's own serializer
     /// byte-for-byte on the reference fixtures (see `lexical_html.rs`). Returns nil when the root is missing or not
@@ -400,7 +400,7 @@ impl RbLexical {
         segments_result(segments)
     }
 
-    /// The document's node types as observed facts, JSON-encoded — the
+    /// The document's node types as observed facts, JSON-encoded, the
     /// native half of the facade's `node_types` discovery aid. Nil when the
     /// root is missing or not Lexical-shaped.
     fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
@@ -429,13 +429,13 @@ impl RbLexical {
 }
 
 // ============================================================================
-// Y::ProseMirror — schema-pinned rendering of ProseMirror/Tiptap documents
+// Y::ProseMirror: schema-pinned rendering of ProseMirror/Tiptap documents
 // ============================================================================
 
 /// A ProseMirror view over a `Y::Doc`. The schema knowledge lives here rather
 /// than on the schema-agnostic `Doc`: core ProseMirror natively, everything
 /// else through the render rules compiled at construction (see
-/// `render_rules` — the `Y::Tiptap` facade's rule set arrives that way).
+/// `render_rules`; the `Y::Tiptap` facade's rule set arrives that way).
 /// Holds a cheap clone of the doc (yrs `Doc` is an Arc handle), so it reads
 /// live state.
 ///
@@ -450,7 +450,7 @@ struct RbProseMirror {
 }
 
 impl RbProseMirror {
-    /// `Y::NativeProseMirror.new(doc, rules_json)` — the Y::ProseMirror facade
+    /// `Y::NativeProseMirror.new(doc, rules_json)`; the Y::ProseMirror facade
     /// compiles its `nodes:`/`marks:` config to the rules JSON.
     fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
         Ok(RbProseMirror {
@@ -480,7 +480,7 @@ impl RbProseMirror {
         segments_result(segments)
     }
 
-    /// The document's node types as observed facts, JSON-encoded — the
+    /// The document's node types as observed facts, JSON-encoded, the
     /// native half of the facade's `node_types` discovery aid. Nil when the
     /// root is missing or not ProseMirror-shaped.
     fn node_types(&self, args: &[Value]) -> Result<Value, Error> {

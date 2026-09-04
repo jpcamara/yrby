@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 module Y
-  # The Tiptap renderer: Y::ProseMirror (core ProseMirror — schema-basic plus
-  # tables) plus Tiptap's extension nodes, applied beneath the app's rules —
+  # The Tiptap renderer: Y::ProseMirror (core ProseMirror, schema-basic plus
+  # tables) plus Tiptap's extension nodes, applied beneath the app's rules,
   # an app rule for one of these types simply replaces it. This is the
   # byte-parity class: the fixture tests hold `Y::Tiptap.new(doc).to_html`
   # identical to a live editor's own `getHTML()`.
   #
   # Tiptap's marks (underline, highlight, sub/superscript, textStyle) render
-  # natively in the base class — mark serialization is text-run machinery
+  # natively in the base class: mark serialization is text-run machinery
   # the rule system can't express.
   class Tiptap < ProseMirror
     # Tiptap's TaskItem markup: the data-checked flag (false when unset), a
