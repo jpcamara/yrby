@@ -57,7 +57,7 @@ module Y
     class_methods do
       # Declares which storage class backs one collaborative attribute.
       # Encryption is a property of the attribute's storage, so it is
-      # declared here on the model — never by the page or the client:
+      # declared here on the model, never by the page or the client:
       #
       #   has_collaborative_document :body, encrypted: true
       #
@@ -71,7 +71,7 @@ module Y
         ).freeze
       end
 
-      # The storage class for one attribute — the declared one, or plain
+      # The storage class for one attribute: the declared one, or plain
       # Y::Document. Everything server-side must go through this one class
       # per attribute: rows written encrypted read back as ciphertext
       # through the plain classes.
@@ -81,7 +81,7 @@ module Y
     end
 
     # A signed token a channel can trade back for this record with
-    # Y::Collaborative.locate — but only for this attribute.
+    # Y::Collaborative.locate, but only for this attribute.
     def collaborative_sgid(name)
       to_sgid(for: Y::Collaborative.sgid_purpose(name)).to_s
     end

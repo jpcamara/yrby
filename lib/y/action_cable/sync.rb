@@ -134,7 +134,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # Call from `subscribed`. Authorizes the subscriber (see #authorized?),
     # then streams broadcasts for this document and transmits the server's
     # opening handshake (SyncStep1 from the store). Rejects and returns false
-    # when authorized? refuses — including always, until the channel defines it.
+    # when authorized? refuses, including always, until the channel defines it.
     def sync_subscribed(key)
       @sync_key = key.to_s
       sync_validate_required_hooks!
@@ -225,12 +225,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     # The subscription was refused. When the refusal came from the default
-    # authorized? (the channel never defined one), say how to fix it — that is
+    # authorized? (the channel never defined one), say how to fix it. That is
     # the difference between fail-closed and mysteriously broken.
     def sync_reject_unauthorized
       logger.info do
         hint = if method(:authorized?).owner == Sync
-                 "; no authorized? defined — define authorized?(key) in this channel, " \
+                 "; no authorized? defined: define authorized?(key) in this channel, " \
                    "returning true deliberately for public documents"
                end
         "[yrby] subscription rejected key=#{@sync_key.inspect}#{hint}"

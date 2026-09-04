@@ -12,8 +12,8 @@ module Y
     #   <yrby-document grant="<signed sgid>" name="body"></yrby-document>
     #
     # Importing "yrby-client/element" registers it; it subscribes itself to
-    # the gem-shipped Y::DocumentChannel — the way turbo_stream_from's element
-    # subscribes itself to Turbo::StreamsChannel — and hands your code the
+    # the gem-shipped Y::DocumentChannel (the way turbo_stream_from's element
+    # subscribes itself to Turbo::StreamsChannel) and hands your code the
     # synced Y.Doc through its `doc` property and `yrby:synced` event.
     #
     # The grant is a signed GlobalID scoped to this record and attribute

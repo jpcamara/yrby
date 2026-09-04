@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Y
-  # The gem-shipped channel behind collaborative_document_tag — the whole wire
+  # The gem-shipped channel behind collaborative_document_tag: the whole wire
   # side of a record-backed collaborative document, the way Turbo::StreamsChannel
   # is the whole wire side of a turbo_stream_from subscription. Apps subscribe
   # to it by name ("Y::DocumentChannel") with the grant the tag rendered; there
@@ -12,7 +12,7 @@ module Y
   # the document is whatever that grant verifies to. Authorization happened
   # when your controller decided to render the tag; the grant carries that
   # decision to the socket. A missing, tampered, expired, or wrong-attribute
-  # grant — or one whose record no longer exists — is rejected.
+  # grant (or one whose record no longer exists) is rejected.
   #
   # Storage follows the record's declaration: an attribute the model marked
   # `has_collaborative_document :name, encrypted: true` routes every load and
@@ -21,7 +21,7 @@ module Y
   # is recorded there before it is acknowledged or broadcast. Anything else
   # (custom stores, room-keyed documents) means writing your own channel
   # (see the yrby-rails README).
-  # ::ActionCable, explicitly — inside module Y a bare ActionCable resolves
+  # ::ActionCable, explicitly: inside module Y a bare ActionCable resolves
   # to the gem's own Y::ActionCable concern.
   class DocumentChannel < ::ActionCable::Channel::Base
     include Y::ActionCable
@@ -48,7 +48,7 @@ module Y
     end
 
     # One access path per document: the class the model declared for this
-    # attribute decides the cryptography — for the binding, every load, and
+    # attribute decides the cryptography: for the binding, every load, and
     # every append alike.
     def storage
       record ? record.class.collaborative_document_class(params[:name]) : Y::Document
