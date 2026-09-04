@@ -450,3 +450,37 @@ test("bfcache: a non-persisted pageshow (normal load) does not resurrect stale p
 
   assert.equal(p.awareness.getLocalState(), null, "no restore on a normal load");
 });
+
+test("presence survives an explicit disconnect/connect cycle", (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "rc1" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalStateField("user", "ada");
+
+  p.disconnect();
+  assert.equal(p.awareness.getLocalState(), null, "peers drop us while we're gone");
+
+  p.connect();
+  c.deliverConnected();
+
+  assert.deepEqual(p.awareness.getLocalState(), { user: "ada" }, "presence comes back");
+  // setLocalStateField is a no-op on null local state, so an app updating
+  // presence after a reconnect would otherwise stay invisible for good.
+  p.awareness.setLocalStateField("cell", "a1");
+  assert.deepEqual(p.awareness.getLocalState(), { user: "ada", cell: "a1" });
+});
+
+test("a reconnect never overwrites presence the app set in the meantime", (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "rc2" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalStateField("user", "ada");
+
+  p.disconnect();
+  p.awareness.setLocalState({ user: "grace" }); // signed in as someone else
+  p.connect();
+
+  assert.deepEqual(p.awareness.getLocalState(), { user: "grace" }, "the app's state wins");
+});
