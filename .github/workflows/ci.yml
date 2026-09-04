@@ -265,7 +265,13 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
           working-directory: site
+      - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
+
+      # The site depends on the gems by path, so the native extension has to be
+      # built before Rails can boot.
+      - name: Build the extension
+        run: bundle install && bundle exec rake compile
 
       - name: RuboCop
         working-directory: site
