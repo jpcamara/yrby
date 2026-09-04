@@ -105,7 +105,7 @@ class ConnectionGuard
   end
 
   # Record a connection's identity (its throttle IP and slot token) at connect,
-  # so the sweep can free its connection slot if it leaks. Creates the guard 
+  # so the sweep can free its connection slot if it leaks. Creates the guard
   # (every accepted connection gets one) and stamps it live.
   def register(connection_id, ip, slot_token, now = monotonic)
     @mutex.synchronize do

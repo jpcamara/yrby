@@ -1,11 +1,9 @@
 class PagesController < ApplicationController
   before_action :cache_page
 
-  def index
-  end
+  def index; end
 
-  def lexxy
-  end
+  def lexxy; end
 
   private
 

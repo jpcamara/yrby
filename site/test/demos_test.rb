@@ -216,9 +216,11 @@ class DemosTest < ActionDispatch::IntegrationTest
 
   test "the stored endpoint rejects unknown demos and malformed rooms" do
     get "/demos/wiki/room1/stored"
+
     assert_response :not_found
 
     get "/demos/kanban/#{"a" * 33}/stored"
+
     assert_response :not_found
   end
 

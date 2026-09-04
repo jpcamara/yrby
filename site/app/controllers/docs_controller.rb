@@ -8,7 +8,7 @@ class DocsController < ApplicationController
     cache_publicly
     respond_to do |format|
       format.html { render :show }
-      # The raw markdown, for `Accept: text/markdown` and `/docs/:page.md`, 
+      # The raw markdown, for `Accept: text/markdown` and `/docs/:page.md`,
       # the format coding agents read best. Nearly free: DocPage already holds
       # the source.
       format.md do

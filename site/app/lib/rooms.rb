@@ -103,7 +103,7 @@ class Rooms
   end
 
   # The document size cap. The true size is state bytes plus tail bytes in the
-  # database, but querying it on every frame would put a SUM on the hot path, 
+  # database, but querying it on every frame would put a SUM on the hot path,
   # and querying it every few seconds would leave a flood window: at the frame
   # cap a hostile client can append megabytes between refreshes.
   #
