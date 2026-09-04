@@ -41,6 +41,7 @@ end
 
 gem "yrby", path: "../.."
 gem "yrby-rails", path: "../.."
+gem "yrby-forms", path: "../.."
 
 # AnyCable (multi-process WebSocket server) — for the AnyCable harness/test
 gem "anycable-rails", "~> 1.6"

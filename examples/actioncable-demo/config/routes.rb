@@ -10,6 +10,11 @@ Rails.application.routes.draw do
   get "docs/:id/kanban", to: "documents#kanban", as: :document_kanban
   get "docs/:id/forms", to: "documents#forms", as: :document_forms
   get "docs/:id/spreadsheet", to: "documents#spreadsheet", as: :document_spreadsheet
+  # yrby-forms: a plain Rails form whose fields collaborate (own model +
+  # FormFieldsChannel + Y::Document storage, unlike the docs pages' Store).
+  get "tickets/:id", to: "tickets#show", as: :ticket
+  get "tickets/:id/state", to: "tickets#state", as: :ticket_state
+
   get "docs/:id/content", to: "documents#content", as: :document_content
   get "docs/:id/audit", to: "documents#audit", as: :document_audit
   # DEMO/TEST ONLY — never mount in production. One anonymous POST can wipe a

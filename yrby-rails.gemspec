@@ -17,6 +17,8 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
 
+  # The yrby-forms files are excluded the same way the core gem excludes
+  # this gem's: they ship in yrby-forms only.
   spec.files = Dir[
     "lib/yrby-rails.rb",
     "lib/yrby/**/*.rb",
@@ -27,7 +29,7 @@ Gem::Specification.new do |spec|
     "LICENSE",
     "README.md",
     "CHANGELOG-rails.md"
-  ]
+  ] - Dir["lib/yrby/forms/**/*", "lib/generators/yrby_forms{,/**/*}"]
   spec.require_paths = ["lib"]
 
   spec.metadata["source_code_uri"] = spec.homepage

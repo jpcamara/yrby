@@ -149,6 +149,32 @@ const deleteRetry = (() => {
   return { content: b64(content), deletion: b64(deletion) }
 })()
 
+// Fixture 12: a collaborative form-field document, laid out the way yrby-forms
+// writes it: one "fields" map share holding the LWW entries, one Y.Text share
+// per text-tier field ("fields/summary", "fields/description"). The map also
+// carries a real-but-undeclared column name ("title") and an invented key
+// ("hacked"), so the materializer's declared-fields-only filter is testable.
+// STATUS_DONE is a later incremental map write to status (last write wins).
+const formFields = (() => {
+  const doc = new Y.Doc()
+  doc.clientID = 1
+  const updates = []
+  doc.on("update", (u) => updates.push(u))
+  doc.transact(() => {
+    const fields = doc.getMap("fields")
+    fields.set("status", "active")
+    fields.set("priority", 7)
+    fields.set("urgent", true)
+    fields.set("due_on", "2026-09-01")
+    fields.set("title", "not yours")
+    fields.set("hacked", "x")
+    doc.getText("fields/summary").insert(0, "Fix the flaky spec")
+    doc.getText("fields/description").insert(0, "It fails on Tuesdays.")
+  })
+  doc.transact(() => doc.getMap("fields").set("status", "done"))
+  return { full: b64(updates[0]), statusDone: b64(updates[1]) }
+})()
+
 // Fixture 7: a real awareness (presence) message frame, client 42 with a user
 // and cursor, exactly as a browser client emits it: MSG_AWARENESS (1) wrapping
 // an encoded awareness update.
@@ -281,6 +307,20 @@ module YjsFixtures
   module CrossClientOrigin
     CONTENT = YjsFixtures.b64("${crossClientOrigin.content}")
     DELTA = YjsFixtures.b64("${crossClientOrigin.delta}")
+  end
+
+  # Fixture 12: a collaborative form-field document, laid out the way
+  # yrby-forms writes it: one "fields" map share holding the LWW entries
+  # (status "active", priority 7, urgent true, due_on "2026-09-01"), one
+  # Y.Text share per text-tier field ("fields/summary" = "Fix the flaky
+  # spec", "fields/description" = "It fails on Tuesdays."). The map also
+  # carries a real-but-undeclared column name ("title") and an invented key
+  # ("hacked"), so the materializer's declared-fields-only filter is
+  # testable. STATUS_DONE is a later incremental map write to status (last
+  # write wins).
+  module FormFields
+    FULL = YjsFixtures.b64("${formFields.full}")
+    STATUS_DONE = YjsFixtures.b64("${formFields.statusDone}")
   end
 end
 `

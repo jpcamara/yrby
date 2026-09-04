@@ -75,6 +75,24 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  forms:
+    name: yrby-forms (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        node: ["20", "22"]
+    defaults:
+      run:
+        working-directory: packages/forms
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm test
+
   demo:
     name: Demo e2e (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest
@@ -142,6 +160,9 @@ jobs:
       - name: Build yrby-client package
         working-directory: packages/client
         run: npm ci && npm run build
+      - name: Build yrby-forms package
+        working-directory: packages/forms
+        run: npm ci && npm run build
       - name: Build frontend bundle
         working-directory: examples/actioncable-demo/frontend
         run: bun install && bun run build
@@ -201,6 +222,12 @@ jobs:
           # document, and that a peer's focused cell shows up in the other
           # browser.
           PORT=3777 node frontend/spreadsheet_e2e.mjs
+          # yrby-forms: the packaged <collaborative-form>/<collaborative-field>
+          # elements over a real Rails form (tickets page). Two real browsers:
+          # the LWW field converges last-write-wins, the text field merges
+          # concurrent typing, presence outlines the peer's field, and the
+          # materialized columns match what the clients converged on.
+          PORT=3777 node frontend/form_fields_e2e.mjs
           kill "$(cat /tmp/puma.pid)" || true
 
       # Re-run the same slice under a multi-process Falcon deployment (2 fiber

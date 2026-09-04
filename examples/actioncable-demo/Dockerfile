@@ -48,10 +48,11 @@ RUN cd /src/yrby \
  && bundle install \
  && bundle exec rake compile
 
-# yrby-client (a file: dep of the front end) ships from a `dist/` that is NOT
-# committed and has no install-time build hook, so build it explicitly first --
-# the demo's `bun install` then copies the fresh dist.
+# yrby-client and yrby-forms (file: deps of the front end) ship from `dist/`
+# dirs that are NOT committed and have no install-time build hook, so build
+# them explicitly first -- the demo's `bun install` then copies the fresh dist.
 RUN cd /src/yrby/packages/client && bun install && bun run build
+RUN cd /src/yrby/packages/forms && bun install && bun run build
 
 WORKDIR /src/yrby/examples/actioncable-demo
 

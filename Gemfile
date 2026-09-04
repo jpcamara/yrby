@@ -4,6 +4,7 @@ source "https://rubygems.org"
 
 gemspec name: "yrby"
 gemspec name: "yrby-rails"
+gemspec name: "yrby-forms"
 
 # Fiber scheduler used by test/fiber_scheduler_test.rb to drive the native
 # extension inside an Async reactor (the server shape under Falcon).

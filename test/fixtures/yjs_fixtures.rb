@@ -110,4 +110,18 @@ module YjsFixtures
     CONTENT = YjsFixtures.b64("AQEDAAQBAXQDYWJjAA==")
     DELTA = YjsFixtures.b64("AQEBAMQDAAMBAVgA")
   end
+
+  # Fixture 12: a collaborative form-field document, laid out the way
+  # yrby-forms writes it: one "fields" map share holding the LWW entries
+  # (status "active", priority 7, urgent true, due_on "2026-09-01"), one
+  # Y.Text share per text-tier field ("fields/summary" = "Fix the flaky
+  # spec", "fields/description" = "It fails on Tuesdays."). The map also
+  # carries a real-but-undeclared column name ("title") and an invented key
+  # ("hacked"), so the materializer's declared-fields-only filter is
+  # testable. STATUS_DONE is a later incremental map write to status (last
+  # write wins).
+  module FormFields
+    FULL = YjsFixtures.b64("AQgBACgBBmZpZWxkcwZzdGF0dXMBdwZhY3RpdmUoAQZmaWVsZHMIcHJpb3JpdHkBfQcoAQZmaWVsZHMGdXJnZW50AXgoAQZmaWVsZHMGZHVlX29uAXcKMjAyNi0wOS0wMSgBBmZpZWxkcwV0aXRsZQF3CW5vdCB5b3VycygBBmZpZWxkcwZoYWNrZWQBdwF4BAEOZmllbGRzL3N1bW1hcnkSRml4IHRoZSBmbGFreSBzcGVjBAESZmllbGRzL2Rlc2NyaXB0aW9uFUl0IGZhaWxzIG9uIFR1ZXNkYXlzLgA=")
+    STATUS_DONE = YjsFixtures.b64("AQEBLagBAAF3BGRvbmUBAQEAAQ==")
+  end
 end
