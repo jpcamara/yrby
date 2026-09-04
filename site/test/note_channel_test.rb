@@ -44,7 +44,7 @@ class NoteChannelTest < ActionCable::Channel::TestCase
 
   test "a token minted for another field is rejected" do
     # The verifier is keyed by the field-scoped purpose, so a body token does
-    # not verify under a different field — the gem's field scoping.
+    # not verify under a different field: the gem's field scoping.
     subscribe token: Note.room_token(ROOM, :title), field: "body"
 
     assert_predicate subscription, :rejected?

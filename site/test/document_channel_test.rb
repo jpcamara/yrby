@@ -34,7 +34,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert transmissions.any? { |m| m["update"].present? }, "expected a SyncStep1 handshake"
   end
 
-  test "a raw document key is rejected — clients cannot name documents" do
+  test "a raw document key is rejected: clients cannot name documents" do
     subscribe id: KEY
 
     assert_predicate subscription, :rejected?

@@ -58,7 +58,7 @@ class ConnectionGuardTest < ActiveSupport::TestCase
 
     assert_not guard.take_frame(CID, 0), "over the burst, at the same instant"
 
-    # Re-subscribing must not refill the frame bucket — the reset/multiply hole.
+    # Re-subscribing must not refill the frame bucket: the reset/multiply hole.
     guard.release_subscription(CID, "tiptap/a", 0)
     guard.admit_subscription(CID, "tiptap/b", 0)
 

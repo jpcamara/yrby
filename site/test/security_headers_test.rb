@@ -12,7 +12,7 @@ class SecurityHeadersTest < ActionDispatch::IntegrationTest
     assert_predicate csp, :present?, "every response must carry a CSP"
     assert_includes csp, "script-src 'self'"
     assert_not_includes csp, "script-src 'self' 'unsafe-inline'",
-                        "script-src must be strict — no inline scripts anywhere"
+                        "script-src must be strict: no inline scripts anywhere"
     assert_includes csp, "frame-ancestors 'none'"
     assert_includes csp, "object-src 'none'"
     assert_includes csp, "base-uri 'self'"

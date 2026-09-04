@@ -37,7 +37,7 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
     limiter.acquire("1.2.3.4")
     limiter.release("1.2.3.4", "not-a-real-token")
 
-    # The live slot is untouched — no wrongful decrement, no freeing another
+    # The live slot is untouched: no wrongful decrement, no freeing another
     # connection's slot.
     assert_equal 1, limiter.count("1.2.3.4")
     assert_equal 1, limiter.total
@@ -78,7 +78,7 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
     assert_equal 50, limiter.total
   end
 
-  test "the limiter never reaps a slot by age — a held slot stays held" do
+  test "the limiter never reaps a slot by age: a held slot stays held" do
     # A slot is a leak only when its connection is silent past the TTL, and that
     # liveness lives in the ConnectionGuard, not here (which cannot see frames).
     # This ledger frees a slot only on release; a long-open reader is never

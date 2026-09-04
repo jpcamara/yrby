@@ -17,7 +17,7 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
       assert_not Object.const_defined?(framework), "#{framework} should not be loaded"
     end
 
-    # Action Text must never be loaded — lexxy-realtime's Collaborative
+    # Action Text must never be loaded: lexxy-realtime's Collaborative
     # concern capability-detects it (`if respond_to?(:has_rich_text)`), and
     # this app relies on the plain-column path. ActionText::TagHelper is the
     # probe rather than the bare module name because loading the lexxy gem's

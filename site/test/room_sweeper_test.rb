@@ -21,7 +21,7 @@ class RoomSweeperTest < ActiveSupport::TestCase
   test "a room with a recent write is kept even if the document row is old" do
     document = make_room("tiptap/active", age: 2.hours)
     # A new append: the document row's updated_at stays old (appends don't
-    # touch it), but the update row is fresh — that must count as activity.
+    # touch it), but the update row is fresh: that must count as activity.
     document.updates.create!(payload: Updates::CHAIN[0])
 
     assert_empty RoomSweeper.run_once(ttl: 1.hour)

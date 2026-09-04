@@ -43,7 +43,7 @@ class RackAttackTest < ActionDispatch::IntegrationTest
   test "the authenticated RPC endpoint is reached and never throttled" do
     # Every WebSocket command arrives here from the embedded Go server carrying
     # the bearer, so this path carries the cable's whole message volume.
-    # Throttling it by IP would throttle the site itself, so it is safelisted —
+    # Throttling it by IP would throttle the site itself, so it is safelisted,
     # and a flood of it must not consume a visitor's page budget either.
     headers = { "Authorization" => Rack::Attack.rpc_bearer }
     (Limits::PAGE_REQUESTS + 5).times { post "/_anycable/connect", headers: headers }

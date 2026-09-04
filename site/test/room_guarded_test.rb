@@ -8,7 +8,7 @@ require "test_helper"
 # check in frontend/raw_ws_whisper_check.mjs; this pins the method's contract.
 class RoomGuardedTest < ActiveSupport::TestCase
   # A probe with a stream_from that records its calls, and RoomGuarded's own
-  # stream_from spliced in above it — so a call lands on the override first and
+  # stream_from spliced in above it, so a call lands on the override first and
   # falls through to `super` here, exactly as it does on a real channel. Built
   # this way to exercise the one method without the channel/Concern machinery.
   def probe
