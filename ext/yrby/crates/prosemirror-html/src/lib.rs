@@ -1,40 +1,45 @@
-//! Native HTML rendering of ProseMirror/Tiptap documents from the yrs collab
-//! structure — no Node process, no headless editor.
+//! HTML for ProseMirror and Tiptap documents, rendered from the Yjs
+//! structure the editor syncs. No Node process and no headless editor.
 //!
-//! The y-prosemirror binding stores a document in a Y.XmlFragment: block nodes
-//! are Y.XmlElement (the tag is the node type, its attributes are the node
-//! attrs), and text is Y.XmlText whose per-run formatting attributes are the
-//! marks. Node and mark names come from the editor's schema, so this accepts
-//! both spellings in use: Tiptap's camelCase (`bulletList`, `bold`) and the
-//! prosemirror-schema-basic snake_case (`bullet_list`, `strong`).
+//! The y-prosemirror binding stores a document in a `Y.XmlFragment`. Block
+//! nodes are `Y.XmlElement`s: the tag is the node type and the attributes
+//! are the node attrs. Text is `Y.XmlText`, and each run's formatting
+//! attributes are its marks. Node and mark names come from the editor's
+//! schema, so both spellings are accepted: Tiptap's camelCase (`bulletList`,
+//! `bold`) and prosemirror-schema-basic's snake_case (`bullet_list`,
+//! `strong`).
 //!
-//! This renders **core ProseMirror**: the prosemirror-schema-basic node set
-//! plus the prosemirror-tables family — paragraphs, headings, blockquotes,
-//! code blocks, bullet/ordered lists, images, hard breaks, horizontal rules,
-//! and tables (semantic `<table><tbody>…`, without the `<colgroup>`/
-//! `min-width` styling editor views inject). Tiptap's extension nodes — task
-//! lists, mentions, the details family — live in the Ruby layer as the
-//! `Y::Tiptap` renderer's rule set, built on the same extension API apps use
-//! (`Y::ProseMirror` is the core base class). Output follows
-//! `ueberdosis/tiptap-php`, and with `Y::Tiptap`'s rules it matches Tiptap's
-//! own `getHTML()` byte for byte on the captured fixtures — that guarantee
-//! is held at the Ruby layer; the native tests pin core output as goldens
-//! where a fixture contains Tiptap-only nodes.
+//! This renders core ProseMirror: the prosemirror-schema-basic node set plus
+//! the prosemirror-tables family. That is paragraphs, headings, blockquotes,
+//! code blocks, bullet and ordered lists, images, hard breaks, horizontal
+//! rules, and tables as semantic `<table><tbody>…`, without the
+//! `<colgroup>` and `min-width` styling an editor view injects. Tiptap's
+//! extension nodes (task lists, mentions, the details family) live in the
+//! Ruby layer as the `Y::Tiptap` renderer's rule set, built on the same
+//! extension API applications use. `Y::ProseMirror` is the core base class.
+//! The output follows `ueberdosis/tiptap-php`. With `Y::Tiptap`'s rules it
+//! matches Tiptap's own `getHTML()` byte for byte on the captured fixtures.
+//! That guarantee is held at the Ruby layer. Where a fixture contains
+//! Tiptap-only nodes, the tests here pin core output as goldens.
 //!
-//! Marks stay native on purpose: mark serialization is text-run machinery
-//! (nesting order, textStyle's CSS, code's exclusivity), which the rule
-//! system can't express. The built-in set covers schema-basic's marks and
-//! Tiptap's — nesting outermost-first: link, a textStyle span, bold, italic,
-//! strike, underline, highlight, then subscript/superscript. `code` excludes
-//! the other formatting marks, so a code run is `<code>` alone — though a
+//! Marks stay native on purpose. Mark serialization is text-run machinery
+//! (nesting order, textStyle's CSS, code's exclusivity) that the rule system
+//! cannot express. The built-in set covers schema-basic's marks and
+//! Tiptap's, nested outermost-first: link, a textStyle span, bold, italic,
+//! strike, underline, highlight, then subscript and superscript. `code`
+//! excludes the other formatting marks, so a code run is `<code>` alone. A
 //! link still wraps it (see `render_run`).
 //!
-//! Custom nodes and marks: apps register rules by node type and mark name
-//! (see `render_rules`). A node rule is consulted before the built-in arms, so
-//! it can extend the schema or override a built-in; a mark rule claims its
-//! mark from the built-in wraps and wraps outside everything, link included.
-//! Declarative rules render here; callback rules emit `Segment::Deferred` for
-//! the caller to fill in after the render.
+//! A node type with no rule still renders its text and child blocks, just
+//! unwrapped.
+//!
+//! Applications register custom nodes and marks as rules keyed by node type
+//! and mark name (see `render_rules`). A node rule is consulted before the
+//! built-in arms, so it can extend the schema or replace a built-in. A mark
+//! rule claims its mark from the built-in wraps and wraps outside
+//! everything, link included. Declarative rules render here. Callback rules
+//! emit `Segment::Deferred` for the caller to fill in after the render
+//! returns.
 
 // README examples are living code: compile-checked on every cargo test.
 #[cfg(doctest)]
@@ -42,10 +47,10 @@
 mod readme_examples {}
 
 // The full rules surface, re-exported: depend on this crate alone;
-// yrs-html-core is an internal implementation crate.
-pub use yrs_html_core::*;
-use yrs::types::text::YChange;
+// yjs-html-core is an internal implementation crate.
+pub use yjs_html_core::*;
 use yrs::types::Attrs;
+use yrs::types::text::YChange;
 use yrs::{
     Any, GetString, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut,
     XmlTextRef,
@@ -105,7 +110,7 @@ pub fn render_segments<T: ReadTxn>(
 /// callback rules, segments always flatten.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
-        yrs_html_core::flatten(segs)
+        yjs_html_core::flatten(segs)
             .into_html()
             .expect("no callback rules registered")
     })
@@ -605,102 +610,120 @@ fn render_rule_inline<T: ReadTxn>(
     em.push('>');
 }
 
-/// Emit each formatted run of a Y.XmlText.
+/// Emit the formatted runs of a Y.XmlText, keeping marks shared by
+/// adjacent runs open across them: `bold` then `bold italic` renders as
+/// `<strong>a<em>b</em></strong>`, the way the editor's DOM serializer
+/// keeps an active mark open into the next run, not as two sibling
+/// `<strong>` wraps. Sharing is by identical opening tag, so a mark whose
+/// attributes differ between runs (a different href, a different style)
+/// never merges.
 fn render_text_runs<T: ReadTxn>(txn: &T, t: &XmlTextRef, em: &mut Emitter, rules: &Rules) {
+    let mut open: Vec<(String, String)> = Vec::new();
     for d in t.diff(txn, YChange::identity) {
         if let Out::Any(Any::String(s)) = &d.insert {
-            em.push_str(&render_run(s, d.attributes.as_deref(), rules));
+            let stack = run_stack(d.attributes.as_deref(), rules);
+            let shared = open
+                .iter()
+                .zip(stack.iter())
+                .take_while(|(a, b)| a == b)
+                .count();
+            for (_, close) in open.split_off(shared).into_iter().rev() {
+                em.push_str(&close);
+            }
+            for (open_tag, _) in &stack[shared..] {
+                em.push_str(open_tag);
+            }
+            open = stack;
+            em.push_str(&escape_text(s));
         }
+    }
+    for (_, close) in open.into_iter().rev() {
+        em.push_str(&close);
     }
 }
 
-/// Wrap one text run in its marks, nesting innermost-first:
-/// subscript/superscript, highlight, underline, strike, italic, bold, a
-/// textStyle span, then link on the outside. `code` renders alone among the
-/// formatting marks (Tiptap's Code mark excludes them all), but a link still
-/// wraps it — Tiptap can't produce code+link, prosemirror-schema-basic can,
-/// and dropping the link would lose the href.
-///
-/// A registered mark rule claims its stored name from the built-in wraps
-/// (overriding it) and wraps outside everything; multiple custom marks nest
-/// alphabetically by name, so output is deterministic regardless of
-/// registration order. Overriding replaces only the markup: a claimed
-/// `code` still excludes the other formatting marks, and a claimed
-/// formatting mark stays excluded from a code run.
-fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
-    let mut html = escape_text(text);
+/// The run's mark wrappers as (open tag, close tag) pairs, outermost
+/// first: registered custom marks (reverse-alphabetical, so the last name
+/// alphabetically is outermost), link, the textStyle span, then bold,
+/// italic, strike, underline, highlight, and innermost
+/// subscript/superscript — or `code` alone in their place.
+fn run_stack(marks: Option<&Attrs>, rules: &Rules) -> Vec<(String, String)> {
     let Some(marks) = marks else {
-        return html;
+        return Vec::new();
     };
+    // Innermost first, reversed at the end.
+    let mut stack: Vec<(String, String)> = Vec::new();
+    let tag = |t: &str| (format!("<{t}>"), format!("</{t}>"));
     if has(marks, &["code"], rules) {
-        html = wrap(html, "code");
+        stack.push(tag("code"));
     } else if !marks.contains_key("code") {
         // (A claimed `code` lands here too — on the run, but skipped by the
-        // else-if: the rule replaces the wrap, via wrap_custom_marks below,
+        // else-if: the rule replaces the wrap, via the custom marks below,
         // and code's exclusivity over the other formatting marks holds.)
         if has(marks, &["subscript", "sub"], rules) {
-            html = wrap(html, "sub");
+            stack.push(tag("sub"));
         } else if has(marks, &["superscript", "sup"], rules) {
-            html = wrap(html, "sup");
+            stack.push(tag("sup"));
         }
         if has(marks, &["highlight"], rules) {
-            html = wrap(html, "mark");
+            stack.push(tag("mark"));
         }
         if has(marks, &["underline", "u"], rules) {
-            html = wrap(html, "u");
+            stack.push(tag("u"));
         }
         if has(marks, &["strike", "s"], rules) {
-            html = wrap(html, "s");
+            stack.push(tag("s"));
         }
         if has(marks, &["italic", "em"], rules) {
-            html = wrap(html, "em");
+            stack.push(tag("em"));
         }
         if has(marks, &["bold", "strong"], rules) {
-            html = wrap(html, "strong");
+            stack.push(tag("strong"));
         }
         if !rules.marks.contains_key("textStyle") {
             if let Some(Any::Map(style)) = marks.get("textStyle") {
                 let css = text_style_css(style);
                 if !css.is_empty() {
-                    html = format!("<span style=\"{}\">{html}</span>", escape_attr(&css));
+                    stack.push((
+                        format!("<span style=\"{}\">", escape_attr(&css)),
+                        "</span>".to_string(),
+                    ));
                 }
             }
         }
     }
     if !rules.marks.contains_key("link") {
         if let Some(Any::Map(link)) = marks.get("link") {
-            html = wrap_link(html, link);
+            stack.push((link_open(link), "</a>".to_string()));
         }
     }
     if !rules.marks.is_empty() {
-        html = wrap_custom_marks(html, marks, rules);
+        let code = marks.contains_key("code");
+        let mut names: Vec<&str> = rules
+            .marks
+            .keys()
+            .map(String::as_str)
+            .filter(|name| marks.contains_key(*name))
+            .filter(|name| !code || matches!(*name, "code" | "link"))
+            .collect();
+        names.sort_unstable();
+        for name in names {
+            let rule = &rules.marks[name];
+            stack.push((
+                custom_mark_open(rule, marks.get(name)),
+                format!("</{}>", rule.tag),
+            ));
+        }
     }
-    html
+    stack.reverse();
+    stack
 }
 
-/// Apply the run's registered custom marks, outermost of everything. A code
-/// run keeps its exclusivity under overrides too: only the `code` and `link`
-/// claims themselves may wrap it, matching what the built-in wraps allow —
-/// otherwise overriding a formatting mark would change which marks render on
-/// a code run, not just their markup.
-fn wrap_custom_marks(html: String, marks: &Attrs, rules: &Rules) -> String {
-    let code = marks.contains_key("code");
-    let mut names: Vec<&str> = rules
-        .marks
-        .keys()
-        .map(String::as_str)
-        .filter(|name| marks.contains_key(*name))
-        .filter(|name| !code || matches!(*name, "code" | "link"))
-        .collect();
-    names.sort_unstable();
-    let mut html = html;
-    for name in names {
-        html = wrap_custom_mark(html, &rules.marks[name], marks.get(name));
-    }
-    html
-}
-
-fn wrap_custom_mark(inner: String, rule: &MarkRule, value: Option<&Any>) -> String {
+/// The opening tag for a registered custom mark. Custom marks sit outside
+/// everything; a code run keeps its exclusivity under overrides too: only
+/// the `code` and `link` claims themselves may wrap it, matching what the
+/// built-in wraps allow.
+fn custom_mark_open(rule: &MarkRule, value: Option<&Any>) -> String {
     let mut out = String::from("<");
     out.push_str(&rule.tag);
     for (attr, parts) in &rule.attrs {
@@ -709,13 +732,9 @@ fn wrap_custom_mark(inner: String, rule: &MarkRule, value: Option<&Any>) -> Stri
             out.push_str(attr);
             out.push_str("=\"");
             out.push_str(&escape_attr(&v));
-            out.push('"');
+            out.push('\"');
         }
     }
-    out.push('>');
-    out.push_str(&inner);
-    out.push_str("</");
-    out.push_str(&rule.tag);
     out.push('>');
     out
 }
@@ -790,7 +809,7 @@ fn hex_to_rgb(value: &str) -> Option<String> {
 
 /// `<a>` with Tiptap's attribute order (target, rel, class, href, title),
 /// skipping any that are absent or null.
-fn wrap_link(inner: String, link: &std::collections::HashMap<String, Any>) -> String {
+fn link_open(link: &std::collections::HashMap<String, Any>) -> String {
     let mut out = String::from("<a");
     for key in ["target", "rel", "class", "href", "title"] {
         if let Some(Any::String(v)) = link.get(key) {
@@ -802,8 +821,6 @@ fn wrap_link(inner: String, link: &std::collections::HashMap<String, Any>) -> St
         }
     }
     out.push('>');
-    out.push_str(&inner);
-    out.push_str("</a>");
     out
 }
 
@@ -820,10 +837,6 @@ fn render_image<T: ReadTxn>(txn: &T, e: &XmlElementRef, em: &mut Emitter) {
         }
     }
     em.push('>');
-}
-
-fn wrap(inner: String, tag: &str) -> String {
-    format!("<{tag}>{inner}</{tag}>")
 }
 
 /// A mark is present and not claimed by a registered rule for that stored
@@ -903,8 +916,42 @@ mod tests {
         a
     }
 
+    /// Single-run rendering for the mark unit tests: the run's full
+    /// open/close stack around the escaped text.
+    fn render_run(text: &str, marks: Option<&Attrs>, rules: &Rules) -> String {
+        let stack = run_stack(marks, rules);
+        let mut html: String = stack.iter().map(|(open, _)| open.as_str()).collect();
+        html.push_str(&escape_text(text));
+        for (_, close) in stack.iter().rev() {
+            html.push_str(close);
+        }
+        html
+    }
+
     fn run(text: &str, marks: Option<&Attrs>) -> String {
         render_run(text, marks, &Rules::empty())
+    }
+
+    #[test]
+    fn adjacent_runs_share_their_common_outer_marks() {
+        use yrs::{Text, XmlFragment};
+        let doc = Doc::new();
+        let f = doc.get_or_insert_xml_fragment("default");
+        let mut txn = doc.transact_mut();
+        let p = f.insert(&mut txn, 0, XmlElementPrelim::empty("paragraph"));
+        let t = p.insert(&mut txn, 0, XmlTextPrelim::new(""));
+        let bold = marks(&["bold"]);
+        let bold_em = marks(&["bold", "italic"]);
+        t.insert_with_attributes(&mut txn, 0, "nested ", bold.clone());
+        t.insert_with_attributes(&mut txn, 7, "deep", bold_em);
+        t.insert_with_attributes(&mut txn, 11, " tail", bold);
+        drop(txn);
+        let txn = doc.transact();
+        assert_eq!(
+            render(&txn, &f).unwrap(),
+            "<p><strong>nested <em>deep</em> tail</strong></p>",
+            "shared outer marks stay open across adjacent runs"
+        );
     }
 
     /// Core rendering of the captured Tiptap document, pinned as a golden
@@ -1236,7 +1283,7 @@ mod tests {
         let txn = doc.transact();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
         assert_eq!(
-            yrs_html_core::flatten(segs).into_html().unwrap(),
+            yjs_html_core::flatten(segs).into_html().unwrap(),
             "<aside class=\"callout callout--warning\"><div class=\"para\">careful</div></aside>"
         );
     }
@@ -1294,7 +1341,7 @@ mod tests {
         }
         let txn = doc.transact();
         let map = collect_node_types(&txn, &frag).unwrap();
-        let json = yrs_html_core::type_map_json(&map, |ty| {
+        let json = yjs_html_core::type_map_json(&map, |ty| {
             if is_builtin(ty) {
                 Some("builtin")
             } else {

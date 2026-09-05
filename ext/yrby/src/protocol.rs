@@ -71,24 +71,24 @@ pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String>
 ///
 /// This must be EXACT: the sync layer records on "ready" and resyncs on "not
 /// ready", and a parked update that slipped through would look like an
-/// already-applied retry downstream — acked and dropped, losing real content.
+/// already-applied retry downstream: acked and dropped, losing real content.
 ///
 /// Clocks alone can't decide it. An update can satisfy every per-client clock
 /// and still fail to integrate: its items may reference other clients' blocks
 /// (origins/parents), and merged updates hide internal gaps behind Skip blocks.
 /// So the clock lower bound serves only as a cheap definitive REJECT; "ready"
 /// is decided by trial-integrating on a throwaway probe seeded with the doc's
-/// integrated state — ready iff nothing parks.
+/// integrated state: ready iff nothing parks.
 pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
-    // Partial order: "not covered" includes incomparable — not ready either way.
+    // Partial order: "not covered" includes incomparable: not ready either way.
     let lower_covered = doc.transact().state_vector() >= update.state_vector_lower();
     if !lower_covered {
         return Ok(false);
     }
     // Seed the probe with the doc's INTEGRATED state (gap-free), for two
     // reasons. A lossless seed would replant the doc's own pre-existing
-    // pending in the probe, making has_pending true for EVERY update — the
+    // pending in the probe, making has_pending true for EVERY update: the
     // verdict must be about this update, not the doc's baggage. And an update
     // whose dependency exists only in that pending buffer is genuinely not
     // ready: recording it would put a gap in the durable log; a resync heals
@@ -118,13 +118,13 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
 /// doc), then compare the probe before and after applying the update:
 ///
 /// - **Insert/format-only updates** grow the probe's state vector, so comparing
-///   the state vector is enough — and cheaper than a full re-encode.
+///   the state vector is enough, and cheaper than a full re-encode.
 /// - **Delete-bearing updates** don't move the state vector (a deletion tombstones
 ///   an existing struct rather than adding one), so we compare the full encoded
 ///   state, which carries the delete set. An already-applied pure-delete retry
 ///   re-encodes byte-identically → false; a genuinely new deletion changes the
 ///   delete set → true. This is exact but pays for two full encodes, so only
-///   delete-bearing frames — a minority — take that path.
+///   delete-bearing frames, a minority, take that path.
 ///
 /// Earlier this branch was conservative: any delete-bearing update returned true
 /// (record it), which double-recorded and re-broadcast pure-delete retries the
@@ -157,7 +157,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     }
 
     // Fast path: blocks beyond the doc's state vector are content the doc
-    // lacks — the update advances, no probe needed. The common case (a novel
+    // lacks: the update advances, no probe needed. The common case (a novel
     // edit) exits here; only retries and ambiguous diffs pay for the probe.
     if !has_deletes {
         let covered = doc.transact().state_vector() >= update.state_vector();
@@ -206,10 +206,10 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
             return Ok(true);
         }
         // An unchanged state vector is ambiguous. Usually it means the doc
-        // already had everything in this update (a retry — return false, don't
+        // already had everything in this update (a retry: return false, don't
         // re-record). But it can ALSO mean the update failed to integrate and
         // was stashed as pending, which doesn't move the state vector either.
-        // That case is missing content, not a duplicate — returning false would
+        // That case is missing content, not a duplicate: returning false would
         // let a caller ack it and drop it. Distinguish the two by whether the
         // probe gained pending. (The sync flow screens gaps out with
         // update_is_ready before calling this; the check guards direct callers.)
@@ -240,7 +240,7 @@ pub(crate) fn has_pending(doc: &Doc) -> bool {
 /// Non-destructive: the prune happens only on the throwaway copy; `doc` keeps its
 /// pending, so a genuine gap still heals if its missing dependency later arrives.
 pub(crate) fn integrated_update(doc: &Doc, sv: &StateVector) -> Result<Vec<u8>, String> {
-    // Pending check and encode share ONE transaction — with two, a concurrent
+    // Pending check and encode share ONE transaction. With two, a concurrent
     // gappy apply_update could slip between them and the encode would serve
     // the very pending this function exists to exclude.
     let full = {
@@ -548,7 +548,7 @@ mod tests {
     // it and types between C's characters, so A's delta references C's blocks as
     // origins. Returns (c_update, a_delta). On a doc missing `c_update`, the
     // per-client clock lower bound of `a_delta` is satisfied (A starts at clock
-    // 0) but integration parks — the case a clock-only readiness check misses.
+    // 0) but integration parks: the case a clock-only readiness check misses.
     fn cross_client_origin_gap() -> (Vec<u8>, Vec<u8>) {
         let c = Doc::new();
         let ct = c.get_or_insert_text("t");
@@ -573,7 +573,7 @@ mod tests {
         let (c_update, a_delta) = cross_client_origin_gap();
 
         // A server that never saw C's content: the clock lower bound passes, but
-        // the update can't integrate — it must NOT be ready (previously it was,
+        // the update can't integrate: it must NOT be ready (previously it was,
         // and the downstream advances? probe then acked-and-dropped it).
         let server = Doc::new();
         assert!(
@@ -617,7 +617,7 @@ mod tests {
     fn a_doc_with_legacy_pending_still_accepts_healthy_updates() {
         // Why update_is_ready seeds its probe with the INTEGRATED state: with a
         // lossless seed, the doc's own pre-existing pending would park in the
-        // probe and every verdict would come back "not ready" — a server with
+        // probe and every verdict would come back "not ready": a server with
         // one legacy gap would reject every healthy keystroke forever.
         let (_first, dependent) = gap_pair();
         let doc = Doc::new();
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn an_update_depending_only_on_pending_content_is_not_ready() {
         // The other half of the integrated-only seed: a dependency that exists
-        // solely in the doc's pending buffer doesn't count — recording such an
+        // solely in the doc's pending buffer doesn't count: recording such an
         // update would put a gap in the durable log. Not ready; resync heals
         // both as one complete delta.
         let src = Doc::new();
@@ -674,7 +674,7 @@ mod tests {
     #[test]
     fn update_advances_reports_true_when_the_update_would_park() {
         // Defense in depth for callers using advances? without the ready gate: a
-        // gappy update parks pending — that changes the doc, so it advances (it
+        // gappy update parks pending: that changes the doc, so it advances (it
         // must never be misread as an already-applied retry and dropped).
         let (_c_update, a_delta) = cross_client_origin_gap();
         let server = Doc::new();
@@ -896,7 +896,7 @@ mod tests {
         // for a fresh peer.
         //
         // Scope: this can't hit the original check-vs-encode race (its window
-        // is nanoseconds; never reproduced even at 20k iterations) — that fix
+        // is nanoseconds; never reproduced even at 20k iterations). That fix
         // is guaranteed by using a single transaction. What this catches is
         // coarser: encoding outside the lock, or a fast path skipping the
         // pending check.
@@ -914,7 +914,7 @@ mod tests {
             let first = first.clone();
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
-                    // Park a pending struct, then heal it, over and over — the
+                    // Park a pending struct, then heal it, over and over: the
                     // encode below keeps racing both transitions.
                     doc.transact_mut()
                         .apply_update(yrs::Update::decode_v1(&dependent).unwrap())

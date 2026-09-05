@@ -113,11 +113,11 @@ class Y::Document < ActiveRecord::Base
   # compaction committing between the two reads then hands us rows already
   # folded into the fresh snapshot, an idempotent double-apply, where
   # the reverse order could pair a pre-compaction snapshot with an empty
-  # tail and omit committed changes. Quarantined rows are applied too:
-  # the output goes through compacted_state_update, which is gap-free by
-  # construction, so an unhealed gap contributes nothing while a gap
-  # healed by a newer tail row is served immediately instead of waiting
-  # for the next compaction.
+  # tail and omit committed changes. Quarantined rows are applied too,
+  # and the output is lossless (encode_state_as_update): an unhealed gap
+  # rides along as a pending struct, so a peer loaded mid-gap holds the
+  # parked edit and heals it the moment the missing dependency arrives,
+  # while a gap healed by a newer tail row is served merged immediately.
   def load_state
     tail = updates.reset.pluck(:payload) # reset: never a cached tail
     snapshot = self.class.where(id: id).pick(:state)
@@ -126,7 +126,7 @@ class Y::Document < ActiveRecord::Base
     doc = Y::Doc.new
     doc.apply_update(snapshot) if snapshot
     tail.each { |payload| doc.apply_update(payload) }
-    doc.compacted_state_update
+    doc.encode_state_as_update
   end
 
   # Compact the tail into state. The row lock serializes racing
