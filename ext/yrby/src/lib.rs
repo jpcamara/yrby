@@ -7,9 +7,12 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
 
+mod array;
 mod map;
 mod protocol;
 mod read;
+mod shared;
+mod text;
 use protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
     update_is_ready,
@@ -39,6 +42,8 @@ fn assert_thread_safe() {
     is_send_sync::<RbLexical>();
     is_send_sync::<RbProseMirror>();
     is_send_sync::<map::RbMap>();
+    is_send_sync::<array::RbArray>();
+    is_send_sync::<text::RbText>();
 }
 
 /// Run `f` with the GVL (Global VM Lock) released, so other Ruby threads,
@@ -222,6 +227,18 @@ impl RbDoc {
         let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))
             .map_err(yrb_error)?;
         Ok(binary_string(&update))
+    }
+
+    /// A live `Y::Array` handle to the root array named `name` (created if
+    /// absent). Writes through it mutate the document and sync to every peer.
+    fn get_array(&self, name: String) -> array::RbArray {
+        array::root_array(&self.0, name)
+    }
+
+    /// A live `Y::Text` handle to the root text named `name` (created if
+    /// absent). This is what an agent appends into.
+    fn get_text(&self, name: String) -> text::RbText {
+        text::root_text(&self.0, name)
     }
 
     /// A live `Y::Map` handle to the root map named `name` (created if absent).
@@ -642,6 +659,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbDoc::compacted_state_update, 0),
     )?;
     doc_class.define_method("get_map", method!(RbDoc::get_map, 1))?;
+    doc_class.define_method("get_array", method!(RbDoc::get_array, 1))?;
+    doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
     doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
@@ -663,6 +682,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     // Live shared-type handles.
     map::define(ruby, module)?;
+    array::define(ruby, module)?;
+    text::define(ruby, module)?;
 
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;
