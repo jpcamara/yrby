@@ -10,7 +10,7 @@ module Y
   # `marks:`. A rule is consulted before the built-in schema, so it can add a
   # custom node or override a built-in one.
   #
-  # The usual way in is the block form — one `rules.node` call per type,
+  # The usual way in is the block form, one `rules.node` call per type,
   # keyword options for markup-as-data, a Ruby block for logic (see Builder
   # below). `contains:` says what's inside the node: :inline (formatted
   # text, the default), :blocks (child block nodes), or :none (a leaf). The
@@ -26,7 +26,7 @@ module Y
   #                             attrs: { "class" => ["callout callout--", :kind] },
   #                             contains: :blocks
   #     end
-  #   `tag` is the element; `attrs` values are templates — a String literal,
+  #   `tag` is the element; `attrs` values are templates: a String literal,
   #   a Symbol referencing one of the node's stored attributes, or an Array
   #   mixing both (an attribute that resolves empty is omitted); `text` is a
   #   template for literal text content; `void: true` emits no closing tag;
@@ -45,20 +45,20 @@ module Y
   #   document is locked) and receives a RenderRules::Node with the node's
   #   type, stored attributes, children already rendered to HTML, and
   #   child_types (its element/block children by type). Its return value is
-  #   spliced in verbatim — it is trusted HTML, so escape any attribute
+  #   spliced in verbatim: it is trusted HTML, so escape any attribute
   #   values you interpolate.
   #
   # Mark rules (ProseMirror only) are declarative: `tag` plus `attrs`
   # templates whose Symbol refs resolve against the mark's own attributes. A
   # custom mark wraps outside every built-in mark; several custom marks nest
   # alphabetically. A rule for a built-in mark's stored name replaces its
-  # wrap (the markup changes, the semantics don't — an overridden code mark
+  # wrap (the markup changes, the semantics don't: an overridden code mark
   # still excludes the other formatting).
   module RenderRules
     # What a callback receives. `attrs` keys are as stored (Lexical's own
     # props keep their "__" prefix); `content` is the node's children,
     # already rendered to an HTML string; `child_types` lists the node's
-    # element/block children by type, in document order — the structural
+    # element/block children by type, in document order: the structural
     # facts attrs and content can't answer (a gallery's image count, whether
     # a list item holds a nested list).
     Node = Data.define(:type, :attrs, :content, :child_types)
@@ -125,7 +125,7 @@ module Y
     # A template: String literal, Symbol attribute reference, or an Array of
     # both.
     def compile_parts(template)
-      Array(template).map do |part|
+      Kernel.Array(template).map do |part|
         case part
         when Symbol then { "ref" => part.to_s }
         else { "lit" => part.to_s }
@@ -137,7 +137,7 @@ module Y
     # from stored values. Text content escapes `&`, `<`, `>` (quotes stay
     # literal, matching the browser serializer); attribute values also
     # escape `"`. Prefer these over ERB::Util.html_escape when byte parity
-    # with editor output matters — html_escape also rewrites apostrophes.
+    # with editor output matters: html_escape also rewrites apostrophes.
     def escape_text(value)
       value.to_s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
     end
@@ -212,10 +212,10 @@ module Y
   # they compile the rules config, hold the callbacks, and splice deferred
   # segments after a render. The native handle does everything else.
   class Lexical
-    # `Y::Lexical.new(doc, nodes: { "type" => rule })` — see Y::RenderRules
+    # `Y::Lexical.new(doc, nodes: { "type" => rule })`; see Y::RenderRules
     # for the rule forms. This is core Lexical only: paragraphs, headings,
     # quotes, code, lists, tables, links, text formatting. Editor-specific
-    # nodes arrive as rules — Y::Lexxy subclasses this with the Lexxy schema;
+    # nodes arrive as rules. Y::Lexxy subclasses this with the Lexxy schema;
     # a different Lexical editor brings its own rule set the same way.
     def initialize(doc, nodes: {})
       builder = RenderRules::Builder.new(marks_allowed: false)
@@ -227,15 +227,15 @@ module Y
 
     def to_html(root = nil)
       result = root.nil? ? @native.to_html : @native.to_html(root)
-      return result unless result.is_a?(Array)
+      return result unless result.is_a?(::Array)
 
       RenderRules.splice(result, @render_callbacks)
     end
 
-    # What node types this document actually contains — the discovery aid
+    # What node types this document actually contains: the discovery aid
     # for writing rules. Facts per type: "count", "attrs" (names as stored),
     # "children" (child node types), "text" (whether it holds text runs),
-    # and "handled" ("builtin", "rule", or nil — nil marks the types you
+    # and "handled" ("builtin", "rule", or nil; nil marks the types you
     # still need a rule for). Children plus text is how you pick contains:.
     def node_types(root = nil)
       json = root.nil? ? @native.node_types : @native.node_types(root)
@@ -244,11 +244,11 @@ module Y
   end
 
   class ProseMirror
-    # `Y::ProseMirror.new(doc, nodes: {...}, marks: {...})` — see
+    # `Y::ProseMirror.new(doc, nodes: {...}, marks: {...})`; see
     # Y::RenderRules for the rule forms. This is core ProseMirror only:
     # prosemirror-schema-basic plus the prosemirror-tables family, and the
-    # full mark set (marks are native — see `rules.mark` for overrides).
-    # Editor-specific nodes arrive as rules — Y::Tiptap subclasses this with
+    # full mark set (marks are native; see `rules.mark` for overrides).
+    # Editor-specific nodes arrive as rules. Y::Tiptap subclasses this with
     # Tiptap's extension nodes; a different ProseMirror editor brings its
     # own rule set the same way.
     def initialize(doc, nodes: {}, marks: {})
@@ -262,15 +262,15 @@ module Y
 
     def to_html(root = nil)
       result = root.nil? ? @native.to_html : @native.to_html(root)
-      return result unless result.is_a?(Array)
+      return result unless result.is_a?(::Array)
 
       RenderRules.splice(result, @render_callbacks)
     end
 
-    # What node types this document actually contains — the discovery aid
+    # What node types this document actually contains: the discovery aid
     # for writing rules. Facts per type: "count", "attrs" (names as stored),
     # "children" (child node types), "text" (whether it holds text runs),
-    # and "handled" ("builtin", "rule", or nil — nil marks the types you
+    # and "handled" ("builtin", "rule", or nil; nil marks the types you
     # still need a rule for). Children plus text is how you pick contains:.
     def node_types(root = nil)
       json = root.nil? ? @native.node_types : @native.node_types(root)

@@ -21,6 +21,8 @@ class DecoderTest < Minitest::Test
 
   # A Y.Map "state" = { title: "Dashboard", count: 3, active: true, price: 9.99 }.
   MAP = "AQSP+KW4BQAoAQVzdGF0ZQV0aXRsZQF3CURhc2hib2FyZCgBBXN0YXRlBWNvdW50AX0DKAEFc3RhdGUGYWN0aXZlAXgoAQVzdGF0ZQVwcmljZQF7QCP64UeuFHsA"
+  # A Y.Array "cards" of two Y.Maps -- the kanban/spreadsheet shape.
+  ARRAY = "AQiMovTdCAAHAQVjYXJkcwEoAIyi9N0IAAJpZAF3ATEoAIyi9N0IAAR0ZXh0AXcORGVzaWduIHRoZSBBUEkoAIyi9N0IAAZjb2x1bW4BdwR0b2Rvh4yi9N0IAAEoAIyi9N0IBAJpZAF3ATIoAIyi9N0IBAR0ZXh0AXcHU2hpcCBpdCgAjKL03QgEBmNvbHVtbgF3BGRvbmUA"
   # rubocop:enable Layout/LineLength
 
   def decode(b64)
@@ -96,5 +98,27 @@ class DecoderTest < Minitest::Test
     doc.apply_update(decode(MAP))
 
     assert_nil doc.read_map("nope")
+  end
+
+  # --- read_array (array-rooted state) --------------------------------------
+
+  def test_read_array_returns_elements_as_json
+    doc = Y::Doc.new
+    doc.apply_update(decode(ARRAY))
+
+    assert_equal(
+      [
+        { "id" => "1", "text" => "Design the API", "column" => "todo" },
+        { "id" => "2", "text" => "Ship it", "column" => "done" }
+      ],
+      JSON.parse(doc.read_array("cards"))
+    )
+  end
+
+  def test_read_array_missing_root_is_nil
+    doc = Y::Doc.new
+    doc.apply_update(decode(ARRAY))
+
+    assert_nil doc.read_array("nope")
   end
 end

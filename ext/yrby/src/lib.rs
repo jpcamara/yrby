@@ -7,17 +7,20 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
 
+mod array;
 mod map;
 mod protocol;
 mod read;
+mod shared;
+mod text;
+use lexical_yjs_html as lexical_html;
+use prosemirror_yjs_html as prosemirror_html;
 use protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
     update_is_ready,
 };
 use render_rules::{Rules, Segment};
-pub(crate) use yrs_html_core as render_rules;
-use yrs_lexical_html as lexical_html;
-use yrs_prosemirror_html as prosemirror_html;
+pub(crate) use yjs_html_core as render_rules;
 
 /// Wrapper around yrs Doc.
 ///
@@ -39,6 +42,8 @@ fn assert_thread_safe() {
     is_send_sync::<RbLexical>();
     is_send_sync::<RbProseMirror>();
     is_send_sync::<map::RbMap>();
+    is_send_sync::<array::RbArray>();
+    is_send_sync::<text::RbText>();
 }
 
 /// Run `f` with the GVL (Global VM Lock) released, so other Ruby threads,
@@ -170,7 +175,7 @@ impl RbDoc {
         let doc = &self.0;
         nogvl(move || {
             // Exactly ONE transaction per call. Opening a second while the
-            // first is still held deadlocks against a waiting writer — and
+            // first is still held deadlocks against a waiting writer, and
             // inside nogvl that hang can't be interrupted.
             let txn = doc.transact();
             txn.get_text(name.as_str()).map(|t| t.get_string(&txn))
@@ -202,8 +207,22 @@ impl RbDoc {
         })
     }
 
+    /// A `Y.Array` root serialized to a JSON array string (values recursive, in
+    /// array order). The counterpart to read_map for documents whose root is an
+    /// array: a board's cards, a sheet's rows. Callers parse the JSON (e.g.
+    /// `JSON.parse(doc.read_array("cards"))`). The serialization lives in
+    /// `read::array_json` (pure, Rust-tested).
+    fn read_array(&self, name: String) -> Option<String> {
+        let doc = &self.0;
+        nogvl(move || {
+            let txn = doc.transact();
+            let array = txn.get_array(name.as_str())?;
+            Some(read::array_json(&txn, &array))
+        })
+    }
+
     /// True if the doc holds un-integrable pending structs or a pending delete
-    /// set — content that couldn't integrate because a causally-prior update is
+    /// set: content that couldn't integrate because a causally-prior update is
     /// missing. Such content is a recovery buffer, not document state; it heals if
     /// the missing dependency later arrives. A pure read.
     fn pending(&self) -> bool {
@@ -213,7 +232,7 @@ impl RbDoc {
 
     /// Like `encode_state_as_update` (full state), but **gap-free**: it excludes
     /// any pending (un-integrable) structs and pending delete set. Use this when
-    /// persisting or serving state that other peers will apply — serving pending
+    /// persisting or serving state that other peers will apply. Serving pending
     /// content poisons their sync. Non-destructive: this doc keeps its pending, so
     /// a genuine gap still heals if its dependency arrives. (`encode_state_as_update`
     /// stays lossless for raw-update recovery.)
@@ -222,6 +241,18 @@ impl RbDoc {
         let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))
             .map_err(yrb_error)?;
         Ok(binary_string(&update))
+    }
+
+    /// A live `Y::Array` handle to the root array named `name` (created if
+    /// absent). Writes through it mutate the document and sync to every peer.
+    fn get_array(&self, name: String) -> array::RbArray {
+        array::root_array(&self.0, name)
+    }
+
+    /// A live `Y::Text` handle to the root text named `name` (created if
+    /// absent). This is what an agent appends into.
+    fn get_text(&self, name: String) -> text::RbText {
+        text::root_text(&self.0, name)
     }
 
     /// A live `Y::Map` handle to the root map named `name` (created if absent).
@@ -346,12 +377,12 @@ impl RbDoc {
 }
 
 // ============================================================================
-// Y::Lexical — schema-pinned rendering of Lexical/Lexxy documents
+// Y::Lexical: schema-pinned rendering of Lexical/Lexxy documents
 // ============================================================================
 
 /// A Lexical view over a `Y::Doc`. The schema knowledge lives here rather
 /// than on the schema-agnostic `Doc`: core Lexical natively, everything else
-/// through the render rules compiled at construction (see `render_rules` —
+/// through the render rules compiled at construction (see `render_rules`;
 /// the `Y::Lexxy` facade's rule set arrives that way). Holds a cheap clone of
 /// the doc (yrs `Doc` is an Arc handle), so it reads live state.
 ///
@@ -366,7 +397,7 @@ struct RbLexical {
 }
 
 impl RbLexical {
-    /// `Y::NativeLexical.new(doc, rules_json)` — the Y::Lexical facade
+    /// `Y::NativeLexical.new(doc, rules_json)`; the Y::Lexical facade
     /// compiles its `nodes:` config to the rules JSON.
     fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
         Ok(RbLexical {
@@ -376,7 +407,7 @@ impl RbLexical {
     }
 
     /// Render the document's XML root (default `"root"`, Lexical's standard
-    /// collab root name) natively — no Node process or headless editor. The
+    /// collab root name) natively, with no Node process or headless editor. The
     /// native side renders core Lexical plus whatever the rules cover; with
     /// the rule set `Y::Lexxy` passes, output matches Lexxy's own serializer
     /// byte-for-byte on the reference fixtures (see `lexical_html.rs`). Returns nil when the root is missing or not
@@ -395,7 +426,7 @@ impl RbLexical {
         segments_result(segments)
     }
 
-    /// The document's node types as observed facts, JSON-encoded — the
+    /// The document's node types as observed facts, JSON-encoded, the
     /// native half of the facade's `node_types` discovery aid. Nil when the
     /// root is missing or not Lexical-shaped.
     fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
@@ -424,13 +455,13 @@ impl RbLexical {
 }
 
 // ============================================================================
-// Y::ProseMirror — schema-pinned rendering of ProseMirror/Tiptap documents
+// Y::ProseMirror: schema-pinned rendering of ProseMirror/Tiptap documents
 // ============================================================================
 
 /// A ProseMirror view over a `Y::Doc`. The schema knowledge lives here rather
 /// than on the schema-agnostic `Doc`: core ProseMirror natively, everything
 /// else through the render rules compiled at construction (see
-/// `render_rules` — the `Y::Tiptap` facade's rule set arrives that way).
+/// `render_rules`; the `Y::Tiptap` facade's rule set arrives that way).
 /// Holds a cheap clone of the doc (yrs `Doc` is an Arc handle), so it reads
 /// live state.
 ///
@@ -445,7 +476,7 @@ struct RbProseMirror {
 }
 
 impl RbProseMirror {
-    /// `Y::NativeProseMirror.new(doc, rules_json)` — the Y::ProseMirror facade
+    /// `Y::NativeProseMirror.new(doc, rules_json)`; the Y::ProseMirror facade
     /// compiles its `nodes:`/`marks:` config to the rules JSON.
     fn native_new(doc: &RbDoc, rules_json: String) -> Result<Self, Error> {
         Ok(RbProseMirror {
@@ -475,7 +506,7 @@ impl RbProseMirror {
         segments_result(segments)
     }
 
-    /// The document's node types as observed facts, JSON-encoded — the
+    /// The document's node types as observed facts, JSON-encoded, the
     /// native half of the facade's `node_types` discovery aid. Nil when the
     /// root is missing or not ProseMirror-shaped.
     fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
@@ -636,12 +667,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
     doc_class.define_method("read_map", method!(RbDoc::read_map, 1))?;
+    doc_class.define_method("read_array", method!(RbDoc::read_array, 1))?;
     doc_class.define_method("pending?", method!(RbDoc::pending, 0))?;
     doc_class.define_method(
         "compacted_state_update",
         method!(RbDoc::compacted_state_update, 0),
     )?;
     doc_class.define_method("get_map", method!(RbDoc::get_map, 1))?;
+    doc_class.define_method("get_array", method!(RbDoc::get_array, 1))?;
+    doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
     doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
@@ -663,6 +697,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     // Live shared-type handles.
     map::define(ruby, module)?;
+    array::define(ruby, module)?;
+    text::define(ruby, module)?;
 
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;

@@ -5,7 +5,7 @@ require "generators/yrby/tables/tables_generator"
 
 module Yrby
   module Generators
-    # `bin/rails generate yrby:install` — a DocumentChannel speaking the
+    # `bin/rails generate yrby:install`: a DocumentChannel speaking the
     # y-websocket protocol over the gem's document storage, plus the storage
     # migration (via yrby:tables). The models ship in the gem; only the
     # migration lands in the app.
