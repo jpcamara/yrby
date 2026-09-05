@@ -85,7 +85,8 @@ class ArrayTest < Minitest::Test
     @plan.push("a")
     @plan.push("b")
     seen = []
-    @plan.each { |v| seen << v }
+    # each is the method under test here, so collecting with it is the point.
+    @plan.each { |v| seen << v } # rubocop:disable Style/MapIntoArray
 
     assert_equal %w[a b], seen
   end
