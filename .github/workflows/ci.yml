@@ -248,3 +248,61 @@ jobs:
         if: failure()
         run: /usr/bin/tail -120 /tmp/e2e-server.log || true
 
+  # The docs/demo site (site/). A separate Rails app on the PUBLISHED gems and
+  # npm package, so this job also checks that what the site documents is what a
+  # reader can install. No Postgres and no Redis services: the store is the
+  # gem's own Y::Document models on SQLite, and the WebSocket server is the
+  # anycable-go embedded in the thrust proxy, which ships inside the
+  # anycable-thruster gem — nothing to install separately.
+  site:
+    name: Site (docs + demos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: site
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+
+      # The site depends on the gems by path, so the native extension has to be
+      # built before Rails can boot.
+      - name: Build the extension
+        run: bundle install && bundle exec rake compile
+
+      - name: RuboCop
+        working-directory: site
+        run: bundle exec rubocop
+
+      - name: ESLint
+        working-directory: site/frontend
+        run: bun install --frozen-lockfile && bunx eslint .
+
+      - name: Build the demo bundles
+        working-directory: site/frontend
+        run: bun run build
+
+      - name: Test (store, throttles, controllers)
+        working-directory: site
+        run: bin/rails test
+
+      # Two real Chrome windows against the full deployment shape: thrust, the
+      # embedded AnyCable server, and Falcon with one worker. Rich text syncs, a
+      # second room is a different document, cell-level merges survive, kanban
+      # syncs — and presence goes out as AnyCable whispers rather than reaching
+      # Ruby at all, which the harness counts rather than assumes.
+      - name: E2e — two browsers on the live site
+        working-directory: site/frontend
+        run: |
+          export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
+          PORT=3888 SERVER_PIDFILE=/tmp/site.pid ./boot_server.sh
+          PORT=3888 node site_e2e.mjs
+          kill "$(cat /tmp/site.pid)" || true
+
+      - name: Server log on failure
+        if: failure()
+        working-directory: site
+        run: /usr/bin/tail -120 /tmp/site-e2e.log || true
