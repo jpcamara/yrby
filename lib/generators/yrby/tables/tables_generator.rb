@@ -10,7 +10,7 @@ module Yrby
     # yrby:install, and by other gems building on the same storage.
     #
     # Template notes (kept here, not in the emitted migration): state is
-    # 1.gigabyte - 1 — the largest limit every adapter accepts. MySQL maps
+    # 1.gigabyte - 1: the largest limit every adapter accepts. MySQL maps
     # anything over 16 MB to longblob (a compacted snapshot is the whole
     # document; a 16 MB cap would break compaction); Postgres raises above
     # 1 GB - 1 and ignores the limit on bytea otherwise; SQLite ignores
