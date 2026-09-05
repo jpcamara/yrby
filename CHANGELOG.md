@@ -22,6 +22,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Live `Y::Array` and `Y::Text` handles.** `Doc#get_array(name)` and
+  `Doc#get_text(name)` return live handles alongside `Doc#get_map`. Arrays get
+  `push`/`<<`, `insert`, `[]`, `[]=`, `delete_at`, `clear`, `size`, `empty?`,
+  `to_a` and `each`; text gets `push`/`<<`, `insert`, `delete`, `clear`, `to_s`,
+  `length` and `empty?`. Writes mutate the CRDT and sync to every peer.
+
+  A handle's path is now a list of segments (a map key or an array index), so a
+  handle can address a map stored inside an array. That is the shape most
+  collaborative state has, a list of records, and `array.get_map(i)` hands back a
+  live handle to one so it can be edited in place. `get_map`, `get_array` and
+  `get_text` exist on both `Y::Map` and `Y::Array`, so any nested shared type is
+  reachable. Negative indexes count from the end, and an out-of-range index reads
+  as `nil` rather than raising, so a stale index from a concurrent edit is
+  harmless. Both types are asserted `Send + Sync` at compile time.
+
+  Note for code inside `module Y`: `Y::Array` shadows `::Array` there, so a bare
+  `Array` now resolves to the handle class. The HTML renderers were fixed to say
+  `::Array` and `Kernel.Array(...)`, the same rule that already applies to
+  `::ActionCable`.
+
 - **Live `Y::Map` handles.** `Doc#get_map(name)` returns a `Y::Map` you can both
   read and *write*: `map[key]`, `map[key] = value`, `delete`, `clear`, `keys`,
   `size`, `key?`, `to_h`, and `each`. Writes mutate the CRDT, so they sync to
