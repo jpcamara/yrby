@@ -25,8 +25,10 @@ Rhino Editor, and CodeMirror. The same channel also syncs Yjs shapes with no
 editor at all: a whiteboard on a `Y.Map`, a kanban board on a `Y.Array`, a
 co-filled form. ([Editors](#editors))
 
-In Ruby, the documents are readable without a browser. `Doc#read_text` and
-`Doc#read_map` reconstruct contents for search, validation, and exports.
+In Ruby, the documents are readable and writable without a browser.
+`Doc#read_text` and `Doc#read_map` reconstruct contents for search,
+validation, and exports, and `Doc#get_map` returns a live `Y::Map` handle for
+building or editing shared state server-side, which then syncs to everyone.
 `Y::Tiptap` and `Y::Lexxy` render a document to HTML byte-identical to the
 editor's own serializer, take rules for your app's custom nodes, and drop
 straight into ActionText. ([Rendering to HTML](#rendering-to-html))
@@ -70,6 +72,7 @@ npm install yrby-client
 - [Usage](#usage)
   - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
   - [Reading document contents](#reading-document-contents)
+  - [Y::Map (live shared maps)](#ymap-live-shared-maps)
   - [Pending structs and gap-free state](#pending-structs-and-gap-free-state)
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
@@ -89,7 +92,9 @@ documents - a `Doc`, awareness, and the y-websocket protocol primitives. By defa
 the Ruby side treats a document as opaque CRDT state: it applies updates, answers
 sync handshakes, and records deltas without reaching into the contents - the browser
 editor owns the document's shape. When you do need to look inside, `Doc#read_text`
-and `Doc#read_map` reconstruct it server-side, in Ruby.
+and `Doc#read_map` reconstruct it server-side, in Ruby; and `Doc#get_map` returns a
+live `Y::Map` handle you can read and write when the server needs to build or edit
+shared state itself.
 
 ## Durability and delivery
 
@@ -228,6 +233,47 @@ doc.read_xml("root")          # => text of an XML root, one block per line
 doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
 doc.read_array("cards")       # => a Y.Array root as a JSON string; JSON.parse it
 ```
+
+These are read-only snapshots. To *build or edit* a map from Ruby, use a live
+handle (below).
+
+### Y::Map (live shared maps)
+
+`Doc#get_map` returns a live handle to a `Y.Map` root: reading it reflects the
+current document, and writing it mutates the CRDT (so the change syncs to every
+peer). Handles carry the same thread-safety guarantees as `Doc`: every operation
+runs with the GVL released and holds no lock across the boundary.
+
+```ruby
+map = doc.get_map("state")   # root map, created if absent
+
+# Write: primitives, arrays, and (nested) hashes
+map["title"]  = "Dashboard"
+map["count"]  = 3
+map["tags"]   = %w[a b c]
+map["user"]   = { "name" => "Ada", "role" => "eng" }  # nested Y.Map
+
+# Read: a snapshot value (nested map/array come back as Hash/Array)
+map["title"]           # => "Dashboard"
+map.to_h               # => { "title" => "Dashboard", "count" => 3, ... }
+map.keys               # => ["title", "count", "tags", "user"]
+map.size               # => 4
+map.key?("title")      # => true
+map.each { |k, v| puts "#{k}: #{v}" }
+
+# A live handle to a nested map; mutating it mutates the document
+user = map.get_map("user")   # => Y::Map (or nil if absent / not a map)
+user["name"] = "Grace"       # doc now has state.user.name == "Grace"
+
+# Delete
+map.delete("count")    # => 3 (the previous value)
+map.clear
+```
+
+A handle is addressed by its root name plus a path of keys and re-resolves on
+every operation, so it never caches a raw CRDT pointer that could dangle when the
+tree is mutated (possibly on another thread). A nested handle keeps working even
+as sibling keys change around it.
 
 ### Pending structs and gap-free state
 
