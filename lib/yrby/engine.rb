@@ -7,5 +7,9 @@ module Yrby
   # The Rails engine. Autoloads the gem's models (Y::Document,
   # Y::DocumentUpdate) from app/models.
   class Engine < ::Rails::Engine
+    initializer "yrby.collaborative" do
+      ActiveSupport.on_load(:active_record) { include Y::Collaborative }
+      ActiveSupport.on_load(:action_view) { include Y::Collaborative::Helper }
+    end
   end
 end

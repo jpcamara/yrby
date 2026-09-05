@@ -36,6 +36,16 @@
         "types": "./dist/cjs/base64.d.ts",
         "default": "./dist/cjs/base64.js"
       }
+    },
+    "./element": {
+      "import": {
+        "types": "./dist/document_element.d.ts",
+        "default": "./dist/document_element.js"
+      },
+      "require": {
+        "types": "./dist/cjs/document_element.d.ts",
+        "default": "./dist/cjs/document_element.js"
+      }
     }
   },
   "files": [
@@ -74,13 +84,17 @@
   },
   "peerDependencies": {
     "yjs": "^13.6.0",
-    "y-protocols": "^1.0.5"
+    "y-protocols": "^1.0.5",
+    "@rails/actioncable": ">= 7.1"
   },
   "peerDependenciesMeta": {
     "yjs": {
       "optional": true
     },
     "y-protocols": {
+      "optional": true
+    },
+    "@rails/actioncable": {
       "optional": true
     }
   },

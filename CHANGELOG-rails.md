@@ -7,6 +7,70 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Y::DocumentChannel`, shipped in the gem the way Turbo ships
+  `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a
+  page rendered (`{ grant:, name: }`); the channel trades the grant back for
+  its record, derives the document, and stores through `Y::Document` — there
+  is no channel to generate or write. Missing, tampered, wrong-attribute,
+  and destroyed-record grants are rejected.
+
+- `collaborative_document_tag(record, name, **options)`, included into
+  Action View by the engine: renders the mount element carrying the signed
+  grant, the attribute name, and the channel name as data attributes.
+  Render it only where the request is already authorized to collaborate on
+  the record — possession of the grant is what the channel checks, the same
+  model as `turbo_stream_from`'s signed stream names.
+
+- Default storage: a channel that declares no `on_load`/`on_change` now
+  gets `Y::Document` storage automatically (the Action Text posture — the
+  gem's tables are the default, the hooks are the seam for pointing storage
+  elsewhere). Outside a yrby-rails app the concern still fails closed until
+  hooks are declared.
+
+- `has_collaborative_document :name, encrypted: true` — the model declares
+  which storage class backs an attribute, and `Y::DocumentChannel` follows
+  the declaration: every load and append for a declared-encrypted attribute
+  routes through `Y::EncryptedDocument`, so the bytes are ciphertext at
+  rest and unreadable through the plain classes. Encryption is a property
+  of the attribute's storage; nothing a page renders or a client sends can
+  influence it. Undeclared attributes keep plain `Y::Document`.
+
+- `Y::Collaborative`: the signed handshake for record-backed documents,
+  included into ActiveRecord::Base by the engine. A page mints
+  `record.collaborative_sgid(:body)`; the channel trades it back with
+  `Y::Collaborative.locate(params[:sgid], :body)` — a signed GlobalID scoped
+  to one attribute, so a token minted for one field cannot open another.
+  This is the standard way to implement `authorized?` for record-backed
+  documents (and the flow lexxy-realtime already uses, now provided by
+  yrby-rails itself).
+
+### Changed
+
+- **Breaking:** subscriptions are refused until the channel defines
+  `authorized?(key)`. `sync_subscribed` now calls it before any stream is
+  opened or state served, and the concern's default returns `false` — a
+  channel authorizes subscribers by decision, not by omission. Add the
+  method to every channel that includes `Y::ActionCable`:
+
+  ```ruby
+  private
+
+  def authorized?(key)
+    current_user&.can_edit?(key)
+  end
+  ```
+
+  Return `true` deliberately for public documents. When the default is what
+  rejected (no override defined), the log says exactly that.
+
+- `yrby:install` no longer generates a channel — the gem ships
+  `Y::DocumentChannel`, so install lands only the storage migration. Apps
+  that want their own channel (custom storage, room-keyed documents) write
+  one with `include Y::ActionCable`; the README shows the shape the old
+  template had.
+
 ### Fixed
 
 - The `yrby:tables` migration template caps `y_documents.state` at

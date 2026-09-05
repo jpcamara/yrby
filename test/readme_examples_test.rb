@@ -8,6 +8,7 @@ require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 require_relative "../app/models/y/encrypted_document"
 require_relative "../app/models/y/encrypted_document_update"
+require "y/collaborative"
 
 # Runs the ```ruby blocks from README.md against the real gem, so an
 # example that drifts from the API fails the suite. Each block evaluates
@@ -35,6 +36,12 @@ class ReadmeExamplesTest < Minitest::Test
     data = Y::Doc.new.sync_step1
     frame = Y.wrap_update(update)
     note = Struct.new(:content).new
+    post_class = Class.new(ActiveRecord::Base) do
+      self.table_name = "pages"
+      def self.name = "Page" # record binding derives keys from the class name
+    end
+    post = post_class.create!(title: "readme")
+    Y::Document.for(post, :body).append(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
     store = Class.new do
       def replay(_id) = YjsFixtures::TwoDocsMerged::DOC1_UPDATE
       def record!(_id, _update) = nil
@@ -48,6 +55,10 @@ class ReadmeExamplesTest < Minitest::Test
         def params = {}
         def reject = nil
       end
+    end
+    class ApplicationRecord < ActiveRecord::Base
+      self.abstract_class = true
+      include Y::Collaborative
     end
   RUBY
 

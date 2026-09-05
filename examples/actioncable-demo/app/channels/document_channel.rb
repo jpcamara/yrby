@@ -18,4 +18,12 @@ class DocumentChannel < ApplicationCable::Channel
   def receive(data)
     sync_receive(data, params[:id])
   end
+
+  private
+
+  # This is the gem's local test/demo app: every document is deliberately
+  # public. Real apps check the connection's identity against the key here.
+  def authorized?(_key)
+    true
+  end
 end
