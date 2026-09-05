@@ -10,10 +10,13 @@ module Yrby
     # yrby:install, and by other gems building on the same storage.
     #
     # Template notes (kept here, not in the emitted migration): state is
-    # 4.gigabytes - 1 (longblob on MySQL; a compacted snapshot is the whole
-    # document; a 16 MB cap would break compaction) and payload is
-    # 16.megabytes - 1 (one update can carry a big paste or a client's
-    # accumulated offline edits; the 64 KB default blob is too small).
+    # 1.gigabyte - 1: the largest limit every adapter accepts. MySQL maps
+    # anything over 16 MB to longblob (a compacted snapshot is the whole
+    # document; a 16 MB cap would break compaction); Postgres raises above
+    # 1 GB - 1 and ignores the limit on bytea otherwise; SQLite ignores
+    # limits. Payload is 16.megabytes - 1 (one update can carry a big paste
+    # or a client's accumulated offline edits; the 64 KB default blob is
+    # too small).
     # The partial unique index's WHERE only keeps
     # key-only rows out of the index: uniqueness holds without it, since
     # unique indexes treat NULLs as distinct on every supported database,

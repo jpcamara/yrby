@@ -1,48 +1,61 @@
-//! Native HTML rendering of Lexical documents from the yrs collab structure —
-//! no Node process, no headless editor.
+//! HTML for Lexical documents, rendered from the Yjs structure the editor
+//! syncs. No Node process and no headless editor. A server that holds the
+//! document bytes produces the markup itself.
 //!
-//! This renders **core Lexical**: paragraphs, headings, quotes, code, lists
-//! and list items, tables, horizontal rules, links, and the whole text-format
-//! model. Everything Lexxy-specific — its own node types (attachments,
+//! This renders core Lexical: paragraphs, headings, quotes, code blocks,
+//! lists and list items, tables, horizontal rules, links, and the whole
+//! text-format model. Lexxy's additions live in the Ruby layer, as the
+//! `Y::Lexxy` renderer's rule set: its own node types (attachments,
 //! galleries, `early_escape_code`, `horizontal_divider`) and its decorations
-//! of core nodes (the table figure wrapper, header-cell styling, the
-//! nested-list-item class) — lives in the Ruby layer as the `Y::Lexxy`
-//! renderer's rule set, built on the same extension API apps use
-//! (`Y::Lexical` is the core base class). The Lexxy byte-parity guarantee is
-//! held there: the Ruby fixture tests and the live headless-Chrome e2e pin
-//! `Y::Lexxy#to_html` against a real editor's own serialized value. The
-//! native tests pin core output as regression goldens (stock Lexical has no
-//! canonical serializer to capture against).
+//! of core nodes (the figure around a table, header-cell styling, the
+//! nested-list-item class). That rule set uses the same extension API
+//! applications use. `Y::Lexical` is the core base class. The byte-parity
+//! guarantee is held there too: the Ruby fixture tests and the
+//! headless-Chrome end-to-end run pin `Y::Lexxy#to_html` against a real
+//! editor's serialized value. The tests in this crate pin core output as
+//! regression goldens. Stock Lexical has no canonical serializer to capture
+//! from.
 //!
-//! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in pure
-//! PHP — a schema-pinned renderer outside the JS runtime. This works from the
-//! collab (Yjs) structure rather than JSON.
+//! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in
+//! plain PHP, outside any JavaScript runtime. This crate does the same job
+//! from the collaborative (Yjs) structure.
 //!
-//! Storage model (verified against bytes captured from a live editor):
-//! - Blocks are `Y.XmlText` with a `__type` attribute (`paragraph`, `heading`
-//!   (+`__tag`), `quote`, `code` (+`__language`), `list`/`listitem`,
-//!   `table`/`tablerow`/`tablecell`, `link`/`autolink` (inline)).
-//! - Text runs are preceded by an embedded `Y.Map` carrying per-run metadata
-//!   (`__type: "text" | "code-highlight" | "tab"`, `__format` bitmask).
-//! - `linebreak` is a bare metadata map; `tab` is a map followed by a "\t" run.
-//! - Decorator nodes are `Y.XmlElement`s with their fields as plain
-//!   attributes (`horizontalrule` here; app/Lexxy decorators via rules).
+//! How Lexical stores a document, checked against bytes captured from a live
+//! editor:
 //!
-//! Text-format rendering follows the export pipeline Lexxy runs (Lexical's
-//! `$generateHtmlFromNodes` + sanitize), which is the only externally
-//! pinnable truth for formatting: inner tag `strong` (bold) / `em` (italic,
-//! when not bold); outer tag `code` / `mark` / `sub` / `sup`; an `<i>` wrap
-//! only when bold+italic combine (the `em` slot is taken); `<s>` / `<u>`
-//! wraps always; `<span>`s are unwrapped, so unformatted text is bare. A
-//! run's `__style` (highlight colors) survives on the createDOM tag,
-//! filtered to color/background-color; on a plain or s/u-only run it dies
-//! with the unwrapped span. Case-transform format bits are never rendered
-//! (their text-transform style is outside the sanitize whitelist).
+//! - Blocks are `Y.XmlText` with a `__type` attribute: `paragraph`,
+//!   `heading` (plus `__tag`), `quote`, `code` (plus `__language`), `list`
+//!   and `listitem`, `table`, `tablerow` and `tablecell`, and the inline
+//!   `link` and `autolink`.
+//! - Each text run is preceded by an embedded `Y.Map` with its metadata: a
+//!   `__type` of `text`, `code-highlight`, or `tab`, and a `__format`
+//!   bitmask.
+//! - A `linebreak` is a bare metadata map. A `tab` is a map followed by a
+//!   `"\t"` run.
+//! - Decorator nodes are `Y.XmlElement`s whose fields are plain attributes.
+//!   `horizontalrule` is handled here. Application and Lexxy decorators come
+//!   in through rules.
 //!
-//! Custom nodes: rules are registered by `__type` (see `yrs-html-core`) and
-//! consulted before the built-in arms, so they extend the schema or override
-//! a built-in. Declarative rules render here; callback rules emit
-//! `Segment::Deferred` for the caller to fill in after the render.
+//! Text formatting follows the export pipeline Lexxy runs: Lexical's
+//! `$generateHtmlFromNodes`, then sanitize. That output is the only
+//! formatting truth that can be pinned from outside. The inner tag is
+//! `strong` for bold, or `em` for italic without bold. The outer tag is
+//! `code`, `mark`, `sub`, or `sup`. An `<i>` wraps only when bold and italic
+//! combine, because the `em` slot is taken. `<s>` and `<u>` wrap whenever
+//! present. `<span>`s are unwrapped, so unformatted text is bare. A run's
+//! `__style` (highlight colors) survives on the createDOM tag, filtered to
+//! color and background-color. On a plain run, or one with only strike or
+//! underline, it goes away with the span. The case-transform format bits
+//! never render; their text-transform style is outside the sanitize
+//! whitelist.
+//!
+//! A node type with no rule still renders its text and child blocks, just
+//! unwrapped.
+//!
+//! Custom nodes register rules by `__type` (see `yjs-html-core`). A rule is
+//! consulted before the built-in arms, so it can extend the schema or
+//! replace a built-in. Declarative rules render here. Callback rules emit
+//! `Segment::Deferred` for the caller to fill in after the render returns.
 
 // README examples are living code: compile-checked on every cargo test.
 #[cfg(doctest)]
@@ -50,8 +63,8 @@
 mod readme_examples {}
 
 // The full rules surface, re-exported: depend on this crate alone;
-// yrs-html-core is an internal implementation crate.
-pub use yrs_html_core::*;
+// yjs-html-core is an internal implementation crate.
+pub use yjs_html_core::*;
 use yrs::types::text::YChange;
 use yrs::{
     Any, GetString, Map, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
@@ -130,7 +143,7 @@ pub fn render_segments<T: ReadTxn>(
 /// callback rules, segments always flatten.
 pub fn render<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Option<String> {
     render_segments(txn, fragment, &Rules::empty()).map(|segs| {
-        yrs_html_core::flatten(segs)
+        yjs_html_core::flatten(segs)
             .into_html()
             .expect("no callback rules registered")
     })
@@ -773,11 +786,7 @@ fn lexxy_style(style: &str) -> Option<String> {
             css.push(';');
         }
     }
-    if css.is_empty() {
-        None
-    } else {
-        Some(css)
-    }
+    if css.is_empty() { None } else { Some(css) }
 }
 
 /// `link` / `autolink`: Lexxy's sanitize keeps only `href` and `title`
@@ -1301,7 +1310,7 @@ mod tests {
         let txn = doc.transact();
         let frag = txn.get_xml_fragment("root").unwrap();
         let segs = render_segments(&txn, &frag, &rules).unwrap();
-        let html = yrs_html_core::flatten(segs).into_html().unwrap();
+        let html = yjs_html_core::flatten(segs).into_html().unwrap();
         assert_eq!(
             html,
             "<p><a class=\"app-link\" href=\"https://x.example\">site</a>\

@@ -47,10 +47,20 @@ reachable through several front ends (linked from the nav on each page):
 | `/docs/demo/whiteboard` | `Y.Map` of shapes | draggable sticky notes |
 | `/docs/demo/kanban` | `Y.Array` of card `Y.Map`s | add / move / delete |
 | `/docs/demo/forms` | `Y.Map` of fields | co-filled form |
+| `/docs/demo/spreadsheet` | `Y.Array` of row `Y.Map`s, cells nested `Y.Map`s | grid + TanStack Table |
 
 Each is a self-contained entry under `frontend/src/`; the only thing that differs
-is the Yjs binding. A two-window agent-browser check for the last four lives in
-`frontend/opaque_demos_e2e.mjs` (run the server with `STORE_KIND=file` first).
+is the Yjs binding. A two-window agent-browser check for the middle four lives in
+`frontend/opaque_demos_e2e.mjs` (run the server with `STORE_KIND=file` first);
+the spreadsheet has its own, `frontend/spreadsheet_e2e.mjs`, which CI runs.
+
+The spreadsheet is the one that shows conflict *granularity*. A cell is not a
+scalar: it is a `Y.Map` of `{ value, bold, fill }`, so one person bolding a cell
+and another typing in it are writes to different keys and both survive, while
+two writes to the same key are last-writer-wins. Its sorting and column order
+come from [TanStack Table](https://tanstack.com/table)'s headless core and are
+deliberately never written to the document — two browsers can sort the same rows
+differently while editing the same cells.
 
 ### Using this in your own app
 

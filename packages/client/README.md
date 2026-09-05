@@ -88,7 +88,7 @@ your own `Awareness`, drop down to `YProtocolSession`, which leaves it for you t
 own.)
 
 On the server, include `Y::ActionCable` in a channel named
-`DocumentChannel` (the [`yrby-actioncable`](https://rubygems.org/gems/yrby-actioncable)
+`DocumentChannel` (the [`yrby-rails`](https://rubygems.org/gems/yrby-rails)
 gem). The server subscribes document broadcasts and AnyCable awareness whispers
 on separate streams, so the document stream is not whisper-enabled. Need a
 different transport or framing? Drop down to `YProtocolSession` and supply your

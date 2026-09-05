@@ -1,14 +1,15 @@
 [package]
-name = "yrs-html-core"
-description = "Internal core for the yrs-*-html renderer crates; depend on those instead"
+name = "yjs-html-core"
+description = "Internal core for the lexical-yjs-html and prosemirror-yjs-html renderer crates; depend on those instead"
 repository = "https://github.com/jpcamara/yrby"
 readme = "README.md"
-version = "0.1.0"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
 authors = ["JP Camara <johnpcamara@gmail.com>"]
 license = "MIT"
-publish = false
+keywords = ["yjs", "crdt", "yrs", "html", "rendering"]
+categories = ["text-processing", "web-programming"]
 
 [dependencies]
 yrs = { version = "0.27", features = ["sync"] }

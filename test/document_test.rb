@@ -205,6 +205,21 @@ class DocumentTest < Minitest::Test
                  "one clean row is below the threshold; quarantined rows don't trigger"
   end
 
+  def test_load_state_preserves_an_unhealed_gap_so_a_peer_can_heal_it
+    document = Y::Document.locate!("room-1")
+    document.append(YjsFixtures::Gap::DEPENDENT)
+    document.compact! # quarantined
+
+    peer = Y::Doc.new
+    peer.apply_update(Y::Document.load_state("room-1"))
+
+    assert_predicate peer, :pending?, "the parked edit rides along in served state"
+
+    peer.apply_update(YjsFixtures::Gap::FIRST)
+
+    assert_equal "ab", peer.read_text("notepad"), "the peer heals without another load"
+  end
+
   def test_a_healed_gap_is_served_immediately_and_compacts_clean
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)

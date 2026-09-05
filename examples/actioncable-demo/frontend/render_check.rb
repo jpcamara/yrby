@@ -15,8 +15,10 @@ doc.apply_update($stdin.binmode.read)
 html =
   case kind
   when "prosemirror" then Y::Tiptap.new(doc).to_html(root || "default")
+  when "prosemirror-core" then Y::ProseMirror.new(doc).to_html(root || "default")
   when "lexical" then Y::Lexxy.new(doc).to_html(root || "root")
-  else abort "unknown renderer #{kind.inspect} (prosemirror|lexical)"
+  when "lexical-core" then Y::Lexical.new(doc).to_html(root || "root")
+  else abort "unknown renderer #{kind.inspect} (prosemirror|prosemirror-core|lexical|lexical-core)"
   end
 abort "renderer returned nil for root #{root.inspect}" if html.nil?
 print html
