@@ -48,8 +48,8 @@ to edit the record:
 The tag renders a signed grant for that record and attribute, the same way
 `turbo_stream_from` signs its stream names. The gem's `Y::DocumentChannel`
 verifies the grant when a client subscribes and records every change as
-`Y::Document` rows before it acknowledges the change. The client only ever
-sends the grant, and you don't write a channel.
+`Y::Document` rows before it acknowledges the change. The client presents the
+grant and attribute name, and you don't write a channel.
 
 The tag renders an element that connects on its own. Import it once, and when
 the document has synced your code gets it and hands it to whichever editor
@@ -71,9 +71,7 @@ See the [client lifecycle and recovery contract](packages/client/README.md#docum
 The document is rows in your database, and you can read it back in Ruby:
 
 ```ruby
-doc = Y::Doc.new
-state = post.collaborative_document(:body).load_state
-doc.apply_update(state) if state
+doc = post.collaborative_document(:body).doc
 doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
@@ -591,9 +589,46 @@ declaration keep using plain `Y::Document`. In a channel of your own, point
 configure your app's encryption keys and use one access path per document.
 Rows written encrypted read back as ciphertext through the plain classes.
 
-Use `post.collaborative_document(:body)` to read or append from application
-code. It follows the same declaration as the channel, including encryption;
-you do not need to choose between `Y::Document` and `Y::EncryptedDocument`.
+`post.collaborative_document(:body)` returns a bound `Y::Collaborative::Attribute`
+with `load_state`, `append(update)`, `key`, and `doc`. `doc` reconstructs a fresh
+native `Y::Doc` for Ruby reads and rendering. For built-in row operations such
+as compaction, use `post.collaborative_document(:body).document.compact!`.
+The same accessor serves the channel and application code, including encryption.
+
+Custom storage can use the shipped channel too. Declare one adapter implementing
+both `load(record, name)` and `write(record, name, update)`:
+
+```ruby
+class PostStore
+  def self.load(record, name)
+    # Return lossless binary Yjs state, or nil for a new document.
+  end
+
+  def self.write(record, name, update)
+    # Persist durably before returning. Tolerate duplicates; raise on failure.
+  end
+end
+
+class Post < ApplicationRecord
+  has_collaborative_document :body, storage: PostStore
+end
+```
+
+The helper and Ruby accessor stay the same. The adapter supplies both channel
+loads/appends and `post.collaborative_document(:body).doc`; yrby creates no
+built-in document rows for it. A failed write is neither acknowledged nor
+broadcast. Custom storage owns encryption and compaction, so combining `storage:`
+with `encrypted: true` raises, as does asking a custom attribute for `.document`.
+Plain undeclared attributes still use `Y::Document`. Declarations are inherited
+without mutating their parent. Changing an existing attribute's storage requires
+migrating its data; the declaration does not copy it.
+
+Built-in attributes retain their stored document key. Custom attributes use the
+same conventional record/attribute key returned by `Y::Document.key_for(record,
+name)`, without requiring a built-in row. Grants keep their existing scope and
+lifetime. For custom authorization or room-keyed collaboration, generate a
+channel with `bin/rails generate yrby:install --channel` and implement its
+`authorized?(key)` method. Both storage hooks remain available in custom channels.
 
 The migration creates `y_documents` and `y_document_updates`. To rename them,
 edit the generated migration and point `Y::Document.table_name` and

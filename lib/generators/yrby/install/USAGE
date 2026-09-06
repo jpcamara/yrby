@@ -8,3 +8,8 @@ Example:
 
     This will create:
         db/migrate/XXXXXXXX_create_y_tables.rb
+
+    To also generate an explicit application channel:
+        bin/rails generate yrby:install --channel
+
+    Implement authorized?(key) in the generated channel before using it.

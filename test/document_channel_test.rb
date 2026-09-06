@@ -61,7 +61,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     subscribe grant: grant, name: "body", session_id: "browser-session"
 
     assert_predicate subscription, :confirmed?
-    assert_equal @page.collaborative_document(:body), subscription.send(:document)
+    assert_equal @page.collaborative_document(:body).document, subscription.send(:document).document
   end
 
   def test_a_signed_grant_subscribes_and_gets_the_opening_handshake
@@ -133,7 +133,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
     document = secret.collaborative_document(:body)
 
-    assert_instance_of Y::EncryptedDocument, document
+    assert_instance_of Y::EncryptedDocument, document.document
     doc = Y::Doc.new
     doc.apply_update(document.load_state)
 
@@ -142,7 +142,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     # The safety property: the recorded bytes are ciphertext at rest, so the
     # plain classes read back garbage, never the document. One access path
     # per document.
-    raw = Y::DocumentUpdate.find_by!(document_id: document.id).payload
+    raw = Y::DocumentUpdate.find_by!(document_id: document.document.id).payload
 
     refute_equal update, raw, "the stored payload must not be the plaintext delta"
     assert_raises(StandardError, "the plain path reads ciphertext, not a document") do
@@ -155,8 +155,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   def test_document_accessor_uses_plain_storage_for_undeclared_attributes
     document = @page.collaborative_document(:body)
 
-    assert_instance_of Y::Document, document
-    assert_equal document, @page.collaborative_document("body")
+    assert_instance_of Y::Collaborative::Attribute, document
+    assert_instance_of Y::Document, document.document
+    assert_equal document.document, @page.collaborative_document("body").document
     assert_equal @page, document.record
   end
 

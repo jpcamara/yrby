@@ -52,9 +52,9 @@ try {
   assert.ok(up, "Rails fixture boots");
   await browser(session, "open", base);
   console.log(JSON.stringify(await browser(session, "snapshot", "-i")));
-  await wait('document.querySelector("#body-doc")?.provider?.synced && document.querySelector("#secret-doc")?.provider?.synced');
-  check("two simultaneous default elements share one real WebSocket", await evaluate('window.socketCount === 1 && document.querySelector("#body-doc").provider.consumer === document.querySelector("#secret-doc").provider.consumer'));
-  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 2 && initialReadiness.every(Boolean) && browserEvents.length === 2 && browserEvents.every(e => e.synced && e.hasProvider)'));
+  await wait('document.querySelector("#body-doc")?.provider?.synced && document.querySelector("#secret-doc")?.provider?.synced && document.querySelector("#external-doc")?.provider?.synced');
+  check("simultaneous default elements share one real WebSocket", await evaluate('window.socketCount === 1 && document.querySelector("#body-doc").provider.consumer === document.querySelector("#secret-doc").provider.consumer'));
+  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 3 && initialReadiness.every(Boolean) && browserEvents.length === 3 && browserEvents.every(e => e.synced && e.hasProvider)'));
   await browser(session, "find", "label", "Body", "fill", "before move");
   await wait('!document.querySelector("#body-doc").provider.hasPending');
   check("ordinary edit reaches the Ruby accessor", (await state("body")).text === "before move");
@@ -71,6 +71,12 @@ try {
   const encrypted = await state("secret");
   check("encrypted browser edit reads through declared storage", encrypted.text === "encrypted browser edit" && encrypted.storage === "Y::EncryptedDocument");
   check("encrypted payload has a ciphertext envelope", JSON.parse(Buffer.from(encrypted.raw_payload, "base64").toString()).p !== undefined);
+
+  await browser(session, "find", "label", "Custom storage", "fill", "custom adapter browser edit");
+  await wait('!document.querySelector("#external-doc").provider.hasPending');
+  const custom = await state("external");
+  check("custom storage serves both browser writes and native Ruby reads without built-in rows",
+    custom.text === "custom adapter browser edit" && custom.storage === "BrowserStore" && custom.built_in_rows === 0);
 
   // Suspend managed subscriptions while leaving HTTP available for Turbo Drive.
   await evaluate('sessionStore.suspend(); window.suspendedSockets = socketCount');
@@ -190,6 +196,22 @@ try {
   await evaluate('document.body.append(detachedElement)');
   await wait('detachedElement.provider?.synced');
   check("reinsert after async cancellation subscribes successfully", await evaluate('detachedElement.doc.getText("content").toString() === "pending across Turbo"'));
+  // Use a real Rails subscription, retain its obsolete callbacks, and replace it.
+  await evaluate(`window.guardSession = detachedElement.session;
+    window.guardProvider = guardSession.provider;
+    window.guardStore = DocumentSessionStore.for(guardProvider.consumer);
+    window.oldGuardSubscription = guardProvider.consumer.subscriptions.subscriptions.find(sub =>
+      sub.identifier === JSON.stringify({ channel: guardProvider.channelName, ...guardProvider.channelParams }));
+    guardStore.suspend();`);
+  await wait('guardProvider.status === "disconnected"');
+  await evaluate('guardStore.resume()');
+  await wait('guardProvider.synced');
+  check("late callbacks from a real retired subscription cannot pause or reject the replacement",
+    await evaluate(`oldGuardSubscription.disconnected(); oldGuardSubscription.rejected();
+      guardSession.state === "attached" && guardSession.provider === guardProvider && guardProvider.synced`));
+  await browser(session, "find", "label", "Body", "fill", "guarded reconnect edit");
+  await wait('!guardSession.hasPending');
+  check("typing after stale callbacks still persists through the live replacement", (await state("body")).text === "guarded reconnect edit");
   // The managed subscription nonce works with the actual AnyCable web client.
   await evaluate(`(async () => { window.anyConsumer = await anyCableConsumer();
     YrbyDocumentElement.consumer = anyConsumer;

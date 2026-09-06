@@ -94,7 +94,13 @@ test("fresh grants and replacement lifetimes use different acknowledgment routes
   assert.notEqual(replacementSub.params.session_id, originalSub.params.session_id);
   sync(replacementSub);
   replacement.session.doc.getText("content").insert(0, "new edit");
-  ack(originalSub); // A late old callback cannot prune a replacement's queue.
+  // Cable routes incoming messages by serialized subscription identifier, even
+  // if the old handler is gone. Old ACKs must never reach the new queue.
+  const oldIdentifier = JSON.stringify(originalSub.params);
+  const oldAck = originalSub.sent.filter(message => message.id !== undefined).at(-1).id;
+  for (const sub of consumer.created) {
+    if (!sub.removed && JSON.stringify(sub.params) === oldIdentifier) sub.handlers.received({ ack: oldAck });
+  }
   assert.equal(replacement.session.hasPending, true);
 });
 

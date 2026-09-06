@@ -9,9 +9,15 @@ module Yrby
     # yrby:tables). That is the whole install: the models and the
     # Y::DocumentChannel that syncs through them ship in the gem, the way
     # Turbo ships Turbo::StreamsChannel. Apps that want their own channel
-    # (custom storage, room-keyed documents) write one with Y::ActionCable;
-    # see the README.
+    # (custom authorization, room-keyed documents) can request --channel.
     class InstallGenerator < ::Rails::Generators::Base
+      source_root File.expand_path("templates", __dir__)
+      class_option :channel, type: :boolean, default: false, desc: "Generate a custom DocumentChannel"
+
+      def create_channel
+        template "document_channel.rb", "app/channels/document_channel.rb" if options[:channel]
+      end
+
       def create_tables
         invoke "yrby:tables"
       end
@@ -33,9 +39,13 @@ module Yrby
 
                  import "yrby-client/element"
 
-                 document.addEventListener("yrby:synced", ({ target }) => {
-                   if (target.matches("yrby-document")) bindYourEditor(target.doc)
+                 document.addEventListener("yrby:synced", ({ target, detail }) => {
+                   const editor = bindYourEditor(target, detail.doc, detail.provider)
+                   detail.signal.addEventListener("abort", () => editor.destroy(), { once: true })
                  })
+
+          --channel also generates app/channels/document_channel.rb. Implement
+          its authorized? method before using that explicit custom channel.
 
           The README's Editors section links working integrations for
           Tiptap, Lexxy, Rhino Editor, and CodeMirror.

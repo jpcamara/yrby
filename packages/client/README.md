@@ -206,6 +206,11 @@ await provider.whenSynced; // resolves immediately if already synced
 It resolves once, on the first catch-up, and stays resolved across later
 reconnects. Use `onStatusChange` to track the live connection.
 
+Callbacks from superseded subscriptions are ignored after `disconnect()` or
+`destroy()`. A consumer that invokes its callbacks during subscription creation
+is supported: the provider waits until creation returns before handling them.
+These guards are separate from the managed session's unique acknowledgment route.
+
 On `disconnect()` / `destroy()` — and on browser `pagehide` — the provider
 broadcasts a presence removal so peers drop your cursor immediately instead of
 waiting for the awareness timeout. `destroy()` is synchronous (the unsubscribe is

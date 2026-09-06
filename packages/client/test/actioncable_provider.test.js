@@ -68,6 +68,47 @@ test("constructs with a default awareness and exposes synced/hasPending", (t) =>
   assert.equal(p.hasPending, false);
 });
 
+test("late callbacks from an old subscription cannot affect a new connection", async (t) => {
+  const subscriptions = [];
+  const consumer = { subscriptions: { create(_params, mixin) {
+    const sub = { ...mixin, send() {}, unsubscribe() {} };
+    subscriptions.push(sub);
+    return sub;
+  } } };
+  const errors = [];
+  const doc = new Y.Doc();
+  const p = makeProvider(t, doc, consumer, {}, { onError: (e) => errors.push(e) });
+  p.connect();
+  const old = subscriptions[0];
+  old.connected();
+  p.disconnect();
+  p.connect();
+  const fresh = subscriptions[1];
+  fresh.connected();
+  doc.getText("body").insert(0, "pending");
+  old.received({ ack: 1 });
+  old.disconnected();
+  old.rejected();
+  assert.equal(p.hasPending, true);
+  assert.equal(p.status, "connected");
+  assert.equal(errors.length, 0);
+  fresh.received({ ack: 1 });
+  assert.equal(p.hasPending, false);
+});
+
+test("synchronous consumer connection callbacks send the opening handshake after create returns", async (t) => {
+  const sent = [];
+  const consumer = { subscriptions: { create(_params, mixin) {
+    mixin.connected();
+    return { ...mixin, send: (message) => sent.push(message), unsubscribe() {} };
+  } } };
+  const p = makeProvider(t, new Y.Doc(), consumer);
+  p.connect();
+  await Promise.resolve();
+  assert.equal(p.status, "connected");
+  assert.ok(sent.some((message) => fromBase64(message.update)[0] === 0));
+});
+
 test("on connect: the SyncStep1 handshake goes via normal send, never whisper", (t) => {
   const c = fakeConsumer({ withWhisper: true });
   const p = makeProvider(t, new Y.Doc(), c, { id: "r2" });

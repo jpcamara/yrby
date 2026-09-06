@@ -9,9 +9,17 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `record.collaborative_document(name)` follows the model's storage declaration
-  for application reads and writes, including encrypted attributes. The shipped
-  channel uses the same accessor.
+- `record.collaborative_document(name)` returns a bound
+  `Y::Collaborative::Attribute` for application reads/writes and the shipped
+  channel. `doc` reconstructs a native `Y::Doc`; `load_state`, `append`, and `key`
+  follow the same storage choice. Built-in row operations are explicitly
+  available through `.document`.
+- `has_collaborative_document :body, storage: PostStore` selects one adapter
+  implementing `load(record, name)` and `write(record, name, update)` for both
+  channel persistence and Ruby reads. Custom storage creates no built-in rows,
+  cannot be combined with `encrypted: true`, and must supply both operations.
+- `Y::Document.key_for(record, name)` exposes the existing conventional key
+  without allocating a document row.
 
 - `Y::DocumentChannel`, shipped in the gem the way Turbo ships
   `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a
@@ -69,11 +77,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   Return `true` deliberately for public documents. When the default is what
   rejected (no override defined), the log says exactly that.
 
-- `yrby:install` no longer generates a channel — the gem ships
-  `Y::DocumentChannel`, so install lands only the storage migration. Apps
-  that want their own channel (custom storage, room-keyed documents) write
-  one with `include Y::ActionCable`; the README shows the shape the old
-  template had.
+- `yrby:install` defaults to only the storage migration; the gem ships
+  `Y::DocumentChannel`. `--channel` optionally generates an explicit application
+  channel for custom authorization or room-keyed documents. It denies access
+  until its authorization method is implemented, including stateless receive.
 
 ### Fixed
 

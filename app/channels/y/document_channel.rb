@@ -17,17 +17,16 @@ module Y
   # Storage follows the record's declaration: an attribute the model marked
   # `has_collaborative_document :name, encrypted: true` routes every load and
   # append through Y::EncryptedDocument; undeclared attributes use plain
-  # Y::Document. State rebuilds from your database on join, and every change
-  # is recorded there before it is acknowledged or broadcast. Anything else
-  # (custom stores, room-keyed documents) means writing your own channel
-  # (see the yrby-rails README).
+  # Y::Document. A declared storage adapter supplies both reads and writes.
+  # Every change is recorded before it is acknowledged or broadcast. Custom
+  # authorization or room-keyed documents can use an application channel.
   # ::ActionCable, explicitly: inside module Y a bare ActionCable resolves
   # to the gem's own Y::ActionCable concern.
   class DocumentChannel < ::ActionCable::Channel::Base
     include Y::ActionCable
 
-    on_load { |key| storage.load_state(key) }
-    on_change { |key, update| storage.append(key, update) }
+    on_load { |_key| document.load_state }
+    on_change { |_key, update| document.append(update) }
 
     def subscribed = sync_subscribed(document&.key)
 
@@ -45,13 +44,6 @@ module Y
 
     def document
       record&.collaborative_document(params[:name].to_s)
-    end
-
-    # One access path per document: the class the model declared for this
-    # attribute decides the cryptography: for the binding, every load, and
-    # every append alike.
-    def storage
-      record ? record.class.collaborative_document_class(params[:name]) : Y::Document
     end
   end
 end

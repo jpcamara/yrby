@@ -16,6 +16,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Managed sessions expose suspension, delivery status, and recovery after
   rejection. Per-provider subscription nonces isolate acknowledgment sequences.
 
+### Fixed
+
+- ActionCable providers ignore callbacks from superseded subscriptions, so a
+  delayed disconnect or rejection cannot stop a live replacement from delivering
+  edits. Synchronous consumer callbacks wait until subscription creation returns.
+  Managed sessions retain distinct provider identifiers to isolate old ACKs.
+
 ## [0.7.1] - 2026-08-19
 
 ### Fixed

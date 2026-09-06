@@ -43,6 +43,11 @@ ActiveRecord::Schema.define do
     t.timestamps
     t.index %i[record_type record_id name], unique: true
   end
+  create_table :external_updates, force: true do |t|
+    t.bigint :record_id, null: false
+    t.string :name, null: false
+    t.binary :payload, null: false
+  end
   create_table :y_document_updates, force: true do |t|
     t.references :document, null: false
     t.binary :payload, null: false
@@ -50,8 +55,24 @@ ActiveRecord::Schema.define do
     t.datetime :created_at, null: false
   end
 end
+class ExternalUpdate < ActiveRecord::Base
+end
+
+class BrowserStore
+  def self.load(record, name)
+    doc = Y::Doc.new
+    ExternalUpdate.where(record_id: record.id, name: name).pluck(:payload).each { |update| doc.apply_update(update) }
+    doc.encode_state_as_update
+  end
+
+  def self.write(record, name, update)
+    ExternalUpdate.create!(record_id: record.id, name: name, payload: update)
+  end
+end
+
 class Page < ActiveRecord::Base
   has_collaborative_document :secret, encrypted: true
+  has_collaborative_document :external, storage: BrowserStore
 end
 Page.create!(id: 1, title: "Browser regression")
 
@@ -73,6 +94,9 @@ class BrowserController < ActionController::Base
       <%= collaborative_document_tag @page, :secret, id: "secret-doc" do %>
         <label>Encrypted text <textarea aria-label="Encrypted text" disabled></textarea></label>
       <% end %>
+      <%= collaborative_document_tag @page, :external, id: "external-doc" do %>
+        <label>Custom storage <textarea aria-label="Custom storage" disabled></textarea></label>
+      <% end %>
       <p id="status">Loading</p><div id="move-target"></div>
       <a href="/away">Away</a></body></html>
     ERB
@@ -87,13 +111,16 @@ class BrowserController < ActionController::Base
   end
 
   def state
-    document = Page.find(1).collaborative_document(params[:name])
-    doc = Y::Doc.new
-    bytes = document.load_state
-    doc.apply_update(bytes) if bytes
-    raw = Y::DocumentUpdate.where(document_id: document.id).pick(:payload)
-    render json: { text: doc.read_text("content"), storage: document.class.name,
-                   raw_payload: raw && Base64.strict_encode64(raw) }
+    attribute = Page.find(1).collaborative_document(params[:name])
+    if params[:name] == "external"
+      render json: { text: attribute.doc.read_text("content"), storage: "BrowserStore",
+                     built_in_rows: Y::Document.where(record: Page.find(1), name: "external").count }
+    else
+      document = attribute.document
+      raw = Y::DocumentUpdate.where(document_id: document.id).pick(:payload)
+      render json: { text: attribute.doc.read_text("content"), storage: document.class.name,
+                     raw_payload: raw && Base64.strict_encode64(raw) }
+    end
   end
 
   def asset
