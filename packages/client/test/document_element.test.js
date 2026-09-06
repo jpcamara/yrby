@@ -122,16 +122,23 @@ test("cached previews have no document or provider; promotion binds once", async
   assert.equal(el.events.length, 1);
 });
 
-test("before-cache releases bindings and a canceled navigation rebinds passive markup", async t => {
+test("before-cache releases bindings and a canceled navigation rebinds passive markup", { timeout: 5000 }, async t => {
   const attrs = { grant: "g", name: "body", "data-yrby-snapshot": "obsolete" };
   const { el, consumer, document, mount } = setup(t, attrs);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   const signal = el.events[0].detail.signal;
+  const originalSubscription = consumer.created.at(-1);
   document.dispatchEvent(new Event("turbo:before-cache"));
   assert.equal(signal.aborted, true);
   assert.equal(el.doc, undefined);
   assert.equal(attrs["data-yrby-snapshot"], undefined);
-  await new Promise(resolve => setTimeout(resolve, 15));
+  // Wait for the observable replacement, not elapsed time: a busy event loop
+  // can run the old fixed delay before Turbo's deferred reconciliation finishes.
+  const started = performance.now();
+  while (consumer.created.at(-1) === originalSubscription && performance.now() - started < 2000) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.notEqual(consumer.created.at(-1), originalSubscription, "expected a replacement subscription");
   sync(consumer.created.at(-1)); await el.whenSynced;
   assert.equal(el.events.length, 2);
 });
