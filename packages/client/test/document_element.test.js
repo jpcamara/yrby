@@ -15,6 +15,7 @@ function fakeConsumer() {
     calls,
     deliverConnected: () => sub.connected(),
     deliverReceived: (msg) => sub.received(msg),
+    deliverRejected: () => sub.rejected(),
     subscriptions: {
       create(params, mixin) {
         calls.created.push(params);
@@ -236,12 +237,18 @@ test("a cloned Turbo snapshot replays pending content until acked, and releases 
   original.doc.getText("content").insert(0, "unsent edit");
   assert.equal(original.provider.hasPending, true);
   const oldDoc = original.doc;
+  const oldProvider = original.provider;
   document.dispatchEvent(new Event("turbo:before-cache"));
   const clonedAttrs = { ...attrs };
   original.disconnectedCallback();
   await new Promise(r => queueMicrotask(r));
   assert.equal(original.provider, undefined);
+  assert.equal(oldDoc.isDestroyed, false, "unacknowledged delivery still owns the original document");
+  const pendingFrame = consumer.calls.send.find(m => m.id !== undefined);
+  consumer.deliverReceived({ ack: pendingFrame.id });
+  await Promise.resolve();
   assert.equal(oldDoc.isDestroyed, true);
+  assert.equal(oldProvider.awareness.getLocalState(), null);
 
   const restoredConsumer = fakeConsumer();
   const restored = element(t, clonedAttrs, restoredConsumer);
@@ -295,4 +302,140 @@ test("snapshot restore queues only the small pending tail, not the saved documen
   assert.equal(clean.doc.getText("content").length, 100_004);
   assert.equal(clean.provider.hasPending, false, "acknowledged content is not requeued");
   server.destroy();
+});
+
+for (const changed of [{ grant: "other" }, { name: "notes" }, { channel: "OtherChannel" }]) {
+  test(`retarget before caching never relabels the document: ${Object.keys(changed)[0]}`, async (t) => {
+    const attrs = { grant: "g", name: "body" };
+    const original = element(t, attrs, fakeConsumer());
+    await original.connectedCallback();
+    original.doc.getText("content").insert(0, "private pending edit");
+    Object.assign(attrs, changed);
+    const [key, value] = Object.entries(changed)[0];
+    original.attributeChangedCallback(key, null, value);
+    assert.equal(original.provider.status, "disconnected");
+    assert.equal(original.provider.hasPending, true, "failed retarget keeps the original edit");
+    assert.equal(original.events.at(-1).type, "yrby:error");
+    original.destroy();
+    assert.equal(JSON.parse(attrs["data-yrby-snapshot"]).identity, JSON.stringify(["Y::DocumentChannel", "g", "body"]));
+    const restored = element(t, { ...attrs }, fakeConsumer());
+    await restored.connectedCallback();
+    assert.equal(restored.doc.getText("content").toString(), "");
+    assert.equal(restored.provider.hasPending, false);
+    const originalIdentity = element(t, { ...attrs, grant: "g", name: "body", channel: null }, fakeConsumer());
+    await originalIdentity.connectedCallback();
+    assert.equal(originalIdentity.doc.getText("content").toString(), "private pending edit");
+    assert.equal(originalIdentity.provider.hasPending, true);
+  });
+}
+
+test("retarget while the consumer is loading cannot subscribe with the old document", async (t) => {
+  let provide;
+  const attrs = { grant: "g", name: "body" };
+  const consumer = fakeConsumer();
+  const el = element(t, attrs, new Promise(resolve => { provide = resolve; }));
+  const starting = el.connectedCallback();
+  el.doc.getText("content").insert(0, "private before startup");
+  attrs.grant = "other";
+  el.attributeChangedCallback("grant", "g", "other");
+  provide(consumer);
+  await starting;
+  assert.equal(consumer.calls.created.length, 0);
+  el.destroy();
+  assert.equal(JSON.parse(attrs["data-yrby-snapshot"]).identity, JSON.stringify(["Y::DocumentChannel", "g", "body"]));
+});
+
+test("a disconnected retarget fails closed and reverting reconnects the original provider", async (t) => {
+  const attrs = { grant: "g", name: "body" };
+  const el = element(t, attrs, fakeConsumer());
+  await el.connectedCallback();
+  const { provider } = el;
+  el.disconnectedCallback();
+  await new Promise(r => queueMicrotask(r));
+  attrs.grant = "other";
+  await el.connectedCallback();
+  assert.equal(provider.status, "disconnected");
+  attrs.grant = "g";
+  await el.connectedCallback();
+  assert.equal(el.provider, provider);
+  assert.equal(provider.status, "connecting");
+});
+
+test("Turbo preview cannot connect or resolve readiness and releases its document", async (t) => {
+  const consumer = fakeConsumer();
+  const el = element(t, { grant: "g", name: "body" }, consumer);
+  el.ownerDocument = new EventTarget();
+  el.ownerDocument.documentElement = { hasAttribute: () => true };
+  let ready = false;
+  el.whenSynced.then(() => { ready = true; });
+  await el.connectedCallback();
+  const doc = el.doc;
+  assert.equal(el.inert, true);
+  assert.equal(consumer.calls.created.length, 0);
+  assert.equal(ready, false);
+  el.disconnectedCallback();
+  await new Promise(r => queueMicrotask(r));
+  assert.equal(doc.isDestroyed, true);
+  assert.equal(el.provider, undefined);
+});
+
+test("navigation finishes pending delivery under the original grant before releasing it", async (t) => {
+  const document = new EventTarget();
+  const attrs = { grant: "original-grant", name: "body" };
+  const consumer = fakeConsumer();
+  const original = element(t, attrs, consumer);
+  original.ownerDocument = document;
+  await original.connectedCallback();
+  consumer.deliverConnected();
+  original.doc.getText("content").insert(0, "unsent before navigation");
+  const { doc, provider } = original;
+  document.dispatchEvent(new Event("turbo:before-cache"));
+  original.disconnectedCallback();
+  await new Promise(r => queueMicrotask(r));
+  assert.equal(original.provider, undefined);
+  assert.equal(doc.isDestroyed, false);
+  assert.equal(provider.awareness.getLocalState(), null);
+  const fresh = element(t, { grant: "fresh-grant", name: "body" }, fakeConsumer());
+  fresh.ownerDocument = document;
+  await fresh.connectedCallback();
+  assert.equal(fresh.provider.hasPending, false, "old tail is never reauthorized with a fresh grant");
+  const frame = consumer.calls.send.find(m => m.id !== undefined);
+  assert.equal(consumer.calls.created[0].grant, "original-grant");
+  consumer.deliverReceived({ ack: frame.id });
+  await Promise.resolve();
+  assert.equal(doc.isDestroyed, true);
+  assert.equal(provider.status, "disconnected");
+});
+
+test("a retained preview initializes when Turbo promotes it to the live page", async (t) => {
+  const consumer = fakeConsumer();
+  const el = element(t, { grant: "g", name: "body" }, consumer);
+  const document = el.ownerDocument = new EventTarget();
+  let preview = true;
+  document.documentElement = { hasAttribute: () => preview };
+  el.inert = false;
+  await el.connectedCallback();
+  preview = false;
+  document.dispatchEvent(new Event("turbo:render"));
+  await Promise.resolve();
+  assert.equal(consumer.calls.created.length, 1);
+  assert.equal(el.inert, false);
+  assert.ok(el.provider);
+});
+
+
+test("a rejected outgoing subscription releases resources while retaining its snapshot", async (t) => {
+  const consumer = fakeConsumer();
+  const el = element(t, { grant: "expired", name: "body" }, consumer);
+  el.ownerDocument = new EventTarget();
+  await el.connectedCallback();
+  el.doc.getText("content").insert(0, "recoverable edit");
+  const { doc, provider } = el;
+  el.ownerDocument.dispatchEvent(new Event("turbo:before-cache"));
+  el.disconnectedCallback();
+  await new Promise(r => queueMicrotask(r));
+  consumer.deliverRejected();
+  assert.equal(doc.isDestroyed, true);
+  assert.equal(provider.status, "disconnected");
+  assert.ok(JSON.parse(el.getAttribute("data-yrby-snapshot")).pending);
 });

@@ -77,6 +77,12 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Document elements keep their original grant, name, and channel when Turbo
+  morphs their attributes, preventing cached edits from crossing documents.
+- Turbo previews stay inert. Outgoing pending edits finish delivery through
+  their original grant before cleanup, including when fresh HTML replaces a
+  cached preview with a newly minted grant.
+
 - Default storage now supplies the loader and recorder as a pair. Declaring
   only one custom hook raises before subscribing or acknowledging an update,
   instead of silently sending reads and writes to different stores.

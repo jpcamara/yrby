@@ -79,6 +79,7 @@ export class ActionCableProvider {
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #whenSynced: Promise<void> | null = null;
+  #acknowledgmentWaiters = new Set<() => void>();
   // `session.synced` resets on every transport drop (a reconnect
   // re-handshakes). Whether the first catch-up has ever happened is tracked
   // separately here, so `whenSynced` does not depend on when it is first
@@ -150,6 +151,12 @@ export class ActionCableProvider {
     return this.session.hasPending;
   }
 
+  /** Resolves when the delivery queue is empty; remains pending if destroyed before ack. */
+  get whenAcknowledged(): Promise<void> {
+    if (!this.hasPending) return Promise.resolve();
+    return new Promise(resolve => { this.#acknowledgmentWaiters.add(resolve); });
+  }
+
   /** Copy the unacknowledged tail for a page snapshot, without the full document. */
   get pendingUpdate(): Uint8Array | null {
     return this.session.pendingUpdate;
@@ -197,6 +204,10 @@ export class ActionCableProvider {
           // Reliable-delivery ack: confirm + prune the local queue.
           if (message && message.ack !== undefined) {
             provider.session.ack(message.ack);
+            if (!provider.hasPending) {
+              for (const resolve of provider.#acknowledgmentWaiters) resolve();
+              provider.#acknowledgmentWaiters.clear();
+            }
             return;
           }
           const awarenessPayload = message && message.awareness;
@@ -266,6 +277,7 @@ export class ActionCableProvider {
     this.session.destroy();
     this.awareness.destroy(); // stops its reaper timer
     this.#statusListeners.clear();
+    this.#acknowledgmentWaiters.clear();
   }
 
   #computeStatus(): ProviderStatus {

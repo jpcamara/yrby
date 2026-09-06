@@ -57,9 +57,19 @@ The element owns connect/reconnect against the gem-shipped
 `Y.Doc` across DOM moves, and saves its state in Turbo's cached snapshot.
 A restored snapshot creates a new document and queues only its unacknowledged
 tail for delivery; already-saved content is restored without retransmitting it.
-The old cached page's
-provider and awareness timer are released. This preserves edits across Turbo
-restores; it is not persistent offline storage across closing or reloading a tab.
+During navigation, an unacknowledged queue finishes through the original
+provider and grant, even if the fresh page mints a different grant. Presence is
+cleared immediately; the outgoing provider and document are released after
+acknowledgment (or subscription rejection). Cached previews are inert and do
+not connect or resolve readiness; the live page binds its editor after sync.
+This preserves edits across Turbo navigation within the tab. It is not
+persistent offline storage across closing or reloading a tab.
+
+The grant, name, and channel are fixed for a document's lifetime, including
+while its consumer loads. Changing them on a live element disconnects it and
+emits `yrby:error`; its state remains bound to the original identity. Replace
+the element when changing documents. For explicit reuse, call `destroy()`
+before changing its attributes, then reconnect it.
 
 The element exposes `doc`, `provider`, and `whenSynced`. The promise is available
 immediately, even while its consumer is loading; await it before binding an editor.
@@ -79,6 +89,10 @@ Custom snapshot integrations can pair `provider.pendingUpdate` with
 tail (or returns `null`); the latter restores its delivery obligation even
 when those changes are already present in the document. Restore full state
 with `applyRemoteUpdate` first, then restore the pending tail before connecting.
+
+`provider.whenAcknowledged` resolves when its delivery queue is empty. A
+transport disconnect leaves it pending while delivery retries. Destroying a
+provider before acknowledgment leaves the promise unresolved.
 
 All elements on a page share one consumer, created from
 `@rails/actioncable` (an optional peer dependency) by default; on AnyCable
