@@ -77,6 +77,13 @@ try {
     assert.ok(!errors || /No (errors|page errors)/i.test(errors), errors)
   }
   console.log("ok: record-backed example browser checks passed")
+} catch (error) {
+  for (const session of sessions) {
+    console.error(session, await js(session,
+      '({url:location.href, title:document.title, status:document.querySelector("#document-status")?.textContent})').catch(() => null))
+    console.error(await ab(session, "errors").catch(() => "Browser unavailable"))
+  }
+  throw error
 } finally {
   await Promise.allSettled(sessions.map(session => ab(session, "close")))
 }

@@ -39,7 +39,7 @@ From `site/frontend`, run `bun run build:client`, then
 and builds the client from this checkout.
 
 `/examples/document` uses a pre-provisioned `ExampleDocument` record, created
-by its migration. Anonymous page reads create no records. The view renders
+by its migration (or idempotent seeds on a fresh database). Anonymous page reads create no records. The view renders
 `collaborative_document_tag`; CodeMirror mounts on `yrby:synced` and is destroyed
 when `detail.signal` aborts. A template defers attaching the helper markup until
 the AnyCable consumer and delegated listener are configured. The read panel calls
