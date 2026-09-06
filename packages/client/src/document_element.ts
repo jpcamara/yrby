@@ -1,88 +1,128 @@
-// <yrby-document> — the auto-connecting element for the gem-shipped
-// Y::DocumentChannel, the way <turbo-cable-stream-source> auto-connects for
-// Turbo::StreamsChannel. collaborative_document_tag renders it with the signed
-// grant; importing "yrby-client/element" registers it; connection needs no
-// per-feature JavaScript.
-//
-//   <yrby-document grant="..." name="body"></yrby-document>
-//
-// The one thing an element cannot do alone is finish the job: the payload is
-// a Y.Doc that your editor binding must receive. Take it from the `doc`
-// property, after the first sync (binding earlier makes each client seed its
-// own competing top-level node):
-//
-//   document.querySelector("yrby-document")
-//     .addEventListener("yrby:synced", ({ target }) => bindEditor(target.doc))
-//
-// or `await el.whenSynced` once the element is connected.
-//
-// All elements on a page share one cable consumer. By default it is created
-// from "@rails/actioncable" (an optional peer dependency, imported only when
-// used); an app on AnyCable assigns its own once, before the elements connect:
-//
-//   YrbyDocumentElement.consumer = createCable(...)
-import * as Y from "yjs";
-import { ActionCableProvider } from "./actioncable_provider.js";
-import type { CableConsumer } from "./actioncable_provider.js";
+import { type CableConsumer } from "./actioncable_provider.js";
+import { DocumentSessionStore, type DocumentAttachment } from "./document_session.js";
+import { registerDocumentMount } from "./turbo_adapter.js";
 
-// Node (SSR, tests) has no HTMLElement; parsing must not crash there, so the
-// class exists everywhere and only registration is browser-gated below.
 const Base = (typeof HTMLElement === "undefined" ? class {} : HTMLElement) as typeof HTMLElement;
-
-let sharedConsumer: CableConsumer | undefined;
-
-async function defaultConsumer(): Promise<CableConsumer> {
-  if (!sharedConsumer) {
-    const actioncable = await import("@rails/actioncable");
-    sharedConsumer = actioncable.createConsumer() as CableConsumer;
-  }
-  return sharedConsumer;
+let sharedConsumer: Promise<CableConsumer> | undefined;
+function defaultConsumer(): Promise<CableConsumer> {
+  return sharedConsumer ??= import("@rails/actioncable")
+    .then(ac => ac.createConsumer() as CableConsumer)
+    .catch(error => { sharedConsumer = undefined; throw error; });
 }
 
+/** An editor attachment. The session store owns documents and pending delivery. */
 export class YrbyDocumentElement extends Base {
-  /** Assign once for AnyCable (or any custom consumer); default is @rails/actioncable's. */
-  static consumer: CableConsumer | undefined;
+  static consumer: CableConsumer | Promise<CableConsumer> | undefined;
+  static observedAttributes = ["grant", "name", "channel"];
+  #attachment: DocumentAttachment | undefined;
+  #connected = false;
+  #active = false;
+  #starting = false;
+  #generation = 0;
+  #unregister: (() => void) | undefined;
+  #holdingInert = false;
+  #previousInert = false;
+  #resolveSynced!: () => void;
+  #whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
+  get session() { return this.#attachment?.session; }
+  get doc() { return this.session?.doc; }
+  get provider() { return this.session?.provider; }
+  get whenSynced(): Promise<void> { return this.#whenSynced; }
 
-  doc: Y.Doc = new Y.Doc();
-  provider: ActionCableProvider | undefined;
-
-  async connectedCallback(): Promise<void> {
-    if (this.provider) {
-      // Re-inserted (Turbo restore, DOM move): same doc, same provider, resubscribe.
-      this.provider.connect();
-      return;
-    }
-
-    const consumer = YrbyDocumentElement.consumer ?? (await defaultConsumer());
-    this.provider = new ActionCableProvider(this.doc, consumer, this.channelName, {
-      grant: this.getAttribute("grant"),
-      name: this.getAttribute("name"),
-    });
-    this.provider.connect();
-    void this.provider.whenSynced.then(() => {
-      this.dispatchEvent(
-        new CustomEvent("yrby:synced", {
-          bubbles: true,
-          detail: { doc: this.doc, provider: this.provider },
-        }),
-      );
-    });
+  connectedCallback(): void {
+    this.#connected = true;
+    this.#unregister ??= registerDocumentMount(this);
   }
-
   disconnectedCallback(): void {
-    this.provider?.disconnect();
+    this.#connected = false;
+    // Same-turn moves keep their binding, queue, undo history, and presence.
+    queueMicrotask(() => { if (!this.#connected) this.destroy(); });
+  }
+  attributeChangedCallback(_name: string, oldValue: string | null, newValue: string | null): void {
+    if (oldValue === newValue || !this.#connected) return;
+    this.#release();
+    const generation = this.#generation;
+    queueMicrotask(() => { if (generation === this.#generation) void this.#attach(); });
   }
 
-  /** Resolves after the first catch-up with the server. Available once connected. */
-  get whenSynced(): Promise<void> | undefined {
-    return this.provider?.whenSynced;
+  /** @internal Called by the browser adapter; independent of Turbo event names. */
+  activate(): void { this.#active = true; void this.#attach(); }
+  /** @internal */
+  deactivate(): void { this.#active = false; this.#release(); }
+  /** Release the editor attachment. Unsaved work remains owned by its session. */
+  destroy(): void {
+    this.#connected = false;
+    this.deactivate();
+    const unregister = this.#unregister;
+    this.#unregister = undefined;
+    unregister?.();
   }
 
-  private get channelName(): string {
-    return this.getAttribute("channel") || "Y::DocumentChannel";
+  async #attach(): Promise<void> {
+    if (!this.#connected || !this.#active || this.#starting || this.#attachment) return;
+    this.#holdInert();
+    this.#starting = true;
+    const generation = this.#generation;
+    const descriptor = { channel: this.getAttribute("channel") || undefined,
+      grant: this.getAttribute("grant") || "", name: this.getAttribute("name") || "" };
+    try {
+      const consumer = await (YrbyDocumentElement.consumer ?? defaultConsumer());
+      if (!this.#connected || !this.#active || generation !== this.#generation) return;
+      const attachment = this.#attachment = DocumentSessionStore.for(consumer).acquire(descriptor);
+      const session = attachment.session;
+      attachment.signal.addEventListener("abort", () => {
+        if (this.#attachment !== attachment) return;
+        this.#release();
+        if (session.state === "blocked") this.#error(session.error, session);
+      }, { once: true });
+      if (session.state === "blocked") {
+        this.#release();
+        this.#error(session.error, session);
+        return;
+      }
+      void session.whenSynced.then(() => {
+        if (this.#attachment !== attachment || attachment.signal.aborted || !this.#connected || !this.#active) return;
+        this.#restoreInert();
+        this.#resolveSynced();
+        this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
+          detail: { session, doc: session.doc, provider: session.provider, attachment, signal: attachment.signal } }));
+      });
+    } catch (error) {
+      if (generation === this.#generation && this.#connected) this.#error(error);
+    } finally {
+      if (generation === this.#generation) this.#starting = false;
+    }
+  }
+  #release(): void {
+    ++this.#generation;
+    const attachment = this.#attachment;
+    this.#attachment = undefined;
+    if (attachment || this.#starting) {
+      this.#whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
+    }
+    this.#starting = false;
+    this.#holdInert();
+    attachment?.release();
+  }
+  #holdInert(): void {
+    if (!this.#holdingInert) {
+      // A cached clone carries the library's inert attribute, not its JS fields.
+      const saved = this.getAttribute("data-yrby-inert");
+      this.#previousInert = saved === null ? this.inert : saved === "true";
+      this.setAttribute("data-yrby-inert", String(this.#previousInert));
+    }
+    this.#holdingInert = true;
+    this.inert = true;
+  }
+  #restoreInert(): void {
+    if (this.#holdingInert) this.inert = this.#previousInert;
+    this.#holdingInert = false;
+    this.removeAttribute("data-yrby-inert");
+  }
+  #error(error: unknown, session?: DocumentAttachment["session"]): void {
+    this.dispatchEvent(new CustomEvent("yrby:error", { bubbles: true, detail: { error, session } }));
   }
 }
-
 if (typeof customElements !== "undefined" && !customElements.get("yrby-document")) {
   customElements.define("yrby-document", YrbyDocumentElement);
 }

@@ -9,6 +9,18 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `record.collaborative_document(name)` returns a bound
+  `Y::Collaborative::Attribute` for application reads/writes and the shipped
+  channel. `doc` reconstructs a native `Y::Doc`; `load_state`, `append`, and `key`
+  follow the same storage choice. Built-in row operations are explicitly
+  available through `.document`.
+- `has_collaborative_document :body, storage: PostStore` selects one adapter
+  implementing `load(record, name)` and `write(record, name, update)` for both
+  channel persistence and Ruby reads. Custom storage creates no built-in rows,
+  cannot be combined with `encrypted: true`, and must supply both operations.
+- `Y::Document.key_for(record, name)` exposes the existing conventional key
+  without allocating a document row.
+
 - `Y::DocumentChannel`, shipped in the gem the way Turbo ships
   `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a
   page rendered (`{ grant:, name: }`); the channel trades the grant back for
@@ -65,13 +77,24 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   Return `true` deliberately for public documents. When the default is what
   rejected (no override defined), the log says exactly that.
 
-- `yrby:install` no longer generates a channel — the gem ships
-  `Y::DocumentChannel`, so install lands only the storage migration. Apps
-  that want their own channel (custom storage, room-keyed documents) write
-  one with `include Y::ActionCable`; the README shows the shape the old
-  template had.
+- `yrby:install` defaults to only the storage migration; the gem ships
+  `Y::DocumentChannel`. `--channel` optionally generates an explicit application
+  channel for custom authorization or room-keyed documents. It denies access
+  until its authorization method is implemented, including stateless receive.
 
 ### Fixed
+
+- Document elements attach editors to independently owned sessions. Pending
+  edits survive navigation under their original grant; rejected delivery stays
+  recoverable. Turbo previews are inert and cached HTML contains no CRDT bytes.
+- Attribute morphs release the old editor binding and acquire the new document
+  without transferring its pending edits or authorization.
+
+- Default storage now supplies the loader and recorder as a pair. Declaring
+  only one custom hook raises before subscribing or acknowledging an update,
+  instead of silently sending reads and writes to different stores.
+
+- Signed grants initialize without requiring the host app to load Active Job.
 
 - The `yrby:tables` migration template caps `y_documents.state` at
   `1.gigabyte - 1` instead of `4.gigabytes - 1`. Postgres raises

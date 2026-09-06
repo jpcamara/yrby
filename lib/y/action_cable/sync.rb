@@ -85,9 +85,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # elsewhere.
       def on_load(&block)
         @on_load = block if block
-        return @on_load if defined?(@on_load) && @on_load
-
-        superclass.respond_to?(:on_load) ? superclass.on_load : Sync.default_hook(:on_load)
+        sync_storage_hook(:on_load)
       end
 
       # Record every document change durably before it is applied or
@@ -100,9 +98,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # are present.
       def on_change(&block)
         @on_change = block if block
-        return @on_change if defined?(@on_change) && @on_change
-
-        superclass.respond_to?(:on_change) ? superclass.on_change : Sync.default_hook(:on_change)
+        sync_storage_hook(:on_change)
       end
 
       # Maximum size, in decoded bytes, of an incoming document/awareness frame.
@@ -128,6 +124,20 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         return @on_gap if defined?(@on_gap) && @on_gap
 
         superclass.respond_to?(:on_gap) ? superclass.on_gap : nil
+      end
+
+      private
+
+      # Defaults are one store, never half of a custom store. Inherit explicit
+      # hooks together so subclasses may override one side of a complete pair.
+      def sync_storage_hook(name)
+        hooks = sync_storage_hooks
+        hooks.empty? ? Sync.default_hook(name) : hooks[name]
+      end
+
+      def sync_storage_hooks
+        inherited = superclass.respond_to?(:sync_storage_hooks, true) ? superclass.send(:sync_storage_hooks) : {}
+        inherited.merge({ on_load: @on_load, on_change: @on_change }.compact)
       end
     end
 

@@ -48,8 +48,8 @@ to edit the record:
 The tag renders a signed grant for that record and attribute, the same way
 `turbo_stream_from` signs its stream names. The gem's `Y::DocumentChannel`
 verifies the grant when a client subscribes and records every change as
-`Y::Document` rows before it acknowledges the change. The client only ever
-sends the grant, and you don't write a channel.
+`Y::Document` rows before it acknowledges the change. The client presents the
+grant and attribute name, and you don't write a channel.
 
 The tag renders an element that connects on its own. Import it once, and when
 the document has synced your code gets it and hands it to whichever editor
@@ -58,16 +58,20 @@ binding you use:
 ```js
 import "yrby-client/element"
 
-document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
-  bindYourEditor(target.doc) // any Yjs editor binding
+document.addEventListener("yrby:synced", ({ target, detail }) => {
+  const editor = bindYourEditor(target, detail.doc, detail.provider)
+  detail.signal.addEventListener("abort", () => editor.destroy(), { once: true })
 })
 ```
+
+Sessions retain pending edits after an editor leaves the page. Bindings clean up
+through the abort signal; clean sessions reload from Rails on a later visit.
+See the [client lifecycle and recovery contract](packages/client/README.md#document-sessions).
 
 The document is rows in your database, and you can read it back in Ruby:
 
 ```ruby
-doc = Y::Doc.new
-doc.apply_update(Y::Document.for(post, :body).load_state)
+doc = post.collaborative_document(:body).doc
 doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
@@ -75,9 +79,9 @@ Install the gem and the npm package:
 
 ```
 gem install yrby-rails # depends on yrby
-npm install yrby-client
+npm install yrby-client yjs y-protocols @rails/actioncable
 
-bin/rails yrby:install && bin/rails db:migrate
+bin/rails generate yrby:install && bin/rails db:migrate
 ```
 
 ## Contents
@@ -536,7 +540,7 @@ In a Rails app, one generator creates the storage migration. The models and
 `Y::DocumentChannel` are already in the gem:
 
 ```bash
-bin/rails yrby:install
+bin/rails generate yrby:install
 bin/rails db:migrate
 ```
 
@@ -584,6 +588,47 @@ declaration keep using plain `Y::Document`. In a channel of your own, point
 `on_load` and `on_change` at `Y::EncryptedDocument` instead. Either way,
 configure your app's encryption keys and use one access path per document.
 Rows written encrypted read back as ciphertext through the plain classes.
+
+`post.collaborative_document(:body)` returns a bound `Y::Collaborative::Attribute`
+with `load_state`, `append(update)`, `key`, and `doc`. `doc` reconstructs a fresh
+native `Y::Doc` for Ruby reads and rendering. For built-in row operations such
+as compaction, use `post.collaborative_document(:body).document.compact!`.
+The same accessor serves the channel and application code, including encryption.
+
+Custom storage can use the shipped channel too. Declare one adapter implementing
+both `load(record, name)` and `write(record, name, update)`:
+
+```ruby
+class PostStore
+  def self.load(record, name)
+    # Return lossless binary Yjs state, or nil for a new document.
+  end
+
+  def self.write(record, name, update)
+    # Persist durably before returning. Tolerate duplicates; raise on failure.
+  end
+end
+
+class Post < ApplicationRecord
+  has_collaborative_document :body, storage: PostStore
+end
+```
+
+The helper and Ruby accessor stay the same. The adapter supplies both channel
+loads/appends and `post.collaborative_document(:body).doc`; yrby creates no
+built-in document rows for it. A failed write is neither acknowledged nor
+broadcast. Custom storage owns encryption and compaction, so combining `storage:`
+with `encrypted: true` raises, as does asking a custom attribute for `.document`.
+Plain undeclared attributes still use `Y::Document`. Declarations are inherited
+without mutating their parent. Changing an existing attribute's storage requires
+migrating its data; the declaration does not copy it.
+
+Built-in attributes retain their stored document key. Custom attributes use the
+same conventional record/attribute key returned by `Y::Document.key_for(record,
+name)`, without requiring a built-in row. Grants keep their existing scope and
+lifetime. For custom authorization or room-keyed collaboration, generate a
+channel with `bin/rails generate yrby:install --channel` and implement its
+`authorized?(key)` method. Both storage hooks remain available in custom channels.
 
 The migration creates `y_documents` and `y_document_updates`. To rename them,
 edit the generated migration and point `Y::Document.table_name` and
@@ -645,8 +690,10 @@ authoritative is kept in ActionCable process memory, so AnyCable RPC workers,
 Puma workers, and separate dynos can all handle messages for the same document,
 as long as they share the same store and the same cable adapter.
 
-`on_load` and `on_change` default to `Y::Document` storage when the yrby-rails
-models are installed. Declaring either one replaces the default. Outside a
+`on_load` and `on_change` default together to `Y::Document` storage when the
+yrby-rails models are installed and neither hook is declared. To replace
+storage, declare both hooks so reads and writes use the same store. A subclass
+may override either hook of an explicitly configured pair. Outside a
 yrby-rails app there is no default, and the channel fails before it can
 acknowledge or broadcast an edit until you declare both. Presence is ephemeral.
 Awareness frames are relayed, and `yrby-client` sends a best-effort

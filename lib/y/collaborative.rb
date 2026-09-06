@@ -48,36 +48,41 @@ module Y
     end
 
     included do
-      # Per-attribute storage declarations, class name => resolved lazily so
-      # declaring a model never forces the engine's models to load first.
-      class_attribute :collaborative_document_classes,
+      class_attribute :collaborative_document_options,
                       instance_accessor: false, default: {}.freeze
     end
 
     class_methods do
-      # Declares which storage class backs one collaborative attribute.
-      # Encryption is a property of the attribute's storage, so it is
-      # declared here on the model, never by the page or the client:
-      #
-      #   has_collaborative_document :body, encrypted: true
-      #
-      # Y::DocumentChannel consults this declaration and routes every load
-      # and append for the attribute through Y::EncryptedDocument, which
-      # stores state and update payloads under Active Record encryption.
-      # Undeclared attributes keep plain Y::Document storage.
-      def has_collaborative_document(name, encrypted: false) # rubocop:disable Naming/PredicatePrefix
-        self.collaborative_document_classes = collaborative_document_classes.merge(
-          name.to_sym => (encrypted ? "Y::EncryptedDocument" : "Y::Document")
+      # Select storage once for both the shipped channel and Ruby reads.
+      # A custom adapter implements load(record, name) and write(record, name, update).
+      # Undeclared attributes use plain Y::Document storage.
+      def has_collaborative_document(name, encrypted: false, storage: nil) # rubocop:disable Naming/PredicatePrefix
+        if storage && (!storage.respond_to?(:load) || !storage.respond_to?(:write))
+          raise ArgumentError, "storage must implement load(record, name) and write(record, name, update)"
+        end
+        raise ArgumentError, "encrypted: applies to built-in storage only" if encrypted && storage
+
+        self.collaborative_document_options = collaborative_document_options.merge(
+          name.to_s => { encrypted: encrypted, storage: storage }.freeze
         ).freeze
       end
 
-      # The storage class for one attribute: the declared one, or plain
-      # Y::Document. Everything server-side must go through this one class
-      # per attribute: rows written encrypted read back as ciphertext
-      # through the plain classes.
+      # Resolve built-in classes lazily, respecting Rails model load order.
+      # A custom store must never silently fall back to plain database reads.
       def collaborative_document_class(name)
-        (collaborative_document_classes[name.to_sym] || "Y::Document").constantize
+        options = collaborative_document_options.fetch(name.to_s, {})
+        if options[:storage]
+          raise ArgumentError,
+                "custom storage has no document model; use collaborative_document(name)"
+        end
+
+        options[:encrypted] ? Y::EncryptedDocument : Y::Document
       end
+    end
+
+    # One bound access path for reads, appends and native Ruby document access.
+    def collaborative_document(name)
+      Attribute.new(self, name)
     end
 
     # A signed token a channel can trade back for this record with
@@ -88,4 +93,5 @@ module Y
   end
 end
 
+require "y/collaborative/attribute"
 require "y/collaborative/helper"

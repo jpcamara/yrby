@@ -76,9 +76,12 @@ export class ActionCableProvider {
   #subscription: CableSubscription | null = null;
   #onError: (error: unknown, context: string) => void;
   #connected = false;
+  #generation = 0;
+  #destroyed = false;
   #status: ProviderStatus = "disconnected";
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #whenSynced: Promise<void> | null = null;
+  #acknowledgmentWaiters = new Set<() => void>();
   // `session.synced` resets on every transport drop (a reconnect
   // re-handshakes). Whether the first catch-up has ever happened is tracked
   // separately here, so `whenSynced` does not depend on when it is first
@@ -150,6 +153,22 @@ export class ActionCableProvider {
     return this.session.hasPending;
   }
 
+  /** Resolves when the delivery queue is empty; remains pending if destroyed before ack. */
+  get whenAcknowledged(): Promise<void> {
+    if (!this.hasPending) return Promise.resolve();
+    return new Promise(resolve => { this.#acknowledgmentWaiters.add(resolve); });
+  }
+
+  /** Copy the unacknowledged tail for a page snapshot, without the full document. */
+  get pendingUpdate(): Uint8Array | null {
+    return this.session.pendingUpdate;
+  }
+
+  /** Restore an unsent local tail, which must still be delivered and acknowledged. */
+  restorePendingUpdate(update: Uint8Array): void {
+    this.session.restorePendingUpdate(update);
+  }
+
   /**
    * Apply a bootstrap/restore update (initial HTTP state, a server snapshot, an
    * import) without re-sending it to the server as a local edit. Call it once per
@@ -178,15 +197,29 @@ export class ActionCableProvider {
   }
 
   connect(): void {
+    if (this.#destroyed) throw new Error("provider is destroyed");
     if (this.#subscription) return;
     const provider = this;
+    const generation = ++this.#generation;
+    let creating = true;
+    const current = () => generation === provider.#generation && !provider.#destroyed;
+    // A consumer may call back inside create(). Wait until the returned
+    // subscription is installed so the opening handshake has somewhere to send.
+    const run = (callback: () => void) => {
+      if (creating) queueMicrotask(() => { if (current()) callback(); });
+      else if (current()) callback();
+    };
     this.#subscription = this.consumer.subscriptions.create(
       { channel: this.channelName, ...this.channelParams },
       {
-        received(message: CableMessage) {
+        received(message: CableMessage) { run(() => {
           // Reliable-delivery ack: confirm + prune the local queue.
           if (message && message.ack !== undefined) {
             provider.session.ack(message.ack);
+            if (!provider.hasPending) {
+              for (const resolve of provider.#acknowledgmentWaiters) resolve();
+              provider.#acknowledgmentWaiters.clear();
+            }
             return;
           }
           const awarenessPayload = message && message.awareness;
@@ -208,26 +241,27 @@ export class ActionCableProvider {
           const reply = provider.session.receive(frame);
           if (reply) provider.#send(reply, undefined); // e.g. SyncStep2 answering a SyncStep1
           provider.#refreshStatus(); // a SyncStep2 may have just flipped us to "synced"
-        },
-        connected() {
+        }); },
+        connected() { run(() => {
           provider.#connected = true;
           provider.session.onConnect(); // handshake + replay the unacked tail
           provider.#refreshStatus();
-        },
-        disconnected() {
+        }); },
+        disconnected() { run(() => {
           provider.#connected = false;
           provider.session.onDisconnect(); // pause retransmits, clear remote presence
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
-        },
-        rejected() {
+        }); },
+        rejected() { run(() => {
           // The channel refused the subscription (auth, missing doc). Surface
           // it and tear down — otherwise the provider sits at "connecting"
           // forever, silently queueing edits. The app decides what's next.
-          provider.#onError(new Error("subscription rejected by the server"), "rejected");
           provider.disconnect();
-        },
+          provider.#onError(new Error("subscription rejected by the server"), "rejected");
+        }); },
       }
     );
+    creating = false;
     this.#installUnloadHandler();
     this.#refreshStatus(); // -> "connecting"
   }
@@ -235,6 +269,7 @@ export class ActionCableProvider {
   disconnect(): void {
     if (!this.#subscription) return;
     const sub = this.#subscription;
+    ++this.#generation; // Obsolete callbacks cannot pause or reject a replacement.
     // Tell peers we're gone while the transport is still live, then pause and
     // detach. Defer the unsubscribe one microtask so the removal frame flushes
     // before the channel tears down.
@@ -253,9 +288,11 @@ export class ActionCableProvider {
 
   destroy(): void {
     this.disconnect();
+    this.#destroyed = true;
     this.session.destroy();
     this.awareness.destroy(); // stops its reaper timer
     this.#statusListeners.clear();
+    this.#acknowledgmentWaiters.clear();
   }
 
   #computeStatus(): ProviderStatus {

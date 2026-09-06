@@ -116,6 +116,20 @@ export class YProtocolSession {
     return this.#delivery.hasPending;
   }
 
+  /** A copy of the unacknowledged tail for a browser snapshot, or null. */
+  get pendingUpdate(): Uint8Array | null {
+    const updates = this.#delivery.pending.map(({ update }) => update);
+    return updates.length ? mergeUpdates(updates).slice() : null;
+  }
+
+  /** Restore a saved local tail, retaining ack tracking even if already integrated. */
+  restorePendingUpdate(update: Uint8Array): void {
+    // Snapshot state may already contain these structs. Applying alone would
+    // emit no update event and silently lose the queue's delivery obligation.
+    applyUpdate(this.doc, update, this);
+    this.#delivery.enqueue(update.slice());
+  }
+
   /** Transport connected: send the opening handshake and replay the unacked tail. */
   onConnect(): void {
     this.#send(this.#frameSyncStep1(), undefined);

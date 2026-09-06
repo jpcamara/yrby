@@ -66,6 +66,30 @@ bin/rails s
 
 ## Pull requests
 
+### Document element browser regression
+
+After `bundle install` and `bundle exec rake compile`, run:
+
+```bash
+cd packages/client
+npm ci
+npm test
+npm run test:browser
+```
+
+The browser regression needs `agent-browser` on PATH and its Chrome installed
+(`agent-browser install`). `AB_BIN` can select another installation; `PORT`
+defaults to 3789. It starts an isolated Rails/SQLite/Puma fixture and uses real
+ActionCable, the AnyCable web client, Turbo navigation, and two Chrome sessions
+to check pending-edit recovery, shared views, retargeting, presence, async
+startup, encrypted/custom storage, and late callbacks from replaced subscriptions. It stops its server
+and browser sessions afterward. Logs and a screenshot are written under `tmp/`.
+
+The fixture is local-only and contains no authentication beyond the grants
+being tested. Do not deploy it.
+
+### Submission checks
+
 - Keep the binding layer thin; put testable logic in pure functions.
 - Add/adjust tests (Ruby, and Rust for pure logic).
 - Make sure `rake test`, `cargo test`, rubocop, clippy, and rustfmt all pass.

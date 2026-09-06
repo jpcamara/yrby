@@ -21,6 +21,21 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     assert_no_file "app/models/yrby_document_update.rb"
   end
 
+  def test_optionally_generates_an_explicit_custom_channel
+    run_generator ["--channel"]
+
+    assert_file "app/channels/document_channel.rb" do |channel|
+      assert_includes channel, "include Y::ActionCable"
+      assert_includes channel, "def subscribed = sync_subscribed(params[:id])"
+      assert_includes channel, "return reject unless authorized?(params[:id])"
+      assert_includes channel, "def authorized?(_document_key)"
+      assert_match(/def authorized\?\(_document_key\)\s+false/, channel)
+      assert_includes channel, "Y::Document.load_state(key)"
+      assert_includes channel, "Y::Document.append(key, update)"
+    end
+    assert_migration "db/migrate/create_y_tables.rb"
+  end
+
   def test_generates_the_storage_migration
     run_generator
 

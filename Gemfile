@@ -11,6 +11,7 @@ gem "async"
 
 # Test-only: the store and generator tests run on SQLite (activerecord and
 # railties come in through the yrby-rails gemspec).
+gem "puma", require: false # real ActionCable server for the element browser regression
 gem "sqlite3", require: false
 
 gem "rubocop", require: false
