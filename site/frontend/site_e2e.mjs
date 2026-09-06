@@ -79,7 +79,7 @@ const synced = (s) => js(s, `!!(window.__yrby && window.__yrby.provider.synced)`
 const openBoth = async (path) => {
   for (const s of SESSIONS) {
     await ab(s, "open", `${BASE}${path}`)
-    await ab(s, "viewport", ...VIEWPORT)
+    await ab(s, "set", "viewport", ...VIEWPORT)
   }
   for (const s of SESSIONS) await waitFor(`${s} synced on ${path}`, async () => (await synced(s)) === true)
 }
@@ -162,7 +162,7 @@ check(`document updates went through send too (${counts.documentSends} document 
 // --- 2) The room is the boundary ---------------------------------------------
 // A second room on the same demo is a different document, on the same process.
 await ab(B, "open", `${BASE}/demos/tiptap/${ROOM}-other`)
-await ab(B, "viewport", ...VIEWPORT)
+await ab(B, "set", "viewport", ...VIEWPORT)
 await waitFor("B synced in the other room", async () => (await synced(B)) === true)
 await waitFor("B's editor mounted in the other room", async () => (await prose(B)) !== "null")
 check("a different room is a different document", !((await prose(B)) || "").includes("hello from A"))

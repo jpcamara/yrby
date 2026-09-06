@@ -12,9 +12,9 @@ proxy, the AnyCable server, and Falcon as one command. Go holds every socket and
 calls back into Rails over HTTP RPC, so the Ruby side only ever handles a short
 request.
 
-It runs on the **published** packages, not on the checkout it sits inside:
-`yrby` and `yrby-rails` from RubyGems, `yrby-client` from npm. If a page here
-works, it works from a fresh `gem install`.
+The gems and yrby client currently come from this checkout because the
+record-backed integration is unreleased. The Lexxy adapter and other editor
+packages remain published dependencies. See the build instructions below.
 
 ```
 site/
@@ -26,6 +26,43 @@ site/
 ├── frontend/          bun build for the demo bundles + the e2e harness
 └── test/              caps, throttles, sweeper, controllers
 ```
+
+## The record-backed working example
+
+The site uses path gems and `yrby-client` from `../packages/client`, so the
+working example and reference pages share one API version. Published
+`yrby-client` 0.5.0 has no `/element` export. Switch to released dependencies
+only after the corresponding API ships.
+
+From `site/frontend`, run `bun run build:client`, then
+`bun install --frozen-lockfile` and `bun run build`. The first command installs
+and builds the client from this checkout.
+
+`/examples/document` uses a pre-provisioned `ExampleDocument` record, created
+by its migration. Anonymous page reads create no records. The view renders
+`collaborative_document_tag`; CodeMirror mounts on `yrby:synced` and is destroyed
+when `detail.signal` aborts. A template defers attaching the helper markup until
+the AnyCable consumer and delegated listener are configured. The read panel calls
+`collaborative_document(:body).doc.read_text("content")` in Rails.
+
+`ExampleDocumentGuard` wraps the shipped `Y::DocumentChannel` itself: only this
+example's body is admitted, and `RoomGuarded` supplies the same seats, frame
+limits, write budget and awareness restrictions as the room demos. Guarding
+the shipped class prevents a client from bypassing an application subclass
+by changing the channel name. These anonymous-demo limits are site policy,
+not required integration boilerplate.
+
+The existing idle-document sweeper expires this example's CRDT content; its
+one record stays provisioned. It deliberately shares one document across
+visitors. The other demos still offer separate room URLs.
+
+`bin/rails test` executes the docs' scratchpad hooks with out-of-order updates,
+the storage-aware Ruby read example, and the example's controller/channel
+policy. `PORT=3888 node document_e2e.mjs` (from `frontend`, after
+`./boot_server.sh`) drives two agent-browser windows through editing, Ruby
+read-back, clean remount and detached pending delivery. `site_e2e.mjs` continues
+testing the other editor and shape demos.
+
 
 ## Running it
 

@@ -34,7 +34,7 @@ cross-process reads, and convergence under concurrent editing.
 
 This site runs on AnyCable too, in the smallest setup AnyCable offers.
 [anycable-thruster](https://github.com/anycable/thruster) embeds anycable-go in
-the Thruster proxy, so `thrust bin/rails server` is the entire deployment. The
+the Thruster proxy, so `thrust bin/serve` is the entire deployment. The
 Go server owns `/cable`. It calls Rails back over HTTP RPC at a path AnyCable
 mounts in the app, and Rails hands broadcasts back to it over localhost. There's
 no Redis and no separate RPC process, because it's a single node. The
@@ -50,7 +50,11 @@ gone by the time `receive` runs. So pass the key on every action:
 
 ```ruby
 def subscribed    = sync_subscribed(params[:id])
-def receive(data) = sync_receive(data, params[:id])
+def receive(data)
+  return reject unless authorized?(params[:id])
+
+  sync_receive(data, params[:id])
+end
 ```
 
 That's why every channel example in these docs is written this way, and why the
@@ -75,7 +79,7 @@ class ScratchpadChannel < ApplicationCable::Channel
     doc = Y::Doc.new
     doc.apply_update(Base64.strict_decode64(doc_state)) if doc_state
     doc.apply_update(update)
-    self.doc_state = Base64.strict_encode64(doc.compacted_state_update)
+    self.doc_state = Base64.strict_encode64(doc.encode_state_as_update)
   end
 
   def subscribed    = sync_subscribed(params[:id])

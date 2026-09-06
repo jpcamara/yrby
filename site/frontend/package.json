@@ -7,7 +7,9 @@
     "watch": "bun build.mjs --watch",
     "lint": "eslint .",
     "build:css": "tailwindcss -i css/site.css -o ../public/site.css --minify",
-    "watch:css": "tailwindcss -i css/site.css -o ../public/site.css --watch"
+    "watch:css": "tailwindcss -i css/site.css -o ../public/site.css --watch",
+    "build:client": "cd ../../packages/client && npm ci && npm run build",
+    "test:document": "node document_e2e.mjs"
   },
   "dependencies": {
     "@37signals/lexxy": "^0.9.29",
@@ -31,7 +33,7 @@
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.20",
-    "yrby-client": "^0.5.0"
+    "yrby-client": "file:../../packages/client"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

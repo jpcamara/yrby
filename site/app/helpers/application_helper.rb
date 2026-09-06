@@ -57,8 +57,7 @@ module ApplicationHelper
 
   def hero_read_back_code
     code_block "ruby", <<~RUBY
-      doc = Y::Doc.new
-      doc.apply_update(Y::Document.for(@post, :body).load_state)
+      doc = @post.collaborative_document(:body).doc
       Y::Lexxy.new(doc).to_html  # or read_text / read_map / read_array
     RUBY
   end

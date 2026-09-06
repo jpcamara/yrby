@@ -9,7 +9,15 @@ process to run.
 
 ## Install
 
-Two gems and one npm package.
+This quickstart describes the upcoming record-backed API from
+[PR #83](https://github.com/jpcamara/yrby/pull/83). It is not available in the
+published `yrby-client` 0.5.0 package: that release has no `/element` export.
+Until the matching release ships, use the gems and built client from the same
+checkout, as this site's [working example](/examples/document) does. The
+lower-level provider remains available in the published package.
+
+For a released version that includes this API, install two gems and the browser
+package with its peers:
 
 ```ruby
 # Core CRDT + protocol primitives:
@@ -21,7 +29,7 @@ gem "yrby-rails"
 ```
 
 ```
-npm install yrby-client
+npm install yrby-client yjs y-protocols @rails/actioncable
 ```
 
 Ruby 3.4 or newer. Releases include precompiled gems for Ruby 3.4 and 4.0 on
@@ -35,7 +43,7 @@ The generator adds the migration. The models and the channel are already in the
 gem, the same way Action Text owns `ActionText::RichText`.
 
 ```bash
-bin/rails yrby:install
+bin/rails generate yrby:install
 bin/rails db:migrate
 ```
 
@@ -50,8 +58,9 @@ is already allowed to edit the record:
 
 The tag renders a signed grant for that record and attribute, the same way
 `turbo_stream_from` signs its stream names. The gem's `Y::DocumentChannel`
-verifies the grant when a client subscribes, and it records every change as
-`Y::Document` rows before it acknowledges the change. The client only ever
+verifies the grant when a client subscribes and persists changes before
+acknowledging them. By default it uses `Y::Document`; model declarations select
+encrypted or custom storage for both the channel and Ruby reads. The client only ever
 sends the grant. A grant that is missing, tampered with, or minted
 for a different attribute is rejected, and so is one whose record has since
 been deleted. The authorization check is the one your controller already made
@@ -61,13 +70,14 @@ check happened.
 The document is rows in your database, and you can read it back in Ruby:
 
 ```ruby
-doc = Y::Doc.new
-doc.apply_update(Y::Document.for(@post, :body).load_state)
+doc = @post.collaborative_document(:body).doc
 doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
-If you need custom storage, documents keyed by room instead of by record, or
-your own authorization scheme, you write a channel yourself. It uses the same
+For custom storage, declare a model adapter with `storage:`; the helper and
+shipped channel stay the same. See [Storage](/docs/storage). For documents keyed
+by room or your own authorization scheme, generate an application channel with
+`bin/rails generate yrby:install --channel`. It uses the same
 concern `Y::DocumentChannel` does and takes a few lines.
 [The document channel](/docs/document-channel) covers it.
 
@@ -80,13 +90,25 @@ code gets it and hands it to whichever editor binding you use:
 ```js
 import "yrby-client/element"
 
-document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
-  bindYourEditor(target.doc) // any Yjs editor binding
+document.addEventListener("yrby:synced", ({ target, detail }) => {
+  const editor = bindYourEditor(target, detail.doc, detail.provider)
+  detail.signal.addEventListener("abort", () => editor.destroy(), { once: true })
 })
 ```
 
-`yrby:synced` fires after the first catch-up with the server. Bind the editor
-there. Most editor bindings seed an empty document when they mount, so if you
+`yrby:synced` fires once per attachment after the first catch-up with the server.
+Bind the editor there, and detach it when the signal aborts. The binding owns
+its editor and listeners; yrby owns the document, provider, and shared consumer.
+Do not destroy those from editor cleanup. Delegating the event to `document`
+also handles elements inserted later.
+
+Pending edits remain in a session until acknowledged, even after the editor
+leaves the DOM. A later clean visit reloads content from Rails; it need not use
+the same `Y.Doc` or preserve editor undo history. See the
+[client lifecycle](/docs/javascript-client#document-sessions-and-navigation).
+Try the [record-backed editor](/examples/document) in two windows.
+
+ Most editor bindings seed an empty document when they mount, so if you
 bind before the server's state arrives, each client inserts its own top-level
 node and they fight over it. On AnyCable, set the shared consumer once before
 the elements connect: `YrbyDocumentElement.consumer = createCable()`. See

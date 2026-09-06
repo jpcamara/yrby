@@ -57,6 +57,47 @@ declaration keep using plain `Y::Document`. In a channel of your own, point
 configure your app's encryption keys and use one access path per document.
 Rows written encrypted read back as ciphertext through the plain classes.
 
+## Record-backed access and custom adapters
+
+`post.collaborative_document(:body)` returns a bound `Y::Collaborative::Attribute`
+with `load_state`, `append(update)`, `key`, and `doc`. `doc` reconstructs a fresh
+native `Y::Doc` for Ruby reads and rendering. For built-in row operations such
+as compaction, use `post.collaborative_document(:body).document.compact!`.
+The same accessor serves the channel and application code, including encryption.
+
+Custom storage can use the shipped channel too. Declare one adapter implementing
+both `load(record, name)` and `write(record, name, update)`:
+
+```ruby
+class PostStore
+  def self.load(record, name)
+    # Return lossless binary Yjs state, or nil for a new document.
+  end
+
+  def self.write(record, name, update)
+    # Persist durably before returning. Tolerate duplicates; raise on failure.
+  end
+end
+
+class Post < ApplicationRecord
+  has_collaborative_document :body, storage: PostStore
+end
+```
+
+The helper and Ruby accessor stay the same. The adapter supplies both channel
+loads/appends and `post.collaborative_document(:body).doc`; yrby creates no
+built-in document rows for it. A failed write is neither acknowledged nor
+broadcast. Custom storage owns encryption and compaction, so combining `storage:`
+with `encrypted: true` raises, as does asking a custom attribute for `.document`.
+Plain undeclared attributes still use `Y::Document`. Declarations are inherited
+without mutating their parent. Changing an existing attribute's storage requires
+migrating its data; the declaration does not copy it.
+
+Built-in attributes retain their stored document key. Custom attributes use the
+same conventional record/attribute key returned by `Y::Document.key_for(record,
+name)`, without requiring a built-in row. Grants keep their existing scope and
+lifetime.
+
 ## Writing your own store
 
 Two things matter.
@@ -137,7 +178,7 @@ class ScratchpadChannel < ApplicationCable::Channel
     doc = Y::Doc.new
     doc.apply_update(@doc_state) if @doc_state
     doc.apply_update(update)
-    @doc_state = doc.compacted_state_update
+    @doc_state = doc.encode_state_as_update
   end
 
   def subscribed    = sync_subscribed(params[:id])

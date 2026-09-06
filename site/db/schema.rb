@@ -10,7 +10,12 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 20_260_831_000_002) do
+ActiveRecord::Schema[8.1].define(version: 20_260_906_000_001) do
+  create_table "example_documents", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
   create_table "notes", force: :cascade do |t|
     t.text "body"
     t.datetime "created_at", null: false

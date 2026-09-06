@@ -283,7 +283,7 @@ jobs:
 
       - name: Build the demo bundles
         working-directory: site/frontend
-        run: bun run build
+        run: bun run build:client && bun run build
 
       - name: Test (store, throttles, controllers)
         working-directory: site
@@ -300,6 +300,7 @@ jobs:
           export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
           PORT=3888 SERVER_PIDFILE=/tmp/site.pid ./boot_server.sh
           PORT=3888 node site_e2e.mjs
+          PORT=3888 node document_e2e.mjs
           kill "$(cat /tmp/site.pid)" || true
 
       - name: Server log on failure

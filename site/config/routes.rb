@@ -17,6 +17,9 @@ Rails.application.routes.draw do
   get "llms.txt", to: "meta#llms"
   get "llms-full.txt", to: "meta#llms_full"
 
+  get "examples/document", to: "examples#document"
+  get "examples/document/stored", to: "examples#stored"
+
   get "demos", to: "demos#index"
   # A bare demo URL mints a room and redirects, so every visitor lands
   # somewhere private without having to think about it.

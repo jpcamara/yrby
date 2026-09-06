@@ -15,25 +15,142 @@ If you have an editor binding, you already have both.
 
 ## The `<yrby-document>` element
 
-`collaborative_document_tag` renders an element that connects on its own.
-Importing the element registers it, and after that there is no connection code
-to write per feature:
+This API is unreleased in the published 0.5.0 package. See the
+[version note and working example](/docs/getting-started#install).
+
+The auto-connecting element behind yrby-rails' `collaborative_document_tag`,
+the way `<turbo-cable-stream-source>` sits behind `turbo_stream_from`. The tag
+renders it with a signed grant; importing the element once is the whole
+wiring:
 
 ```js
-import "yrby-client/element"
+import "yrby-client/element";
 
-document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
-  bindYourEditor(target.doc) // fires after the first catch-up
-})
+document.addEventListener("yrby:synced", ({ target, detail }) => {
+  const editor = bindYourEditor(target, detail.doc, detail.provider);
+  detail.signal.addEventListener("abort", () => editor.destroy(), { once: true });
+});
 ```
 
-The element subscribes to the gem's `Y::DocumentChannel` with the grant from
-the tag. Set a `channel` attribute to use a different channel name. It keeps
-its `Y.Doc` across DOM moves and Turbo restores, and it exposes `doc`,
-`provider`, and `whenSynced`. All the elements on a page share one consumer,
-which comes from `@rails/actioncable` by default. On AnyCable, assign
-`YrbyDocumentElement.consumer = createCable()` once, before the elements
-connect.
+`bindYourEditor` is your application's editor binding. Its cleanup must detach
+Yjs listeners and disable or remove editor controls. It must not destroy the
+session-owned document/provider or disconnect the shared consumer. The attachment's abort
+signal runs cleanup before yrby checks whether any final update needs delivery.
+Use this signal even if the editor has already left the DOM.
+
+A document session owns the `Y.Doc`, provider, and unacknowledged edits. The
+element attaches an editor to that session. Removing the last editor clears
+presence and releases a clean session. A pending session keeps delivering
+through its original grant until acknowledged. Rejection stops retries and
+retains recoverable work in memory; it does not count as acknowledgment.
+
+Turbo previews are inert and create no document or provider. Cached markup
+contains no CRDT snapshot. History restoration reattaches to a pending session
+or loads saved content from Rails. A fresh grant creates a separate session;
+the previous session's edits reach it through normal server synchronization.
+This is an in-tab delivery guarantee, not persistent offline storage across
+closing or reloading the tab.
+
+Same-turn DOM moves retain the editor binding and document. A clean delayed
+remount reconstructs saved content; it need not retain the old undo stack or
+Y.Doc identity. Changing grant, name, or channel aborts the old binding
+immediately and acquires a new session for the complete new tuple. Pending
+work stays with the old session and its original authorization.
+
+The element exposes its current `session`, `doc`, and `provider`. Before
+acquisition or during retargeting these are unavailable; no unowned document
+is created by reading a getter. `whenSynced` is always a promise, even before
+consumer initialization. It resolves after the current session's first
+catch-up, and an abandoned attachment's wait stays unresolved. The bubbling
+`yrby:synced` event fires once per attachment, with `detail.signal` for cleanup.
+Readiness does not imply the connection is currently online or every edit is
+acknowledged. Use `provider.synced` and `session.hasPending` for those states.
+
+Import failures and subscription rejection emit `yrby:error` with
+`detail.error`; rejection also includes the recoverable `detail.session`.
+A blocked session stays inert. After retrying it, call `element.activate()`
+to attach again, or remount the element. `element.destroy()` releases its
+attachment and prevents automatic binding until it is reinserted; it does not
+discard pending edits.
+
+Install `@rails/actioncable`, `yjs`, and `y-protocols` for the default element.
+All default elements share one consumer, including its in-flight import.
+For AnyCable assign an ActionCable-compatible consumer before adding elements:
+
+```js
+import { YrbyDocumentElement } from "yrby-client/element";
+import { createConsumer } from "@anycable/web";
+
+YrbyDocumentElement.consumer = createConsumer();
+// Append the server-rendered element only after this assignment.
+```
+
+Importing the module registers and upgrades existing `<yrby-document>` tags
+immediately. When configuring a custom consumer on an already rendered page,
+keep the helper's markup inside a `<template>`, configure the consumer and
+register the editor listener, then append the template's content. The
+[working example](/examples/document) uses that order. Its source is in
+[`site/frontend/src/document.js`](https://github.com/jpcamara/yrby/blob/feat/site/site/frontend/src/document.js).
+
+
+## Document sessions and navigation
+
+A store is scoped to one consumer. Matching `{ channel, grant, name }` tuples
+share a document and queue. Grants are compared exactly, never decoded to
+infer a common record. Different consumers have separate scopes. Each provider
+lifetime adds an opaque `session_id` subscription parameter to isolate its
+acknowledgments; this parameter never selects or authorizes a server document.
+
+Headless workflows can hold an explicit attachment through their own lifetime:
+
+```js
+import { DocumentSessionStore } from "yrby-client";
+
+const store = DocumentSessionStore.for(consumer);
+const attachment = store.acquire({ grant, name: "body" });
+const { session } = attachment;
+await session.whenSynced;
+// Work with session.doc; keep attachment until your workflow is finished.
+attachment.release(); // idempotent; pending work continues delivering
+```
+
+Multiple views share one local presence identity. Use
+`attachment.setPresence(state)` for the focused editor and
+`attachment.setPresence(null)` when it blurs. Removing an unfocused view will
+not clear another view's presence. A binding can access its attachment through
+`yrby:synced`'s `detail.attachment`.
+
+`session.state` is `attached`, `draining`, `blocked`, or `closed`, independent
+of the provider's live transport status. Both sessions and stores emit `change`
+events; a store event carries the changed session in `event.detail`. Observe
+the store to report delivery failures after the originating page disappears.
+
+```js
+store.addEventListener("change", ({ detail: session }) => {
+  if (session.state === "blocked") reportDeliveryFailure(session.error, session);
+});
+
+store.suspend(); // explicitly stop managed network activity, retaining work
+store.resume();  // resume this consumer scope, including detached pending work
+```
+
+Use store suspension for managed sessions rather than relying on
+transport-specific consumer disconnect behavior. Navigation never reconnects
+a suspended scope. Applications changing accounts must suspend/unmount the old
+scope and handle its retained work; a new consumer does not adopt it.
+
+A blocked session's `exportRecovery()` returns defensive copies of its full
+Yjs `update`, its `pending` tail, and its immutable `descriptor`. `retry()`
+retries only the original authorization. The application can export these
+bytes or explicitly call `discard()`; cache eviction never discards unsaved
+work. Recovery is memory-only, and its memory use grows with retained work.
+No fresh grant is implicitly treated as a renewal of blocked authorization.
+
+Custom persistence integrations can still use `provider.pendingUpdate` and
+`provider.restorePendingUpdate(bytes)`. Restore saved full state through
+`applyRemoteUpdate` first, then restore only the pending tail before connecting.
+`provider.whenAcknowledged` resolves when its queue empties; it remains pending
+if the provider is destroyed before acknowledgment.
 
 ## ActionCableProvider
 

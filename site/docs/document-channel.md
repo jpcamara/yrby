@@ -5,15 +5,16 @@
 Most apps never write a channel. `Y::DocumentChannel` ships in `yrby-rails`,
 the same way `Turbo::StreamsChannel` ships in turbo-rails. A client subscribes
 with the signed grant that `collaborative_document_tag` rendered. The channel
-looks up the record from the grant, and it records every change as
-`Y::Document` rows before it acknowledges the change. A grant that is missing,
+looks up the record from the grant and persists every change through that
+attribute's configured storage before acknowledging it. A grant that is missing,
 tampered with, or minted for a different attribute is rejected, and so is one
 whose record has since been deleted. See
 [Getting started](/docs/getting-started).
 
 The rest of this page is about building your own channel with the same concern
-`Y::DocumentChannel` uses. You'd do that for custom storage, for documents keyed
-by room with no record behind them, or for an authorization scheme of your own.
+`Y::DocumentChannel` uses. You would do that for documents keyed by room with
+no record behind them or for an authorization scheme of your own. Record-backed
+custom storage can use the shipped channel with a model adapter.
 
 ## Build your own
 
@@ -33,6 +34,8 @@ class DocumentChannel < ApplicationCable::Channel
   end
 
   def receive(data)
+    return reject unless authorized?(params[:id])
+
     sync_receive(data, params[:id])
   end
 
@@ -52,12 +55,18 @@ point it somewhere else:
   on_change { |key, update| Y::Document.append(key, update) }    # record, then broadcast
 ```
 
+Generate this optional channel with `bin/rails generate yrby:install --channel`.
+The default generator installs only the storage migration. Record-backed custom
+storage can instead use [a model adapter](/docs/storage#record-backed-access-and-custom-adapters)
+with the shipped channel.
+
 ## The two hooks
 
 `on_load` and `on_change` default to `Y::Document` storage when the yrby-rails
-models are installed. Declaring either one replaces the default. Outside a
-yrby-rails app there is no default, and the channel fails before it can
-acknowledge or broadcast an edit until you declare both.
+models are installed and neither hook is configured. To customize storage,
+provide both hooks; a partial pair raises instead of mixing stores. A subclass
+may override one hook of an explicitly configured, complete inherited pair.
+Outside Rails there are no defaults.
 
 `on_load` is called with a key and returns a binary Y.js update, or nil for a
 fresh document. `on_change` is called with a key and the exact CRDT delta, and
@@ -94,9 +103,10 @@ end
 ```
 
 A document that really is public gets an explicit `def authorized?(_key) =
-true`. It's in the code, so a reviewer can grep for it. A subscriber that is
-refused never reaches `receive`, because without a confirmed subscription the
-cable routes nothing to the channel. One gate covers reads and writes.
+true`. It's in the code, so a reviewer can grep for it. Check authorization in `receive` too, as the generated channel does. A
+subscribe-time decision is not a fresh permission check for later commands;
+AnyCable constructs a new channel instance per command. `sync_receive` handles
+the protocol and does not call your `authorized?` method for you.
 
 For documents that belong to a record, the gem provides the token flow
 `authorized?` needs: `Y::Collaborative`, which the engine includes into Active
