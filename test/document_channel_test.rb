@@ -57,6 +57,13 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   def grant = @page.collaborative_sgid(:body)
 
+  def test_session_routing_nonce_does_not_select_or_authorize_a_document
+    subscribe grant: grant, name: "body", session_id: "browser-session"
+
+    assert_predicate subscription, :confirmed?
+    assert_equal @page.collaborative_document(:body), subscription.send(:document)
+  end
+
   def test_a_signed_grant_subscribes_and_gets_the_opening_handshake
     subscribe grant: grant, name: "body"
 

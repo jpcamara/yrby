@@ -67,7 +67,7 @@ class BrowserController < ActionController::Base
       }; }</script>
       <script type="module" src="/assets/client.js" data-turbo-track="reload"></script>
       </head><body><h1>Collaborative document</h1>
-      <%= collaborative_document_tag @page, :body, id: "body-doc" do %>
+      <%= collaborative_document_tag @page, :body, id: "body-doc", data: (params[:permanent].present? ? { turbo_permanent: true } : {}) do %>
         <label>Body <textarea aria-label="Body" disabled></textarea></label>
       <% end %>
       <%= collaborative_document_tag @page, :secret, id: "secret-doc" do %>

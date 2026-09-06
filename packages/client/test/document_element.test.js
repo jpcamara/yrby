@@ -1,441 +1,191 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as Y from "yjs";
-import * as encoding from "lib0/encoding";
-import { MessageType, toBase64 } from "../dist/index.js";
 import { YrbyDocumentElement } from "../dist/document_element.js";
+import { DocumentSessionStore } from "../dist/index.js";
+import { disconnectTurbo } from "../dist/turbo_adapter.js";
+import { fakeConsumer, sync, tick } from "./session_helpers.js";
 
-// The element runs here without a DOM: the module's base class falls back to
-// a plain class in Node, so tests drive the lifecycle callbacks directly and
-// stub the two DOM methods the element touches (attributes, events).
-function fakeConsumer() {
-  const calls = { send: [], created: [] };
-  let sub = null;
-  const consumer = {
-    calls,
-    deliverConnected: () => sub.connected(),
-    deliverReceived: (msg) => sub.received(msg),
-    deliverRejected: () => sub.rejected(),
-    subscriptions: {
-      create(params, mixin) {
-        calls.created.push(params);
-        sub = {
-          identifier: JSON.stringify(params),
-          send: (data) => calls.send.push(data),
-          unsubscribe: () => {
-            calls.removed = (calls.removed || 0) + 1;
-          },
-          ...mixin,
-        };
-        return sub;
-      },
-    },
-  };
-  return consumer;
-}
-
-function syncStep2Envelope(peerDoc) {
-  const e = encoding.createEncoder();
-  encoding.writeVarUint(e, MessageType.Sync);
-  encoding.writeVarUint(e, 1); // messageYjsSyncStep2
-  encoding.writeVarUint8Array(e, Y.encodeStateAsUpdate(peerDoc));
-  return { update: toBase64(encoding.toUint8Array(e)) };
-}
-
-function element(t, attributes, consumer) {
+function setup(t, attributes = { grant: "g", name: "body" }, consumer = fakeConsumer(), document = new EventTarget()) {
   const el = new YrbyDocumentElement();
-  el.getAttribute = (name) => attributes[name] ?? null;
+  let connected = true;
+  el.ownerDocument = document;
+  Object.defineProperty(el, "isConnected", { get: () => connected });
+  el.getAttribute = name => attributes[name] ?? null;
   el.setAttribute = (name, value) => { attributes[name] = value; };
-  el.removeAttribute = (name) => { delete attributes[name]; };
+  el.removeAttribute = name => { delete attributes[name]; };
   el.events = [];
-  el.dispatchEvent = (event) => el.events.push(event);
+  el.dispatchEvent = event => { el.events.push(event); return true; };
+  el.inert = false;
   YrbyDocumentElement.consumer = consumer;
-  t.after(() => {
+  const mount = async () => { connected = true; el.connectedCallback(); await tick(); };
+  const remove = () => { connected = false; el.disconnectedCallback(); };
+  const change = (name, value) => { const old = attributes[name]; attributes[name] = value; el.attributeChangedCallback(name, old, value); };
+  t.after(async () => {
+    remove(); await tick(); disconnectTurbo(document);
+    if (consumer.created) for (const session of DocumentSessionStore.for(consumer).sessions) session.discard();
     YrbyDocumentElement.consumer = undefined;
-    el.destroy();
-    el.doc.destroy();
   });
-  return el;
+  return { el, consumer, mount, remove, change, document };
 }
 
-test("connectedCallback subscribes with the element's grant and channel", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "signed-token", name: "body" }, consumer);
-
-  await el.connectedCallback();
-
-  assert.equal(consumer.calls.created.length, 1);
-  assert.deepEqual(consumer.calls.created[0], {
-    channel: "Y::DocumentChannel",
-    grant: "signed-token",
-    name: "body",
-  });
-  assert.ok(el.doc instanceof Y.Doc, "the element owns a doc");
-  assert.ok(el.provider, "and the provider that syncs it");
-});
-
-test("a channel attribute overrides the default", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body", channel: "CustomChannel" }, consumer);
-
-  await el.connectedCallback();
-
-  assert.equal(consumer.calls.created[0].channel, "CustomChannel");
-});
-
-test("yrby:synced fires after the first catch-up, with the doc in reach", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body" }, consumer);
-
-  await el.connectedCallback();
-  consumer.deliverConnected();
-  consumer.deliverReceived(syncStep2Envelope(new Y.Doc()));
-  await el.whenSynced;
-  await new Promise((resolve) => setTimeout(resolve, 0)); // let the .then dispatch run
-
-  assert.equal(el.events.length, 1);
-  assert.equal(el.events[0].type, "yrby:synced");
-  assert.equal(el.events[0].detail.doc, el.doc);
-});
-
-test("disconnect and reinsert reuse the same doc and provider", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body" }, consumer);
-
-  await el.connectedCallback();
-  const { doc, provider } = el;
-  el.disconnectedCallback();
-  await el.connectedCallback();
-
-  assert.equal(el.doc, doc, "a DOM move must not reset the document");
-  assert.equal(el.provider, provider);
-});
-
-test("whenSynced waits for async startup AND the server catch-up", async (t) => {
-  const consumer = fakeConsumer();
+test("readiness is available before async startup; no unowned document exists", async t => {
+  const actual = fakeConsumer();
   let provide;
-  const el = element(t, { grant: "g", name: "body" }, new Promise(r => { provide = r; }));
+  const { el, mount } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
   const ready = el.whenSynced;
   let resolved = false;
   ready.then(() => { resolved = true; });
-  const connecting = el.connectedCallback();
-  await Promise.resolve();
-  assert.equal(resolved, false);
+  await mount();
+  assert.equal(el.doc, undefined);
   assert.equal(el.provider, undefined);
-  provide(consumer);
-  await connecting;
-  assert.equal(el.whenSynced, ready);
+  provide(actual);
+  await tick();
   assert.equal(resolved, false);
-  consumer.deliverConnected();
-  const peer = new Y.Doc();
-  peer.getText("content").insert(0, "server state");
-  consumer.deliverReceived(syncStep2Envelope(peer));
+  assert.equal(el.inert, true);
+  sync(actual.created[0], "saved");
   await ready;
-  assert.equal(el.doc.getText("content").toString(), "server state");
-  peer.destroy();
+  assert.equal(el.doc.getText("content").toString(), "saved");
+  assert.equal(el.inert, false);
+  assert.equal(el.events[0].detail.signal.aborted, false);
 });
 
-test("a removed element cannot connect after its consumer resolves", async (t) => {
+test("removed elements cannot subscribe after the consumer resolves", async t => {
   const consumer = fakeConsumer();
   let provide;
-  const el = element(t, { grant: "g", name: "body" }, new Promise(r => { provide = r; }));
-  const connecting = el.connectedCallback();
-  el.disconnectedCallback();
-  provide(consumer);
-  await connecting;
-  assert.equal(consumer.calls.created.length, 0);
-  assert.equal(el.provider, undefined);
+  const { el, mount, remove } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
+  await mount(); remove(); provide(consumer); await tick();
+  assert.equal(consumer.created.length, 0);
+  assert.equal(el.doc, undefined);
 });
 
-test("reinsert during initialization creates only the current subscription", async (t) => {
-  const consumer = fakeConsumer();
-  let provide;
-  const el = element(t, { grant: "g", name: "body" }, new Promise(r => { provide = r; }));
-  const old = el.connectedCallback();
-  el.disconnectedCallback();
-  const current = el.connectedCallback();
-  provide(consumer);
-  await Promise.all([old, current]);
-  assert.equal(consumer.calls.created.length, 1);
-});
-
-test("async initialization failure emits an error and can be retried", async (t) => {
-  const consumer = fakeConsumer();
-  const error = new Error("consumer unavailable");
-  const el = element(t, { grant: "g", name: "body" }, Promise.reject(error));
-  await el.connectedCallback();
-  assert.equal(el.events[0].type, "yrby:error");
-  assert.equal(el.events[0].detail.error, error);
-  assert.equal(el.provider, undefined);
-  YrbyDocumentElement.consumer = consumer;
-  await el.connectedCallback();
-  assert.equal(consumer.calls.created.length, 1);
-});
-
-test("a stale initialization rejection cannot destroy a newer connection", async (t) => {
-  const consumer = fakeConsumer();
-  let rejectOld;
-  const el = element(t, { grant: "g", name: "body" }, new Promise((_, reject) => { rejectOld = reject; }));
-  const old = el.connectedCallback();
-  el.disconnectedCallback();
-  YrbyDocumentElement.consumer = consumer;
-  await el.connectedCallback();
-  const provider = el.provider;
-  rejectOld(new Error("stale failure"));
-  await old;
+test("same-turn DOM moves retain binding and document, clean delayed remounts reconstruct", async t => {
+  const { el, consumer, mount, remove } = setup(t);
+  await mount(); sync(consumer.created[0], "saved"); await el.whenSynced;
+  const { doc, provider } = el, signal = el.events[0].detail.signal;
+  remove(); await mount();
+  assert.equal(el.doc, doc);
   assert.equal(el.provider, provider);
-  assert.equal(provider.status, "connecting");
-  assert.equal(el.events.length, 0);
+  assert.equal(signal.aborted, false);
+  assert.equal(el.events.length, 1);
+  remove(); await tick();
+  assert.equal(signal.aborted, true);
+  assert.equal(doc.isDestroyed, true);
+  await mount(); sync(consumer.created.at(-1), "saved"); await el.whenSynced;
+  assert.notEqual(el.doc, doc);
+  assert.equal(el.doc.getText("content").toString(), "saved");
 });
 
-test("destroy is idempotent and saved edits replay on reuse", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body" }, consumer);
-  await el.connectedCallback();
-  el.doc.getText("content").insert(0, "saved edit");
-  el.destroy();
-  el.destroy();
-  await el.connectedCallback();
-  assert.equal(el.doc.getText("content").toString(), "saved edit");
-  assert.equal(el.provider.hasPending, true);
-});
-
-test("a same-turn move does not unsubscribe or clear presence", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body" }, consumer);
-  await el.connectedCallback();
-  el.provider.awareness.setLocalState({ user: { name: "Alice" } });
-  el.disconnectedCallback();
-  await el.connectedCallback();
-  assert.equal(consumer.calls.removed ?? 0, 0);
-  assert.equal(consumer.calls.created.length, 1);
-  assert.deepEqual(el.provider.awareness.getLocalState(), { user: { name: "Alice" } });
-});
-
-test("delayed reinsertion restores presence while reusing the doc and provider", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body" }, consumer);
-  await el.connectedCallback();
-  const provider = el.provider;
-  provider.awareness.setLocalState({ user: { name: "Alice" } });
-  el.disconnectedCallback();
-  await new Promise(r => queueMicrotask(r));
-  assert.equal(provider.awareness.getLocalState(), null);
-  await el.connectedCallback();
-  assert.equal(el.provider, provider);
-  assert.deepEqual(provider.awareness.getLocalState(), { user: { name: "Alice" } });
-});
-
-test("a cloned Turbo snapshot replays pending content until acked, and releases the old provider", async (t) => {
-  const consumer = fakeConsumer();
-  const attrs = { grant: "g", name: "body" };
-  const original = element(t, attrs, consumer);
-  const document = new EventTarget();
-  original.ownerDocument = document;
-  await original.connectedCallback();
-  consumer.deliverConnected();
-  original.doc.getText("content").insert(0, "unsent edit");
-  assert.equal(original.provider.hasPending, true);
-  const oldDoc = original.doc;
-  const oldProvider = original.provider;
-  document.dispatchEvent(new Event("turbo:before-cache"));
-  const clonedAttrs = { ...attrs };
-  original.disconnectedCallback();
-  await new Promise(r => queueMicrotask(r));
-  assert.equal(original.provider, undefined);
-  assert.equal(oldDoc.isDestroyed, false, "unacknowledged delivery still owns the original document");
-  const pendingFrame = consumer.calls.send.find(m => m.id !== undefined);
-  consumer.deliverReceived({ ack: pendingFrame.id });
-  await Promise.resolve();
-  assert.equal(oldDoc.isDestroyed, true);
-  assert.equal(oldProvider.awareness.getLocalState(), null);
-
-  const restoredConsumer = fakeConsumer();
-  const restored = element(t, clonedAttrs, restoredConsumer);
-  await restored.connectedCallback();
-  restoredConsumer.deliverConnected();
-  assert.equal(restored.doc.getText("content").toString(), "unsent edit");
-  assert.equal(restored.provider.hasPending, true);
-  const update = restoredConsumer.calls.send.find(m => m.id !== undefined);
-  assert.ok(update, "restored bytes go through ack tracking");
-  restoredConsumer.deliverReceived({ ack: update.id });
-  assert.equal(restored.provider.hasPending, false);
-});
-
-test("cached state never crosses a changed grant, name or channel", async (t) => {
-  const attrs = { grant: "g", name: "body" };
-  const original = element(t, attrs, fakeConsumer());
-  original.doc.getText("content").insert(0, "private state");
-  original.destroy();
-  for (const changed of [{ grant: "other" }, { name: "notes" }, { channel: "OtherChannel" }]) {
-    const restored = element(t, { ...attrs, ...changed }, fakeConsumer());
-    await restored.connectedCallback();
-    assert.equal(restored.doc.getText("content").toString(), "");
-    assert.equal(restored.provider.hasPending, false);
-  }
-});
-
-test("snapshot restore queues only the small pending tail, not the saved document", async (t) => {
-  const consumer = fakeConsumer();
-  const attrs = { grant: "g", name: "body" };
-  const original = element(t, attrs, consumer);
-  await original.connectedCallback();
-  const server = new Y.Doc();
-  server.getText("content").insert(0, "x".repeat(100_000));
-  original.provider.applyRemoteUpdate(Y.encodeStateAsUpdate(server));
-  original.doc.getText("content").insert(100_000, "tail");
-  original.destroy();
-  const restoredConsumer = fakeConsumer();
-  const restored = element(t, { ...attrs }, restoredConsumer);
-  await restored.connectedCallback();
-  restoredConsumer.deliverConnected();
-  assert.equal(restored.doc.getText("content").length, 100_004);
-  const frame = restoredConsumer.calls.send.find(m => m.id !== undefined);
-  assert.ok(frame.update.length < 200, "only the small local tail goes on the wire");
-  restoredConsumer.deliverReceived({ ack: frame.id });
-  assert.equal(restored.provider.hasPending, false);
-  restored.destroy();
-  const clean = element(t, {
-    grant: "g", name: "body", "data-yrby-snapshot": restored.getAttribute("data-yrby-snapshot")
-  }, fakeConsumer());
-  await clean.connectedCallback();
-  assert.equal(clean.doc.getText("content").length, 100_004);
-  assert.equal(clean.provider.hasPending, false, "acknowledged content is not requeued");
-  server.destroy();
-});
-
-for (const changed of [{ grant: "other" }, { name: "notes" }, { channel: "OtherChannel" }]) {
-  test(`retarget before caching never relabels the document: ${Object.keys(changed)[0]}`, async (t) => {
-    const attrs = { grant: "g", name: "body" };
-    const original = element(t, attrs, fakeConsumer());
-    await original.connectedCallback();
-    original.doc.getText("content").insert(0, "private pending edit");
-    Object.assign(attrs, changed);
-    const [key, value] = Object.entries(changed)[0];
-    original.attributeChangedCallback(key, null, value);
-    assert.equal(original.provider.status, "disconnected");
-    assert.equal(original.provider.hasPending, true, "failed retarget keeps the original edit");
-    assert.equal(original.events.at(-1).type, "yrby:error");
-    original.destroy();
-    assert.equal(JSON.parse(attrs["data-yrby-snapshot"]).identity, JSON.stringify(["Y::DocumentChannel", "g", "body"]));
-    const restored = element(t, { ...attrs }, fakeConsumer());
-    await restored.connectedCallback();
-    assert.equal(restored.doc.getText("content").toString(), "");
-    assert.equal(restored.provider.hasPending, false);
-    const originalIdentity = element(t, { ...attrs, grant: "g", name: "body", channel: null }, fakeConsumer());
-    await originalIdentity.connectedCallback();
-    assert.equal(originalIdentity.doc.getText("content").toString(), "private pending edit");
-    assert.equal(originalIdentity.provider.hasPending, true);
+for (const field of ["grant", "name", "channel"]) {
+  test(`retargeting ${field} aborts the old binding and leaves its pending edits in the original session`, async t => {
+    const { el, consumer, mount, change } = setup(t);
+    await mount(); sync(consumer.created[0]); await el.whenSynced;
+    const session = el.session, signal = el.events[0].detail.signal;
+    el.doc.getText("content").insert(0, "private edit");
+    change(field, "other");
+    assert.equal(signal.aborted, true);
+    assert.equal(el.doc, undefined);
+    await tick();
+    assert.notEqual(el.session, session);
+    assert.equal(session.hasPending, true);
+    assert.equal(session.descriptor[field], field === "channel" ? "Y::DocumentChannel" : field === "grant" ? "g" : "body");
+    assert.equal(el.doc.getText("content").toString(), "");
+    assert.equal(el.provider.hasPending, false);
   });
 }
 
-test("retarget while the consumer is loading cannot subscribe with the old document", async (t) => {
+test("multiple attribute changes during startup acquire only the complete current tuple", async t => {
+  const consumer = fakeConsumer();
   let provide;
-  const attrs = { grant: "g", name: "body" };
-  const consumer = fakeConsumer();
-  const el = element(t, attrs, new Promise(resolve => { provide = resolve; }));
-  const starting = el.connectedCallback();
-  el.doc.getText("content").insert(0, "private before startup");
-  attrs.grant = "other";
-  el.attributeChangedCallback("grant", "g", "other");
-  provide(consumer);
-  await starting;
-  assert.equal(consumer.calls.created.length, 0);
+  const { el, mount, change } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
+  await mount(); change("grant", "other"); change("name", "notes"); provide(consumer); await tick();
+  assert.equal(consumer.created.length, 1);
+  assert.equal(consumer.created[0].params.grant, "other");
+  assert.equal(consumer.created[0].params.name, "notes");
   el.destroy();
-  assert.equal(JSON.parse(attrs["data-yrby-snapshot"]).identity, JSON.stringify(["Y::DocumentChannel", "g", "body"]));
 });
 
-test("a disconnected retarget fails closed and reverting reconnects the original provider", async (t) => {
-  const attrs = { grant: "g", name: "body" };
-  const el = element(t, attrs, fakeConsumer());
-  await el.connectedCallback();
-  const { provider } = el;
-  el.disconnectedCallback();
-  await new Promise(r => queueMicrotask(r));
-  attrs.grant = "other";
-  await el.connectedCallback();
-  assert.equal(provider.status, "disconnected");
-  attrs.grant = "g";
-  await el.connectedCallback();
-  assert.equal(el.provider, provider);
-  assert.equal(provider.status, "connecting");
-});
-
-test("Turbo preview cannot connect or resolve readiness and releases its document", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body" }, consumer);
-  el.ownerDocument = new EventTarget();
-  el.ownerDocument.documentElement = { hasAttribute: () => true };
-  let ready = false;
-  el.whenSynced.then(() => { ready = true; });
-  await el.connectedCallback();
-  const doc = el.doc;
-  assert.equal(el.inert, true);
-  assert.equal(consumer.calls.created.length, 0);
-  assert.equal(ready, false);
-  el.disconnectedCallback();
-  await new Promise(r => queueMicrotask(r));
-  assert.equal(doc.isDestroyed, true);
-  assert.equal(el.provider, undefined);
-});
-
-test("navigation finishes pending delivery under the original grant before releasing it", async (t) => {
+test("cached previews have no document or provider; promotion binds once", async t => {
   const document = new EventTarget();
-  const attrs = { grant: "original-grant", name: "body" };
-  const consumer = fakeConsumer();
-  const original = element(t, attrs, consumer);
-  original.ownerDocument = document;
-  await original.connectedCallback();
-  consumer.deliverConnected();
-  original.doc.getText("content").insert(0, "unsent before navigation");
-  const { doc, provider } = original;
-  document.dispatchEvent(new Event("turbo:before-cache"));
-  original.disconnectedCallback();
-  await new Promise(r => queueMicrotask(r));
-  assert.equal(original.provider, undefined);
-  assert.equal(doc.isDestroyed, false);
-  assert.equal(provider.awareness.getLocalState(), null);
-  const fresh = element(t, { grant: "fresh-grant", name: "body" }, fakeConsumer());
-  fresh.ownerDocument = document;
-  await fresh.connectedCallback();
-  assert.equal(fresh.provider.hasPending, false, "old tail is never reauthorized with a fresh grant");
-  const frame = consumer.calls.send.find(m => m.id !== undefined);
-  assert.equal(consumer.calls.created[0].grant, "original-grant");
-  consumer.deliverReceived({ ack: frame.id });
-  await Promise.resolve();
-  assert.equal(doc.isDestroyed, true);
-  assert.equal(provider.status, "disconnected");
-});
-
-test("a retained preview initializes when Turbo promotes it to the live page", async (t) => {
-  const consumer = fakeConsumer();
-  const el = element(t, { grant: "g", name: "body" }, consumer);
-  const document = el.ownerDocument = new EventTarget();
   let preview = true;
   document.documentElement = { hasAttribute: () => preview };
-  el.inert = false;
-  await el.connectedCallback();
+  const { el, consumer, mount } = setup(t, undefined, undefined, document);
+  await mount();
+  assert.equal(el.inert, true);
+  assert.equal(el.doc, undefined);
+  assert.equal(consumer.created.length, 0);
   preview = false;
   document.dispatchEvent(new Event("turbo:render"));
-  await Promise.resolve();
-  assert.equal(consumer.calls.created.length, 1);
-  assert.equal(el.inert, false);
-  assert.ok(el.provider);
+  document.dispatchEvent(new Event("turbo:load"));
+  await tick();
+  sync(consumer.created[0]); await el.whenSynced;
+  assert.equal(consumer.created.length, 1);
+  assert.equal(el.events.length, 1);
+});
+
+test("before-cache releases bindings and a canceled navigation rebinds passive markup", async t => {
+  const attrs = { grant: "g", name: "body", "data-yrby-snapshot": "obsolete" };
+  const { el, consumer, document, mount } = setup(t, attrs);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  const signal = el.events[0].detail.signal;
+  document.dispatchEvent(new Event("turbo:before-cache"));
+  assert.equal(signal.aborted, true);
+  assert.equal(el.doc, undefined);
+  assert.equal(attrs["data-yrby-snapshot"], undefined);
+  await new Promise(resolve => setTimeout(resolve, 15));
+  sync(consumer.created.at(-1)); await el.whenSynced;
+  assert.equal(el.events.length, 2);
+});
+
+test("rejection aborts editor cleanup, reports the recoverable session, and stays inert", async t => {
+  const { el, consumer, mount } = setup(t);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  const session = el.session;
+  const signal = el.events[0].detail.signal;
+  signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "final"));
+  consumer.created[0].handlers.rejected();
+  assert.equal(el.inert, true);
+  assert.equal(el.doc, undefined);
+  assert.equal(session.hasPending, true);
+  assert.equal(el.events.at(-1).type, "yrby:error");
+  assert.equal(el.events.at(-1).detail.session, session);
+});
+
+test("a stale failed initialization cannot damage a newer attachment", async t => {
+  let reject;
+  const consumer = fakeConsumer();
+  const { el, mount, remove } = setup(t, undefined, new Promise((_, r) => { reject = r; }));
+  await mount(); remove(); await tick();
+  YrbyDocumentElement.consumer = consumer;
+  await mount();
+  const session = el.session;
+  reject(new Error("old")); await tick();
+  assert.equal(el.session, session);
+  assert.equal(el.events.length, 0);
 });
 
 
-test("a rejected outgoing subscription releases resources while retaining its snapshot", async (t) => {
+test("cached library inert state is cleared on readiness while application inert is preserved", async t => {
+  for (const original of [false, true]) {
+    const { el, consumer, mount } = setup(t, { grant: "g", name: "body", "data-yrby-inert": String(original) });
+    el.inert = true; // clone of a suspended editor
+    await mount(); sync(consumer.created[0]); await el.whenSynced;
+    assert.equal(el.inert, original);
+    assert.equal(el.getAttribute("data-yrby-inert"), null);
+  }
+});
+
+
+test("old adapter cleanup cannot unregister a replacement adapter in the same document", async t => {
+  const document = new EventTarget();
   const consumer = fakeConsumer();
-  const el = element(t, { grant: "expired", name: "body" }, consumer);
-  el.ownerDocument = new EventTarget();
-  await el.connectedCallback();
-  el.doc.getText("content").insert(0, "recoverable edit");
-  const { doc, provider } = el;
-  el.ownerDocument.dispatchEvent(new Event("turbo:before-cache"));
-  el.disconnectedCallback();
-  await new Promise(r => queueMicrotask(r));
-  consumer.deliverRejected();
+  const old = setup(t, undefined, consumer, document);
+  await old.mount();
+  disconnectTurbo(document);
+  const current = setup(t, undefined, consumer, document);
+  await current.mount();
+  const doc = current.el.doc;
+  old.remove(); await tick();
+  disconnectTurbo(document);
+  assert.equal(current.el.doc, undefined);
   assert.equal(doc.isDestroyed, true);
-  assert.equal(provider.status, "disconnected");
-  assert.ok(JSON.parse(el.getAttribute("data-yrby-snapshot")).pending);
 });

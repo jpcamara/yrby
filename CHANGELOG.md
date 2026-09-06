@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- yrby-client document elements use shared, consumer-scoped document sessions
+  to own pending delivery independently of editor attachments. Editor bindings
+  receive an abort signal for cleanup. Clean delayed remounts reload from the
+  server; `doc` and `provider` are unavailable before acquisition or during
+  retargeting. Turbo no longer serializes CRDT state into cached HTML.
+- Managed sessions expose suspension, delivery status, and recovery after
+  rejection. Per-provider subscription nonces isolate acknowledgment sequences.
+
 ## [0.7.1] - 2026-08-19
 
 ### Fixed

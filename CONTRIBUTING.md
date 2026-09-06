@@ -80,8 +80,9 @@ npm run test:browser
 The browser regression needs `agent-browser` on PATH and its Chrome installed
 (`agent-browser install`). `AB_BIN` can select another installation; `PORT`
 defaults to 3789. It starts an isolated Rails/SQLite/Puma fixture and uses real
-ActionCable, Turbo navigation, and two Chrome sessions to check pending-edit
-recovery, presence, async startup, and encrypted storage. It stops its server
+ActionCable, the AnyCable web client, Turbo navigation, and two Chrome sessions
+to check pending-edit recovery, shared views, retargeting, presence, async
+startup, and encrypted storage. It stops its server
 and browser sessions afterward. Logs and a screenshot are written under `tmp/`.
 
 The fixture is local-only and contains no authentication beyond the grants

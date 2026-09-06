@@ -59,31 +59,52 @@ try {
   await wait('!document.querySelector("#body-doc").provider.hasPending');
   check("ordinary edit reaches the Ruby accessor", (await state("body")).text === "before move");
   await evaluate('window.savedDoc = document.querySelector("#body-doc").doc; window.savedProvider = document.querySelector("#body-doc").provider; document.querySelector("#move-target").append(document.querySelector("#body-doc"))');
-  check("same-turn DOM move preserves identity and presence", await evaluate('document.querySelector("#body-doc").doc === savedDoc && document.querySelector("#body-doc").provider === savedProvider && savedProvider.awareness.getLocalState().user.name === "Browser reviewer"'));
+  check("same-turn DOM move preserves document and editor binding", await evaluate('document.querySelector("#body-doc").doc === savedDoc && document.querySelector("#body-doc").provider === savedProvider && document.querySelector("#body-doc").mountCount === 1'));
   await evaluate('window.moved = document.querySelector("#body-doc"); moved.remove()');
-  await wait('moved.provider.status === "disconnected"');
+  await wait('moved.provider === undefined && savedDoc.isDestroyed');
   await evaluate('document.querySelector("#move-target").append(moved)');
   await wait('moved.provider.synced');
-  check("delayed reinsertion restores presence", await evaluate('moved.provider === savedProvider && moved.provider.awareness.getLocalState().user.name === "Browser reviewer"'));
+  check("clean delayed reinsertion reconstructs saved content", await evaluate('moved.provider !== savedProvider && moved.doc.getText("content").toString() === "before move"'));
+  await evaluate('window.savedDoc = moved.doc; window.savedProvider = moved.provider; window.sessionStore = DocumentSessionStore.for(savedProvider.consumer); void 0');
   await browser(session, "find", "label", "Encrypted text", "fill", "encrypted browser edit");
   await wait('!document.querySelector("#secret-doc").provider.hasPending');
   const encrypted = await state("secret");
   check("encrypted browser edit reads through declared storage", encrypted.text === "encrypted browser edit" && encrypted.storage === "Y::EncryptedDocument");
   check("encrypted payload has a ciphertext envelope", JSON.parse(Buffer.from(encrypted.raw_payload, "base64").toString()).p !== undefined);
 
-  // Close the actual WebSocket while leaving HTTP available for Turbo Drive.
-  await evaluate('savedProvider.consumer.disconnect()');
+  // Suspend managed subscriptions while leaving HTTP available for Turbo Drive.
+  await evaluate('sessionStore.suspend(); window.suspendedSockets = socketCount');
   await wait('!savedProvider.synced');
   await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
   check("edit is pending and absent from storage before navigating", await evaluate('savedProvider.hasPending') && (await state("body")).text === "before move");
   await browser(session, "find", "role", "link", "click", "--name", "Away");
   await browser(session, "wait", "--url", "**/away");
   check("Turbo navigation stays in the same JS context", await evaluate('!!window.savedDoc'));
-  await wait("savedDoc.isDestroyed");
-  check("old snapshot document is disposed", await evaluate('savedDoc.isDestroyed'));
+  check("pending session survives page removal without a replacement subscription", await evaluate('!savedDoc.isDestroyed && savedProvider.hasPending && savedProvider.status === "disconnected"'));
+  check("no CRDT snapshot bytes are written into cached elements", await evaluate('!moved.hasAttribute("data-yrby-snapshot")'));
   await browser(session, "back");
+  await wait('document.querySelector("#body-doc")?.doc === savedDoc');
+  check("suspended history restore reuses the pending session without reopening the socket", await evaluate('socketCount === suspendedSockets && document.querySelector("#body-doc").doc.getText("content").toString() === "pending across Turbo"'));
+  await evaluate('sessionStore.resume()');
   await wait('document.querySelector("#body-doc")?.provider?.synced && !document.querySelector("#body-doc").provider.hasPending');
   check("actual Turbo history restore retains and acknowledges the unsent edit", await evaluate('document.querySelector("#body-doc").doc.getText("content").toString() === "pending across Turbo"') && (await state("body")).text === "pending across Turbo");
+  // Drop the actual socket without suspending the store, then restore transport.
+  await evaluate(`window.networkSession = document.querySelector("#body-doc").session;
+    window.networkConnection = networkSession.provider.consumer.connection;
+    window.networkOpen = networkConnection.open; networkConnection.open = () => false;
+    networkConnection.webSocket.close();`);
+  await wait('!networkSession.provider.synced');
+  await browser(session, "find", "label", "Body", "fill", "network drop recovered");
+  await browser(session, "find", "role", "link", "click", "--name", "Away");
+  await browser(session, "wait", "--url", "**/away");
+  check("transport loss preserves detached delivery", await evaluate('networkSession.state === "draining" && networkSession.hasPending'));
+  await browser(session, "back");
+  await wait('document.querySelector("#body-doc")?.session === networkSession');
+  await evaluate('networkConnection.open = networkOpen; networkConnection.open()');
+  await wait('networkSession.provider.synced && !networkSession.hasPending');
+  check("real socket reconnection delivers the offline edit", (await state("body")).text === "network drop recovered");
+  await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
+  await wait('!networkSession.hasPending');
   await browser(peer, "open", base);
   await wait('document.querySelector("#body-doc")?.provider?.synced', peer);
   check("a fresh browser reads the recovered edit from the server", await evaluate('document.querySelector("#body-doc").doc.getText("content").toString() === "pending across Turbo"', peer));
@@ -91,7 +112,7 @@ try {
 
   // An advance visit first renders the cached preview, then replaces it with
   // fresh server HTML. Hold that response so the transient page is observable.
-  await evaluate('window.beforePreview = document.querySelector("#body-doc"); window.outgoingPreviewDoc = beforePreview.doc; window.outgoingPreviewProvider = beforePreview.provider; window.previewConsumer = beforePreview.provider.consumer; previewConsumer.disconnect(); window.connectionOpen = previewConsumer.connection.open; previewConsumer.connection.open = () => false');
+  await evaluate('window.beforePreview = document.querySelector("#body-doc"); window.outgoingPreviewDoc = beforePreview.doc; window.outgoingPreviewProvider = beforePreview.provider; window.previewConsumer = beforePreview.provider.consumer; sessionStore.suspend()');
   await wait('!beforePreview.provider.synced');
   await browser(session, "find", "label", "Body", "fill", "pending before preview");
   check("preview regression starts with an unacknowledged edit", await evaluate('beforePreview.provider.hasPending'));
@@ -108,44 +129,60 @@ try {
     previewElement.querySelector("textarea").focus();
     previewElement.inert && !previewElement.provider && document.activeElement !== previewElement.querySelector("textarea")`));
   check("outgoing delivery survives while the preview is offline", await evaluate('outgoingPreviewProvider.hasPending && !outgoingPreviewDoc.isDestroyed'));
-  await evaluate('previewConsumer.connection.open = connectionOpen; previewConsumer.connection.open(); releaseFresh(); window.fetch = originalFetch');
+  await evaluate('releaseFresh(); window.fetch = originalFetch');
+  await wait('!document.documentElement.hasAttribute("data-turbo-preview") && document.querySelector("#body-doc") !== previewElement');
+  check("fresh page stays inert during explicit suspension", await evaluate('document.querySelector("#body-doc").inert && !document.querySelector("#body-doc").provider'));
+  await evaluate('sessionStore.resume()');
   await wait('!document.documentElement.hasAttribute("data-turbo-preview") && document.querySelector("#body-doc")?.provider?.synced && !document.querySelector("#body-doc").provider.hasPending');
-  check("fresh response releases the transient preview document", await evaluate('previewDoc.isDestroyed && previewElement.provider === undefined && document.querySelector("#body-doc") !== previewElement'));
+  check("transient previews never allocate a document", await evaluate('previewDoc === undefined && previewElement.doc === undefined && previewElement.provider === undefined'));
   await wait('outgoingPreviewDoc.isDestroyed && !outgoingPreviewProvider.hasPending && document.querySelector("#body-doc").doc.getText("content").toString() === "pending before preview"');
   check("fresh page has a newly minted grant", await evaluate('beforePreview.getAttribute("grant") !== document.querySelector("#body-doc").getAttribute("grant")'));
   check("fresh HTML receives and acknowledges the pre-preview pending edit", await evaluate('document.querySelector("#body-doc").doc.getText("content").toString() === "pending before preview"') && (await state("body")).text === "pending before preview");
   await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
   await wait('!document.querySelector("#body-doc").provider.hasPending');
 
-  // Exercise Turbo's real morph algorithm while preserving the element node.
-  await evaluate(`window.morphElement = document.querySelector("#body-doc");
-    window.morphProvider = morphElement.provider;
-    window.originalGrant = morphElement.getAttribute("grant");
-    window.identityErrors = [];
-    morphElement.addEventListener("yrby:error", event => identityErrors.push(event.detail.error.message));
-    morphProvider.consumer.disconnect();`);
-  await wait('!morphProvider.synced');
+  // Same grant: multiple editors share one queue and release independently.
+  await evaluate(`window.primary = document.querySelector("#body-doc");
+    window.secondView = primary.cloneNode(true); secondView.id = "second-view";
+    secondView.querySelector("textarea").setAttribute("aria-label", "Second view");
+    document.body.append(secondView);`);
+  await wait('secondView.provider?.synced');
+  check("two views share the document and delivery queue", await evaluate('primary.session === secondView.session && primary.provider === secondView.provider'));
+  await browser(session, "find", "label", "Second view", "fill", "shared views");
+  await wait('!secondView.provider.hasPending');
+  await evaluate('secondView.remove()');
+  await wait('secondView.provider === undefined');
+  check("removing one view preserves the other binding", await evaluate('primary.provider.synced && primary.doc.getText("content").toString() === "shared views" && secondView.unmountCount === 1'));
+
+  // A morph switches bindings while the old session drains under its own grant.
+  await evaluate(`window.morphElement = primary;
+    window.morphSession = primary.session; window.originalGrant = primary.getAttribute("grant");
+    window.mountsBeforeMorph = primary.mountCount;
+    sessionStore.suspend();`);
   await browser(session, "find", "label", "Body", "fill", "private body pending");
   await evaluate(`const replacement = morphElement.cloneNode(true);
     replacement.setAttribute("grant", document.querySelector("#secret-doc").getAttribute("grant"));
     replacement.setAttribute("name", "secret");
     Turbo.renderStreamMessage('<turbo-stream action="replace" method="morph" target="body-doc"><template>' + replacement.outerHTML + '</template></turbo-stream>');`);
-  await wait('document.querySelector("#body-doc").getAttribute("name") === "secret"');
-  check("Turbo morph cannot retarget a live provider", await evaluate('document.querySelector("#body-doc") === morphElement && morphElement.provider === morphProvider && morphProvider.status === "disconnected" && morphProvider.hasPending && identityErrors.length > 0'));
-  await evaluate(`document.dispatchEvent(new Event("turbo:before-cache"));
-    window.morphedSnapshot = morphElement.getAttribute("data-yrby-snapshot");
-    window.retargeted = document.createElement("yrby-document");
-    retargeted.setAttribute("grant", morphElement.getAttribute("grant"));
-    retargeted.setAttribute("name", "secret");
-    retargeted.setAttribute("data-yrby-snapshot", morphedSnapshot);
-    document.body.append(retargeted);`);
-  await wait('retargeted.provider?.synced && !retargeted.provider.hasPending');
-  check("morphed cache retains the original identity and cannot leak its tail", await evaluate('JSON.parse(morphedSnapshot).identity === JSON.stringify(["Y::DocumentChannel", originalGrant, "body"]) && retargeted.doc.getText("content").toString() === "encrypted browser edit"') && (await state("secret")).text === "encrypted browser edit");
-  await evaluate('retargeted.remove(); retargeted.destroy(); morphElement.setAttribute("grant", originalGrant); morphElement.setAttribute("name", "body")');
-  await wait('morphProvider.synced && !morphProvider.hasPending');
-  check("reverting the identity preserves delivery to the original document", (await state("body")).text === "private body pending");
+  await wait('document.querySelector("#body-doc").getAttribute("name") === "secret" && morphElement.session !== morphSession');
+  check("Turbo morph switches attachments and preserves the original pending queue", await evaluate('document.querySelector("#body-doc") === morphElement && morphSession.hasPending && morphSession.descriptor.grant === originalGrant && morphElement.session === document.querySelector("#secret-doc").session && morphElement.mountCount === mountsBeforeMorph + 1'));
+  await evaluate('sessionStore.resume()');
+  await wait('morphSession.state === "closed" && morphElement.provider.synced');
+  check("original tail reaches only its original Ruby document", (await state("body")).text === "private body pending" && (await state("secret")).text === "encrypted browser edit");
+  await evaluate('morphElement.setAttribute("grant", originalGrant); morphElement.setAttribute("name", "body")');
+  await wait('morphElement.provider?.synced && morphElement.doc.getText("content").toString() === "private body pending"');
   await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
-  await wait('!morphProvider.hasPending');
+  await wait('!morphElement.provider.hasPending');
+
+  // A before-cache event can leave the current page in place (canceled visit).
+  await evaluate('window.beforeCancelMounts = morphElement.mountCount; document.dispatchEvent(new Event("turbo:before-cache"))');
+  await wait('morphElement.provider?.synced && morphElement.mountCount === beforeCancelMounts + 1');
+  check("canceled navigation rebinds the live editor once", await evaluate('morphElement.doc.getText("content").toString() === "pending across Turbo" && !morphElement.inert'));
+
+  // Permanent DOM nodes still get a fresh editor binding after navigation.
+  await evaluate('morphElement.setAttribute("data-turbo-permanent", ""); window.permanentMounts = morphElement.mountCount; Turbo.visit("/?permanent=1")');
+  await wait('location.search === "?permanent=1" && document.querySelector("#body-doc")?.provider?.synced');
+  check("Turbo permanent element is rebound without duplicating editor listeners", await evaluate('document.querySelector("#body-doc") === morphElement && morphElement.mountCount > permanentMounts && morphElement.mountCount - morphElement.unmountCount === 1'));
 
   await browser(session, "open", `${base}/?detach=1`);
   await wait('document.querySelector("#secret-doc")?.provider?.synced');
@@ -153,6 +190,23 @@ try {
   await evaluate('document.body.append(detachedElement)');
   await wait('detachedElement.provider?.synced');
   check("reinsert after async cancellation subscribes successfully", await evaluate('detachedElement.doc.getText("content").toString() === "pending across Turbo"'));
+  // The managed subscription nonce works with the actual AnyCable web client.
+  await evaluate(`(async () => { window.anyConsumer = await anyCableConsumer();
+    YrbyDocumentElement.consumer = anyConsumer;
+    window.anyElement = document.querySelector("#body-doc").cloneNode(true);
+    anyElement.id = "any-document";
+    anyElement.querySelector("textarea").setAttribute("aria-label", "AnyCable body");
+    document.body.append(anyElement); })()`);
+  await wait('anyElement.provider?.synced');
+  await browser(session, "find", "label", "AnyCable body", "fill", "AnyCable session edit");
+  await wait('!anyElement.provider.hasPending');
+  check("AnyCable client persists and acknowledges a managed session", (await state("body")).text === "AnyCable session edit");
+  await evaluate('window.oldAnyRoute = anyElement.provider.channelParams.session_id; window.oldAnyDoc = anyElement.doc; anyElement.remove()');
+  await wait('oldAnyDoc.isDestroyed');
+  await evaluate('document.body.append(anyElement)');
+  await wait('anyElement.provider?.synced');
+  check("AnyCable replacement uses a fresh ack route and reconstructs saved content", await evaluate('anyElement.provider.channelParams.session_id !== oldAnyRoute && anyElement.doc.getText("content").toString() === "AnyCable session edit"'));
+  await evaluate('anyElement.remove(); anyConsumer.disconnect(); YrbyDocumentElement.consumer = undefined');
   const errors = await browser(session, "errors");
   check("no browser exceptions", (errors.errors ?? []).length === 0);
   console.log("PASS element browser regression (real Rails, ActionCable, Turbo and agent-browser)");

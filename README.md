@@ -58,10 +58,15 @@ binding you use:
 ```js
 import "yrby-client/element"
 
-document.addEventListener("yrby:synced", ({ target }) => {
-  if (target.matches("yrby-document")) bindYourEditor(target.doc) // any Yjs editor binding
+document.addEventListener("yrby:synced", ({ target, detail }) => {
+  const editor = bindYourEditor(target, detail.doc, detail.provider)
+  detail.signal.addEventListener("abort", () => editor.destroy(), { once: true })
 })
 ```
+
+Sessions retain pending edits after an editor leaves the page. Bindings clean up
+through the abort signal; clean sessions reload from Rails on a later visit.
+See the [client lifecycle and recovery contract](packages/client/README.md#document-sessions).
 
 The document is rows in your database, and you can read it back in Ruby:
 
