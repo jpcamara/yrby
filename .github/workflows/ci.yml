@@ -277,13 +277,17 @@ jobs:
         working-directory: site
         run: bundle exec rubocop
 
+      - name: Build the local client before installing the site
+        working-directory: site/frontend
+        run: bun run build:client
+
       - name: ESLint
         working-directory: site/frontend
         run: bun install --frozen-lockfile && bunx eslint .
 
       - name: Build the demo bundles
         working-directory: site/frontend
-        run: bun run build:client && bun run build
+        run: bun run build
 
       - name: Test (store, throttles, controllers)
         working-directory: site
