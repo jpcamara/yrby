@@ -9,6 +9,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `record.collaborative_document(name)` follows the model's storage declaration
+  for application reads and writes, including encrypted attributes. The shipped
+  channel uses the same accessor.
+
 - `Y::DocumentChannel`, shipped in the gem the way Turbo ships
   `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a
   page rendered (`{ grant:, name: }`); the channel trades the grant back for
@@ -72,6 +76,12 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   template had.
 
 ### Fixed
+
+- Default storage now supplies the loader and recorder as a pair. Declaring
+  only one custom hook raises before subscribing or acknowledging an update,
+  instead of silently sending reads and writes to different stores.
+
+- Signed grants initialize without requiring the host app to load Active Job.
 
 - The `yrby:tables` migration template caps `y_documents.state` at
   `1.gigabyte - 1` instead of `4.gigabytes - 1`. Postgres raises

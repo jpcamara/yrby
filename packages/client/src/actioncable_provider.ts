@@ -150,6 +150,16 @@ export class ActionCableProvider {
     return this.session.hasPending;
   }
 
+  /** Copy the unacknowledged tail for a page snapshot, without the full document. */
+  get pendingUpdate(): Uint8Array | null {
+    return this.session.pendingUpdate;
+  }
+
+  /** Restore an unsent local tail, which must still be delivered and acknowledged. */
+  restorePendingUpdate(update: Uint8Array): void {
+    this.session.restorePendingUpdate(update);
+  }
+
   /**
    * Apply a bootstrap/restore update (initial HTTP state, a server snapshot, an
    * import) without re-sending it to the server as a local edit. Call it once per

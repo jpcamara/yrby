@@ -44,7 +44,7 @@ module Y
     end
 
     def document
-      record && storage.for(record, params[:name].to_s)
+      record&.collaborative_document(params[:name].to_s)
     end
 
     # One access path per document: the class the model declared for this

@@ -124,7 +124,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
     assert_includes transmissions, { "ack" => 4 }
 
-    document = Y::EncryptedDocument.find_by!(record: secret, name: "body")
+    document = secret.collaborative_document(:body)
+
+    assert_instance_of Y::EncryptedDocument, document
     doc = Y::Doc.new
     doc.apply_update(document.load_state)
 
@@ -141,5 +143,37 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     end
   ensure
     SecretPage.delete_all
+  end
+
+  def test_document_accessor_uses_plain_storage_for_undeclared_attributes
+    document = @page.collaborative_document(:body)
+
+    assert_instance_of Y::Document, document
+    assert_equal document, @page.collaborative_document("body")
+    assert_equal @page, document.record
+  end
+
+  def test_encrypted_accessor_writes_are_readable_through_the_channel
+    secret = SecretPage.create!(title: "accessor")
+    secret.collaborative_document(:body).append(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+    subscribe grant: secret.collaborative_sgid(:body), name: "body"
+
+    client = Y::Doc.new
+    perform :receive, "update" => Base64.strict_encode64(client.sync_step1)
+    reply = transmissions.last.fetch("update")
+    client.handle_sync_message(Base64.strict_decode64(reply))
+
+    refute_empty client.read_text("content").to_s
+  ensure
+    SecretPage.delete_all
+  end
+
+  def test_storage_declarations_are_inherited_without_mutating_the_parent
+    child = Class.new(SecretPage)
+    child.has_collaborative_document :notes, encrypted: true
+
+    assert_equal Y::EncryptedDocument, child.collaborative_document_class(:body)
+    assert_equal Y::EncryptedDocument, child.collaborative_document_class("notes")
+    assert_equal Y::Document, SecretPage.collaborative_document_class(:notes)
   end
 end

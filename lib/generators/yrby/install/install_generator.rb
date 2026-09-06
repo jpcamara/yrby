@@ -33,10 +33,9 @@ module Yrby
 
                  import "yrby-client/element"
 
-                 document.querySelector("yrby-document")
-                   .addEventListener("yrby:synced", ({ target }) => {
-                     bindYourEditor(target.doc)
-                   })
+                 document.addEventListener("yrby:synced", ({ target }) => {
+                   if (target.matches("yrby-document")) bindYourEditor(target.doc)
+                 })
 
           The README's Editors section links working integrations for
           Tiptap, Lexxy, Rhino Editor, and CodeMirror.

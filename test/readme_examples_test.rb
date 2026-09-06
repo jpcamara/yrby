@@ -38,6 +38,7 @@ class ReadmeExamplesTest < Minitest::Test
     note = Struct.new(:content).new
     post_class = Class.new(ActiveRecord::Base) do
       self.table_name = "pages"
+      include Y::Collaborative
       def self.name = "Page" # record binding derives keys from the class name
     end
     post = post_class.create!(title: "readme")

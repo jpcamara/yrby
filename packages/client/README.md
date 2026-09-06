@@ -47,15 +47,40 @@ wiring:
 ```js
 import "yrby-client/element";
 
-document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
-  bindYourEditor(target.doc); // any Yjs editor binding; fires after the first catch-up
+document.addEventListener("yrby:synced", ({ target }) => {
+  if (target.matches("yrby-document")) bindYourEditor(target.doc);
 });
 ```
 
 The element owns connect/reconnect against the gem-shipped
-`Y::DocumentChannel` (a `channel` attribute overrides the name), keeps its
-`Y.Doc` across DOM moves and Turbo restores, and exposes `doc`, `provider`,
-and `whenSynced`. All elements on a page share one consumer — created from
+`Y::DocumentChannel` (a `channel` attribute overrides the name), reuses its
+`Y.Doc` across DOM moves, and saves its state in Turbo's cached snapshot.
+A restored snapshot creates a new document and queues only its unacknowledged
+tail for delivery; already-saved content is restored without retransmitting it.
+The old cached page's
+provider and awareness timer are released. This preserves edits across Turbo
+restores; it is not persistent offline storage across closing or reloading a tab.
+
+The element exposes `doc`, `provider`, and `whenSynced`. The promise is available
+immediately, even while its consumer is loading; await it before binding an editor.
+Import failures emit a bubbling `yrby:error` event with `event.detail.error`.
+Use a delegated `yrby:synced` listener or an editor controller that reconnects
+after Turbo navigation to bind each restored element, as in the example above.
+
+Install `@rails/actioncable`, `yjs`, and `y-protocols` alongside `yrby-client`
+for the default element. These are optional peers because users of the lower
+level protocol and reliable-delivery exports may not need them.
+
+Temporary removals preserve presence for reinsertion. For a permanently removed
+element outside Turbo navigation, call `element.destroy()` to release its resources.
+
+Custom snapshot integrations can pair `provider.pendingUpdate` with
+`provider.restorePendingUpdate(bytes)`. The former copies the unacknowledged
+tail (or returns `null`); the latter restores its delivery obligation even
+when those changes are already present in the document. Restore full state
+with `applyRemoteUpdate` first, then restore the pending tail before connecting.
+
+All elements on a page share one consumer, created from
 `@rails/actioncable` (an optional peer dependency) by default; on AnyCable
 assign your own once before the elements connect:
 

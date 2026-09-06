@@ -58,8 +58,8 @@ binding you use:
 ```js
 import "yrby-client/element"
 
-document.querySelector("yrby-document").addEventListener("yrby:synced", ({ target }) => {
-  bindYourEditor(target.doc) // any Yjs editor binding
+document.addEventListener("yrby:synced", ({ target }) => {
+  if (target.matches("yrby-document")) bindYourEditor(target.doc) // any Yjs editor binding
 })
 ```
 
@@ -67,7 +67,8 @@ The document is rows in your database, and you can read it back in Ruby:
 
 ```ruby
 doc = Y::Doc.new
-doc.apply_update(Y::Document.for(post, :body).load_state)
+state = post.collaborative_document(:body).load_state
+doc.apply_update(state) if state
 doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
@@ -75,9 +76,9 @@ Install the gem and the npm package:
 
 ```
 gem install yrby-rails # depends on yrby
-npm install yrby-client
+npm install yrby-client yjs y-protocols @rails/actioncable
 
-bin/rails yrby:install && bin/rails db:migrate
+bin/rails generate yrby:install && bin/rails db:migrate
 ```
 
 ## Contents
@@ -536,7 +537,7 @@ In a Rails app, one generator creates the storage migration. The models and
 `Y::DocumentChannel` are already in the gem:
 
 ```bash
-bin/rails yrby:install
+bin/rails generate yrby:install
 bin/rails db:migrate
 ```
 
@@ -584,6 +585,10 @@ declaration keep using plain `Y::Document`. In a channel of your own, point
 `on_load` and `on_change` at `Y::EncryptedDocument` instead. Either way,
 configure your app's encryption keys and use one access path per document.
 Rows written encrypted read back as ciphertext through the plain classes.
+
+Use `post.collaborative_document(:body)` to read or append from application
+code. It follows the same declaration as the channel, including encryption;
+you do not need to choose between `Y::Document` and `Y::EncryptedDocument`.
 
 The migration creates `y_documents` and `y_document_updates`. To rename them,
 edit the generated migration and point `Y::Document.table_name` and
@@ -645,8 +650,10 @@ authoritative is kept in ActionCable process memory, so AnyCable RPC workers,
 Puma workers, and separate dynos can all handle messages for the same document,
 as long as they share the same store and the same cable adapter.
 
-`on_load` and `on_change` default to `Y::Document` storage when the yrby-rails
-models are installed. Declaring either one replaces the default. Outside a
+`on_load` and `on_change` default together to `Y::Document` storage when the
+yrby-rails models are installed and neither hook is declared. To replace
+storage, declare both hooks so reads and writes use the same store. A subclass
+may override either hook of an explicitly configured pair. Outside a
 yrby-rails app there is no default, and the channel fails before it can
 acknowledge or broadcast an edit until you declare both. Presence is ephemeral.
 Awareness frames are relayed, and `yrby-client` sends a best-effort

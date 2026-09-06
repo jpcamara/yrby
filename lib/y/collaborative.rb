@@ -80,6 +80,12 @@ module Y
       end
     end
 
+    # Read and write through the same storage class the channel uses, including
+    # encryption. Resolve on each call so no stale association or class is cached.
+    def collaborative_document(name)
+      self.class.collaborative_document_class(name).for(self, name)
+    end
+
     # A signed token a channel can trade back for this record with
     # Y::Collaborative.locate, but only for this attribute.
     def collaborative_sgid(name)
