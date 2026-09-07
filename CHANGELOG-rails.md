@@ -10,12 +10,19 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `Y::DocumentChannel.authorize_document { |record, name| ... }` optionally
-  checks application permissions in channel context before subscription storage
-  access and every incoming message. Records are freshly located per message.
-  Denial stops and rejects only that subscription without persisting or acking
-  the message; managed clients retain pending edits for recovery. The default
-  remains signed-grant access. Idle connections require application-driven
-  disconnection for immediate revocation; AnyCable presence whispers bypass RPC.
+  checks application permissions in channel context when a client subscribes,
+  in addition to the signed grant. A denial rejects that subscription without
+  opening a stream or serving state; other subscriptions on the connection stay
+  up. The default remains signed-grant access.
+
+  The policy runs at subscribe, not per message, which is Action Cable's own
+  model and keeps a record load and the application's queries off the path of
+  every keystroke and cursor move. A permission revoked mid-session therefore
+  reaches an open subscription only when that client next subscribes; mint
+  short-lived grants, and stop the subscription from the application when access
+  must be cut immediately. The decision is carried as channel state, so it
+  survives AnyCable's fresh channel instance per command; a frame with no
+  authorized subscription behind it is refused even with a valid grant.
 - `record.collaborative_document(name)` returns a bound
   `Y::Collaborative::Attribute` for application reads/writes and the shipped
   channel. `doc` reconstructs a native `Y::Doc`; `load_state`, `append`, and `key`

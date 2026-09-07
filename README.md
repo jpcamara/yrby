@@ -642,27 +642,29 @@ end
 ```
 
 `editable_by?` is your application's policy method, not a yrby API. The block
-receives a freshly located record and the attribute name as a string. It runs
-before subscription storage access and before every incoming message, including
-sync requests, updates, and presence. A false or nil result denies access. An
-invalid grant is rejected before calling the block. Without a block, the valid
-grant remains sufficient; rendering the helper must still require edit permission.
+receives a freshly located record and the attribute name as a string. A false or
+nil result denies access, and the subscription is rejected without opening a
+stream or serving any state. An invalid grant is rejected before the block is
+called. Without a block, the valid grant remains sufficient; rendering the helper
+must still require edit permission. Policy errors fail closed and propagate to
+your error handling.
 
-On a denial during editing, the channel stops its streams and rejects that
-subscription without storing, broadcasting, or acknowledging the message. Other
-subscriptions on the connection remain active. Managed clients retain pending
-edits in a blocked session for recovery. Policy errors also stop the subscription
-and propagate to the application's error handling.
+**The policy runs once, when the client subscribes.** A confirmed subscription is
+the grant from then on, which is how Action Cable is meant to work and what keeps
+a record load and your own queries off the path of every keystroke and every
+cursor move. The tradeoff is that a permission revoked mid-session does not reach
+an open subscription on its own: it takes effect the next time that client
+subscribes. Two things bound it. Mint short-lived grants, since expiry is checked
+on every new subscription. And if your application must cut access off
+immediately, stop the subscription yourself when permission changes, rather than
+waiting for the client to reconnect.
 
-The grant is verified again on every incoming message, so expiration and record
-deletion are enforced on existing connections as well as new subscriptions.
-The policy must query current permissions: a cached user association can still
-be stale even though the document record is fresh. These are message-time checks,
-not immediate revocation: an idle subscriber may keep receiving broadcasts until
-its next message or disconnection. AnyCable presence whispers bypass application
-RPC checks; they do not carry document edits. Immediate read/presence revocation
-requires application-driven disconnection. No grant renewal or user/session
-binding is added.
+The decision is carried for the life of the subscription, on both transports.
+Action Cable keeps the channel instance; AnyCable builds a fresh one per command,
+so the authorized document is declared as channel state and round-trips through
+the RPC. That state lives in anycable-go, not the browser, so a client cannot
+forge it. A frame arriving without an authorized subscription behind it is
+refused even if it carries a perfectly valid grant.
 
 For room-keyed collaboration or custom channel behavior, generate a channel with
 `bin/rails generate yrby:install --channel` and implement its `authorized?(key)`

@@ -145,6 +145,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # then streams broadcasts for this document and transmits the server's
     # opening handshake (SyncStep1 from the store). Rejects and returns false
     # when authorized? refuses, including always, until the channel defines it.
+    # rubocop:disable Naming/PredicateMethod -- a lifecycle call that reports
+    # whether the subscription was accepted, not a predicate.
     def sync_subscribed(key)
       @sync_key = key.to_s
       sync_validate_required_hooks!
@@ -167,7 +169,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       doc = sync_load_doc
       sync_transmit(doc.sync_step1)
       sync_observe_gap if doc.pending?
+      # Truthy on success, so a caller can tell an accepted subscription from a
+      # refused one. Without this the result is whatever the gap check happened
+      # to evaluate to, which is nil for the common case of no open gap.
+      true
     end
+    # rubocop:enable Naming/PredicateMethod
 
     # Call from `receive`. Applies the client's message, replies directly
     # when the protocol calls for it, and relays document/awareness changes

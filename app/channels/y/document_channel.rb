@@ -29,6 +29,22 @@ module Y
 
     class_attribute :document_authorizer, instance_accessor: false, default: nil
 
+    # The authorized document, carried for the life of the subscription.
+    #
+    # The policy runs once, at subscribe. What has to survive to the next
+    # message is the decision, and each transport keeps it differently: Action
+    # Cable holds this channel instance, while AnyCable builds a fresh one per
+    # command and round-trips declared channel state through the RPC. Declaring
+    # it as AnyCable state when anycable-rails is loaded covers both, and the
+    # state lives in anycable-go rather than the browser, so a client cannot
+    # forge it. Gems load before app/ autoloads, so this check sees
+    # anycable-rails whenever the app has it.
+    if respond_to?(:state_attr_accessor)
+      state_attr_accessor :authorized_document_key
+    else
+      attr_accessor :authorized_document_key
+    end
+
     # Configure in Rails.application.config.to_prepare. Runs in channel context
     # (including connection identifiers such as current_user), with a freshly
     # located record and the attribute name. Return truthy to allow access.
@@ -44,16 +60,27 @@ module Y
     def subscribed
       return reject unless document_authorized?
 
-      sync_subscribed(document.key)
+      key = document.key
+      self.authorized_document_key = key if sync_subscribed(key)
     rescue StandardError
       reject_document_subscription
       raise
     end
 
     def receive(data)
-      return unless authorize_receive
+      # The policy ran at subscribe, the way Action Cable intends: a confirmed
+      # subscription is the grant. Re-running it per frame would put a record
+      # load and the application's own queries on the path of every keystroke
+      # and every cursor move. An application that must cut access before the
+      # client disconnects should stop the subscription itself, and a short
+      # grant expiry bounds it in the meantime.
+      #
+      # No key means no authorized subscription reached this command, so there
+      # is nothing to write to and nothing was ever approved.
+      key = authorized_document_key
+      return reject_document_subscription unless key
 
-      sync_receive(data, document.key)
+      sync_receive(data, key)
     end
 
     private
@@ -63,23 +90,11 @@ module Y
     attr_reader :record
 
     def document_authorized?
-      # Do not retain permission-relevant attributes or associations between
-      # messages, even when Action Cable keeps this channel instance alive.
       @record = Y::Collaborative.locate(params[:grant], params[:name])
       return false unless record
 
       authorizer = self.class.document_authorizer
       !authorizer || instance_exec(record, params[:name].to_s, &authorizer)
-    end
-
-    def authorize_receive
-      return true if document_authorized?
-
-      reject_document_subscription
-      false
-    rescue StandardError
-      reject_document_subscription
-      raise
     end
 
     def reject_document_subscription
@@ -91,7 +106,12 @@ module Y
       reject_subscription
     end
 
+    # Storage routing needs the record: an attribute may be encrypted or backed
+    # by a custom adapter. Resolved lazily so a fresh AnyCable instance can
+    # answer a document frame, and only on the frames that touch storage, so
+    # awareness relay stays a pure pass-through.
     def document
+      @record ||= Y::Collaborative.locate(params[:grant], params[:name])
       record&.collaborative_document(params[:name].to_s)
     end
   end
