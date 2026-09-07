@@ -5,6 +5,14 @@ source "https://rubygems.org"
 gemspec name: "yrby"
 gemspec name: "yrby-rails"
 
+# json 3.0 changed JSON.parse's signature, and ActiveSupport 8.1's
+# JSON.decode still calls it with two arguments, so every signed-message
+# read raises ArgumentError. Development and CI only: the incompatibility is
+# between two of our dependencies, not something the published gems should
+# constrain for an app. Drop this once ActiveSupport ships a compatible
+# release.
+gem "json", "< 3"
+
 # Fiber scheduler used by test/fiber_scheduler_test.rb to drive the native
 # extension inside an Async reactor (the server shape under Falcon).
 gem "async"
