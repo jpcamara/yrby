@@ -237,34 +237,40 @@ try {
     'document.querySelector("#body-doc").mountCount === undefined && document.querySelector("#body-doc").querySelector("textarea").disabled', peer));
   await wait('document.querySelector("#secret-doc")?.provider?.synced', peer);
 
-  // Revoke a previously authorized user's access while the socket stays open.
+  // The policy runs when a client subscribes, so revoking permission does not
+  // reach a subscription that is already open. It takes effect on the next one.
   await browser(session, "open", base);
   await wait('document.querySelector("#body-doc")?.provider?.synced && document.querySelector("#secret-doc")?.provider?.synced');
-  await evaluate('window.revokedSession = document.querySelector("#body-doc").session; window.revokedDoc = revokedSession.doc; window.beforeDenialSockets = socketCount');
-  const beforeDeniedEdit = (await state("body")).text;
+  await evaluate('window.beforeDenialSockets = socketCount');
   const permission = await fetch(`${base}/permission?editor=nobody`, { method: "POST" });
   assert.equal(permission.status, 204);
-  await browser(session, "find", "label", "Body", "fill", "unsaved after permission revoked");
-  await wait('revokedSession.state === "blocked"');
-  check("revoked edits are not persisted or acknowledged", (await state("body")).text === beforeDeniedEdit &&
-    await evaluate('revokedSession.hasPending'));
-  check("rejection retains an exportable document and unmounts the editor", await evaluate(
-    'revokedSession.exportRecovery().update.length > 0 && revokedDoc.getText("content").toString() === "unsaved after permission revoked" && document.querySelector("#body-doc").querySelector("textarea").disabled'));
+  await browser(session, "find", "label", "Body", "fill", "edited after permission revoked");
+  await wait('!document.querySelector("#body-doc").provider.hasPending');
+  check("an open subscription keeps working after permission is revoked",
+    (await state("body")).text === "edited after permission revoked");
   await browser(session, "find", "label", "Encrypted text", "fill", "other subscription still works");
   await wait('!document.querySelector("#secret-doc").provider.hasPending');
-  check("denial leaves other subscriptions on the socket working", (await state("secret")).text === "other subscription still works" &&
+  check("revocation leaves other subscriptions on the socket working", (await state("secret")).text === "other subscription still works" &&
     await evaluate('socketCount === beforeDenialSockets'));
 
-  // An authorized peer can continue; its broadcasts must not reach the rejected doc.
+  // Reloading resubscribes, and that is where the revocation lands.
+  await browser(session, "open", base);
+  await wait('documentErrors.some(event => event.id === "body-doc" && event.session?.state === "blocked")');
+  check("the next subscription is refused once permission is gone", await evaluate(
+    'document.querySelector("#body-doc").querySelector("textarea").disabled'));
+
+  // An authorized peer still works, and restoring permission lets this user back.
   const restore = await fetch(`${base}/permission?editor=editor`, { method: "POST" });
   assert.equal(restore.status, 204);
   await browser(peer, "open", base);
   await wait('document.querySelector("#body-doc")?.provider?.synced', peer);
-  await browser(peer, "find", "label", "Body", "fill", "peer edit after rejection");
+  await browser(peer, "find", "label", "Body", "fill", "peer edit after revocation");
   await wait('!document.querySelector("#body-doc").provider.hasPending', peer);
-  check("the rejected subscription no longer receives document broadcasts", (await state("body")).text === "peer edit after rejection" &&
-    await evaluate('revokedDoc.getText("content").toString() === "unsaved after permission revoked"'));
-  await evaluate('revokedSession.discard()');
+  check("an authorized peer keeps editing throughout", (await state("body")).text === "peer edit after revocation");
+  await browser(session, "open", base);
+  await wait('document.querySelector("#body-doc")?.provider?.synced');
+  check("restoring permission admits the user on the next subscription", await evaluate(
+    'document.querySelector("#body-doc").doc.getText("content").toString() === "peer edit after revocation"'));
   const errors = await browser(session, "errors");
   check("no browser exceptions", (errors.errors ?? []).length === 0);
   console.log("PASS element browser regression (real Rails, ActionCable, Turbo and agent-browser)");
