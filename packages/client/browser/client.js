@@ -6,6 +6,10 @@ window.anyCableConsumer = async () => (await import("@anycable/web")).createCons
 window.Turbo = Turbo;
 window.YrbyDocumentElement = YrbyDocumentElement;
 window.browserEvents = [];
+window.documentErrors = [];
+document.addEventListener("yrby:error", ({ target, detail }) => {
+  window.documentErrors.push({ id: target.id, ...detail });
+});
 window.initialReadiness = [];
 for (const el of document.querySelectorAll("yrby-document")) {
   const ready = el.whenSynced;

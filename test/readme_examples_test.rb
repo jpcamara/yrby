@@ -9,6 +9,8 @@ require_relative "../app/models/y/document_update"
 require_relative "../app/models/y/encrypted_document"
 require_relative "../app/models/y/encrypted_document_update"
 require "y/collaborative"
+require "action_cable"
+require_relative "../app/channels/y/document_channel"
 
 # Runs the ```ruby blocks from README.md against the real gem, so an
 # example that drifts from the API fails the suite. Each block evaluates
@@ -61,11 +63,22 @@ class ReadmeExamplesTest < Minitest::Test
       self.abstract_class = true
       include Y::Collaborative
     end
+    module Rails
+      # Run initializer examples without booting a Rails application.
+      def self.application = self
+      def self.config = self
+      def self.to_prepare(&block) = block.call
+    end
   RUBY
 
   def setup
+    @original_authorizer = Y::DocumentChannel.document_authorizer
     Y::DocumentUpdate.delete_all
     Y::Document.delete_all
+  end
+
+  def teardown
+    Y::DocumentChannel.document_authorizer = @original_authorizer
   end
 
   def test_readme_ruby_examples

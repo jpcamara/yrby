@@ -34,7 +34,10 @@ BrowserApplication.initialize!
 FileUtils.mkdir_p(File.expand_path("../../tmp", __dir__))
 ActiveRecord::Schema.verbose = false
 ActiveRecord::Schema.define do
-  create_table(:pages, force: true) { |t| t.string :title }
+  create_table :pages, force: true do |t|
+    t.string :title
+    t.string :body_editor, default: "editor"
+  end
   create_table :y_documents, force: true do |t|
     t.string :key, null: false, index: { unique: true }
     t.references :record, polymorphic: true
@@ -76,8 +79,28 @@ class Page < ActiveRecord::Base
 end
 Page.create!(id: 1, title: "Browser regression")
 
+module ApplicationCable
+  class Connection < ActionCable::Connection::Base
+    identified_by :current_user
+
+    def connect
+      self.current_user = cookies.signed[:browser_user]
+      reject_unauthorized_connection unless current_user
+    end
+  end
+end
+
+Y::DocumentChannel.authorize_document do |record, name|
+  # Fixture policy: body is restricted; other fields let us prove denial does
+  # not close unrelated subscriptions sharing the same socket.
+  name != "body" || record.body_editor == current_user
+end
+
 class BrowserController < ActionController::Base
   def show
+    # Test-only login and deliberate grant exposure for copied-grant tests.
+    # This fixture is local-only and must never be deployed.
+    cookies.signed[:browser_user] = params[:user].presence || "editor"
     @page = Page.find(1)
     render inline: <<~ERB, layout: false
       <!doctype html><html><head><title>yrby browser regression</title>
@@ -123,6 +146,11 @@ class BrowserController < ActionController::Base
     end
   end
 
+  def permission
+    Page.find(1).update!(body_editor: params.require(:editor))
+    head :no_content
+  end
+
   def asset
     path = File.join(ENV.fetch("BROWSER_ASSETS"), File.basename(params[:file]))
     # Exercise the default async import, including simultaneous elements and
@@ -135,6 +163,7 @@ BrowserApplication.routes.draw do
   root to: "browser#show"
   get "/away", to: "browser#away"
   get "/state/:name", to: "browser#state"
+  post "/permission", to: "browser#permission"
   get "/favicon.ico", to: ->(_env) { [204, {}, []] }
   get "/assets/:file", to: "browser#asset", constraints: { file: %r{[^/]+} }
 end

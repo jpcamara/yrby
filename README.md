@@ -626,9 +626,49 @@ migrating its data; the declaration does not copy it.
 Built-in attributes retain their stored document key. Custom attributes use the
 same conventional record/attribute key returned by `Y::Document.key_for(record,
 name)`, without requiring a built-in row. Grants keep their existing scope and
-lifetime. For custom authorization or room-keyed collaboration, generate a
-channel with `bin/rails generate yrby:install --channel` and implement its
-`authorized?(key)` method. Both storage hooks remain available in custom channels.
+lifetime.
+
+To require current user permissions in addition to the signed grant, configure
+the shipped channel. The block runs in channel context, so it can use identifiers
+such as `current_user` provided by your authenticated Action Cable connection:
+
+```ruby
+# config/initializers/yrby.rb
+Rails.application.config.to_prepare do
+  Y::DocumentChannel.authorize_document do |record, name|
+    current_user.present? && record.editable_by?(current_user, attribute: name)
+  end
+end
+```
+
+`editable_by?` is your application's policy method, not a yrby API. The block
+receives a freshly located record and the attribute name as a string. It runs
+before subscription storage access and before every incoming message, including
+sync requests, updates, and presence. A false or nil result denies access. An
+invalid grant is rejected before calling the block. Without a block, the valid
+grant remains sufficient; rendering the helper must still require edit permission.
+
+On a denial during editing, the channel stops its streams and rejects that
+subscription without storing, broadcasting, or acknowledging the message. Other
+subscriptions on the connection remain active. Managed clients retain pending
+edits in a blocked session for recovery. Policy errors also stop the subscription
+and propagate to the application's error handling.
+
+The grant is verified again on every incoming message, so expiration and record
+deletion are enforced on existing connections as well as new subscriptions.
+The policy must query current permissions: a cached user association can still
+be stale even though the document record is fresh. These are message-time checks,
+not immediate revocation: an idle subscriber may keep receiving broadcasts until
+its next message or disconnection. AnyCable presence whispers bypass application
+RPC checks; they do not carry document edits. Immediate read/presence revocation
+requires application-driven disconnection. No grant renewal or user/session
+binding is added.
+
+For room-keyed collaboration or custom channel behavior, generate a channel with
+`bin/rails generate yrby:install --channel` and implement its `authorized?(key)`
+method. Both storage hooks remain available in custom channels. The
+`authorize_document` configuration applies to `Y::DocumentChannel` and its
+subclasses; it does not change the lower-level `Y::ActionCable` concern.
 
 The migration creates `y_documents` and `y_document_updates`. To rename them,
 edit the generated migration and point `Y::Document.table_name` and

@@ -45,6 +45,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   def setup
+    @original_authorizer = Y::DocumentChannel.document_authorizer
     Y::DocumentUpdate.delete_all
     Y::Document.delete_all
     @page = Page.create!(title: "granted")
@@ -52,6 +53,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   def teardown
+    Y::DocumentChannel.document_authorizer = @original_authorizer
     Page.delete_all
   end
 
@@ -110,6 +112,168 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     subscribe grant: token, name: "body"
 
     assert_predicate subscription, :rejected?
+  end
+
+  def test_authorizer_requires_a_block_and_preserves_the_existing_policy
+    Y::DocumentChannel.authorize_document { false }
+    policy = Y::DocumentChannel.document_authorizer
+
+    assert_raises(ArgumentError) { Y::DocumentChannel.authorize_document }
+    assert_same policy, Y::DocumentChannel.document_authorizer
+  end
+
+  def test_authorizer_receives_the_record_attribute_and_connection_context
+    stub_connection current_user: "granted"
+    Y::DocumentChannel.authorize_document do |record, name|
+      record.title == current_user && name == "body"
+    end
+    subscribe grant: grant, name: "body"
+
+    assert_predicate subscription, :confirmed?
+    perform :receive, update_frame
+
+    assert_includes transmissions, { "ack" => 7 }
+    assert_equal 1, Y::DocumentUpdate.count
+  end
+
+  def test_valid_grant_does_not_bypass_policy_or_create_a_document
+    stub_connection current_user: "someone else"
+    Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
+    subscribe grant: grant, name: "body"
+
+    assert_predicate subscription, :rejected?
+    assert_empty subscription.streams
+    assert_empty transmissions
+    assert_equal 0, Y::Document.count
+  end
+
+  def test_nil_policy_result_denies_access
+    Y::DocumentChannel.authorize_document { nil }
+    subscribe grant: grant, name: "body"
+
+    assert_predicate subscription, :rejected?
+  end
+
+  def test_policy_can_deny_one_attribute_while_the_grant_is_valid
+    Y::DocumentChannel.authorize_document { |_record, name| name == "notes" }
+    subscribe grant: grant, name: "body"
+
+    assert_predicate subscription, :rejected?
+    assert_equal 0, Y::Document.count
+  end
+
+  def test_invalid_grant_never_calls_the_policy
+    Y::DocumentChannel.authorize_document { raise "must not be called" }
+    subscribe grant: "invalid", name: "body"
+
+    assert_predicate subscription, :rejected?
+  end
+
+  def test_policy_is_inherited_and_a_subclass_can_replace_it
+    parent = Class.new(Y::DocumentChannel)
+    parent.authorize_document { false }
+    child = Class.new(parent)
+
+    assert_same parent.document_authorizer, child.document_authorizer
+    child.authorize_document { true }
+
+    refute_same parent.document_authorizer, child.document_authorizer
+    assert_nil Y::DocumentChannel.document_authorizer
+  end
+
+  def test_permission_changes_reject_updates_without_ack_or_broadcast
+    stub_connection current_user: "granted"
+    Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
+    subscribe grant: grant, name: "body"
+    @page.update!(title: "revoked")
+    previous_transmissions = transmissions.dup
+    stream = subscription.streams.first
+
+    assert_no_broadcasts(stream) { perform :receive, update_frame }
+
+    assert_equal previous_transmissions, transmissions
+    assert_equal 0, Y::DocumentUpdate.count
+    assert_subscription_stopped
+  end
+
+  def test_permission_changes_also_reject_sync_requests_without_serving_state
+    Y::DocumentChannel.authorize_document { |record, _name| record.title == "granted" }
+    subscribe grant: grant, name: "body"
+    @page.update!(title: "revoked")
+    previous_transmissions = transmissions.dup
+    perform :receive, "update" => Base64.strict_encode64(Y::Doc.new.sync_step1)
+
+    assert_equal previous_transmissions, transmissions
+    assert_subscription_stopped
+  end
+
+  def test_destroyed_record_is_not_retained_by_an_existing_channel
+    subscribe grant: grant, name: "body"
+    @page.destroy!
+    perform :receive, update_frame
+
+    assert_equal 0, Y::DocumentUpdate.count
+    assert_subscription_stopped
+  end
+
+  def test_expired_grant_is_rechecked_on_an_existing_channel
+    token = @page.to_sgid(for: Y::Collaborative.sgid_purpose(:body), expires_in: 1.minute).to_s
+    subscribe grant: token, name: "body"
+    travel 2.minutes do
+      perform :receive, update_frame
+    end
+
+    assert_equal 0, Y::DocumentUpdate.count
+    assert_subscription_stopped
+  end
+
+  def test_stateless_receive_checks_policy_without_a_prior_subscription
+    stub_connection current_user: "someone else"
+    Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
+    params = { grant: grant, name: "body" }.with_indifferent_access
+    @subscription = Y::DocumentChannel.new(connection, "stateless", params)
+    @subscription.singleton_class.include(ActionCable::Channel::ChannelStub)
+    perform :receive, update_frame
+
+    assert_equal 0, Y::Document.count
+    assert_subscription_stopped
+  end
+
+  def test_stateless_receive_allows_an_authorized_update
+    stub_connection current_user: "granted"
+    Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
+    params = { grant: grant, name: "body" }.with_indifferent_access
+    @subscription = Y::DocumentChannel.new(connection, "stateless", params)
+    @subscription.singleton_class.include(ActionCable::Channel::ChannelStub)
+    perform :receive, update_frame
+
+    assert_includes transmissions, { "ack" => 7 }
+    assert_equal 1, Y::DocumentUpdate.count
+  end
+
+  def test_policy_exceptions_stop_the_subscription_and_do_not_ack
+    Y::DocumentChannel.authorize_document do |record, _name|
+      raise "policy unavailable" if record.title == "revoked"
+
+      true
+    end
+    subscribe grant: grant, name: "body"
+    @page.update!(title: "revoked")
+    previous_transmissions = transmissions.dup
+
+    assert_raises(RuntimeError) { perform :receive, update_frame }
+    assert_equal previous_transmissions, transmissions
+    assert_equal 0, Y::DocumentUpdate.count
+    assert_subscription_stopped
+  end
+
+  def test_policy_exception_during_subscription_fails_closed
+    Y::DocumentChannel.authorize_document { raise "policy unavailable" }
+
+    assert_raises(RuntimeError) { subscribe grant: grant, name: "body" }
+    assert_equal 0, Y::Document.count
+    assert_empty transmissions
+    assert_subscription_stopped
   end
 
   # -- storage follows the model's declaration --------------------------------
@@ -183,5 +347,19 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal Y::EncryptedDocument, child.collaborative_document_class(:body)
     assert_equal Y::EncryptedDocument, child.collaborative_document_class("notes")
     assert_equal Y::Document, SecretPage.collaborative_document_class(:notes)
+  end
+
+  private
+
+  def update_frame
+    { "update" => Base64.strict_encode64(Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)), "id" => 7 }
+  end
+
+  def assert_subscription_stopped
+    assert_predicate subscription, :rejected?
+    assert_predicate subscription, :unsubscribed?
+    assert_empty subscription.streams
+    assert connection.transmissions.any? { |message| message[:type] == "reject_subscription" },
+           "the client must receive a rejection to preserve its pending edits"
   end
 end

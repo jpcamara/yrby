@@ -19,7 +19,8 @@ module Y
     # The grant is a signed GlobalID scoped to this record and attribute
     # (record.collaborative_sgid(name)). Render the tag only where the request
     # is already authorized to collaborate on the record; possession of the
-    # grant is what the channel checks.
+    # grant is what the channel checks by default. Applications can also require
+    # live permissions with Y::DocumentChannel.authorize_document.
     #
     # Extra options pass through to the element (a block becomes its content),
     # so it can wrap the mount point an editor binds to:

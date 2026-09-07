@@ -9,6 +9,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Y::DocumentChannel.authorize_document { |record, name| ... }` optionally
+  checks application permissions in channel context before subscription storage
+  access and every incoming message. Records are freshly located per message.
+  Denial stops and rejects only that subscription without persisting or acking
+  the message; managed clients retain pending edits for recovery. The default
+  remains signed-grant access. Idle connections require application-driven
+  disconnection for immediate revocation; AnyCable presence whispers bypass RPC.
 - `record.collaborative_document(name)` returns a bound
   `Y::Collaborative::Attribute` for application reads/writes and the shipped
   channel. `doc` reconstructs a native `Y::Doc`; `load_state`, `append`, and `key`
@@ -60,6 +67,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The shipped document channel re-verifies grants on incoming messages, enforcing
+  existing expiration and record deletion on long-lived Action Cable channels.
+  Grant format and configured lifetime are unchanged.
 - **Breaking:** subscriptions are refused until the channel defines
   `authorized?(key)`. `sync_subscribed` now calls it before any stream is
   opened or state served, and the concern's default returns `false` — a
