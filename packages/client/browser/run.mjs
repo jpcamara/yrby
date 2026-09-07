@@ -87,8 +87,12 @@ try {
   await wait('!savedProvider.synced');
   await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
   check("edit is pending and absent from storage before navigating", await evaluate('savedProvider.hasPending') && (await state("body")).text === "before move");
-  await browser(session, "find", "role", "link", "click", "--name", "Away");
-  await browser(session, "wait", "--url", "**/away");
+  // Located by visible text: agent-browser 0.28's role lookup misses links
+  // and headings (buttons resolve fine), so a role locator finds nothing here.
+  await browser(session, "find", "text", "Away", "click");
+  // wait --url hangs in agent-browser 0.28 even when the URL already matches,
+  // so check location directly through the --fn wait that works.
+  await wait("location.pathname === '/away'");
   check("Turbo navigation stays in the same JS context", await evaluate('!!window.savedDoc'));
   check("pending session survives page removal without a replacement subscription", await evaluate('!savedDoc.isDestroyed && savedProvider.hasPending && savedProvider.status === "disconnected"'));
   check("no CRDT snapshot bytes are written into cached elements", await evaluate('!moved.hasAttribute("data-yrby-snapshot")'));
@@ -105,8 +109,8 @@ try {
     networkConnection.webSocket.close();`);
   await wait('!networkSession.provider.synced');
   await browser(session, "find", "label", "Body", "fill", "network drop recovered");
-  await browser(session, "find", "role", "link", "click", "--name", "Away");
-  await browser(session, "wait", "--url", "**/away");
+  await browser(session, "find", "text", "Away", "click");
+  await wait("location.pathname === '/away'");
   check("transport loss preserves detached delivery", await evaluate('networkSession.state === "draining" && networkSession.hasPending'));
   await browser(session, "back");
   await wait('document.querySelector("#body-doc")?.session === networkSession');
@@ -126,8 +130,8 @@ try {
   await wait('!beforePreview.provider.synced');
   await browser(session, "find", "label", "Body", "fill", "pending before preview");
   check("preview regression starts with an unacknowledged edit", await evaluate('beforePreview.provider.hasPending'));
-  await browser(session, "find", "role", "link", "click", "--name", "Away");
-  await browser(session, "wait", "--url", "**/away");
+  await browser(session, "find", "text", "Away", "click");
+  await wait("location.pathname === '/away'");
   await evaluate(`window.originalFetch = window.fetch;
     window.fetch = (...args) => new URL(args[0].url || args[0], location.href).pathname === "/"
       ? new Promise(resolve => { window.releaseFresh = () => resolve(originalFetch(...args)); })
