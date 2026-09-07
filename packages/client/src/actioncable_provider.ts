@@ -179,6 +179,7 @@ export class ActionCableProvider {
 
   connect(): void {
     if (this.#subscription) return;
+    this.#restorePresence();
     const provider = this;
     this.#subscription = this.consumer.subscriptions.create(
       { channel: this.channelName, ...this.channelParams },
@@ -237,7 +238,9 @@ export class ActionCableProvider {
     const sub = this.#subscription;
     // Tell peers we're gone while the transport is still live, then pause and
     // detach. Defer the unsubscribe one microtask so the removal frame flushes
-    // before the channel tears down.
+    // before the channel tears down. Stash presence first: removing it sets
+    // local awareness to null, and connect() puts it back.
+    this.#stashedPresence = this.awareness.getLocalState();
     this.session.removeLocalAwareness();
     this.session.onDisconnect();
     this.#connected = false;
@@ -272,6 +275,19 @@ export class ActionCableProvider {
     for (const listener of this.#statusListeners) listener({ status: next });
   }
 
+  // Put back the presence a teardown removed. Apps set awareness once at
+  // setup and update it with setLocalStateField, which y-protocols makes a
+  // no-op while local state is null — so without this a provider that
+  // reconnects (or a page restored from bfcache) stays invisible to peers
+  // for good. Never overwrites presence the app set in the meantime.
+  #restorePresence(): void {
+    if (!this.#stashedPresence) return;
+    if (this.awareness.getLocalState() === null) {
+      this.awareness.setLocalState(this.#stashedPresence);
+    }
+    this.#stashedPresence = null;
+  }
+
   // Presence teardown/restore around page lifecycle:
   // - `pagehide`: remove local presence while the socket is still live so peers
   //   drop our cursor now (bfcache-safe; the awareness timeout is the backstop).
@@ -285,11 +301,8 @@ export class ActionCableProvider {
       this.session.removeLocalAwareness();
     };
     this.#onRestore = (event: PageTransitionEvent) => {
-      if (!event.persisted || !this.#stashedPresence) return;
-      if (this.awareness.getLocalState() === null) {
-        this.awareness.setLocalState(this.#stashedPresence);
-      }
-      this.#stashedPresence = null;
+      if (!event.persisted) return;
+      this.#restorePresence();
     };
     window.addEventListener("pagehide", this.#onUnload);
     window.addEventListener("pageshow", this.#onRestore);
