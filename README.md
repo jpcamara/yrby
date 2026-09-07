@@ -942,7 +942,7 @@ class ScratchpadChannel < ApplicationCable::Channel
     doc = Y::Doc.new
     doc.apply_update(@doc_state) if @doc_state
     doc.apply_update(update)
-    @doc_state = doc.compacted_state_update
+    @doc_state = doc.encode_state_as_update
   end
 
   def subscribed    = sync_subscribed(params[:id])
@@ -972,7 +972,7 @@ class ScratchpadChannel < ApplicationCable::Channel
     doc = Y::Doc.new
     doc.apply_update(Base64.strict_decode64(doc_state)) if doc_state
     doc.apply_update(update)
-    self.doc_state = Base64.strict_encode64(doc.compacted_state_update)
+    self.doc_state = Base64.strict_encode64(doc.encode_state_as_update)
   end
 
   def subscribed    = sync_subscribed(params[:id])
