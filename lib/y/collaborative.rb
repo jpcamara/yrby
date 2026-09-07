@@ -13,15 +13,18 @@ module Y
   # resolve it where the channel authorizes.
   #
   #   # the view
-  #   tag.div data: { sgid: post.collaborative_sgid(:body) }
+  #   tag.div data: { grant: post.collaborative_sgid(:body) }
   #
   #   # the channel
   #   def authorized?(_key)
   #     record.present? && record.editable_by?(current_user)
   #   end
   #
+  #   # Located per call rather than memoized: under AnyCable this channel is a
+  #   # fresh instance per command, and a retained record goes stale. The
+  #   # shipped Y::DocumentChannel resolves the grant the same way.
   #   def record
-  #     @record ||= Y::Collaborative.locate(params[:sgid], :body)
+  #     Y::Collaborative.locate(params[:grant], :body)
   #   end
   #
   # The engine includes this into ActiveRecord::Base. This is the token flow

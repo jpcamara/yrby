@@ -106,6 +106,7 @@
     "@anycable/web": "^1.1.1",
     "@hotwired/turbo": "^8.0.23",
     "@rails/actioncable": "^8.1.301",
+    "agent-browser": "^0.28.0",
     "esbuild": "^0.25.12",
     "typescript": "^5.6.0",
     "y-protocols": "^1.0.5",
