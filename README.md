@@ -664,11 +664,27 @@ state is held by anycable-go, not the browser, so a client cannot forge it. A
 frame that arrives without an authorized subscription is refused even if its
 grant is valid.
 
-For room-keyed collaboration or custom channel behavior, generate a channel with
-`bin/rails generate yrby:install --channel` and implement its `authorized?(key)`
-method. Both storage hooks remain available in custom channels. The
-`authorize_document` configuration applies to `Y::DocumentChannel` and its
-subclasses; it does not change the lower-level `Y::ActionCable` concern.
+There are two authorization hooks. Which one you use depends on which channel
+you are on:
+
+| Hook | Channel | Receives |
+|------|---------|----------|
+| `authorize_document { \|record, name\| }` | The shipped `Y::DocumentChannel` | The record and the attribute name |
+| `authorized?(key)` | A channel you write on `Y::ActionCable` | The document key |
+
+The shipped channel has already traded the grant for its record, so it can hand
+your block the record itself. The concern is lower level and knows nothing about
+records, so its hook gets the key.
+
+Do not add a rule to the shipped channel by overriding `authorized?` in a
+subclass. `Y::DocumentChannel` already answers that method, and it answers it
+after the document key has been derived, which creates the row for a built-in
+attribute. `authorize_document` runs before that, so a denied subscription
+leaves nothing behind. Use it, on the class or on a subclass.
+
+For room-keyed collaboration or other custom channel behavior, generate a
+channel with `bin/rails generate yrby:install --channel` and implement its
+`authorized?(key)`. Both storage hooks remain available in custom channels.
 
 The migration creates `y_documents` and `y_document_updates`. To rename them,
 edit the generated migration and point `Y::Document.table_name` and
