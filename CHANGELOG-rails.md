@@ -92,8 +92,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `yrby:install` now creates only the storage migration, since the gem ships
   `Y::DocumentChannel`. `--channel` also generates an application channel for
-  custom authorization or room-keyed documents. The generated channel denies
-  access, on subscribe and on receive, until `authorized?` is implemented.
+  custom authorization or room-keyed documents. The generated channel refuses
+  every subscription until `authorized?` is implemented.
 
 ### Fixed
 

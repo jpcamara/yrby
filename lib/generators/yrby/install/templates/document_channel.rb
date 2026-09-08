@@ -18,18 +18,15 @@ class DocumentChannel < ApplicationCable::Channel
 
   def subscribed = sync_subscribed(params[:id])
 
-  def receive(data)
-    return reject unless authorized?(params[:id])
-
-    sync_receive(data, params[:id])
-  end
+  def receive(data) = sync_receive(data, params[:id])
 
   private
 
   # Everyone is denied until you fill this in. Wire it to your app's auth:
   # identify current_user on the cable connection, then check they may read
-  # and write this document. Don't lean on on_change raising for access
-  # control; that path exists for store failures.
+  # and write this document. It runs once, when the client subscribes, and
+  # the subscription is the grant from then on. Do not use on_change raising
+  # for access control; that path exists for store failures.
   def authorized?(_document_key)
     false
   end

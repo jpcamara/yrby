@@ -26,7 +26,8 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     assert_file "app/channels/document_channel.rb" do |channel|
       assert_includes channel, "include Y::ActionCable"
       assert_includes channel, "def subscribed = sync_subscribed(params[:id])"
-      assert_includes channel, "return reject unless authorized?(params[:id])"
+      assert_includes channel, "def receive(data) = sync_receive(data, params[:id])"
+      refute_includes channel, "authorized?(params[:id])"
       assert_includes channel, "def authorized?(_document_key)"
       assert_match(/def authorized\?\(_document_key\)\s+false/, channel)
       assert_includes channel, "Y::Document.load_state(key)"
