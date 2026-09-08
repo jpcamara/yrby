@@ -136,6 +136,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, Y::DocumentUpdate.count
   end
 
+  # The row assertion is the important one, and it pins the order the channel
+  # checks things in. Asking a built-in attribute for its document key creates
+  # the row, so the policy has to run before the key is derived.
   def test_valid_grant_does_not_bypass_policy_or_create_a_document
     stub_connection current_user: "someone else"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
