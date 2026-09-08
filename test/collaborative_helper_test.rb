@@ -10,8 +10,8 @@ GlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secret")
 
-# The view side: collaborative_document_tag renders the signed grant and the
-# channel coordinates a client needs, and nothing else.
+# The view side: collaborative_document_tag renders the signed grant, channel
+# name, and attribute name a client needs.
 class CollaborativeHelperTest < Minitest::Test
   include ActionView::Helpers::TagHelper
   include Y::Collaborative::Helper

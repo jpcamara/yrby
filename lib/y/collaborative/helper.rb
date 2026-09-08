@@ -11,16 +11,16 @@ module Y
     #
     #   <yrby-document grant="<signed sgid>" name="body"></yrby-document>
     #
-    # Importing "yrby-client/element" registers it; it subscribes itself to
-    # the gem-shipped Y::DocumentChannel (the way turbo_stream_from's element
-    # subscribes itself to Turbo::StreamsChannel) and hands your code the
-    # synced Y.Doc through its `doc` property and `yrby:synced` event.
+    # Importing "yrby-client/element" registers it. The element subscribes to
+    # Y::DocumentChannel on its own and exposes the synced Y.Doc through its
+    # `doc` property and `yrby:synced` event. It works like the element behind
+    # turbo_stream_from.
     #
     # The grant is a signed GlobalID scoped to this record and attribute
     # (record.collaborative_sgid(name)). Render the tag only where the request
-    # is already authorized to collaborate on the record; possession of the
-    # grant is what the channel checks by default. Applications can also require
-    # live permissions with Y::DocumentChannel.authorize_document.
+    # is already allowed to edit the record, because holding the grant is what
+    # the channel checks by default. To also check the user's current
+    # permissions when they subscribe, use Y::DocumentChannel.authorize_document.
     #
     # Extra options pass through to the element (a block becomes its content),
     # so it can wrap the mount point an editor binds to:

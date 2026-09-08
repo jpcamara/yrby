@@ -22,9 +22,9 @@ require_relative "../app/channels/y/document_channel"
 ActionCable.server.config.cable = { "adapter" => "test" }
 ActionCable.server.config.logger = Logger.new(File::NULL)
 
-# The gem-shipped channel: a signed grant in, Y::Document storage out, and
-# nothing for the app to write. Driven through Action Cable's own channel
-# test harness against a test cable adapter.
+# The channel that ships in the gem. It takes a signed grant and stores
+# through Y::Document, and the app writes no channel. Driven through Action
+# Cable's channel test harness against a test cable adapter.
 class DocumentChannelTest < ActionCable::Channel::TestCase
   tests Y::DocumentChannel
 
@@ -181,11 +181,11 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_nil Y::DocumentChannel.document_authorizer
   end
 
-  # The policy runs once, at subscribe, the way Action Cable intends: a
-  # confirmed subscription is the grant. These tests pin that contract, and
-  # with it the tradeoff. An application that must cut access off before the
-  # client disconnects has to stop the subscription itself; mint short-lived
-  # grants to bound how long a stale one can live.
+  # The policy runs once, at subscribe, and the subscription is the grant from
+  # then on. These tests pin that down, tradeoff included. An app that needs
+  # to cut off access before the client disconnects has to stop the
+  # subscription itself, and short-lived grants limit how long a stale one can
+  # live.
   def test_permission_changes_do_not_disturb_an_open_subscription
     stub_connection current_user: "granted"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
@@ -236,10 +236,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_subscription_stopped
   end
 
-  # A frame that reaches the channel without an authorized subscription behind
-  # it is refused even when the grant itself is perfectly valid. The
-  # subscription is what carries the decision, so a valid grant alone buys
-  # nothing.
+  # A frame that arrives without an authorized subscription is refused even
+  # when the grant is valid. The subscription holds the decision, not the
+  # grant.
   def test_a_valid_grant_alone_does_not_authorize_a_frame
     stub_connection current_user: "granted"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
@@ -289,9 +288,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
     refute_empty doc.read_text("content").to_s, "the encrypted path round-trips the document"
 
-    # The safety property: the recorded bytes are ciphertext at rest, so the
-    # plain classes read back garbage, never the document. One access path
-    # per document.
+    # The recorded bytes are ciphertext at rest, so reading them through the
+    # plain classes gives back garbage, not the document. Each document has
+    # one access path.
     raw = Y::DocumentUpdate.find_by!(document_id: document.document.id).payload
 
     refute_equal update, raw, "the stored payload must not be the plaintext delta"

@@ -9,10 +9,10 @@ GlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secret")
 
-# The signed handshake for record-backed documents: a page mints
+# The signed token for record-backed documents. A page mints
 # collaborative_sgid(:attr), a channel trades it back through
-# Y::Collaborative.locate, and the purpose scoping is what keeps a token for
-# one attribute from opening any other.
+# Y::Collaborative.locate, and the purpose scope keeps a token for one
+# attribute from opening any other.
 class CollaborativeSgidTest < Minitest::Test
   class Page < ActiveRecord::Base
     self.table_name = "pages"

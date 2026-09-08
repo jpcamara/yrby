@@ -645,26 +645,24 @@ end
 receives a freshly located record and the attribute name as a string. A false or
 nil result denies access, and the subscription is rejected without opening a
 stream or serving any state. An invalid grant is rejected before the block is
-called. Without a block, the valid grant remains sufficient; rendering the helper
-must still require edit permission. Policy errors fail closed and propagate to
-your error handling.
+called. Without a block, a valid grant is enough, so the view that renders the
+helper must still require edit permission. Policy errors fail closed and
+propagate to your error handling.
 
-**The policy runs once, when the client subscribes.** A confirmed subscription is
-the grant from then on, which is how Action Cable is meant to work and what keeps
-a record load and your own queries off the path of every keystroke and every
-cursor move. The tradeoff is that a permission revoked mid-session does not reach
-an open subscription on its own: it takes effect the next time that client
-subscribes. Two things bound it. Mint short-lived grants, since expiry is checked
-on every new subscription. And if your application must cut access off
-immediately, stop the subscription yourself when permission changes, rather than
-waiting for the client to reconnect.
+The policy runs once, when the client subscribes. From then on the subscription
+is the grant. This is how Action Cable is meant to work, and it keeps a record
+load and your own queries off every keystroke and cursor move. The tradeoff is
+that a permission revoked mid-session takes effect the next time that client
+subscribes. Two things limit that window. Grant expiry is checked on every new
+subscription, so use short-lived grants. And if your application has to cut off
+access immediately, stop the subscription yourself when the permission changes.
 
-The decision is carried for the life of the subscription, on both transports.
-Action Cable keeps the channel instance; AnyCable builds a fresh one per command,
-so the authorized document is declared as channel state and round-trips through
-the RPC. That state lives in anycable-go, not the browser, so a client cannot
-forge it. A frame arriving without an authorized subscription behind it is
-refused even if it carries a perfectly valid grant.
+The decision is kept for the life of the subscription on both transports. Action
+Cable keeps the channel instance. AnyCable builds a fresh one per command, so the
+authorized document is declared as channel state and travels with the RPC. That
+state is held by anycable-go, not the browser, so a client cannot forge it. A
+frame that arrives without an authorized subscription is refused even if its
+grant is valid.
 
 For room-keyed collaboration or custom channel behavior, generate a channel with
 `bin/rails generate yrby:install --channel` and implement its `authorized?(key)`
@@ -718,9 +716,9 @@ back for the record. The page decides which document the client gets.
 ```
 
 ```ruby
-# the channel trades the token back for the record. Located per call rather
-# than memoized: under AnyCable each command builds a fresh channel, and a
-# retained record goes stale.
+# the channel trades the token back for the record. Not memoized: under
+# AnyCable each command builds a fresh channel, and a cached record would go
+# stale.
 def authorized?(_key) = record.present? && record.editable_by?(current_user)
 def record = Y::Collaborative.locate(params[:grant], :body)
 ```

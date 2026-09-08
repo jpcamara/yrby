@@ -14,10 +14,10 @@ const assets = `${root}tmp/browser-assets`;
 const port = process.env.PORT || "3789";
 const base = `http://127.0.0.1:${port}`;
 const ab = process.env.AB_BIN || "agent-browser";
-// Name the sessions here rather than asking agent-browser for one. `session`
-// only reports the *current* name, so an unrecognized subcommand falls through
-// to it and yields "default", which shares a browser with anything else using
-// the default session. A per-process name keeps this run isolated, and keeps
+// Name the sessions here instead of asking agent-browser for one. Its `session`
+// command only prints the current name, and an unknown subcommand falls through
+// to it and prints "default", which would share a browser with anything else on
+// the default session. A per-process name keeps this run isolated and keeps
 // parallel worktrees from colliding.
 const session = process.env.AB_SESSION || `yrby-element-${process.pid}`;
 const peer = `${session}-peer`;

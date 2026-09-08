@@ -73,9 +73,9 @@ class SyncTest < Minitest::Test
     end
 
     # Outside a yrby-rails app there is no Y::Document default, and the
-    # concern fails closed. Stubbed by hand (no minitest/mock in this suite)
-    # rather than relied on, because the full suite loads the models into
-    # this process.
+    # concern fails closed. The full suite loads the models into this
+    # process, so that state is stubbed by hand here (this suite has no
+    # minitest/mock).
     sync = Y::ActionCable::Sync
     sync.singleton_class.alias_method(:real_default_hook, :default_hook)
     sync.define_singleton_method(:default_hook) { |_name| nil }
@@ -135,7 +135,8 @@ class SyncTest < Minitest::Test
 
     assert_equal "doc-7", seen
     assert helper.rejected
-    # An app that decided "no" needs no lecture about defining authorized?.
+    # A channel that defined authorized? and returned false should not get
+    # the hint about defining it.
     refute_match(/define authorized\?/, log.string)
   end
 

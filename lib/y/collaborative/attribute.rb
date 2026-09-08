@@ -2,8 +2,9 @@
 
 module Y
   module Collaborative
-    # A record-bound document capability. Storage selection is shared by Ruby
-    # callers and the channel, including adapters that use no Y::Document row.
+    # One attribute's document on one record. Ruby callers and the channel
+    # both go through it, so they share one storage choice, including custom
+    # adapters that have no Y::Document row.
     class Attribute
       attr_reader :record, :name
 
@@ -28,7 +29,7 @@ module Y
         storage ? storage.write(record, name, update) : document.append(update)
       end
 
-      # A fresh native document for reading/rendering; never a cached replica.
+      # A fresh Y::Doc rebuilt from storage on every call. Nothing is cached.
       def doc
         Y::Doc.new.tap do |doc|
           state = load_state

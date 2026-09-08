@@ -8,9 +8,9 @@ require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 require "logger"
 
-# A channel that declares no storage hooks gets Y::Document storage — the
-# Action Text posture: the gem's own tables are the default, and on_load /
-# on_change remain the seam for pointing storage elsewhere.
+# A channel that declares no storage hooks gets Y::Document storage, the same
+# way Action Text defaults to its own tables. on_load and on_change are still
+# the way to point storage elsewhere.
 class DefaultStorageTest < Minitest::Test
   def setup
     Y::DocumentUpdate.delete_all

@@ -33,8 +33,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   #
   #     private
   #
-  #     # Required. The default refuses everyone; nothing syncs until the
-  #     # channel says who may. Return true deliberately for public documents.
+  #     # Required. The default returns false, so nothing syncs until you
+  #     # define this. Return true for public documents.
   #     def authorized?(key)
   #       current_user&.member_of?(key)
   #     end
@@ -64,10 +64,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       base.extend(ClassMethods)
     end
 
-    # The storage a channel gets without declaring hooks: the gem's own
-    # models, the way Action Text defaults to its rich_texts table. Only in
-    # play when yrby-rails' models are actually loadable, so the concern used
-    # outside Rails still fails closed until hooks are declared.
+    # The storage a channel gets when it declares no hooks: the gem's own
+    # models, much as Action Text defaults to its rich_texts table. It only
+    # applies when the yrby-rails models can be loaded. Outside Rails the
+    # concern still fails closed until hooks are declared.
     DEFAULT_STORAGE = {
       on_load: ->(key) { Y::Document.load_state(key) },
       on_change: ->(key, update) { Y::Document.append(key, update) }
@@ -128,8 +128,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       private
 
-      # Defaults are one store, never half of a custom store. Inherit explicit
-      # hooks together so subclasses may override one side of a complete pair.
+      # The default supplies both hooks or neither, so reads and writes never
+      # go to different stores. Explicit hooks are inherited as a pair, so a
+      # subclass can override one side of a pair its parent defined.
       def sync_storage_hook(name)
         hooks = sync_storage_hooks
         hooks.empty? ? Sync.default_hook(name) : hooks[name]
@@ -141,12 +142,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
-    # Call from `subscribed`. Authorizes the subscriber (see #authorized?),
-    # then streams broadcasts for this document and transmits the server's
-    # opening handshake (SyncStep1 from the store). Rejects and returns false
-    # when authorized? refuses, including always, until the channel defines it.
-    # rubocop:disable Naming/PredicateMethod -- a lifecycle call that reports
-    # whether the subscription was accepted, not a predicate.
+    # Call from `subscribed`. Checks authorized?, then streams broadcasts for
+    # this document and sends the server's opening handshake (SyncStep1 from
+    # the store). Rejects the subscription and returns false when authorized?
+    # returns false. The default authorized? always does, so this rejects until
+    # the channel defines it.
+    # rubocop:disable Naming/PredicateMethod -- reports whether the
+    # subscription was accepted; not a predicate.
     def sync_subscribed(key)
       @sync_key = key.to_s
       sync_validate_required_hooks!
@@ -169,9 +171,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       doc = sync_load_doc
       sync_transmit(doc.sync_step1)
       sync_observe_gap if doc.pending?
-      # Truthy on success, so a caller can tell an accepted subscription from a
-      # refused one. Without this the result is whatever the gap check happened
-      # to evaluate to, which is nil for the common case of no open gap.
+      # Return true so a caller can tell success from rejection. Without it
+      # the method returns whatever the gap check returned, usually nil.
       true
     end
     # rubocop:enable Naming/PredicateMethod
@@ -227,23 +228,23 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     private
 
     # Whether this subscriber may sync the document named by `key`. The
-    # default refuses everyone: authorization is an explicit decision a
-    # channel makes, not something it gets by omission. Override it:
+    # default returns false, so a channel has to define this before anything
+    # syncs. Override it:
     #
     #   def authorized?(key)
     #     current_user&.member_of?(key)
     #   end
     #
-    # Runs before any stream is opened or state served, with the connection's
-    # context available (current_user, params, ...). Return true deliberately
-    # for documents that are genuinely public.
+    # It runs before any stream is opened or state is served, and the
+    # connection's context (current_user, params) is available. Return true
+    # for public documents.
     def authorized?(_key)
       false
     end
 
-    # The subscription was refused. When the refusal came from the default
-    # authorized? (the channel never defined one), say how to fix it. That is
-    # the difference between fail-closed and mysteriously broken.
+    # The subscription was refused. If the refusal came from the default
+    # authorized?, log how to fix it, so a channel that never defined one is
+    # not just silently broken.
     def sync_reject_unauthorized
       logger.info do
         hint = if method(:authorized?).owner == Sync

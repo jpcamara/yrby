@@ -14,9 +14,8 @@ class InstallGeneratorTest < Rails::Generators::TestCase
   def test_generates_no_app_code
     run_generator
 
-    # The channel (Y::DocumentChannel) and the models ship in the gem, the
-    # way Turbo ships Turbo::StreamsChannel — install lands only the
-    # migration.
+    # Y::DocumentChannel and the models ship in the gem, so install only
+    # creates the migration.
     assert_no_file "app/channels/document_channel.rb"
     assert_no_file "app/models/yrby_document_update.rb"
   end

@@ -5,11 +5,10 @@ require "generators/yrby/tables/tables_generator"
 
 module Yrby
   module Generators
-    # `bin/rails generate yrby:install`: the storage migration (via
-    # yrby:tables). That is the whole install: the models and the
-    # Y::DocumentChannel that syncs through them ship in the gem, the way
-    # Turbo ships Turbo::StreamsChannel. Apps that want their own channel
-    # (custom authorization, room-keyed documents) can request --channel.
+    # `bin/rails generate yrby:install` creates the storage migration (through
+    # yrby:tables) and nothing else. The models and Y::DocumentChannel ship in
+    # the gem. Pass --channel to also generate an application channel, for
+    # custom authorization or room-keyed documents.
     class InstallGenerator < ::Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
       class_option :channel, type: :boolean, default: false, desc: "Generate a custom DocumentChannel"

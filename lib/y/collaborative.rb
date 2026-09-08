@@ -4,13 +4,13 @@ require "active_support/concern"
 require "global_id"
 
 module Y
-  # The signed handshake between a page and a channel for record-backed
+  # The signed token that connects a page to a channel for record-backed
   # collaborative documents.
   #
-  # A client should never name its document; the server names it, signs the
-  # claim, and the channel trades the token back for the record. The token is
-  # a signed GlobalID scoped to one attribute: mint it where the page renders,
-  # resolve it where the channel authorizes.
+  # The client never names its document. The server names it, signs the name,
+  # and the channel trades the token back for the record. The token is a
+  # signed GlobalID scoped to one attribute. The page mints it and the channel
+  # resolves it.
   #
   #   # the view
   #   tag.div data: { grant: post.collaborative_sgid(:body) }
@@ -20,24 +20,24 @@ module Y
   #     record.present? && record.editable_by?(current_user)
   #   end
   #
-  #   # Located per call rather than memoized: under AnyCable this channel is a
-  #   # fresh instance per command, and a retained record goes stale. The
-  #   # shipped Y::DocumentChannel resolves the grant the same way.
+  #   # Not memoized: under AnyCable each command gets a fresh channel
+  #   # instance, and a cached record would go stale. Y::DocumentChannel
+  #   # resolves the grant the same way.
   #   def record
   #     Y::Collaborative.locate(params[:grant], :body)
   #   end
   #
-  # The engine includes this into ActiveRecord::Base. This is the token flow
-  # lexxy-realtime uses, provided by yrby-rails itself so any channel's
-  # authorized? can lean on it.
+  # The engine includes this into ActiveRecord::Base. lexxy-realtime uses the
+  # same token flow, and yrby-rails provides it so any channel's authorized?
+  # can use it.
   module Collaborative
     extend ActiveSupport::Concern
 
     class << self
-      # The signed-GlobalID purpose for one collaborative attribute. This
-      # string is the public contract: a token minted for one attribute
-      # verifies only against that attribute's purpose, so it cannot locate
-      # a record for any other attribute or channel.
+      # The signed-GlobalID purpose for one collaborative attribute. A token
+      # minted for one attribute only verifies against that attribute's
+      # purpose, so it cannot locate a record for any other attribute or
+      # channel.
       def sgid_purpose(name) = "yrby/#{name}"
 
       # Resolves a signed token minted by `collaborative_sgid(name)` back to
@@ -83,7 +83,8 @@ module Y
       end
     end
 
-    # One bound access path for reads, appends and native Ruby document access.
+    # The document for one attribute: load_state, append, and doc, using the
+    # storage the model declared.
     def collaborative_document(name)
       Attribute.new(self, name)
     end

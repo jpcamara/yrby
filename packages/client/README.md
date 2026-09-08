@@ -39,10 +39,10 @@ plain-JS projects use the same compiled ESM with nothing extra to install.
 
 ## `<yrby-document>` (the easiest path)
 
-The auto-connecting element behind yrby-rails' `collaborative_document_tag`,
-the way `<turbo-cable-stream-source>` sits behind `turbo_stream_from`. The tag
-renders it with a signed grant; importing the element once is the whole
-wiring:
+This is the element yrby-rails' `collaborative_document_tag` renders, and it
+connects on its own, like `<turbo-cable-stream-source>` does for
+`turbo_stream_from`. The tag gives it a signed grant. Import the element once
+and it handles the rest:
 
 ```js
 import "yrby-client/element";
@@ -55,37 +55,39 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
 
 `bindYourEditor` is your application's editor binding. Its cleanup must detach
 Yjs listeners and disable or remove editor controls. It must not destroy the
-session-owned document/provider or disconnect the shared consumer. The attachment's abort
-signal runs cleanup before yrby checks whether any final update needs delivery.
-Use this signal even if the editor has already left the DOM.
+document or provider, which the session owns, or disconnect the shared consumer.
+The abort signal fires before yrby checks whether a final update still needs
+delivery. Use it even if the editor has already left the DOM.
 
-A document session owns the `Y.Doc`, provider, and unacknowledged edits. The
-element attaches an editor to that session. Removing the last editor clears
-presence and releases a clean session. A pending session keeps delivering
-through its original grant until acknowledged. Rejection stops retries and
-retains recoverable work in memory; it does not count as acknowledgment.
+A document session owns the `Y.Doc`, the provider, and any unacknowledged
+edits. The element attaches an editor to that session. Removing the last editor
+clears presence and releases the session if it has nothing pending. A session
+with pending edits keeps delivering them under its original grant until they
+are acknowledged. A rejection stops the retries and keeps the work in memory
+for recovery. It does not count as an acknowledgment.
 
 Turbo previews are inert and create no document or provider. Cached markup
-contains no CRDT snapshot. History restoration reattaches to a pending session
-or loads saved content from Rails. A fresh grant creates a separate session;
-the previous session's edits reach it through normal server synchronization.
-This is an in-tab delivery guarantee, not persistent offline storage across
-closing or reloading the tab.
+contains no CRDT snapshot. Restoring a page from history reattaches to a
+pending session, or loads saved content from Rails. A new grant gets a separate
+session, and the previous session's edits reach it through normal server sync.
+This guarantee holds within a tab. It is not offline storage, and closing or
+reloading the tab loses unacknowledged edits.
 
-Same-turn DOM moves retain the editor binding and document. A clean delayed
-remount reconstructs saved content; it need not retain the old undo stack or
-Y.Doc identity. Changing grant, name, or channel aborts the old binding
-immediately and acquires a new session for the complete new tuple. Pending
-work stays with the old session and its original authorization.
+Moving the element within the same turn keeps its editor binding and document.
+A clean remount after a delay reloads saved content, and it does not keep the
+old undo stack or `Y.Doc`. Changing the grant, name, or channel aborts the old
+binding at once and acquires a new session for the new tuple. Pending work
+stays with the old session and its original authorization.
 
-The element exposes its current `session`, `doc`, and `provider`. Before
-acquisition or during retargeting these are unavailable; no unowned document
-is created by reading a getter. `whenSynced` is always a promise, even before
-consumer initialization. It resolves after the current session's first
-catch-up, and an abandoned attachment's wait stays unresolved. The bubbling
-`yrby:synced` event fires once per attachment, with `detail.signal` for cleanup.
-Readiness does not imply the connection is currently online or every edit is
-acknowledged. Use `provider.synced` and `session.hasPending` for those states.
+The element exposes its current `session`, `doc`, and `provider`. They are
+unavailable before a session is acquired and while the element is retargeting,
+and reading a getter never creates a document. `whenSynced` is always a
+promise, even before the consumer is initialized. It resolves after the current
+session's first catch-up, and it never resolves for an abandoned attachment.
+The bubbling `yrby:synced` event fires once per attachment, with
+`detail.signal` for cleanup. Synced does not mean the connection is online or
+that every edit is acknowledged. Use `provider.synced` and `session.hasPending`
+for those.
 
 Import failures and subscription rejection emit `yrby:error` with
 `detail.error`; rejection also includes the recoverable `detail.session`.
@@ -146,17 +148,18 @@ store.suspend(); // explicitly stop managed network activity, retaining work
 store.resume();  // resume this consumer scope, including detached pending work
 ```
 
-Use store suspension for managed sessions rather than relying on
-transport-specific consumer disconnect behavior. Navigation never reconnects
-a suspended scope. Applications changing accounts must suspend/unmount the old
-scope and handle its retained work; a new consumer does not adopt it.
+To pause managed sessions, suspend the store. Do not rely on the consumer's
+disconnect behavior, which varies by transport. Navigation never reconnects a
+suspended scope. When an application switches accounts, it must suspend or
+unmount the old scope and deal with its retained work. A new consumer does not
+adopt it.
 
-A blocked session's `exportRecovery()` returns defensive copies of its full
-Yjs `update`, its `pending` tail, and its immutable `descriptor`. `retry()`
-retries only the original authorization. The application can export these
-bytes or explicitly call `discard()`; cache eviction never discards unsaved
-work. Recovery is memory-only, and its memory use grows with retained work.
-No fresh grant is implicitly treated as a renewal of blocked authorization.
+A blocked session's `exportRecovery()` returns copies of its full Yjs
+`update`, its `pending` tail, and its `descriptor`. `retry()` retries with the
+original authorization only. The application can export those bytes or call
+`discard()`. Cache eviction never discards unsaved work. Recovery is held in
+memory, and that memory grows with the retained work. A new grant does not
+unblock a blocked session.
 
 Custom persistence integrations can still use `provider.pendingUpdate` and
 `provider.restorePendingUpdate(bytes)`. Restore saved full state through

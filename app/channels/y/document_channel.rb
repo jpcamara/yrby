@@ -1,44 +1,44 @@
 # frozen_string_literal: true
 
 module Y
-  # The gem-shipped channel behind collaborative_document_tag: the whole wire
-  # side of a record-backed collaborative document, the way Turbo::StreamsChannel
-  # is the whole wire side of a turbo_stream_from subscription. Apps subscribe
-  # to it by name ("Y::DocumentChannel") with the grant the tag rendered; there
-  # is no channel to generate or write.
+  # The channel behind collaborative_document_tag. It ships in the gem, so an
+  # app subscribes to it by name ("Y::DocumentChannel") with the grant the tag
+  # rendered and does not write a channel of its own. Turbo::StreamsChannel
+  # plays the same role for turbo_stream_from.
   #
-  # The client never names a document. It presents the signed, attribute-scoped
-  # grant minted where the page rendered (record.collaborative_sgid(name)), and
-  # the document is whatever that grant verifies to. Authorization happened
-  # when your controller decided to render the tag; the grant carries that
-  # decision to the socket. An optional authorize_document block also checks
-  # the connected user's current permissions before subscribing or processing
-  # any incoming message. A missing, tampered, expired, or wrong-attribute
-  # grant (or one whose record no longer exists) is rejected.
+  # The client never names a document. It sends the signed grant the page
+  # rendered (record.collaborative_sgid(name)), and the document is whatever
+  # that grant verifies to. Your controller authorized the request when it
+  # rendered the tag, and the grant is how that decision reaches the socket.
+  # An optional authorize_document block can also check the connected user's
+  # current permissions when the client subscribes. A missing, tampered,
+  # expired, or wrong-attribute grant is rejected, and so is one whose record
+  # no longer exists.
   #
-  # Storage follows the record's declaration: an attribute the model marked
-  # `has_collaborative_document :name, encrypted: true` routes every load and
-  # append through Y::EncryptedDocument; undeclared attributes use plain
-  # Y::Document. A declared storage adapter supplies both reads and writes.
-  # Every change is recorded before it is acknowledged or broadcast. Custom
-  # authorization or room-keyed documents can use an application channel.
-  # ::ActionCable, explicitly: inside module Y a bare ActionCable resolves
-  # to the gem's own Y::ActionCable concern.
+  # Storage is whatever the model declared. An attribute marked
+  # `has_collaborative_document :name, encrypted: true` loads and appends
+  # through Y::EncryptedDocument. A declared storage adapter handles both reads
+  # and writes. Undeclared attributes use plain Y::Document. Every change is
+  # recorded before it is acknowledged or broadcast. For custom authorization
+  # or room-keyed documents, write an application channel instead.
+  #
+  # The superclass is written as ::ActionCable because inside module Y a bare
+  # ActionCable resolves to the gem's own Y::ActionCable concern.
   class DocumentChannel < ::ActionCable::Channel::Base
     include Y::ActionCable
 
     class_attribute :document_authorizer, instance_accessor: false, default: nil
 
-    # The authorized document, carried for the life of the subscription.
+    # The document key this subscription was authorized for.
     #
-    # The policy runs once, at subscribe. What has to survive to the next
-    # message is the decision, and each transport keeps it differently: Action
-    # Cable holds this channel instance, while AnyCable builds a fresh one per
-    # command and round-trips declared channel state through the RPC. Declaring
-    # it as AnyCable state when anycable-rails is loaded covers both, and the
-    # state lives in anycable-go rather than the browser, so a client cannot
-    # forge it. Gems load before app/ autoloads, so this check sees
-    # anycable-rails whenever the app has it.
+    # The policy runs once, at subscribe, and the result has to survive until
+    # the next message. Action Cable keeps this channel instance alive, so an
+    # instance variable is enough. AnyCable builds a new instance for every
+    # command and only carries over declared channel state, so when
+    # anycable-rails is loaded the key is declared as state instead. That state
+    # is held by anycable-go, not the browser, so a client cannot forge it.
+    # Gems load before app/ autoloads, so this check sees anycable-rails
+    # whenever the app has it.
     if respond_to?(:state_attr_accessor)
       state_attr_accessor :authorized_document_key
     else
@@ -68,15 +68,14 @@ module Y
     end
 
     def receive(data)
-      # The policy ran at subscribe, the way Action Cable intends: a confirmed
-      # subscription is the grant. Re-running it per frame would put a record
-      # load and the application's own queries on the path of every keystroke
-      # and every cursor move. An application that must cut access before the
-      # client disconnects should stop the subscription itself, and a short
-      # grant expiry bounds it in the meantime.
+      # The policy already ran at subscribe, and the subscription is the
+      # grant from then on. Running it again on every frame would add a record
+      # load and the app's own queries to every keystroke and cursor move. An
+      # app that needs to cut off access before the client disconnects should
+      # stop the subscription itself. Short grant expiries limit the window.
       #
-      # No key means no authorized subscription reached this command, so there
-      # is nothing to write to and nothing was ever approved.
+      # No key means this command did not come through an authorized
+      # subscription, so there is nothing to write to.
       key = authorized_document_key
       return reject_document_subscription unless key
 
@@ -106,10 +105,10 @@ module Y
       reject_subscription
     end
 
-    # Storage routing needs the record: an attribute may be encrypted or backed
-    # by a custom adapter. Resolved lazily so a fresh AnyCable instance can
-    # answer a document frame, and only on the frames that touch storage, so
-    # awareness relay stays a pure pass-through.
+    # Picking storage needs the record, since an attribute may be encrypted or
+    # use a custom adapter. It is looked up lazily so a fresh AnyCable instance
+    # can handle a document frame, and only document frames need it. Awareness
+    # frames are relayed without touching it.
     def document
       @record ||= Y::Collaborative.locate(params[:grant], params[:name])
       record&.collaborative_document(params[:name].to_s)

@@ -9,20 +9,21 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `Y::DocumentChannel.authorize_document { |record, name| ... }` optionally
-  checks application permissions in channel context when a client subscribes,
-  in addition to the signed grant. A denial rejects that subscription without
-  opening a stream or serving state; other subscriptions on the connection stay
-  up. The default remains signed-grant access.
+- `Y::DocumentChannel.authorize_document { |record, name| ... }` checks the
+  application's permissions when a client subscribes, in addition to the
+  signed grant. The block runs in channel context. A denial rejects that
+  subscription without opening a stream or serving state. Other subscriptions
+  on the connection are unaffected. Without a block, the signed grant is
+  sufficient.
 
-  The policy runs at subscribe, not per message, which is Action Cable's own
-  model and keeps a record load and the application's queries off the path of
-  every keystroke and cursor move. A permission revoked mid-session therefore
-  reaches an open subscription only when that client next subscribes; mint
-  short-lived grants, and stop the subscription from the application when access
-  must be cut immediately. The decision is carried as channel state, so it
-  survives AnyCable's fresh channel instance per command; a frame with no
-  authorized subscription behind it is refused even with a valid grant.
+  The policy runs once, at subscribe. It does not run on every message, which
+  would add a record load and the application's own queries to every keystroke
+  and cursor move. A permission revoked mid-session takes effect the next time
+  that client subscribes. Use short-lived grants, and stop the subscription
+  from the application when access has to be cut off immediately. The decision
+  is stored as channel state so it survives AnyCable's fresh channel instance
+  per command. A frame that arrives without an authorized subscription is
+  refused even if its grant is valid.
 - `record.collaborative_document(name)` returns a bound
   `Y::Collaborative::Attribute` for application reads/writes and the shipped
   channel. `doc` reconstructs a native `Y::Doc`; `load_state`, `append`, and `key`
@@ -35,53 +36,48 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Y::Document.key_for(record, name)` exposes the existing conventional key
   without allocating a document row.
 
-- `Y::DocumentChannel`, shipped in the gem the way Turbo ships
+- `Y::DocumentChannel` ships in the gem, the way Turbo ships
   `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a
-  page rendered (`{ grant:, name: }`); the channel trades the grant back for
-  its record, derives the document, and stores through `Y::Document` — there
-  is no channel to generate or write. Missing, tampered, wrong-attribute,
-  and destroyed-record grants are rejected.
+  page rendered (`{ grant:, name: }`). The channel trades the grant back for
+  its record, finds the document, and stores through `Y::Document`. There is
+  no channel to generate or write. Missing, tampered, wrong-attribute, and
+  destroyed-record grants are rejected.
 
 - `collaborative_document_tag(record, name, **options)`, included into
-  Action View by the engine: renders the mount element carrying the signed
+  Action View by the engine. It renders the mount element with the signed
   grant, the attribute name, and the channel name as data attributes.
-  Render it only where the request is already authorized to collaborate on
-  the record — possession of the grant is what the channel checks, the same
-  model as `turbo_stream_from`'s signed stream names.
+  Render it only where the request is already allowed to edit the record.
+  Holding the grant is what the channel checks, the same model as
+  `turbo_stream_from`'s signed stream names.
 
 - Default storage: a channel that declares no `on_load`/`on_change` now
-  gets `Y::Document` storage automatically (the Action Text posture — the
-  gem's tables are the default, the hooks are the seam for pointing storage
-  elsewhere). Outside a yrby-rails app the concern still fails closed until
-  hooks are declared.
+  gets `Y::Document` storage automatically, the same way Action Text defaults
+  to its own tables. The hooks are still how you point storage elsewhere.
+  Outside a yrby-rails app the concern still fails closed until hooks are
+  declared.
 
-- `has_collaborative_document :name, encrypted: true` — the model declares
-  which storage class backs an attribute, and `Y::DocumentChannel` follows
-  the declaration: every load and append for a declared-encrypted attribute
-  routes through `Y::EncryptedDocument`, so the bytes are ciphertext at
-  rest and unreadable through the plain classes. Encryption is a property
-  of the attribute's storage; nothing a page renders or a client sends can
-  influence it. Undeclared attributes keep plain `Y::Document`.
+- `has_collaborative_document :name, encrypted: true` declares which storage
+  class backs an attribute, and `Y::DocumentChannel` uses it. Every load and
+  append for an encrypted attribute goes through `Y::EncryptedDocument`, so
+  the bytes are ciphertext at rest and unreadable through the plain classes.
+  Encryption is decided by the model. Nothing a page renders or a client
+  sends can change it. Undeclared attributes keep plain `Y::Document`.
 
-- `Y::Collaborative`: the signed handshake for record-backed documents,
+- `Y::Collaborative`: the signed token flow for record-backed documents,
   included into ActiveRecord::Base by the engine. A page mints
-  `record.collaborative_sgid(:body)`; the channel trades it back with
-  `Y::Collaborative.locate(params[:sgid], :body)` — a signed GlobalID scoped
-  to one attribute, so a token minted for one field cannot open another.
-  This is the standard way to implement `authorized?` for record-backed
-  documents (and the flow lexxy-realtime already uses, now provided by
-  yrby-rails itself).
+  `record.collaborative_sgid(:body)` and the channel trades it back with
+  `Y::Collaborative.locate(params[:grant], :body)`. The token is a signed
+  GlobalID scoped to one attribute, so a token minted for one field cannot
+  open another. This is the standard way to implement `authorized?` for
+  record-backed documents. lexxy-realtime already uses this flow, and
+  yrby-rails now provides it.
 
 ### Changed
 
-- The shipped document channel re-verifies grants on incoming messages, enforcing
-  existing expiration and record deletion on long-lived Action Cable channels.
-  Grant format and configured lifetime are unchanged.
 - **Breaking:** subscriptions are refused until the channel defines
   `authorized?(key)`. `sync_subscribed` now calls it before any stream is
-  opened or state served, and the concern's default returns `false` — a
-  channel authorizes subscribers by decision, not by omission. Add the
-  method to every channel that includes `Y::ActionCable`:
+  opened or state is served, and the default returns `false`. Add the method
+  to every channel that includes `Y::ActionCable`:
 
   ```ruby
   private
@@ -91,13 +87,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   end
   ```
 
-  Return `true` deliberately for public documents. When the default is what
-  rejected (no override defined), the log says exactly that.
+  Return `true` for public documents. When the default is what rejected the
+  subscription, the log message says so.
 
-- `yrby:install` defaults to only the storage migration; the gem ships
-  `Y::DocumentChannel`. `--channel` optionally generates an explicit application
-  channel for custom authorization or room-keyed documents. It denies access
-  until its authorization method is implemented, including stateless receive.
+- `yrby:install` now creates only the storage migration, since the gem ships
+  `Y::DocumentChannel`. `--channel` also generates an application channel for
+  custom authorization or room-keyed documents. The generated channel denies
+  access, on subscribe and on receive, until `authorized?` is implemented.
 
 ### Fixed
 

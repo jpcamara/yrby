@@ -81,8 +81,9 @@ class Y::Document < ActiveRecord::Base
       (select(:id).find_by(key: key) || create_or_find_by!(key: key)).append(update)
     end
 
-    # The conventional record/attribute identity, also usable without a stored row.
-    # polymorphic_name follows Rails' record_type, including STI and namespaces.
+    # The key for one attribute of one record, such as "post/1/body". It does
+    # not need a stored row. polymorphic_name is what Rails uses for
+    # record_type, so STI subclasses and namespaced models get the same key.
     def key_for(record, name)
       "#{record.class.polymorphic_name.underscore}/#{record.id}/#{name}"
     end
