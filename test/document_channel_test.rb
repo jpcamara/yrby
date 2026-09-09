@@ -183,6 +183,28 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_nil Y::DocumentChannel.document_authorizer
   end
 
+  # The README says a subclass can override authorized? directly, with the
+  # located record available as `record`. Pin that, including that a denial
+  # there still creates no document row.
+  def test_a_subclass_can_override_authorized_using_the_located_record
+    channel = Class.new(Y::DocumentChannel) do
+      private
+
+      def authorized?(_key) = record.title == current_user
+    end
+
+    stub_connection current_user: "someone else"
+    subscribe_through channel, grant: grant, name: "body"
+
+    assert_predicate subscription, :rejected?
+    assert_equal 0, Y::Document.count
+
+    stub_connection current_user: "granted"
+    subscribe_through channel, grant: grant, name: "body"
+
+    assert_predicate subscription, :confirmed?
+  end
+
   # The policy runs once, at subscribe, and the subscription is the grant from
   # then on. These tests pin that down, tradeoff included. An app that needs
   # to cut off access before the client disconnects has to stop the
@@ -337,6 +359,14 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   private
+
+  # ActionCable::Channel::TestCase#subscribe is bound to `tests Y::DocumentChannel`.
+  # This does the same for a subclass.
+  def subscribe_through(channel_class, params)
+    @subscription = channel_class.new(connection, "subclass", params.with_indifferent_access)
+    @subscription.singleton_class.include(ActionCable::Channel::ChannelStub)
+    @subscription.subscribe_to_channel
+  end
 
   def update_frame
     { "update" => Base64.strict_encode64(Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)), "id" => 7 }
