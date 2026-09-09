@@ -15,8 +15,13 @@ module Y
         @name = name.to_s.dup.freeze
       end
 
+      # Never creates a row. A stored binding keeps whatever key it was given;
+      # otherwise this is the conventional record/attribute key.
       def key
-        storage ? Y::Document.key_for(record, name) : document.key
+        return Y::Document.key_for(record, name) if storage
+
+        stored = record.class.collaborative_document_class(name).find_by(record: record, name: name)
+        stored&.key || Y::Document.key_for(record, name)
       end
 
       def load_state
