@@ -45,8 +45,9 @@ module Y
       attr_accessor :authorized_document_key
     end
 
-    # Configure in Rails.application.config.to_prepare. Runs in channel context
-    # (including connection identifiers such as current_user), with a freshly
+    # The shipped channel's authorized?, as a block. Configure it in
+    # Rails.application.config.to_prepare. It runs in channel context, so
+    # current_user and other connection identifiers are available, with the
     # located record and the attribute name. Return truthy to allow access.
     def self.authorize_document(&block)
       raise ArgumentError, "authorize_document requires a block" unless block
@@ -59,7 +60,6 @@ module Y
 
     def subscribed
       return reject unless locate_record
-      return reject unless policy_allows?
 
       key = document.key
       self.authorized_document_key = key if sync_subscribed(key)
@@ -87,32 +87,19 @@ module Y
 
     attr_reader :record
 
-    # Two things have to be true to subscribe, and `subscribed` checks them in
-    # this order: the grant resolves to a record, and the application's policy
-    # allows this user to have it.
-
     # Nil for a missing, tampered, expired, or wrong-attribute grant, and for a
     # record that has since been destroyed.
     def locate_record
       @record = Y::Collaborative.locate(params[:grant], params[:name])
     end
 
-    # The block from authorize_document, or an allow when none is configured.
-    def policy_allows?
+    # Y::ActionCable calls this from sync_subscribed, before any stream is
+    # opened or state is served. The grant already resolved to a record; this
+    # runs the application's rule from authorize_document, if there is one.
+    def authorized?(_key)
       authorizer = self.class.document_authorizer
       !authorizer || instance_exec(record, params[:name].to_s, &authorizer)
     end
-
-    # Y::ActionCable calls this from sync_subscribed, and its default refuses
-    # every subscription, so the channel has to answer. Both checks already ran
-    # in `subscribed`, and they had to: sync_subscribed takes the document key,
-    # and asking a built-in attribute for its key creates the document row. A
-    # denied subscription must not leave one behind. So this is the concern's
-    # contract, not a third check.
-    #
-    # A subclass that wants its own rule should configure authorize_document
-    # rather than override this, so the rule still runs before the row exists.
-    def authorized?(_key) = true
 
     def reject_document_subscription
       stop_all_streams

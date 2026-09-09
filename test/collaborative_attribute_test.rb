@@ -102,6 +102,13 @@ class CollaborativeAttributeTest < ActionCable::Channel::TestCase
     assert_instance_of Y::EncryptedDocument, @page.collaborative_document(:secret).document
   end
 
+  def test_key_does_not_create_a_document_row
+    attribute = @page.collaborative_document(:body)
+
+    assert_equal Y::Document.key_for(@page, "body"), attribute.key
+    assert_equal 0, Y::Document.count
+  end
+
   def test_custom_storage_cannot_silently_fall_back_to_plain_database_access
     assert_raises(ArgumentError) { @page.collaborative_document(:external).document }
     assert_raises(ArgumentError) { Page.collaborative_document_class(:external) }
