@@ -286,6 +286,19 @@ export class ActionCableProvider {
     this.#refreshStatus(); // -> "disconnected"
   }
 
+  /**
+   * Resubscribe with updated channel params, such as a renewed grant. The
+   * doc, the delivery queue, awareness, and this provider's ack route all
+   * carry over; only the cable subscription is replaced. A no-op after
+   * destroy().
+   */
+  renew(params: object): void {
+    Object.assign(this.channelParams, params);
+    if (this.#destroyed) return;
+    this.disconnect();
+    this.connect();
+  }
+
   destroy(): void {
     this.disconnect();
     this.#destroyed = true;

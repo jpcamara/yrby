@@ -111,8 +111,12 @@ class BrowserController < ActionController::Base
       }; }</script>
       <script type="module" src="/assets/client.js" data-turbo-track="reload"></script>
       </head><body><h1>Collaborative document</h1>
-      <%= collaborative_document_tag @page, :body, id: "body-doc", data: (params[:permanent].present? ? { turbo_permanent: true } : {}) do %>
+      <%= collaborative_document_tag @page, :body, id: "body-doc", refresh: "/grant?name=body", data: (params[:permanent].present? ? { turbo_permanent: true } : {}) do %>
         <label>Body <textarea aria-label="Body" disabled></textarea></label>
+      <% end %>
+      <%# A grant that expires almost at once, so a reconnect has to refresh it. %>
+      <%= collaborative_document_tag @page, :notes, id: "notes-doc", expires_in: 2.seconds, refresh: "/grant?name=notes" do %>
+        <label>Notes <textarea aria-label="Notes" disabled></textarea></label>
       <% end %>
       <%= collaborative_document_tag @page, :secret, id: "secret-doc" do %>
         <label>Encrypted text <textarea aria-label="Encrypted text" disabled></textarea></label>
@@ -151,6 +155,16 @@ class BrowserController < ActionController::Base
     head :no_content
   end
 
+  # The refresh endpoint: the same rule the channel policy applies, re-run over
+  # HTTP with the session cookie, then a fresh short-lived grant.
+  def grant
+    page = Page.find(1)
+    name = params.require(:name)
+    return head :forbidden unless name != "body" || page.body_editor == cookies.signed[:browser_user]
+
+    render json: { grant: page.collaborative_sgid(name, expires_in: 2.seconds) }
+  end
+
   def asset
     path = File.join(ENV.fetch("BROWSER_ASSETS"), File.basename(params[:file]))
     # Exercise the default async import, including simultaneous elements and
@@ -164,6 +178,7 @@ BrowserApplication.routes.draw do
   get "/away", to: "browser#away"
   get "/state/:name", to: "browser#state"
   post "/permission", to: "browser#permission"
+  get "/grant", to: "browser#grant"
   get "/favicon.ico", to: ->(_env) { [204, {}, []] }
   get "/assets/:file", to: "browser#asset", constraints: { file: %r{[^/]+} }
 end

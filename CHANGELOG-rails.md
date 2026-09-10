@@ -19,8 +19,9 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   The policy runs once, at subscribe. It does not run on every message, which
   would add a record load and the application's own queries to every keystroke
   and cursor move. A permission revoked mid-session takes effect the next time
-  that client subscribes. Use short-lived grants, and stop the subscription
-  from the application when access has to be cut off immediately. The decision
+  that client subscribes. A short `expires_in:` with a `refresh:` URL bounds
+  that window, and the application can stop the subscription itself when access
+  has to be cut off immediately. The decision
   is stored as channel state so it survives AnyCable's fresh channel instance
   per command. A frame that arrives without an authorized subscription is
   refused even if its grant is valid.
@@ -36,6 +37,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot be combined with `encrypted: true`, and must supply both operations.
 - `Y::Document.key_for(record, name)` exposes the existing conventional key
   without allocating a document row.
+- `collaborative_sgid(name, expires_in:)` and
+  `collaborative_document_tag(record, name, expires_in:, refresh:)`. The grant
+  lifetime was GlobalID's default with no way to shorten it. `refresh:` names a
+  URL the element fetches when a subscription is rejected; the action re-runs
+  the app's authorization and renders `{ grant: ... }`, and the client
+  resubscribes the same session under the new grant. One attempt per
+  rejection, nothing on a timer.
 
 - `Y::DocumentChannel` ships in the gem, the way Turbo ships
   `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a

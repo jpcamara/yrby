@@ -56,9 +56,10 @@ try {
   assert.ok(up, "Rails fixture boots");
   await browser(session, "open", base);
   console.log(JSON.stringify(await browser(session, "snapshot", "-i")));
-  await wait('document.querySelector("#body-doc")?.provider?.synced && document.querySelector("#secret-doc")?.provider?.synced && document.querySelector("#external-doc")?.provider?.synced');
+  await wait('["#body-doc", "#secret-doc", "#external-doc", "#notes-doc"].every(id => document.querySelector(id)?.provider?.synced)');
   check("simultaneous default elements share one real WebSocket", await evaluate('window.socketCount === 1 && document.querySelector("#body-doc").provider.consumer === document.querySelector("#secret-doc").provider.consumer'));
-  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 3 && initialReadiness.every(Boolean) && browserEvents.length === 3 && browserEvents.every(e => e.synced && e.hasProvider)'));
+  // Four elements on the page: body, secret, external, and notes.
+  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 4 && initialReadiness.every(Boolean) && browserEvents.length === 4 && browserEvents.every(e => e.synced && e.hasProvider)'));
   await browser(session, "find", "label", "Body", "fill", "before move");
   await wait('!document.querySelector("#body-doc").provider.hasPending');
   check("ordinary edit reaches the Ruby accessor", (await state("body")).text === "before move");
@@ -237,6 +238,23 @@ try {
   await wait('anyElement.provider?.synced');
   check("AnyCable replacement uses a fresh ack route and reconstructs saved content", await evaluate('anyElement.provider.channelParams.session_id !== oldAnyRoute && anyElement.doc.getText("content").toString() === "AnyCable session edit"'));
   await evaluate('anyElement.remove(); anyConsumer.disconnect(); YrbyDocumentElement.consumer = undefined');
+
+  // A grant that expired while the socket was open is refreshed on reconnect.
+  // The notes document's grant lives two seconds. Let it expire, drop the
+  // socket so Action Cable resubscribes with the stale grant, and the element
+  // must fetch a fresh one from /grant and carry on with the same session.
+  await browser(session, "open", base);
+  await wait('document.querySelector("#notes-doc")?.provider?.synced');
+  await evaluate(`window.notesSession = document.querySelector("#notes-doc").session; window.notesDoc = notesSession.doc;
+    window.refreshCalls = 0; const realFetch = window.fetch;
+    window.fetch = (...args) => { if (String(args[0]).includes("/grant")) window.refreshCalls++; return realFetch(...args); };`);
+  await browser(session, "wait", "3000");
+  await evaluate('notesSession.provider.consumer.connection.webSocket.close()');
+  await wait('window.refreshCalls >= 1 && notesSession.state !== "blocked" && notesSession.provider?.synced');
+  await browser(session, "find", "label", "Notes", "fill", "after grant refresh");
+  await wait('!notesSession.provider.hasPending');
+  check("an expired grant is refreshed on reconnect and the same session keeps delivering",
+    (await state("notes")).text === "after grant refresh" && await evaluate('notesSession.doc === notesDoc && refreshCalls === 1'));
 
   // A copied, valid grant cannot bypass the authenticated connection's policy.
   await browser(peer, "open", `${base}/?user=visitor`);

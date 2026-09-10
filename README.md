@@ -654,8 +654,10 @@ is the grant. This is how Action Cable is meant to work, and it keeps a record
 load and your own queries off every keystroke and cursor move. The tradeoff is
 that a permission revoked mid-session takes effect the next time that client
 subscribes. Two things limit that window. Grant expiry is checked on every new
-subscription, so use short-lived grants. And if your application has to cut off
-access immediately, stop the subscription yourself when the permission changes.
+subscription, so a short `expires_in:` on the tag bounds it, provided you also
+give the element a `refresh:` URL (see below). And if your application has to
+cut off access immediately, stop the subscription yourself when the permission
+changes.
 
 The decision is kept for the life of the subscription on both transports. Action
 Cable keeps the channel instance. AnyCable builds a fresh one per command, so the
@@ -671,6 +673,37 @@ channel you write, you define it, and it receives the document key. The shipped
 `authorize_document` block with the record and the attribute name, and with no
 block a valid grant is enough. A subclass can override `authorized?` directly
 instead; the located record is available as `record`.
+
+### Grant lifetime and refresh
+
+A grant lives as long as GlobalID's signed-id default, which is one month under
+Rails. `expires_in:` on the tag shortens it. But the grant is baked into the
+page, and Action Cable resubscribes with it after every network drop, so a grant
+shorter than an editing session would block the editor at the first
+reconnect after it expired. Pair it with `refresh:`, a URL the element fetches
+when a subscription is rejected:
+
+```erb
+<%= collaborative_document_tag @post, :body, expires_in: 10.minutes,
+                               refresh: grant_post_path(@post) %>
+```
+
+```ruby
+# config/routes.rb:  resources :posts do get :grant, on: :member end
+# app/controllers/posts_controller.rb
+def grant
+  @post = current_user.posts.find(params[:id])   # your own authorization, again
+  render json: { grant: @post.collaborative_sgid(:body, expires_in: 10.minutes) }
+end
+```
+
+On a rejection the element fetches that URL with the session cookie, and the
+action re-runs your authorization. A `{ "grant": ... }` response resubscribes
+the same session, with the same document and pending edits, under the new
+grant. Anything else, a non-2xx status or a second rejection, blocks the session
+as before. Nothing renews on a timer, so an open, healthy subscription is never
+interrupted. Every reconnect after expiry is a fresh permission check, which is
+what a short lifetime is for.
 
 For room-keyed collaboration or other custom channel behavior, generate a
 channel with `bin/rails generate yrby:install --channel` and implement its

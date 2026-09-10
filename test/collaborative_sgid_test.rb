@@ -14,6 +14,8 @@ SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secr
 # Y::Collaborative.locate, and the purpose scope keeps a token for one
 # attribute from opening any other.
 class CollaborativeSgidTest < Minitest::Test
+  include ActiveSupport::Testing::TimeHelpers
+
   class Page < ActiveRecord::Base
     self.table_name = "pages"
     include GlobalID::Identification
@@ -48,6 +50,25 @@ class CollaborativeSgidTest < Minitest::Test
     assert_nil Y::Collaborative.locate(nil, :body)
     assert_nil GlobalID::Locator.locate_signed(sgid, for: :something_else),
                "the raw token is purpose-scoped for any other consumer too"
+  end
+
+  def test_expires_in_bounds_the_grant
+    token = @page.collaborative_sgid(:body, expires_in: 1.minute)
+
+    assert_equal @page, Y::Collaborative.locate(token, :body)
+    travel 2.minutes do
+      assert_nil Y::Collaborative.locate(token, :body)
+    end
+  end
+
+  def test_without_expires_in_the_default_lifetime_applies
+    # Outside Rails, GlobalID sets no default, so the token has no expiry. The
+    # point is that omitting the option does not pass an explicit nil through.
+    token = @page.collaborative_sgid(:body)
+
+    travel 2.minutes do
+      assert_equal @page, Y::Collaborative.locate(token, :body)
+    end
   end
 
   def test_a_destroyed_record_locates_nothing
