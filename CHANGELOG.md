@@ -46,6 +46,42 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Live `Y::Array` and `Y::Text` handles.** `Doc#get_array(name)` and
+  `Doc#get_text(name)` return live handles alongside `Doc#get_map`. Arrays get
+  `push`/`<<`, `insert`, `[]`, `[]=`, `delete_at`, `clear`, `size`, `empty?`,
+  `to_a` and `each`; text gets `push`/`<<`, `insert`, `delete`, `clear`, `to_s`,
+  `length` and `empty?`. Writes mutate the CRDT and sync to every peer.
+
+  A handle's path is now a list of segments (a map key or an array index), so a
+  handle can address a map stored inside an array. That is the shape most
+  collaborative state has, a list of records, and `array.get_map(i)` hands back a
+  live handle to one so it can be edited in place. `get_map`, `get_array` and
+  `get_text` exist on both `Y::Map` and `Y::Array`, so any nested shared type is
+  reachable. Negative indexes count from the end, and an out-of-range index reads
+  as `nil` rather than raising, so a stale index from a concurrent edit is
+  harmless. Both types are asserted `Send + Sync` at compile time.
+
+  Note for code inside `module Y`: `Y::Array` shadows `::Array` there, so a bare
+  `Array` now resolves to the handle class. The HTML renderers were fixed to say
+  `::Array` and `Kernel.Array(...)`, the same rule that already applies to
+  `::ActionCable`.
+
+- **Live `Y::Map` handles.** `Doc#get_map(name)` returns a `Y::Map` you can both
+  read and *write*: `map[key]`, `map[key] = value`, `delete`, `clear`, `keys`,
+  `size`, `key?`, `to_h`, and `each`. Writes mutate the CRDT, so they sync to
+  every peer. Values round-trip primitives, arrays, and nested hashes; a nested
+  hash becomes a real nested `Y.Map`, and `map.get_map(key)` returns a live handle
+  to it (mutating the child mutates the document). This is the first actual yrs
+  shared type exposed for building/editing state in Ruby, complementing the
+  read-only `read_text`/`read_xml`/`read_map` snapshots.
+
+  Handles carry the same thread-safety guarantees as `Doc`: every operation opens
+  its own transaction inside `nogvl` (GVL released) and holds no lock across the
+  boundary. A handle is addressed by root name plus a path of keys and re-resolves
+  per operation; it never caches a raw yrs branch pointer that could dangle when
+  the tree is mutated (possibly on another thread), so a nested handle keeps
+  working even as sibling keys change around it. `Y::Map` is asserted `Send + Sync`
+  at compile time alongside `Doc`.
 - `Y::Decoder` ships in the core gem and loads with `require "y"`. It was
   scaffolded as a separate `yrby-decoder` gem, but it is 66 lines of pure
   Ruby over `Doc#read_text` / `read_xml`, requires the native core either
