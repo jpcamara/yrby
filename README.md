@@ -697,6 +697,10 @@ def grant
 end
 ```
 
+That action mints write access, so it must be at least as strict as the page
+that renders the tag. Without an authorization check it hands grants to anyone
+who can reach the URL, and a short `expires_in:` protects nothing.
+
 On a rejection the element fetches that URL with the session cookie, and the
 action re-runs your authorization. A `{ "grant": ... }` response resubscribes
 the same session, with the same document and pending edits, under the new
