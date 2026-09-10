@@ -6,6 +6,9 @@ module Y
     # both go through it, so they share one storage choice, including custom
     # adapters that have no Y::Document row.
     class Attribute
+      # What yrs encodes when a diff contains no changes.
+      EMPTY_UPDATE = "\x00\x00".b.freeze
+
       attr_reader :record, :name
 
       def initialize(record, name)
@@ -32,6 +35,27 @@ module Y
       # failure. The channel acknowledges and broadcasts only after this returns.
       def append(update)
         storage ? storage.write(record, name, update) : document.append(update)
+      end
+
+      # Edit the document from Ruby, as a peer of the browsers. Loads the
+      # current state, yields a live document, records what the block changed
+      # through the declared storage, then broadcasts it on the document's
+      # stream so open editors apply it. Returns the update, or nil when the
+      # block changed nothing.
+      #
+      #   post.collaborative_document(:body).edit do |doc|
+      #     doc.get_text("content").push("Reviewed by ops.\n")
+      #   end
+      def edit
+        live = doc
+        before = live.encode_state_vector
+        yield live
+        update = live.encode_state_as_update(before)
+        return nil if update.b == EMPTY_UPDATE
+
+        append(update)
+        Y::ActionCable.broadcast(key, update)
+        update
       end
 
       # A fresh Y::Doc rebuilt from storage on every call. Nothing is cached.

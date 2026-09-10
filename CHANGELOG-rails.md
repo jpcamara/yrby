@@ -37,6 +37,12 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot be combined with `encrypted: true`, and must supply both operations.
 - `Y::Document.key_for(record, name)` exposes the existing conventional key
   without allocating a document row.
+- `record.collaborative_document(name).edit { |doc| ... }` edits a document
+  from Ruby as a peer of the browsers: it loads the current state, yields a
+  live document, records the change through the declared storage, and
+  broadcasts it. `Y::ActionCable.broadcast(key, update)` is the module-level
+  broadcast it uses, for channels that record updates of their own.
+  `examples/agent` shows an agent running a plan people edit while it runs.
 - `collaborative_sgid(name, expires_in:)` and
   `collaborative_document_tag(record, name, expires_in:, refresh:)`. The grant
   lifetime was GlobalID's default with no way to shorten it. `refresh:` names a

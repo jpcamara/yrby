@@ -39,6 +39,15 @@ async function browser(who, ...args) {
 }
 const evaluate = async (code, who = session) => (await browser(who, "eval", "-b", Buffer.from(code).toString("base64"))).result;
 const wait = (condition, who = session) => browser(who, "wait", "--fn", condition);
+// Poll the fixture's storage endpoint until done(text) holds, up to ~20s.
+async function pollState(name, done) {
+  for (let i = 0; i < 100; i++) {
+    const { text } = await state(name);
+    if (done(text)) return text;
+    await sleep(200);
+  }
+  throw new Error(`pollState(${name}) timed out`);
+}
 const check = (label, value) => { assert.ok(value, label); console.log(`PASS ${label}`); };
 async function state(name) {
   const response = await fetch(`${base}/state/${name}`);
@@ -56,10 +65,10 @@ try {
   assert.ok(up, "Rails fixture boots");
   await browser(session, "open", base);
   console.log(JSON.stringify(await browser(session, "snapshot", "-i")));
-  await wait('["#body-doc", "#secret-doc", "#external-doc", "#notes-doc"].every(id => document.querySelector(id)?.provider?.synced)');
+  await wait('["#body-doc", "#secret-doc", "#external-doc", "#notes-doc", "#plan-doc", "#agent-log-doc"].every(id => document.querySelector(id)?.provider?.synced)');
   check("simultaneous default elements share one real WebSocket", await evaluate('window.socketCount === 1 && document.querySelector("#body-doc").provider.consumer === document.querySelector("#secret-doc").provider.consumer'));
-  // Four elements on the page: body, secret, external, and notes.
-  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 4 && initialReadiness.every(Boolean) && browserEvents.length === 4 && browserEvents.every(e => e.synced && e.hasProvider)'));
+  // Six elements on the page: body, secret, external, notes, plan, and agent log.
+  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 6 && initialReadiness.every(Boolean) && browserEvents.length === 6 && browserEvents.every(e => e.synced && e.hasProvider)'));
   await browser(session, "find", "label", "Body", "fill", "before move");
   await wait('!document.querySelector("#body-doc").provider.hasPending');
   check("ordinary edit reaches the Ruby accessor", (await state("body")).text === "before move");
@@ -255,6 +264,28 @@ try {
   await wait('!notesSession.provider.hasPending');
   check("an expired grant is refreshed on reconnect and the same session keeps delivering",
     (await state("notes")).text === "after grant refresh" && await evaluate('notesSession.doc === notesDoc && refreshCalls === 1'));
+
+  // A Ruby agent and a real browser share one document. The person types a
+  // plan; the agent runs it in a background thread, reading each step from
+  // storage right before it runs it. Every browser edit is recorded there
+  // before it is acked, so an edit typed during an earlier step is what the
+  // next step runs. That is the hard part of collaboration: the human's live
+  // edit changes what the agent does next. Verified through storage, so it
+  // holds on any cable adapter. (The agent's progress reaches browsers through
+  // an ordinary broadcast, which needs a cross-process adapter like redis or
+  // solid_cable, the same as any Action Cable broadcast from a job.)
+  await browser(session, "open", base);
+  await wait('["#plan-doc", "#agent-log-doc"].every(id => document.querySelector(id)?.provider?.synced)');
+  await browser(session, "find", "label", "Plan", "fill", "collect metrics\nverify\nreport");
+  await wait('!document.querySelector("#plan-doc").provider.hasPending');
+  const agentStart = await fetch(`${base}/agent/run`, { method: "POST" });
+  assert.equal(agentStart.status, 204);
+  await pollState("agent_log", text => text.includes("Running: collect metrics"));
+  await browser(session, "find", "label", "Plan", "fill", "collect metrics\nverify the deployment\nreport");
+  await wait('!document.querySelector("#plan-doc").provider.hasPending');
+  const agentLog = await pollState("agent_log", text => text.includes("Plan complete."));
+  check("a browser edit made while an earlier step ran is what the agent runs next",
+    agentLog.includes("Done: verify the deployment -> ok") && !agentLog.includes("Running: verify\n"));
 
   // A copied, valid grant cannot bypass the authenticated connection's policy.
   await browser(peer, "open", `${base}/?user=visitor`);
