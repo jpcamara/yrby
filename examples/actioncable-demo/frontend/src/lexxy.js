@@ -50,6 +50,22 @@ window.__yrb = {
   },
 }
 
+// A presence roster: everyone the awareness protocol knows about, including the
+// Ruby agent, which broadcasts its awareness over the same DocumentChannel.
+const rosterEl = document.getElementById("presence-roster")
+function renderRoster() {
+  if (!rosterEl) return
+  const peers = [...awareness.getStates().values()]
+  rosterEl.innerHTML = peers.map((s) => {
+    const name = s?.name ?? s?.awarenessData?.name ?? "someone"
+    const color = s?.color ?? s?.awarenessData?.color ?? "#999"
+    const status = s?.status ? `<span class="status">${s.status}</span>` : ""
+    return `<span class="peer" style="--c:${color}">${name}${status}</span>`
+  }).join("")
+}
+awareness.on("update", renderRoster)
+renderRoster()
+
 const setStatus = (state, text) => {
   statusEl.dataset.state = state
   statusEl.textContent = text

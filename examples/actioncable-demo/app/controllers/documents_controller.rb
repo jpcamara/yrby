@@ -2,7 +2,41 @@
 
 class DocumentsController < ApplicationController
   # The audit control endpoint is a test hook (POST without a form token).
-  skip_forgery_protection only: :audit_control
+  skip_forgery_protection only: %i[audit_control agent]
+
+  # Start a Ruby agent that joins the document as a live presence over the same
+  # DocumentChannel the browsers use. It publishes awareness (its name, color,
+  # and a status it updates as it reads the document) and re-broadcasts on a
+  # heartbeat so it stays present, then clears itself. This is Y::Awareness plus
+  # Y::ActionCable.broadcast: no browser change, the agent just shows up.
+  def agent
+    document_id = params[:id]
+    Thread.new do
+      Rails.application.executor.wrap do
+        ActiveRecord::Base.connection_pool.with_connection do
+          presence = Y::Awareness.new
+          identity = { name: "Agent \u{1F916}", color: "#7c3aed" }
+          16.times do
+            # Read the shared document the way any Ruby process would: replay
+            # the store into a Y::Doc and read its rich text. The agent reacts
+            # to what people have written so far.
+            doc = Y::Doc.new
+            (bytes = Store.current.replay(document_id)) && doc.apply_update(bytes)
+            words = doc.read_xml("root").to_s.split.size
+            status = words.zero? ? "waiting for the first words" : "reviewing \u2014 #{words} words so far"
+            state = identity.merge(awarenessData: identity, anchorPos: nil, focusPos: nil,
+                                   focusing: true, status: status)
+            Y::ActionCable.broadcast(document_id, presence.set_local_state(state.to_json))
+            sleep 4
+          end
+          Y::ActionCable.broadcast(document_id, presence.clear_local_state)
+        end
+      end
+    rescue StandardError => e
+      Rails.logger.error("agent presence failed: #{e.class}: #{e.message}")
+    end
+    head :no_content
+  end
 
   # The collaborative editor page (Tiptap).
   def show

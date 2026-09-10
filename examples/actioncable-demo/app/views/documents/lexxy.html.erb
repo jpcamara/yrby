@@ -24,7 +24,18 @@
                 data-direct-upload-url="<%= rails_direct_uploads_url %>"
                 data-blob-url-template="<%= rails_service_blob_url(":signed_id", ":filename") %>"></lexxy-editor>
 
+  <div id="presence-roster" class="presence-roster" aria-label="Who is here"></div>
+
   <%= render "materialized_note", note: @note, renderer: "Y::Lexxy" %>
 </div>
+
+<style>
+  .presence-roster { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; min-height: 2rem; }
+  .presence-roster .peer { display: inline-flex; align-items: center; gap: .4rem;
+    padding: .25rem .6rem; border-radius: 999px; background: #f3f4f6; font-size: .85rem; }
+  .presence-roster .peer::before { content: ""; width: .7rem; height: .7rem; border-radius: 50%;
+    background: var(--c, #999); }
+  .presence-roster .peer .status { color: #6b7280; font-size: .78rem; }
+</style>
 
 <script src="/lexxy.js" defer></script>
