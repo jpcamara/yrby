@@ -225,6 +225,16 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       sync_send_ack(id, sync_handle_frame(encoded, bytes))
     end
 
+    # The broadcast stream for a document key. Module-level so a process that
+    # is not a channel can publish to the same subscribers.
+    def self.stream_name(key)
+      "yrby:#{key}"
+    end
+
+    def self.envelope(encoded)
+      { "update" => encoded }
+    end
+
     private
 
     # Whether this subscriber may sync the document named by `key`. The
@@ -283,7 +293,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     def sync_envelope(encoded)
-      { "update" => encoded }
+      Sync.envelope(encoded)
     end
 
     # Override in the channel to add identifying context to dropped-frame logs --
@@ -434,7 +444,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     def sync_stream_name
-      "yrby:#{@sync_key}"
+      Sync.stream_name(@sync_key)
     end
 
     def sync_awareness_stream_name

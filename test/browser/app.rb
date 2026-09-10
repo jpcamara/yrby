@@ -13,6 +13,7 @@ require "action_view/railtie"
 require "action_cable/engine"
 require "yrby-rails"
 require "puma"
+require_relative "../../examples/agent/plan_runner"
 require "fileutils"
 
 class BrowserApplication < Rails::Application
@@ -114,6 +115,13 @@ class BrowserController < ActionController::Base
       <%= collaborative_document_tag @page, :body, id: "body-doc", refresh: "/grant?name=body", data: (params[:permanent].present? ? { turbo_permanent: true } : {}) do %>
         <label>Body <textarea aria-label="Body" disabled></textarea></label>
       <% end %>
+      <%# A plan an agent runs while a person edits it, and the agent's live log. %>
+      <%= collaborative_document_tag @page, :plan, id: "plan-doc" do %>
+        <label>Plan <textarea aria-label="Plan" disabled></textarea></label>
+      <% end %>
+      <%= collaborative_document_tag @page, :agent_log, id: "agent-log-doc" do %>
+        <label>Agent log <textarea aria-label="Agent log" disabled></textarea></label>
+      <% end %>
       <%# A grant that expires almost at once, so a reconnect has to refresh it. %>
       <%= collaborative_document_tag @page, :notes, id: "notes-doc", expires_in: 2.seconds, refresh: "/grant?name=notes" do %>
         <label>Notes <textarea aria-label="Notes" disabled></textarea></label>
@@ -155,6 +163,28 @@ class BrowserController < ActionController::Base
     head :no_content
   end
 
+  # Start an agent on the plan document in a background thread. Each step
+  # takes a few seconds, long enough for a browser to edit the plan meanwhile.
+  def agent
+    page = Page.find(1)
+    Thread.new do
+      Rails.application.executor.wrap do
+        ActiveRecord::Base.connection_pool.with_connection do
+          agent = PlanRunner.new(plan: page.collaborative_document(:plan),
+                                 log: page.collaborative_document(:agent_log),
+                                 executor: lambda { |_step|
+                                   sleep 3
+                                   "ok"
+                                 })
+          agent.run
+        end
+      end
+    rescue StandardError => e
+      warn "agent failed: #{e.class}: #{e.message}"
+    end
+    head :no_content
+  end
+
   # The refresh endpoint: the same rule the channel policy applies, re-run over
   # HTTP with the session cookie, then a fresh short-lived grant.
   def grant
@@ -179,6 +209,7 @@ BrowserApplication.routes.draw do
   get "/state/:name", to: "browser#state"
   post "/permission", to: "browser#permission"
   get "/grant", to: "browser#grant"
+  post "/agent/run", to: "browser#agent"
   get "/favicon.ico", to: ->(_env) { [204, {}, []] }
   get "/assets/:file", to: "browser#asset", constraints: { file: %r{[^/]+} }
 end

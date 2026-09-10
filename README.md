@@ -702,6 +702,31 @@ native `Y::Doc` for Ruby reads and rendering. For built-in row operations such
 as compaction, use `post.collaborative_document(:body).document.compact!`.
 The same accessor serves the channel and application code, including encryption.
 
+### Editing a document from Ruby
+
+`edit` makes a Ruby process a peer of the browsers. It loads the current state,
+yields a live document, records what the block changed through the declared
+storage, and broadcasts it, so every open editor applies it:
+
+```ruby
+post.collaborative_document(:body).edit do |doc|
+  doc.get_text("content").push("Reviewed by ops.\n")
+end
+```
+
+The block gets the live handles from `Doc#get_text`, `Doc#get_map`, and
+`Doc#get_array`. A block that changes nothing records and broadcasts nothing.
+Behind it is `Y::ActionCable.broadcast(key, update)`, which any channel built
+on the concern can use after recording an update of its own.
+
+That is enough to put an agent in a document as a collaborator. The one rule
+that makes it work: read the document from storage right before acting, never
+from a copy taken earlier. Every browser edit is recorded before it is
+acknowledged, so the store is the shared truth, and an edit a person makes
+while the agent is busy is what the agent acts on next. `examples/agent` is a
+runner that does this for a plan written one step per line, with a real-Chrome
+test where a person edits step two while step one is running.
+
 Custom storage can use the shipped channel too. Declare one adapter implementing
 both `load(record, name)` and `write(record, name, update)`:
 
