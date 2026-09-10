@@ -753,7 +753,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     awareness_class.define_singleton_method("new", function!(RbAwareness::new, -1))?;
     awareness_class.define_method("client_id", method!(RbAwareness::client_id, 0))?;
     awareness_class.define_method("set_local_state", method!(RbAwareness::set_local_state, 1))?;
-    awareness_class.define_method("clear_local_state", method!(RbAwareness::clear_local_state, 0))?;
+    awareness_class.define_method(
+        "clear_local_state",
+        method!(RbAwareness::clear_local_state, 0),
+    )?;
 
     // Live shared-type handles.
     map::define(ruby, module)?;
