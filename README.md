@@ -25,12 +25,14 @@ Rhino Editor, and CodeMirror. The same channel also syncs Yjs shapes with no
 editor at all: a whiteboard on a `Y.Map`, a kanban board on a `Y.Array`, a
 form filled in together. ([Editors](#editors))
 
-In Ruby, the documents are readable without a browser. `Doc#read_text` and
-`Doc#read_map` rebuild the contents for search, validation, and exports.
-`Y::Tiptap` and `Y::Lexxy` render a document to the same HTML the editor's own
-serializer produces, byte for byte. They take rules for your app's custom
-nodes, and their output drops straight into ActionText.
-([Rendering to HTML](#rendering-to-html))
+In Ruby, the documents are readable and writable without a browser.
+`Doc#read_text`, `Doc#read_map`, and `Doc#read_array` rebuild the contents for
+search, validation, and exports. `Doc#get_map`, `Doc#get_array`, and
+`Doc#get_text` return live handles for building or editing shared state on the
+server, and those edits sync to everyone. `Y::Tiptap` and `Y::Lexxy` render a
+document to the same HTML the editor's own serializer produces, byte for byte.
+They take rules for your app's custom nodes, and their output drops straight
+into ActionText. ([Rendering to HTML](#rendering-to-html))
 
 Underneath, the core is built for a production Rails deployment. A `Doc` is
 thread-safe across Puma and ActionCable threads. Native CRDT work runs with
@@ -96,6 +98,9 @@ bin/rails generate yrby:install && bin/rails db:migrate
 - [Usage](#usage)
   - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
   - [Reading document contents](#reading-document-contents)
+  - [Y::Map (live shared maps)](#ymap-live-shared-maps)
+  - [Y::Array (live shared lists)](#yarray-live-shared-lists)
+  - [Y::Text (live shared text)](#ytext-live-shared-text)
   - [Pending structs and gap-free state](#pending-structs-and-gap-free-state)
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
@@ -115,7 +120,9 @@ documents: a `Doc`, awareness, and the y-websocket protocol primitives. By
 default the Ruby side treats a document as opaque CRDT state. It applies
 updates, answers sync handshakes, and records deltas without looking at the
 contents. The browser editor decides what shape the document has. When you do
-need to look inside, `Doc#read_text` and `Doc#read_map` rebuild it in Ruby.
+need to look inside, `Doc#read_text` and `Doc#read_map` rebuild it in Ruby, and
+`Doc#get_map` returns a live handle when the server needs to build or edit
+shared state itself.
 
 ## Durability and delivery
 
@@ -258,6 +265,106 @@ doc.read_xml("root")          # => text of an XML root, one block per line
 doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
 doc.read_array("cards")       # => a Y.Array root as a JSON string; JSON.parse it
 ```
+
+These are read-only snapshots. To *build or edit* a map from Ruby, use a live
+handle (below).
+
+### Y::Map (live shared maps)
+
+`Doc#get_map` returns a live handle to a `Y.Map` root: reading it reflects the
+current document, and writing it mutates the CRDT (so the change syncs to every
+peer). Handles carry the same thread-safety guarantees as `Doc`: every operation
+runs with the GVL released and holds no lock across the boundary.
+
+```ruby
+map = doc.get_map("state")   # root map, created if absent
+
+# Write: primitives, arrays, and (nested) hashes
+map["title"]  = "Dashboard"
+map["count"]  = 3
+map["tags"]   = %w[a b c]
+map["user"]   = { "name" => "Ada", "role" => "eng" }  # nested Y.Map
+
+# Read: a snapshot value (nested map/array come back as Hash/Array)
+map["title"]           # => "Dashboard"
+map.to_h               # => { "title" => "Dashboard", "count" => 3, ... }
+map.keys               # => ["title", "count", "tags", "user"]
+map.size               # => 4
+map.key?("title")      # => true
+map.each { |k, v| puts "#{k}: #{v}" }
+
+# A live handle to a nested map; mutating it mutates the document
+user = map.get_map("user")   # => Y::Map (or nil if absent / not a map)
+user["name"] = "Grace"       # doc now has state.user.name == "Grace"
+
+# Delete
+map.delete("count")    # => 3 (the previous value)
+map.clear
+```
+
+A handle is addressed by its root name plus a path and re-resolves on every
+operation, so it never caches a raw CRDT pointer that could dangle when the tree
+is mutated (possibly on another thread). A nested handle keeps working even as
+sibling keys change around it.
+
+### Y::Array (live shared lists)
+
+`Doc#get_array` returns a live handle to a `Y.Array` root. The method that
+matters is `get_map`: a list of records is the shape most collaborative state
+has, and a handle addressed by index is what lets you edit one in place.
+
+```ruby
+plan = doc.get_array("plan")   # root array, created if absent
+
+plan.push({ "text" => "Find the posts", "status" => "pending" })
+plan << { "text" => "Draft an outline", "status" => "pending" }
+plan.insert(1, { "text" => "Summarize them", "status" => "pending" })
+
+plan[0]                        # => { "text" => "Find the posts", ... } (a snapshot)
+plan.size                      # => 3
+plan.to_a                      # => the whole list, as plain Ruby
+plan.each { |step| puts step["text"] }
+
+# A live handle to a record stored in the list. Writing it writes the document.
+step = plan.get_map(0)         # => Y::Map (or nil if that element is not a map)
+step["status"] = "done"        # every peer sees the status change
+
+plan.delete_at(-1)             # => the removed value
+plan.clear
+```
+
+Negative indexes count from the end, and an index outside the array reads as
+`nil` rather than raising, so a stale index from a concurrent edit is harmless.
+
+### Y::Text (live shared text)
+
+`Doc#get_text` returns a live handle to a `Y.Text` root. Appending is a CRDT
+insert rather than a whole-document write, so a person typing in the same text
+while a server-side writer appends keeps their edit, and so does the writer.
+
+```ruby
+body = doc.get_text("body")
+
+body.push("The agent wrote ")   # append; the hot path when streaming
+body << "this sentence."
+body.insert(0, "Note: ")        # insert at an index
+body.delete(0, 6)               # remove a range
+
+body.to_s                       # => "The agent wrote this sentence."
+body.length
+body.empty?
+body.clear
+```
+
+Every handle can reach any nested shared type: `get_map`, `get_array`, and
+`get_text` exist on both `Y::Map` and `Y::Array`, so a text field inside a
+record inside a list is directly addressable.
+
+> **Naming note.** `Y::Array` and `Y::Text` shadow `::Array` and Ruby's own
+> names inside `module Y`. Code in that namespace that means the core class must
+> say `::Array` (and `Kernel.Array(...)` for the conversion method), the same way
+> channels in `module Y` must say `::ActionCable`. This bit the HTML renderers
+> when these classes were added.
 
 ### Pending structs and gap-free state
 

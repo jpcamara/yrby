@@ -125,7 +125,7 @@ module Y
     # A template: String literal, Symbol attribute reference, or an Array of
     # both.
     def compile_parts(template)
-      Array(template).map do |part|
+      Kernel.Array(template).map do |part|
         case part
         when Symbol then { "ref" => part.to_s }
         else { "lit" => part.to_s }
@@ -227,7 +227,7 @@ module Y
 
     def to_html(root = nil)
       result = root.nil? ? @native.to_html : @native.to_html(root)
-      return result unless result.is_a?(Array)
+      return result unless result.is_a?(::Array)
 
       RenderRules.splice(result, @render_callbacks)
     end
@@ -262,7 +262,7 @@ module Y
 
     def to_html(root = nil)
       result = root.nil? ? @native.to_html : @native.to_html(root)
-      return result unless result.is_a?(Array)
+      return result unless result.is_a?(::Array)
 
       RenderRules.splice(result, @render_callbacks)
     end
