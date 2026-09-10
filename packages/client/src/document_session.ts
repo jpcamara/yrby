@@ -3,10 +3,17 @@ import * as Y from "yjs";
 import { uuidv4 } from "lib0/random";
 import { ActionCableProvider, type CableConsumer } from "./actioncable_provider.js";
 
-export interface DocumentDescriptor { channel?: string; grant: string; name: string }
+export interface DocumentDescriptor {
+  channel?: string;
+  grant: string;
+  name: string;
+  /** A same-origin URL that returns `{ "grant": "..." }` for this document. Used once per rejection. */
+  refresh?: string;
+}
+export type ResolvedDescriptor = Readonly<{ channel: string; grant: string; name: string; refresh?: string }>;
 export type DocumentSessionState = "attached" | "draining" | "blocked" | "closed";
 export interface DocumentRecovery {
-  descriptor: Readonly<Required<DocumentDescriptor>>;
+  descriptor: ResolvedDescriptor;
   update: Uint8Array;
   pending: Uint8Array | null;
 }
@@ -27,7 +34,12 @@ export class DocumentSessionStore extends EventTarget {
 
   acquire(input: DocumentDescriptor): DocumentAttachment {
     if (!input.grant || !input.name) throw new Error("A document requires a grant and name");
-    const descriptor = Object.freeze({ channel: input.channel || "Y::DocumentChannel", grant: input.grant, name: input.name });
+    // The refresh URL is not part of the identity: matching tuples share a
+    // session, and the first acquirer's URL is the one that session renews with.
+    const descriptor: ResolvedDescriptor = Object.freeze({
+      channel: input.channel || "Y::DocumentChannel", grant: input.grant, name: input.name,
+      ...(input.refresh ? { refresh: input.refresh } : {}),
+    });
     const key = JSON.stringify([descriptor.channel, descriptor.grant, descriptor.name]);
     let session = this.#sessions.get(key);
     if (!session) {
@@ -77,6 +89,14 @@ export class DocumentSession extends EventTarget {
   #presenceOwner: DocumentAttachment | undefined;
   #blocked = false;
   #closed = false;
+  // The grant currently in use. Starts as the descriptor's and changes only
+  // through a successful refresh; the descriptor itself never changes.
+  #grant: string;
+  // One renewal per rejection: set when a refresh is attempted, cleared when
+  // the transport comes back up, so a renewed grant that is rejected in turn
+  // blocks instead of looping.
+  #renewed = false;
+  #renewing = false;
   #recovery: DocumentRecovery | undefined;
   #waiting = false;
   #scheduled = false;
@@ -87,10 +107,11 @@ export class DocumentSession extends EventTarget {
   /** Use DocumentSessionStore.acquire to create and own sessions. */
   constructor(
     readonly store: DocumentSessionStore,
-    readonly descriptor: Readonly<Required<DocumentDescriptor>>,
+    readonly descriptor: ResolvedDescriptor,
     private readonly remove: () => void,
   ) {
     super();
+    this.#grant = descriptor.grant;
     this.doc.on("update", this.#schedule);
   }
   get provider(): ActionCableProvider | undefined { return this.#provider; }
@@ -116,18 +137,21 @@ export class DocumentSession extends EventTarget {
     try {
       if (!this.#provider) {
         const provider = this.#provider = new ActionCableProvider(this.doc, this.store.consumer, this.descriptor.channel, {
-          grant: this.descriptor.grant, name: this.descriptor.name,
+          grant: this.#grant, name: this.descriptor.name,
           // Ack sequence numbers belong to this provider lifetime, not a record.
           session_id: uuidv4(),
         }, { onError: (error, context) => {
           if (this.#provider !== provider) return;
-          if (context === "rejected") this.#block(error);
+          if (context === "rejected") this.#rejected(provider, error);
           else { this.#error = error; this.store.changed(this); }
         } });
         provider.awareness.setLocalState(null);
         if (this.#recovery?.pending) provider.restorePendingUpdate(this.#recovery.pending);
         this.#recovery = undefined;
-        provider.onStatusChange(() => this.store.changed(this));
+        provider.onStatusChange(({ status }) => {
+          if (status === "connected" || status === "synced") this.#renewed = false;
+          this.store.changed(this);
+        });
         void provider.whenSynced.then(() => {
           if (this.#provider === provider && !this.#blocked) this.#resolveSynced();
         });
@@ -159,11 +183,13 @@ export class DocumentSession extends EventTarget {
     return { descriptor: this.descriptor, update: Y.encodeStateAsUpdate(this.doc),
       pending: this.#provider?.pendingUpdate ?? this.#recovery?.pending?.slice() ?? null };
   }
-  /** Retry only with this session's original authorization. */
+  /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
   retry(): void {
     if (!this.#blocked || this.#closed) return;
     this.#blocked = false;
     this.#error = undefined;
+    this.#renewed = false;
+    this.#renewing = false;
     this.connect();
     this.#settle();
   }
@@ -173,6 +199,37 @@ export class DocumentSession extends EventTarget {
     this.#closed = true;
     for (const attachment of this.#attachments) attachment.release();
     this.#dispose();
+  }
+
+  // The server refused the subscription. With a refresh URL, and no renewal
+  // since the transport last came up, ask the application for a new grant and
+  // resubscribe with it. Otherwise, or if that fails, block as before.
+  #rejected(provider: ActionCableProvider, error: unknown): void {
+    const refresh = this.descriptor.refresh;
+    if (!refresh || this.#renewed || this.#renewing) { this.#block(error); return; }
+    this.#renewed = true;
+    this.#renewing = true;
+    void this.#renew(provider, refresh);
+  }
+  async #renew(provider: ActionCableProvider, refresh: string): Promise<void> {
+    let grant: string;
+    try {
+      const response = await fetch(refresh, { credentials: "same-origin", headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`grant refresh failed: ${response.status}`);
+      const body: unknown = await response.json();
+      const candidate = (body as { grant?: unknown } | null)?.grant;
+      if (typeof candidate !== "string" || !candidate) throw new Error("grant refresh returned no grant");
+      grant = candidate;
+    } catch (error) {
+      this.#renewing = false;
+      if (this.#provider === provider && !this.#closed) this.#block(error);
+      return;
+    }
+    this.#renewing = false;
+    if (this.#provider !== provider || this.#closed || this.#blocked) return;
+    this.#grant = grant;
+    provider.renew({ grant });
+    this.store.changed(this);
   }
 
   #block(error: unknown): void {

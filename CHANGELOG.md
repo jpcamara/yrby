@@ -15,6 +15,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   retargeting. Turbo no longer serializes CRDT state into cached HTML.
 - Managed sessions expose suspension, delivery status, and recovery after
   rejection. Per-provider subscription nonces isolate acknowledgment sequences.
+- The element accepts a `refresh` attribute. When a subscription is rejected
+  and the attribute is set, the session fetches that URL once, expects
+  `{ "grant": ... }`, and resubscribes under the new grant with the same
+  document and pending edits. A failed fetch or a second rejection blocks the
+  session as before. Nothing renews on a timer.
 
 ### Fixed
 

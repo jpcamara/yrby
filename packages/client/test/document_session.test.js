@@ -171,3 +171,106 @@ test("blocked work is observable and only explicit discard removes it", t => {
   attachment.session.discard();
   assert.equal(store.sessions.length, 0);
 });
+
+function stubFetch(t, respond) {
+  const calls = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { calls.push({ url, init }); return respond(url, init); };
+  t.after(() => { globalThis.fetch = original; });
+  return calls;
+}
+const jsonResponse = (body, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const refreshing = { ...descriptor, refresh: "/grant" };
+
+test("rejection with a refresh URL renews the grant once and resumes the same session", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const attachment = store.acquire(refreshing), session = attachment.session, provider = session.provider;
+  const first = consumer.created[0];
+  sync(first);
+  session.doc.getText("content").insert(0, "keep me");
+  first.handlers.rejected();
+  await tick(); await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/grant");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  assert.equal(calls[0].init.headers.Accept, "application/json");
+  assert.equal(session.state, "attached");
+  assert.equal(attachment.signal.aborted, false);
+  assert.equal(session.provider, provider, "the same provider resubscribes");
+  const renewed = consumer.created.at(-1);
+  assert.notEqual(renewed, first);
+  assert.equal(renewed.params.grant, "renewed");
+  assert.equal(renewed.params.session_id, first.params.session_id, "the ack route is unchanged");
+  assert.equal(session.descriptor.grant, "g", "the descriptor keeps the original grant");
+  renewed.handlers.connected();
+  assert.ok(renewed.sent.some(message => message.id !== undefined), "pending work replays on the renewed subscription");
+  ack(renewed);
+  await tick();
+  assert.equal(session.hasPending, false);
+});
+
+test("a failed refresh blocks the session with the refresh error", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ error: "forbidden" }, 403));
+  const attachment = store.acquire(refreshing), session = attachment.session;
+  sync(consumer.created[0]);
+  attachment.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "recover me"));
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(session.state, "blocked");
+  assert.match(String(session.error), /403/);
+  assert.equal(attachment.signal.aborted, true);
+  assert.equal(session.hasPending, true);
+  assert.equal(consumer.created.length, 1, "no resubscription without a grant");
+});
+
+test("a renewed grant that is rejected in turn blocks without fetching again, and retry uses it", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const attachment = store.acquire(refreshing), session = attachment.session;
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  const renewed = consumer.created.at(-1);
+  assert.equal(renewed.params.grant, "renewed");
+  renewed.handlers.rejected();
+  await tick(); await tick();
+  assert.equal(calls.length, 1, "one renewal per rejection");
+  assert.equal(session.state, "blocked");
+  assert.equal(attachment.signal.aborted, true);
+  session.retry();
+  assert.equal(consumer.created.at(-1).params.grant, "renewed", "retry reconnects with the current grant");
+});
+
+test("a reconnect after a successful renewal may renew again on the next rejection", async t => {
+  const { consumer, store } = setup(t);
+  let n = 0;
+  const calls = stubFetch(t, () => jsonResponse({ grant: `renewed-${++n}` }));
+  const attachment = store.acquire(refreshing), session = attachment.session;
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  const renewed = consumer.created.at(-1);
+  renewed.handlers.connected();
+  renewed.handlers.rejected();
+  await tick(); await tick();
+  assert.equal(calls.length, 2);
+  assert.equal(consumer.created.at(-1).params.grant, "renewed-2");
+  assert.equal(session.state, "attached");
+  assert.equal(attachment.signal.aborted, false);
+});
+
+test("without a refresh URL a rejection blocks immediately and nothing is fetched", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ grant: "unused" }));
+  const attachment = store.acquire(descriptor), session = attachment.session;
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(calls.length, 0);
+  assert.equal(session.state, "blocked");
+  assert.equal(attachment.signal.aborted, true);
+});

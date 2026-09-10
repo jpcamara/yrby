@@ -91,8 +91,13 @@ module Y
 
     # A signed token a channel can trade back for this record with
     # Y::Collaborative.locate, but only for this attribute.
-    def collaborative_sgid(name)
-      to_sgid(for: Y::Collaborative.sgid_purpose(name)).to_s
+    # Pass expires_in: to bound the grant's life. Without it, GlobalID's own
+    # default applies, which is one month under Rails. The key is only passed
+    # through when given: an explicit nil would mean "never expire".
+    def collaborative_sgid(name, expires_in: nil)
+      options = { for: Y::Collaborative.sgid_purpose(name) }
+      options[:expires_in] = expires_in if expires_in
+      to_sgid(**options).to_s
     end
   end
 end

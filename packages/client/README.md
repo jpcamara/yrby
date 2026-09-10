@@ -96,6 +96,18 @@ to attach again, or remount the element. `element.destroy()` releases its
 attachment and prevents automatic binding until it is reinserted; it does not
 discard pending edits.
 
+A `refresh` attribute names a same-origin URL that returns a new grant for
+this document as JSON, `{ "grant": "..." }`. It is used when the server
+rejects the subscription, which is what happens when a grant expires and the
+cable reconnects. The session fetches the URL with the browser's session
+cookies, resubscribes with the new grant, and keeps its document, its pending
+edits, and its acknowledgment route. The application decides whether to issue
+a grant, so the request is a fresh permission check. Nothing is fetched ahead
+of time. One renewal is tried per rejection: if the refresh fails, or the
+renewed grant is rejected as well, the session blocks as it would without the
+attribute. The attribute is read when the session is acquired, and changing
+it later does not rebind the editor.
+
 Install `@rails/actioncable`, `yjs`, and `y-protocols` for the default element.
 All default elements share one consumer, including its in-flight import.
 For AnyCable assign an ActionCable-compatible consumer before adding elements:
@@ -155,11 +167,13 @@ unmount the old scope and deal with its retained work. A new consumer does not
 adopt it.
 
 A blocked session's `exportRecovery()` returns copies of its full Yjs
-`update`, its `pending` tail, and its `descriptor`. `retry()` retries with the
-original authorization only. The application can export those bytes or call
+`update`, its `pending` tail, and its `descriptor`. `retry()` reconnects with
+the session's current grant, which is the original one or the last one its
+`refresh` URL returned. The application can export those bytes or call
 `discard()`. Cache eviction never discards unsaved work. Recovery is held in
-memory, and that memory grows with the retained work. A new grant does not
-unblock a blocked session.
+memory, and that memory grows with the retained work. A grant supplied any
+other way, such as a new element attribute, does not unblock a blocked
+session; it starts a separate one.
 
 Custom persistence integrations can still use `provider.pendingUpdate` and
 `provider.restorePendingUpdate(bytes)`. Restore saved full state through

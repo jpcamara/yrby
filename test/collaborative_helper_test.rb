@@ -13,6 +13,7 @@ SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secr
 # The view side: collaborative_document_tag renders the signed grant, channel
 # name, and attribute name a client needs.
 class CollaborativeHelperTest < Minitest::Test
+  include ActiveSupport::Testing::TimeHelpers
   include ActionView::Helpers::TagHelper
   include Y::Collaborative::Helper
 
@@ -38,6 +39,23 @@ class CollaborativeHelperTest < Minitest::Test
     assert_match(/\A<yrby-document /, html)
     assert_equal @page, Y::Collaborative.locate(grant, :body), "the rendered grant verifies to the record"
     assert_includes html, 'name="body"'
+  end
+
+  def test_refresh_option_renders_the_url_the_element_fetches_a_new_grant_from
+    html = collaborative_document_tag(@page, :body, refresh: "/pages/1/grant")
+
+    assert_includes html, 'refresh="/pages/1/grant"'
+    refute_includes collaborative_document_tag(@page, :body), "refresh="
+  end
+
+  def test_expires_in_option_mints_an_expiring_grant
+    html = collaborative_document_tag(@page, :body, expires_in: 1.minute)
+    grant = html[/ grant="([^"]+)"/, 1]
+
+    assert_equal @page, Y::Collaborative.locate(grant, :body)
+    travel 2.minutes do
+      assert_nil Y::Collaborative.locate(grant, :body)
+    end
   end
 
   # Pointing the tag at a subclass of the shipped channel is one attribute.

@@ -13,7 +13,7 @@ function defaultConsumer(): Promise<CableConsumer> {
 /** An editor attachment. The session store owns documents and pending delivery. */
 export class YrbyDocumentElement extends Base {
   static consumer: CableConsumer | Promise<CableConsumer> | undefined;
-  static observedAttributes = ["grant", "name", "channel"];
+  static observedAttributes = ["grant", "name", "channel", "refresh"];
   #attachment: DocumentAttachment | undefined;
   #connected = false;
   #active = false;
@@ -38,8 +38,11 @@ export class YrbyDocumentElement extends Base {
     // Same-turn moves keep their binding, queue, undo history, and presence.
     queueMicrotask(() => { if (!this.#connected) this.destroy(); });
   }
-  attributeChangedCallback(_name: string, oldValue: string | null, newValue: string | null): void {
+  attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
     if (oldValue === newValue || !this.#connected) return;
+    // The refresh URL is read when the session is acquired and is not part of
+    // its identity, so changing it does not rebind the editor.
+    if (name === "refresh") return;
     this.#release();
     const generation = this.#generation;
     queueMicrotask(() => { if (generation === this.#generation) void this.#attach(); });
@@ -64,7 +67,8 @@ export class YrbyDocumentElement extends Base {
     this.#starting = true;
     const generation = this.#generation;
     const descriptor = { channel: this.getAttribute("channel") || undefined,
-      grant: this.getAttribute("grant") || "", name: this.getAttribute("name") || "" };
+      grant: this.getAttribute("grant") || "", name: this.getAttribute("name") || "",
+      refresh: this.getAttribute("refresh") || undefined };
     try {
       const consumer = await (YrbyDocumentElement.consumer ?? defaultConsumer());
       if (!this.#connected || !this.#active || generation !== this.#generation) return;

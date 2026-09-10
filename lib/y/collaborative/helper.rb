@@ -26,9 +26,20 @@ module Y
     # so it can wrap the mount point an editor binds to:
     #
     #   <%= collaborative_document_tag @post, :body, id: "editor" %>
+    #
+    # expires_in: bounds the grant's life. refresh: names a URL the element
+    # fetches when a subscription is rejected, to get a fresh grant and
+    # resubscribe without a page load. The app's action re-runs its own
+    # authorization and renders { grant: record.collaborative_sgid(name) }:
+    #
+    #   <%= collaborative_document_tag @post, :body, expires_in: 10.minutes,
+    #                                  refresh: grant_post_path(@post) %>
     module Helper
-      def collaborative_document_tag(record, name, **, &)
-        tag.yrby_document(**, grant: record.collaborative_sgid(name), name: name, &)
+      def collaborative_document_tag(record, name, expires_in: nil, refresh: nil, **, &)
+        grant = record.collaborative_sgid(name, expires_in: expires_in)
+        attributes = { grant: grant, name: name }
+        attributes[:refresh] = refresh if refresh
+        tag.yrby_document(**, **attributes, &)
       end
     end
   end

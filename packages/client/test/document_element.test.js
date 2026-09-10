@@ -196,3 +196,14 @@ test("old adapter cleanup cannot unregister a replacement adapter in the same do
   assert.equal(current.el.doc, undefined);
   assert.equal(doc.isDestroyed, true);
 });
+
+test("the refresh attribute reaches the session and changing it does not rebind", async t => {
+  const { el, consumer, mount, change } = setup(t, { grant: "g", name: "body", refresh: "/grant" });
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  const session = el.session, signal = el.events[0].detail.signal;
+  assert.equal(session.descriptor.refresh, "/grant");
+  change("refresh", "/other");
+  await tick();
+  assert.equal(signal.aborted, false);
+  assert.equal(el.session, session);
+});
