@@ -806,6 +806,25 @@ channel you write, you define it, and it receives the document key. The shipped
 block a valid grant is enough. A subclass can override `authorized?` directly
 instead; the located record is available as `record`.
 
+### Presence from Ruby
+
+`Y::Awareness` lets a Ruby process show up as a live collaborator, the way a
+browser does. Set a state and broadcast the frame it returns:
+
+```ruby
+presence = Y::Awareness.new
+frame = presence.set_local_state({ name: "Agent", color: "#7c3aed" }.to_json)
+# Broadcast `frame` to the document's subscribers:
+#   Y::ActionCable.broadcast(document_key, frame)
+```
+
+`set_local_state` takes a JSON string (the shape your editor renders) and
+returns the y-protocol awareness frame. Browsers subscribed to the document
+apply it as another participant. `clear_local_state` returns the frame that
+removes the presence. Awareness expires on a timer, so a long-lived process
+re-broadcasts its state periodically to stay present. The bytes are the same
+wire format Yjs and y-protocols use, so nothing on the client changes.
+
 ### Grant lifetime and refresh
 
 A grant lives as long as GlobalID's signed-id default, which is one month under
