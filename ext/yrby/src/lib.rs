@@ -2,7 +2,8 @@ use magnus::{
     function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RString, Ruby,
     TryConvert, Value,
 };
-use yrs::sync::{Message, SyncMessage};
+use std::cell::RefCell;
+use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, Transact};
@@ -643,6 +644,59 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // Module Initialization
 // ============================================================================
 
+/// A presence handle a Ruby process can use to appear as a live collaborator.
+///
+/// Wraps a yrs `Awareness`. `set_local_state` takes a JSON string (the shape the
+/// editor renders, e.g. `{"name":"Agent","color":"#7c3aed"}`) and returns the
+/// y-protocol awareness frame to broadcast. Browsers subscribed to the document
+/// apply it as another participant. `clear_local_state` returns the frame that
+/// removes this presence. The bytes are the same wire format Yjs and
+/// y-protocols use, so no client change is needed.
+#[magnus::wrap(class = "Y::Awareness", free_immediately, size)]
+struct RbAwareness(RefCell<Awareness>);
+
+impl RbAwareness {
+    fn new(args: &[Value]) -> Result<Self, Error> {
+        let doc = if args.is_empty() || args[0].is_nil() {
+            Doc::new()
+        } else {
+            let client_id: u64 = TryConvert::try_convert(args[0])?;
+            Doc::with_client_id(client_id)
+        };
+        Ok(RbAwareness(RefCell::new(Awareness::new(doc))))
+    }
+
+    /// This presence's client id, stable for the life of the handle.
+    fn client_id(&self) -> u64 {
+        self.0.borrow().client_id().get()
+    }
+
+    /// Set this client's presence from a JSON string and return the awareness
+    /// frame to broadcast.
+    fn set_local_state(&self, json: String) -> Result<RString, Error> {
+        let value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| yrb_error(format!("Y::Awareness state must be JSON: {e}")))?;
+        let mut awareness = self.0.borrow_mut();
+        awareness
+            .set_local_state(value)
+            .map_err(|e| yrb_error(e.to_string()))?;
+        Self::frame(&awareness)
+    }
+
+    /// Remove this client's presence and return the frame that tells peers to
+    /// drop it.
+    fn clear_local_state(&self) -> Result<RString, Error> {
+        let mut awareness = self.0.borrow_mut();
+        awareness.clean_local_state();
+        Self::frame(&awareness)
+    }
+
+    fn frame(awareness: &Awareness) -> Result<RString, Error> {
+        let update = awareness.update().map_err(|e| yrb_error(e.to_string()))?;
+        Ok(binary_string(&Message::Awareness(update).encode_v1()))
+    }
+}
+
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("Y")?;
@@ -694,6 +748,12 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     prosemirror_class.define_singleton_method("new", function!(RbProseMirror::native_new, 2))?;
     prosemirror_class.define_method("to_html", method!(RbProseMirror::native_to_html, -1))?;
     prosemirror_class.define_method("node_types", method!(RbProseMirror::node_types, -1))?;
+
+    let awareness_class = module.define_class("Awareness", ruby.class_object())?;
+    awareness_class.define_singleton_method("new", function!(RbAwareness::new, -1))?;
+    awareness_class.define_method("client_id", method!(RbAwareness::client_id, 0))?;
+    awareness_class.define_method("set_local_state", method!(RbAwareness::set_local_state, 1))?;
+    awareness_class.define_method("clear_local_state", method!(RbAwareness::clear_local_state, 0))?;
 
     // Live shared-type handles.
     map::define(ruby, module)?;
