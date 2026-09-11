@@ -270,22 +270,23 @@ try {
   // storage right before it runs it. Every browser edit is recorded there
   // before it is acked, so an edit typed during an earlier step is what the
   // next step runs. That is the hard part of collaboration: the human's live
-  // edit changes what the agent does next. Verified through storage, so it
-  // holds on any cable adapter. (The agent's progress reaches browsers through
-  // an ordinary broadcast, which needs a cross-process adapter like redis or
-  // solid_cable, the same as any Action Cable broadcast from a job.)
+  // edit changes what the agent does next. The agent's progress reaches this
+  // browser live through the module-level broadcast, framed as a sync message
+  // like any other update, on the in-process adapter this fixture runs.
   await browser(session, "open", base);
   await wait('["#plan-doc", "#agent-log-doc"].every(id => document.querySelector(id)?.provider?.synced)');
   await browser(session, "find", "label", "Plan", "fill", "collect metrics\nverify\nreport");
   await wait('!document.querySelector("#plan-doc").provider.hasPending');
   const agentStart = await fetch(`${base}/agent/run`, { method: "POST" });
   assert.equal(agentStart.status, 204);
-  await pollState("agent_log", text => text.includes("Running: collect metrics"));
+  await wait('document.querySelector("#agent-log-doc").querySelector("textarea").value.includes("Running: collect metrics")');
   await browser(session, "find", "label", "Plan", "fill", "collect metrics\nverify the deployment\nreport");
   await wait('!document.querySelector("#plan-doc").provider.hasPending');
-  const agentLog = await pollState("agent_log", text => text.includes("Plan complete."));
+  await wait('document.querySelector("#agent-log-doc").querySelector("textarea").value.includes("Plan complete.")');
+  const agentLog = await evaluate('document.querySelector("#agent-log-doc").querySelector("textarea").value');
   check("a browser edit made while an earlier step ran is what the agent runs next",
     agentLog.includes("Done: verify the deployment -> ok") && !agentLog.includes("Running: verify\n"));
+  check("the agent's progress reached the browser live", (await state("agent_log")).text === agentLog);
 
   // A copied, valid grant cannot bypass the authenticated connection's policy.
   await browser(peer, "open", `${base}/?user=visitor`);
