@@ -330,7 +330,7 @@ impl RbDoc {
             let mut ordinal = 0u32;
             for d in root_ref.diff(&txn, yrs::types::text::YChange::identity) {
                 if let yrs::Out::YXmlText(block) = &d.insert {
-                    if contains_branch(&txn, &block, target) {
+                    if contains_branch(&txn, block, target) {
                         return Some(ordinal);
                     }
                     ordinal += 1;
@@ -883,7 +883,7 @@ fn contains_branch<T: ReadTxn>(
     }
     for d in block.diff(txn, yrs::types::text::YChange::identity) {
         if let yrs::Out::YXmlText(child) = &d.insert {
-            if contains_branch(txn, &child, branch) {
+            if contains_branch(txn, child, branch) {
                 return true;
             }
         }
