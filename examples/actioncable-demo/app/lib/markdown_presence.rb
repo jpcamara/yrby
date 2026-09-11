@@ -44,6 +44,35 @@ module MarkdownPresence
     (@others ||= Y::Awareness.new).apply_update(frame)
     note_renewals
     note_movement
+    note_selections
+  rescue StandardError => e
+    Rails.logger.warn("agent presence: #{e.class}: #{e.message} @ #{e.backtrace&.first}")
+  end
+
+  SELECTION_MEMORY = 120 # seconds a selection stays the meaning of "this"
+
+  # The byte range the author of the line at `line` meant by "this": what
+  # they last selected, if recent and still there, else nil.
+  def selection_for(line)
+    client = author_of(line) or return
+    remembered = @selections&.dig(client) or return
+    return if Process.clock_gettime(Process::CLOCK_MONOTONIC) - remembered[:at] > SELECTION_MEMORY
+
+    from = @doc.index_at(remembered[:start], @text.root_name)
+    to = @doc.index_at(remembered[:end], @text.root_name)
+    [from, to].minmax if from && to && from != to
+  end
+
+  # The client whose caret is on `line`.
+  def author_of(line)
+    return unless @others
+
+    @others.states.find do |client, state|
+      next false if client == @presence.client_id || !state.is_a?(Hash)
+
+      head = state.dig("cursor", "head")
+      head.is_a?(Hash) && line_of(@doc.index_at(head, @text.root_name)) == line
+    end&.first
   end
 
   private
@@ -52,6 +81,27 @@ module MarkdownPresence
     return unless index
 
     @text.to_s.byteslice(0, index).to_s.count("\n")
+  end
+
+  # A non-collapsed selection is remembered per client as two anchors, so it
+  # still names the same text after edits above it.
+  def note_selections
+    @selections ||= {}
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @others.states.each do |client, state|
+      next if client == @presence.client_id || !state.is_a?(Hash)
+
+      cursor = state["cursor"]
+      next unless cursor.is_a?(Hash) && cursor["anchor"].is_a?(Hash) && cursor["head"].is_a?(Hash)
+
+      a = @doc.index_at(cursor["anchor"], @text.root_name)
+      h = @doc.index_at(cursor["head"], @text.root_name)
+      next unless a && h && a != h
+
+      from, to = [a, h].minmax
+      @selections[client] = { start: @text.relative_position(from, assoc: :before),
+                              end: @text.relative_position(to, assoc: :after), at: now }
+    end
   end
 
   def note_renewals

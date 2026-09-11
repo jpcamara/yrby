@@ -65,21 +65,27 @@ module MarkdownWork
   # into a new section at the end. Returns the section used, or nil.
   def open_section(task)
     section = task.under && MarkdownDoc.section(text, task.under)
-    if section
-      @section_title = section.title
-      @section_heading = @text.relative_position(MarkdownDoc.line_start(text, section.line))
-      at = MarkdownDoc.line_end(text, MarkdownDoc.section_content_end(text, section))
-      @draft_writer = MarkdownWriter.new(@doc, @text, flush: flush, at: at)
-      @draft_writer.feed("\n\n")
-    else
-      @section_title = section_title(task.text)
-      ensure_trailing_newlines(2)
-      heading_at = @text.length
-      flush.call(@doc.diff { @text.insert(@text.length, "## #{@section_title}\n\n") })
-      @section_heading = @text.relative_position(heading_at)
-      @draft_writer = MarkdownWriter.new(@doc, @text, flush: flush, at: @text.length)
-    end
+    section ? open_named_section(section) : open_new_section(task)
     section
+  end
+
+  def open_named_section(section)
+    @section_title = section.title
+    @section_heading = @text.relative_position(MarkdownDoc.line_start(text, section.line))
+    at = MarkdownDoc.line_end(text, MarkdownDoc.section_content_end(text, section))
+    @draft_region = region(at, at)
+    @draft_writer = MarkdownWriter.new(@doc, @text, flush: flush, at: at)
+    @draft_writer.feed("\n\n")
+  end
+
+  def open_new_section(task)
+    @section_title = section_title(task.text)
+    ensure_trailing_newlines(2)
+    heading_at = @text.length
+    @draft_region = region(heading_at, heading_at)
+    flush.call(@doc.diff { @text.insert(@text.length, "## #{@section_title}\n\n") })
+    @section_heading = @text.relative_position(heading_at)
+    @draft_writer = MarkdownWriter.new(@doc, @text, flush: flush, at: @text.length)
   end
 
   # Let the draft out a little, unless a person is in the section.
@@ -108,6 +114,7 @@ module MarkdownWork
     ensure_trailing_newlines(1) if @draft_writer.index >= @text.length
     mark(@task, :done, anchor: @task_anchor)
     (@sections ||= []) << { title: @section_title, heading: @section_heading }
+    remember_undo("the draft of #{@section_title}", @draft_region) if @draft_region
     present("drafted #{@section_title}", @draft_writer.index,
             detail: "\"#{@task.text}\" is done; edit the section and it's yours")
     note_in_review("Drafted #{@section_title} from the list; edit it and it's yours.")

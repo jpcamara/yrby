@@ -15,9 +15,15 @@ module MarkdownReactions
 
     request = ls[line].strip
     case request
+    when /\A@agent\s+undo\b/i then undo_last(line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(line, request)
     when /\A@agent\s+draft\s+(this|the|here)\b/i then draft_here(line)
-    when /\A@agent\b/i then answer(line, request) unless @answered.include?(request)
+    when /\A@agent\b/i
+      if scoped_request?(request)
+        edit_selection(line, request)
+      elsif !@answered.include?(request)
+        answer(line, request)
+      end
     end
   end
 
@@ -46,11 +52,98 @@ module MarkdownReactions
 
   def apply_contribution(result, avoid)
     highlight = ->(status, from, to) { present(status, from, to, sticky: true) }
+    reg = region_of_plan(result.edits)
     applied = MarkdownEditor.new(@doc, @text, flush: flush, avoid: avoid, presence: highlight).apply(result.edits)
     return unless applied.positive?
 
+    remember_undo("what I added after your change", reg) if reg
     present("added to what you wrote", @text.length, detail: result.note.presence)
     note_in_review("Added after your change: #{result.note.presence || "a line"}")
+  end
+
+  # The byte range a plan will touch, as a region to undo, or nil.
+  def region_of_plan(plan)
+    paragraphs = MarkdownDoc.paragraphs(text)
+    blocks = plan.filter_map { |e| e["block"] if e["block"].is_a?(Integer) && paragraphs[e["block"]] }
+    return if blocks.empty?
+
+    region(MarkdownDoc.line_start(text, paragraphs[blocks.min].first_line),
+           MarkdownDoc.line_end(text, paragraphs[blocks.max].last_line))
+  end
+
+  def scoped_request?(request)
+    !request.end_with?("?") && request.match?(/\b(this|these|that|the selection|selected)\b/i)
+  end
+
+  # "@agent rewrite this in one sentence": the paragraphs the author last
+  # selected (or the one above the line) are the only ones the plan may
+  # touch. The request line goes; the rewrite is typed in its place.
+  def edit_selection(line, request)
+    range = selection_for(line)
+    Rails.logger.debug { "agent: scope for line #{line}: #{range.inspect}" }
+    range ||= paragraph_above(line)
+    return answer(line, request) unless range
+
+    instruction = request.sub(/\A@agent\s*:?\s*/i, "").strip
+    from, to = take_request(line, range)
+    return present("what you selected is gone", @last_index) unless from
+
+    rewrite(*paragraph_span(from, to), instruction)
+    @changes.clear
+  end
+
+  # Paragraph numbers covering a byte range.
+  def paragraph_span(from, to)
+    paragraphs = MarkdownDoc.paragraphs(text)
+    first = paragraphs.index { |p| MarkdownDoc.line_end(text, p.last_line) > from } || (paragraphs.length - 1)
+    last = paragraphs.rindex { |p| MarkdownDoc.line_start(text, p.first_line) < to } || first
+    [first, [last, first].max]
+  end
+
+  def rewrite(first, last, instruction)
+    paragraphs = MarkdownDoc.paragraphs(text)
+    reg = region(MarkdownDoc.line_start(text, paragraphs[first].first_line),
+                 MarkdownDoc.line_end(text, paragraphs[last].last_line))
+    present("rewriting what you selected", *region_bounds(reg), sticky: true)
+    plan = @reviewer.edits(instruction, paragraphs.map(&:text), only: first..last)
+    highlight = ->(status, a, b) { present(status, a, b, sticky: true) }
+    applied = MarkdownEditor.new(@doc, @text, flush: flush, presence: highlight, only: first..last).apply(plan)
+    label = first == last ? "the rewrite of paragraph #{first}" : "the rewrite of paragraphs #{first} to #{last}"
+    remember_undo(label, reg)
+    present("rewrote #{applied} #{applied == 1 ? "paragraph" : "paragraphs"} you selected", *region_bounds(reg))
+    note_in_review("Rewrote what you selected: #{instruction}")
+  end
+
+  # The paragraph just above a line, as a byte range, or nil.
+  def paragraph_above(line)
+    p = MarkdownDoc.paragraphs(text).select { |x| x.last_line < line }.max_by(&:last_line) or return
+    [MarkdownDoc.line_start(text, p.first_line), MarkdownDoc.line_end(text, p.last_line)]
+  end
+
+  # Take the request line out, keeping the scope by anchor across the deletion.
+  def take_request(line, range)
+    from, to = range
+    start = @text.relative_position(from, assoc: :before)
+    finish = @text.relative_position(to, assoc: :after)
+    present("taking your request", MarkdownDoc.line_start(text, line), MarkdownDoc.line_end(text, line), sticky: true)
+    delete_line(line)
+    [@doc.index_at(start, @text.root_name), @doc.index_at(finish, @text.root_name)]
+  end
+
+  # "@agent undo": put back whatever the agent did last.
+  def undo_last(line)
+    delete_line(line)
+    last = (@undos ||= []).pop
+    return present("nothing of mine to undo", @last_index) unless last
+
+    if revert(last[:region])
+      @reviewer.remember("Undid #{last[:label]}") if @reviewer.respond_to?(:remember)
+      present("undid #{last[:label]}", @last_index)
+      note_in_review("Undid #{last[:label]}.")
+    else
+      present("could not undo #{last[:label]}", @last_index, detail: "that part of the document is gone")
+    end
+    @changes.clear
   end
 
   # A change is worth a look once it reads finished: the paragraph ends with
@@ -127,11 +220,13 @@ module MarkdownReactions
     @answered << question
     at = MarkdownDoc.line_end(text, line)
     present("answering", at, sticky: true)
+    reg = region(at, at)
     writer = MarkdownWriter.new(@doc, @text, flush: flush, at: at)
     writer.feed("\n\n")
     stream_into(writer, "answering", pace: ANSWER_PACE) do |emit|
       @reviewer.answer(question, text, &without_headings(emit))
     end
+    remember_undo("my answer", reg)
     present("answered", writer.index)
   end
 

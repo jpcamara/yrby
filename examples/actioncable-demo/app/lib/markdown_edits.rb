@@ -6,6 +6,39 @@
 module MarkdownEdits
   private
 
+  # What the agent does can be undone: each action records the byte range it
+  # touched as two anchors (before the start, after the end) and the text
+  # that was there. The anchors keep bracketing the region as people edit
+  # around it, so undo puts the old text back wherever it is now.
+  def region(from, to)
+    { start: @text.relative_position(from, assoc: :before), end: @text.relative_position(to, assoc: :after),
+      text: text.byteslice(from, to - from).to_s }
+  end
+
+  def region_bounds(reg)
+    from = @doc.index_at(reg[:start], @text.root_name)
+    to = @doc.index_at(reg[:end], @text.root_name)
+    [from, to] if from && to && to >= from
+  end
+
+  def remember_undo(label, reg)
+    (@undos ||= []) << { label: label, region: reg }
+  end
+
+  # Put a region's old text back. Returns where it went, or nil when the
+  # region is gone.
+  def revert(reg)
+    bounds = region_bounds(reg) or return
+    from, to = bounds
+    present("undoing", from, to, sticky: true)
+    sleep 0.4
+    flush.call(@doc.diff do
+      @text.delete(from, to - from) if to > from
+      @text.insert(from, reg[:text]) unless reg[:text].empty?
+    end)
+    from
+  end
+
   # Tasks in the document, never counting the agent's own review section.
   def tasks = MarkdownDoc.tasks(text, except: [MarkdownAgent::REVIEW_TITLE])
 
