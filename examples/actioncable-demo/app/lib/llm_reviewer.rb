@@ -54,7 +54,11 @@ class LlmReviewer
   # blocks, in order). Falls back to the stub's plan.
   def edits(instruction, blocks)
     numbered = blocks.each_with_index.map { |b, i| "[#{i}] #{b}" }.join("\n")
-    Reviewer.parse_edits(ask(format(EDIT_PROMPT, instruction.inspect, numbered)))
+    plan = Reviewer.parse_edits(ask(format(EDIT_PROMPT, instruction.inspect, numbered)))
+    remember("Edited the document on request (#{instruction}): " + plan.map { |e|
+      "#{e["op"]} block #{e["block"]}"
+    }.join(", "))
+    plan
   rescue StandardError => e
     Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
     StubReviewer.new.edits(instruction, blocks)
@@ -65,7 +69,9 @@ class LlmReviewer
   end
 
   def call(text)
-    Reviewer.parse(ask(format(PROMPT, text)))
+    review = Reviewer.parse(ask(format(PROMPT, text)))
+    remember("Reviewed the document: #{review.summary}")
+    review
   rescue StandardError => e
     Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
     StubReviewer.new.call(text)
@@ -76,10 +82,13 @@ class LlmReviewer
   # a fixed review after real words would read as nonsense.
   def stream(text, &block)
     started = false
+    said = +""
     streamed(format(PROMPT, text)) do |chunk|
       started = true
+      said << chunk
       block.call(chunk)
     end
+    remember("Reviewed the document and wrote: #{said}")
   rescue StandardError => e
     raise if started
 
@@ -90,10 +99,13 @@ class LlmReviewer
   # An answer, streamed, with the same fallback rule.
   def answer(question, text, &block)
     started = false
+    said = +""
     streamed(format(QUESTION_PROMPT, question, text)) do |chunk|
       started = true
+      said << chunk
       block.call(chunk)
     end
+    remember("Answered \"#{question}\": #{said}")
   rescue StandardError => e
     raise if started
 
@@ -101,11 +113,79 @@ class LlmReviewer
     StubReviewer.new.answer(question, text, &block)
   end
 
+  INSTRUCTIONS = <<~TXT
+    You are a collaborator in a short working document that a team edits
+    together in real time. You review it, answer questions addressed to
+    @agent, edit it on request, and, between requests, notice what people
+    write and contribute only when it clearly helps. Keep contributions
+    small, concrete, and additive. Never restate the document. Remember what
+    you have already said and done in this document.
+  TXT
+
+  CONSIDER_PROMPT = <<~PROMPT
+    People just changed these blocks (by number):
+    %s
+
+    People are currently writing in blocks: %s. Do not touch those.
+
+    Decide whether a small contribution is clearly helpful right now: an
+    owner or date a task is missing, a question in the text you can answer,
+    a TODO you can draft in a line or two, a plain error. If not, do nothing.
+    Suggestions under the "Agent review" heading are your own earlier
+    review, not requests from the team; do not act on them here.
+
+    Reply with JSON only: {"note":"one short line on what you did or why not","edits":[...]}
+    where edits is empty or holds at most 3 of:
+    {"op":"replace","block":N,"text":"..."} {"op":"insert_after","block":N,"text":"..."} {"op":"delete","block":N}
+
+    Document:
+    %s
+  PROMPT
+
+  Consideration = Data.define(:note, :edits)
+
+  MEMORY_LIMIT = 8
+
+  def initialize
+    @memory = []
+  end
+
+  # What the agent has done in this document so far, for the next prompt. A
+  # reasoning model's reply history is large and some providers reject it
+  # when sent back, so the agent carries its own short account instead.
+  def remember(line)
+    @memory << line.to_s.gsub(/\s+/, " ").strip[0, 240]
+    @memory.shift while @memory.size > MEMORY_LIMIT
+  end
+
+  def memory_prompt
+    return "" if @memory.empty?
+
+    lines = @memory.map { |m| "- #{m}" }.join("\n")
+    "What you have already done in this document, oldest first:\n#{lines}\n\n"
+  end
+
+  # Between requests: given what changed and where people are, a small plan
+  # or nothing. Falls back to the stub's judgment.
+  def consider(changed_blocks, occupied, blocks)
+    numbered = blocks.each_with_index.map { |b, i| "[#{i}] #{b}" }.join("\n")
+    changed = changed_blocks.map { |i| "[#{i}] #{blocks[i]}" }.join("\n")
+    reply = ask(format(CONSIDER_PROMPT, changed, occupied.empty? ? "none" : occupied.join(", "), numbered))
+    json = Reviewer.first_json(reply)
+    result = Consideration.new(note: json["note"].to_s, edits: Array(json["edits"]))
+    did = result.edits.empty? ? "Saw a change and left it alone" : "Contributed after a change"
+    remember("#{did}: #{result.note}")
+    result
+  rescue StandardError => e
+    Rails.logger.warn("LlmReviewer consider fell back to the stub: #{e.class}: #{e.message}")
+    StubReviewer.new.consider(changed_blocks, occupied, blocks)
+  end
+
   private
 
   # Stream a prompt, skipping the chunks a reasoning model sends with no text.
   def streamed(prompt)
-    chat.ask(prompt) do |chunk|
+    chat.ask(memory_prompt + prompt) do |chunk|
       content = chunk.content.to_s
       yield content unless content.empty?
     end
@@ -113,9 +193,11 @@ class LlmReviewer
   end
 
   def ask(prompt)
-    chat.ask(prompt).content.to_s
+    chat.ask(memory_prompt + prompt).content.to_s
   end
 
+  # A fresh chat per call, with the standing instructions. The reviewer's own
+  # memory goes in the prompt, so no reply history is sent back.
   def chat
     require "ruby_llm"
     if ENV["FIREWORKS_API_KEY"].to_s.empty?
@@ -131,6 +213,6 @@ class LlmReviewer
         c.request_timeout = 90
       end
       RubyLLM.chat(model: ENV.fetch("AGENT_MODEL", FIREWORKS_MODEL), provider: :openai, assume_model_exists: true)
-    end
+    end.with_instructions(INSTRUCTIONS)
   end
 end
