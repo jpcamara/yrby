@@ -32,6 +32,34 @@ class LlmReviewer
     %s
   PROMPT
 
+  EDIT_PROMPT = <<~PROMPT
+    You are editing a short working document that a team shares. The document
+    is a list of numbered blocks. Apply this instruction: %s
+
+    Reply with JSON only, no prose, no code fences: {"edits":[...]} where each
+    edit is one of:
+    {"op":"replace","block":N,"text":"new text for that block"}
+    {"op":"insert_after","block":N,"text":"text for a new block after N"}
+    {"op":"delete","block":N}
+    {"op":"heading","block":N,"level":2}
+    In insert_after text, start a line with "- " for a bullet or "1. " for a
+    numbered item; several lines make several blocks. Refer to blocks by
+    number. Keep edits minimal and concrete. At most 12 edits.
+
+    Document:
+    %s
+  PROMPT
+
+  # An edit plan for `instruction` over `blocks` (the document's top-level
+  # blocks, in order). Falls back to the stub's plan.
+  def edits(instruction, blocks)
+    numbered = blocks.each_with_index.map { |b, i| "[#{i}] #{b}" }.join("\n")
+    Reviewer.parse_edits(ask(format(EDIT_PROMPT, instruction.inspect, numbered)))
+  rescue StandardError => e
+    Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
+    StubReviewer.new.edits(instruction, blocks)
+  end
+
   def self.available?
     !ENV["FIREWORKS_API_KEY"].to_s.empty? || !ENV["ANTHROPIC_API_KEY"].to_s.empty?
   end

@@ -8,6 +8,17 @@ module Reviewer
     LlmReviewer.available? ? LlmReviewer.new : StubReviewer.new
   end
 
+  # Model output for an edit plan: JSON, possibly wrapped in a code fence or
+  # prose. The first {...} that parses wins.
+  def self.parse_edits(reply)
+    text = reply.to_s.gsub(/```(?:json)?/, "")
+    json = text[text.index("{")..text.rindex("}")] if text.index("{") && text.rindex("}")
+    edits = JSON.parse(json.to_s)["edits"]
+    raise ArgumentError, "no edits in reply" unless edits.is_a?(Array)
+
+    edits
+  end
+
   # Model output as plain text: lines starting with "- " or "* " are the
   # suggestions, everything else is the summary.
   def self.parse(reply)

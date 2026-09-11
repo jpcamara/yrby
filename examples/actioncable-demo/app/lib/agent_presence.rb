@@ -4,6 +4,22 @@
 module AgentPresence
   IDENTITY = { name: "Agent \u{1F916}", color: "#7c3aed" }.freeze
 
+  # Highlight `block` with a status, the way the editor shows what it is
+  # about to change.
+  def show(status, block)
+    present(status, block.relative_position([1, block.length].min), block.relative_position(block.length))
+  end
+
+  # Move the caret to the end of `block` a few times a second while typing.
+  def follow(block)
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    return if @followed_at && now - @followed_at < 0.25
+
+    @followed_at = now
+    present(@last_presence ? @last_presence[:status] : "editing", block.relative_position(block.length),
+            block.relative_position(block.length))
+  end
+
   private
 
   def block_selection(index)

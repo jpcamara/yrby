@@ -16,7 +16,7 @@ class ReviewAgent
   QUIET = 1.5 # seconds without further edits before the agent notes a change
   KEEP_ALIVE = 15 # presence expires in editors after 30s of silence; refresh before that
 
-  def initialize(document_id, reviewer: Reviewer.default, ticks: 3, pause: 4, watch: 90)
+  def initialize(document_id, reviewer: Reviewer.default, ticks: 3, pause: 4, watch: 600)
     @document_id = document_id
     @reviewer = reviewer
     @ticks = ticks
@@ -84,12 +84,7 @@ class ReviewAgent
       end
       next unless index && index < root.xml_text_count
 
-      question = block_text(index)
-      if question.match?(/\A@agent\b/i)
-        answer(index, question) unless @answered.include?(question)
-      else
-        note_change(index)
-      end
+      react_to(index)
       @changes.clear # what arrived while the agent was writing is not news
     end
   end
@@ -109,6 +104,19 @@ class ReviewAgent
     end
     yield emit
     writer.finish
+  end
+
+  # A line addressed to the agent is an instruction to edit or a question;
+  # anything else is a change to note.
+  def react_to(index)
+    line = block_text(index)
+    if line.match?(/\A@agent\s+edit\b/i)
+      edit_document(index, line)
+    elsif line.match?(/\A@agent\b/i)
+      answer(index, line) unless @answered.include?(line)
+    else
+      note_change(index)
+    end
   end
 
   def note_change(index)
