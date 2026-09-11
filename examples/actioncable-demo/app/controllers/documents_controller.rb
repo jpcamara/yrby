@@ -4,55 +4,17 @@ class DocumentsController < ApplicationController
   # The audit control endpoint is a test hook (POST without a form token).
   skip_forgery_protection only: %i[audit_control agent]
 
-  # Start a Ruby agent that joins the document as a live presence over the same
-  # DocumentChannel the browsers use. It publishes awareness (its name, color,
-  # and a status it updates as it reads the document) and re-broadcasts on a
-  # heartbeat so it stays present, then clears itself. This is Y::Awareness plus
-  # Y::ActionCable.broadcast: no browser change, the agent just shows up.
+  # Start a Ruby agent that joins the document as a live collaborator (see
+  # ReviewAgent). It runs in a background thread over the same DocumentChannel
+  # the browsers use; nothing in the browser changes beyond the roster.
   def agent
     document_id = params[:id]
     Thread.new do
       Rails.application.executor.wrap do
-        ActiveRecord::Base.connection_pool.with_connection do
-          presence = Y::Awareness.new
-          identity = { name: "Agent \u{1F916}", color: "#7c3aed" }
-          wrote = false
-          16.times do |tick|
-            # Read the shared document the way any Ruby process would: replay
-            # the store into a Y::Doc and read its rich text. The agent reacts
-            # to what people have written so far.
-            doc = Y::Doc.new
-            (bytes = Store.current.replay(document_id)) && doc.apply_update(bytes)
-            words = doc.read_xml("root").to_s.split.size
-            status = words.zero? ? "waiting for the first words" : "reviewing \u2014 #{words} words so far"
-
-            # After a few looks, write the review into the document itself: a
-            # heading and a paragraph, built in Lexical's own node shape, sent
-            # as a diff the open editors apply like any remote edit.
-            if !wrote && tick >= 2 && words.positive?
-              blocks = doc.get_xml_text("root").xml_text_count
-              before = doc.encode_state_vector
-              Y::Lexical.append_heading(doc, "Agent review", tag: "h2")
-              Y::Lexical.append_paragraph(doc, "Read #{words} words across #{blocks} blocks. " \
-                "The checklist reads clearly; every step has an owner implied by context. " \
-                "One suggestion: name who signs off before the report is published.")
-              update = doc.encode_state_as_update(before)
-              Store.current.record(document_id, update)
-              Y::ActionCable.broadcast(document_id, update)
-              wrote = true
-              status = "wrote a review into the document"
-            end
-
-            state = identity.merge(awarenessData: identity, anchorPos: nil, focusPos: nil,
-                                   focusing: true, status: status)
-            Y::ActionCable.broadcast_awareness(document_id, presence.set_local_state(state.to_json))
-            sleep 4
-          end
-          Y::ActionCable.broadcast_awareness(document_id, presence.clear_local_state)
-        end
+        ActiveRecord::Base.connection_pool.with_connection { ReviewAgent.new(document_id).run }
       end
     rescue StandardError => e
-      Rails.logger.error("agent presence failed: #{e.class}: #{e.message}")
+      Rails.logger.error("agent failed: #{e.class}: #{e.message}")
     end
     head :no_content
   end
@@ -85,10 +47,14 @@ class DocumentsController < ApplicationController
   # "Opaque state" demos. Each renders a different kind of collaborative app over
   # the SAME DocumentChannel, to show yrby syncs any Yjs shape (the views use
   # a per-demo suffix on the document id so the shapes don't collide).
-  def codemirror = (@document_id = params[:id]) # Y.Text  (code, with cursors)
-  def whiteboard = (@document_id = params[:id]) # Y.Map   (draggable shapes)
-  def kanban     = (@document_id = params[:id]) # Y.Array (cards)
-  def forms      = (@document_id = params[:id]) # Y.Map   (form fields)
+  # Y.Text  (code, with cursors)
+  def codemirror = (@document_id = params[:id])
+  # Y.Map   (draggable shapes)
+  def whiteboard = (@document_id = params[:id])
+  # Y.Array (cards)
+  def kanban     = (@document_id = params[:id])
+  # Y.Map   (form fields)
+  def forms = (@document_id = params[:id])
   # Y.Array of row Y.Maps whose cells are themselves Y.Maps of { value, bold,
   # fill } — so two people can write different properties of one cell. Sorting
   # and column order are TanStack Table's, per browser, never shared.

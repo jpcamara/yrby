@@ -12,7 +12,10 @@
 //! `XmlText`s, so a handle re-resolves correctly after other edits.
 
 use magnus::{prelude::*, r_hash::ForEach, Error, RHash, Ruby, Value};
-use yrs::{Doc, GetString, Text, Transact, Xml, XmlTextPrelim};
+use yrs::{
+    Assoc, Doc, GetString, IndexScope, IndexedSequence, StickyIndex, Text, Transact, Xml,
+    XmlTextPrelim,
+};
 
 use crate::shared::{
     embedded_xml_text_count, key_to_string, resolve_xml_text, ruby_to_invalue, to_in,
@@ -25,6 +28,16 @@ pub struct RbXmlText {
     doc: Doc,
     root: String,
     path: Vec<Seg>,
+}
+
+/// A relative position, computed without the GVL and turned into a Ruby Hash
+/// with it. Mirrors Yjs's RelativePosition JSON: inside a sequence it names
+/// the item to the right (or left); at the end of a nested type it names the
+/// type; at a root it names the root.
+enum RelPos {
+    Item(u64, u32),
+    Type(u64, u32),
+    Root(String),
 }
 
 fn clamp(index: i64, len: u32) -> u32 {
@@ -150,6 +163,54 @@ impl RbXmlText {
         Ok(value)
     }
 
+    /// The Yjs relative position of `index` as the `{type, tname, item, assoc}`
+    /// hash editors put in awareness as a caret. `assoc` is "after" (the
+    /// default: the space before the item at `index`) or "before".
+    fn native_relative_position(&self, index: i64, assoc: String) -> Result<RHash, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let assoc = if assoc == "before" {
+            Assoc::Before
+        } else {
+            Assoc::After
+        };
+        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let (pos, assoc) = nogvl(move || -> Result<(RelPos, i32), String> {
+            let txn = doc.transact();
+            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
+                .ok_or_else(|| "xml text no longer exists".to_string())?;
+            let at = clamp(index, x.len(&txn));
+            // Past the last item there is nothing to name, so Yjs anchors the
+            // position to the type itself (the block, or the root). Same here.
+            let sticky = x
+                .sticky_index(&txn, at, assoc)
+                .unwrap_or_else(|| StickyIndex::from_type(&txn, &x, assoc));
+            let pos = match sticky.scope() {
+                IndexScope::Relative(id) => RelPos::Item(id.client.get(), id.clock),
+                IndexScope::Nested(id) => RelPos::Type(id.client.get(), id.clock),
+                IndexScope::Root(name) => RelPos::Root(name.to_string()),
+            };
+            Ok((pos, sticky.assoc as i32))
+        })
+        .map_err(yrb_error)?;
+        let id = |client: u64, clock: u32| -> Result<RHash, Error> {
+            let h = ruby.hash_new();
+            h.aset("client", client)?;
+            h.aset("clock", clock)?;
+            Ok(h)
+        };
+        let h = ruby.hash_new();
+        h.aset("type", ruby.qnil())?;
+        h.aset("tname", ruby.qnil())?;
+        h.aset("item", ruby.qnil())?;
+        match pos {
+            RelPos::Item(c, k) => h.aset("item", id(c, k)?)?,
+            RelPos::Type(c, k) => h.aset("type", id(c, k)?)?,
+            RelPos::Root(name) => h.aset("tname", name)?,
+        }
+        h.aset("assoc", assoc)?;
+        Ok(h)
+    }
+
     /// Append a nested `XmlText` block with `attributes` and return a live
     /// handle to it. This is how a paragraph is added to a Lexical document.
     fn push_xml_text(&self, attributes: RHash) -> Result<RbXmlText, Error> {
@@ -226,5 +287,9 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
         magnus::method!(RbXmlText::push_xml_text, 1),
     )?;
     class.define_method("xml_text", magnus::method!(RbXmlText::xml_text, 1))?;
+    class.define_method(
+        "native_relative_position",
+        magnus::method!(RbXmlText::native_relative_position, 2),
+    )?;
     Ok(())
 }
