@@ -18,8 +18,8 @@ use yrs::{
 };
 
 use crate::shared::{
-    embedded_xml_text_count, key_to_string, resolve_xml_text, ruby_to_invalue, to_in,
-    to_map_prelim, InValue, Root, Seg,
+    embedded_xml_text_count, embedded_xml_text_index, key_to_string, resolve_xml_text,
+    ruby_to_invalue, to_in, to_map_prelim, InValue, Root, Seg,
 };
 use crate::{nogvl, yrb_error};
 
@@ -211,6 +211,85 @@ impl RbXmlText {
         Ok(h)
     }
 
+    /// Remove `length` units from `index`, both clamped, like `Y::Text#delete`.
+    fn delete(&self, index: i64, length: i64) -> Result<(), Error> {
+        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        nogvl(move || -> Result<(), String> {
+            let mut txn = doc.transact_mut();
+            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
+                .ok_or_else(|| "xml text no longer exists".to_string())?;
+            let len = x.len(&txn);
+            let at = clamp(index, len);
+            let count = length.max(0).min((len - at) as i64) as u32;
+            if count > 0 {
+                x.remove_range(&mut txn, at, count);
+            }
+            Ok(())
+        })
+        .map_err(yrb_error)
+    }
+
+    /// Remove everything: markers, text, and embedded blocks.
+    fn clear(&self) -> Result<(), Error> {
+        self.delete(0, i64::MAX)
+    }
+
+    /// Insert a nested `XmlText` block with `attributes` before the `n`-th
+    /// embedded block (at the end when `n` is past the last) and return a
+    /// live handle to it. This is how a block goes between two others.
+    fn insert_xml_text(&self, n: i64, attributes: RHash) -> Result<RbXmlText, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let pairs = hash_pairs(&ruby, attributes)?;
+        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let ordinal = nogvl(move || -> Result<u32, String> {
+            let mut txn = doc.transact_mut();
+            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
+                .ok_or_else(|| "xml text no longer exists".to_string())?;
+            let count = embedded_xml_text_count(&txn, &x);
+            let ordinal = n.max(0).min(count as i64) as u32;
+            let at = if ordinal == count {
+                x.len(&txn)
+            } else {
+                embedded_xml_text_index(&txn, &x, ordinal).unwrap_or_else(|| x.len(&txn))
+            };
+            let child = x.insert_embed(&mut txn, at, XmlTextPrelim::new(""));
+            for (k, v) in pairs {
+                child.insert_attribute(&mut txn, k, to_in(v));
+            }
+            Ok(ordinal)
+        })
+        .map_err(yrb_error)?;
+        let mut child_path = self.path.clone();
+        child_path.push(Seg::Embed(ordinal));
+        Ok(RbXmlText {
+            doc: self.doc.clone(),
+            root: self.root.clone(),
+            path: child_path,
+        })
+    }
+
+    /// Remove the `n`-th embedded block. Handles to later blocks now point one
+    /// ordinal earlier, as after any removal in a sequence.
+    fn delete_xml_text(&self, n: i64) -> Result<bool, Error> {
+        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        nogvl(move || -> Result<bool, String> {
+            let mut txn = doc.transact_mut();
+            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
+                .ok_or_else(|| "xml text no longer exists".to_string())?;
+            if n < 0 {
+                return Ok(false);
+            }
+            match embedded_xml_text_index(&txn, &x, n as u32) {
+                Some(at) => {
+                    x.remove_range(&mut txn, at, 1);
+                    Ok(true)
+                }
+                None => Ok(false),
+            }
+        })
+        .map_err(yrb_error)
+    }
+
     /// Append a nested `XmlText` block with `attributes` and return a live
     /// handle to it. This is how a paragraph is added to a Lexical document.
     fn push_xml_text(&self, attributes: RHash) -> Result<RbXmlText, Error> {
@@ -287,6 +366,16 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
         magnus::method!(RbXmlText::push_xml_text, 1),
     )?;
     class.define_method("xml_text", magnus::method!(RbXmlText::xml_text, 1))?;
+    class.define_method("delete", magnus::method!(RbXmlText::delete, 2))?;
+    class.define_method("clear", magnus::method!(RbXmlText::clear, 0))?;
+    class.define_method(
+        "insert_xml_text",
+        magnus::method!(RbXmlText::insert_xml_text, 2),
+    )?;
+    class.define_method(
+        "delete_xml_text",
+        magnus::method!(RbXmlText::delete_xml_text, 1),
+    )?;
     class.define_method(
         "native_relative_position",
         magnus::method!(RbXmlText::native_relative_position, 2),

@@ -830,6 +830,25 @@ Y::Lexxy.new(doc).to_html("root")
 it on the flavor that matches the editor: `Y::Lexxy.append_list` writes
 Lexxy's own list item type, `Y::Lexical.append_list` the standard one.
 
+Text can be formatted. Anywhere a helper takes text it also takes runs, an
+array of strings and hashes: `{ text: "bold", bold: true }`, and likewise
+`italic:`, `strikethrough:`, `underline:`, `code:`, or `link: "https://…"`.
+`append_quote` and `append_code(doc, code, language:)` add quotes and code
+blocks. `append_markdown(doc, text)` takes the subset of Markdown a model
+writes (headings, lists, quotes, fenced code, and inline formatting and
+links) and appends it as blocks.
+
+The document can be edited in place, not only appended to. A block handle
+has `delete(index, length)` and `clear`; a parent has
+`insert_xml_text(at, attributes)` and `delete_xml_text(at)`. The helpers
+`insert_paragraph(doc, at, runs)`, `replace_runs(block, runs)`, and
+`delete_block(doc, at)` cover the common moves.
+
+`apply_update_changes(update, root)` applies an update and returns the
+ordinals of the top-level blocks it touched: a block edited (however deep),
+added, or removed. A process following a document reacts to the part that
+changed instead of diffing the text.
+
 To put that into a shared document, do it inside `edit` (or diff against a
 state vector, record the update, and broadcast it). The renderer is the
 check: a Ruby-written paragraph and a typed one render byte for byte the same.

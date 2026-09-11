@@ -42,6 +42,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   that advanced the doc (never for an update the doc already holds, such as
   its own). Presence frames go to `on_awareness`. `subscribe` waits for the
   adapter to confirm, so nothing broadcast right after it is missed.
+  `on_update` also receives the ordinals of the top-level blocks the update
+  touched.
 - `record.collaborative_document(name).edit { |doc| ... }` edits a document
   from Ruby as a peer of the browsers: it loads the current state, yields a
   live document, records the change through the declared storage, and
