@@ -23,9 +23,8 @@ class MarkdownEditor
 
       paragraphs = MarkdownDoc.paragraphs(@text.to_s)
       p = paragraphs[edit["block"]] or next
-      @presence&.call("#{edit["op"].tr("_", " ")} paragraph #{edit["block"]}", p)
+      announce(edit, p)
       send(edit["op"], p, edit)
-      sleep 0.4 if @presence
       applied += 1
     end
     applied
@@ -33,17 +32,38 @@ class MarkdownEditor
 
   private
 
+  # Select the paragraph about to change, and give people a moment to see it.
+  def announce(edit, paragraph)
+    return unless @presence
+
+    @presence.call("#{edit["op"].tr("_", " ")} paragraph #{edit["block"]}",
+                   MarkdownDoc.line_start(@text.to_s, paragraph.first_line),
+                   MarkdownDoc.line_end(@text.to_s, paragraph.last_line))
+    sleep 0.4
+  end
+
   def replace(paragraph, edit)
     from = MarkdownDoc.line_start(@text.to_s, paragraph.first_line)
-    change do
-      @text.delete(from, paragraph.text.bytesize)
-      @text.insert(from, edit["text"].to_s.strip)
-    end
+    change { @text.delete(from, paragraph.text.bytesize) }
+    type(from, edit["text"].to_s.strip)
   end
 
   def insert_after(paragraph, edit)
     at = MarkdownDoc.line_end(@text.to_s, paragraph.last_line)
-    change { @text.insert(at, "\n\n#{edit["text"].to_s.strip}") }
+    change { @text.insert(at, "\n\n") }
+    type(at + 2, edit["text"].to_s.strip)
+  end
+
+  # Type text in at the agent's pace, the written part selected as it grows.
+  def type(at, text)
+    writer = MarkdownWriter.new(@doc, @text, flush: @flush, at: at)
+    pacer = Pacer.new { |piece| writer.feed(piece) }
+    pacer.feed(text)
+    while pacer.pending?
+      pacer.drain
+      @presence&.call("writing", writer.start_index || writer.index, writer.index)
+      sleep 0.03
+    end
   end
 
   def delete(paragraph, _edit)

@@ -535,7 +535,10 @@ before starting the server:
 ```sh
 set -a; source ~/.config/yrby/fireworks.env; set +a
 bin/rails s
-``` `AGENT_STUB_PACE` slows the fixed review's typing
+``` `AGENT_PACE` sets how fast the agent writes, in
+characters per second (default 60, about fast typing); the model's stream is
+buffered and let out at that pace, and the text it has written so far stays
+selected while it writes. `AGENT_STUB_PACE` slows the fixed review's typing
 for a demo (try `0.3`).
 
 The agent remembers what it did. Every prompt carries a short account of its

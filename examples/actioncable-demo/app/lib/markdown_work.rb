@@ -97,7 +97,8 @@ module MarkdownWork
       return
     end
     @pacer.drain
-    present("drafting #{@section_title}", @draft_writer.index, sticky: true)
+    present("drafting #{@section_title}", @draft_writer.start_index || @draft_writer.index, @draft_writer.index,
+            sticky: true)
   end
 
   def next_chunk

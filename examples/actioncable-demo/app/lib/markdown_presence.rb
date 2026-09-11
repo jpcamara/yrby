@@ -5,7 +5,7 @@
 # positions into the Y.Text. The agent publishes the same, with its status in
 # the name (the cursor label) and `status`/`detail`/`at` for the log.
 module MarkdownPresence
-  IDENTITY = { name: "Agent \u{1F916}", color: "#7c3aed", colorLight: "rgba(124, 58, 237, .15)" }.freeze
+  IDENTITY = { name: "Agent \u{1F916}", color: "#7c3aed", colorLight: "rgba(124, 58, 237, .28)" }.freeze
   STATUS_TTL = 8
   HEARTBEAT = 5
   IDLE = 60

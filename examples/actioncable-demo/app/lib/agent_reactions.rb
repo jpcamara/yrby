@@ -167,7 +167,7 @@ module AgentReactions
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless writer.block && now - since > 0.25
 
-      present(status, end_of(writer.block), end_of(writer.block), sticky: true)
+      present(status, start_of_written(writer) || end_of(writer.block), end_of(writer.block), sticky: true)
       since = now
     end
     emit = lambda do |chunk|
@@ -181,5 +181,14 @@ module AgentReactions
     yield emit
     pacer.flush
     writer.finish
+  end
+
+  # Where what a writer has written so far begins: the first block it made,
+  # or nil before it made one. With the end of the current block this gives
+  # a selection over the text as it grows.
+  def start_of_written(writer)
+    first = writer.created.first or return
+    block = doc.find(first) or return
+    block.relative_position([1, block.length].min)
   end
 end
