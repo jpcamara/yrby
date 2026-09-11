@@ -17,6 +17,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   position editors carry in awareness as a caret. `append_list(doc, items,
   ordered:)` appends a bulleted or numbered list; `Y::Lexxy.append_list`
   writes Lexxy's own list item type.
+- `Y::Doc#diff { |doc| ... }` returns the update a block produced, or nil,
+  the unit a process records and broadcasts as it streams into a document.
 - `Y::Awareness` lets a Ruby process publish presence. `set_local_state(json)`
   returns a y-protocol awareness frame to broadcast; browsers apply it as
   another participant. `clear_local_state` removes it. Same wire format as Yjs.

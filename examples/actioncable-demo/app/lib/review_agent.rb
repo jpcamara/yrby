@@ -69,17 +69,27 @@ class ReviewAgent
     block.relative_position(block.length)
   end
 
-  # The review, in Lexical's own node shape: a heading, a paragraph, and a
-  # list, sent as a diff the open editors apply like any remote edit.
+  # The review, typed into the document as the reviewer produces it: a heading
+  # first, then the words as they arrive, prose into a paragraph and "- " lines
+  # into a list. Every insert is a diff the open editors apply, so people watch
+  # the agent write. The caret follows the text.
   def write_review(doc, root, text)
-    review = @reviewer.call(text)
-    before = doc.encode_state_vector
-    Y::Lexical.append_heading(doc, "Agent review", tag: "h2")
-    Y::Lexical.append_paragraph(doc, review.summary)
-    Y::Lexxy.append_list(doc, review.suggestions) if review.suggestions.any?
-    update = doc.encode_state_as_update(before)
-    Store.current.record(@document_id, update)
-    Y::ActionCable.broadcast(@document_id, update)
+    flush = lambda do |update|
+      Store.current.record(@document_id, update)
+      Y::ActionCable.broadcast(@document_id, update)
+    end
+    flush.call(doc.diff { Y::Lexical.append_heading(doc, "Agent review", tag: "h2") })
+    writer = StreamingWriter.new(doc, flush: flush)
+    since = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @reviewer.stream(text) do |chunk|
+      writer.feed(chunk)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      next unless writer.block && now - since > 0.25
+
+      present("writing a review into the document", end_of(writer.block), end_of(writer.block))
+      since = now
+    end
+    writer.finish
     @wrote = true
     root
   end

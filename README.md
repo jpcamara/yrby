@@ -840,6 +840,26 @@ one: the `{type, tname, item, assoc}` hash editors put in awareness as
 replayed document resolves in every open editor. Put it in the presence
 state and the agent has a caret people can see move.
 
+### Streaming into a document
+
+A process that types into a document over time, an agent writing as a model
+produces text, keeps one `Y::Doc` for the whole stream and sends each piece
+as its own diff. `Doc#diff` returns the update a block produced, or nil when
+it produced nothing:
+
+```ruby
+doc = Y::Doc.new
+paragraph = Y::Lexical.append_paragraph(doc, "")
+%w[one two three].each do |word|
+  update = doc.diff { paragraph.insert(paragraph.length, "#{word} ") }
+  # record `update` and broadcast it: Y::ActionCable.broadcast(document_key, update)
+end
+```
+
+Each update is about its chunk, not the document, so open editors show the
+words appearing. Put the block's end position in the presence state and the
+agent's caret follows what it writes.
+
 ### Presence from Ruby
 
 `Y::Awareness` lets a Ruby process show up as a live collaborator, the way a
