@@ -860,6 +860,28 @@ Each update is about its chunk, not the document, so open editors show the
 words appearing. Put the block's end position in the presence state and the
 agent's caret follows what it writes.
 
+### Following a document from Ruby
+
+`Y::ActionCable::Peer` is a Ruby process that follows a document live. It
+holds a `Y::Doc`, applies every update the document's subscribers broadcast,
+and calls you when something changed. That is how an agent reacts to people's
+edits as they happen, rather than only when it next reads the store.
+
+```ruby
+peer = Y::ActionCable::Peer.new("post/1/body")
+peer.on_update { |update, doc| puts doc.read_xml("root") }
+peer.subscribe
+# Then load what is stored: peer.doc.apply_update(store.replay("post/1/body")).
+# An edit that lands in between is applied, not lost.
+```
+
+Subscribe first, then load, so nothing is missed in between. Callbacks run
+on the cable adapter's thread, so keep them short or hand the work to your
+own thread. Updates the doc already holds, including the ones this process
+broadcast itself, do not fire `on_update`, so an agent writing through the
+same doc does not react to its own edits. Presence frames go to
+`on_awareness`.
+
 ### Presence from Ruby
 
 `Y::Awareness` lets a Ruby process show up as a live collaborator, the way a
