@@ -13,6 +13,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   addressed by ordinal. `Y::Lexical.append_paragraph` and `append_heading`
   build Lexical's exact node shape, so a Ruby-written block renders the same
   as a typed one and an open editor applies it as a remote edit.
+  `Y::XmlText#relative_position(index, assoc:)` builds the Yjs relative
+  position editors carry in awareness as a caret.
 - `Y::Awareness` lets a Ruby process publish presence. `set_local_state(json)`
   returns a y-protocol awareness frame to broadcast; browsers apply it as
   another participant. `clear_local_state` removes it. Same wire format as Yjs.

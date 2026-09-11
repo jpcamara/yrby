@@ -82,6 +82,53 @@ class XmlTextTest < Minitest::Test
     assert_equal "typed", doc.read_xml("root")
   end
 
+  # A caret is a Yjs relative position: {type, tname, item, assoc}. Inside a
+  # text it names the character to the right; at the end of a block it names
+  # the block; at a root it names the root. Ids are global, so a position
+  # built here resolves on every peer.
+  def test_a_position_inside_text_names_the_character
+    doc = Y::Doc.new
+    block = Y::Lexical.append_paragraph(doc, "Hello caret world")
+    pos = block.relative_position(6) # after the marker embed, after "Hello"
+
+    assert_kind_of Integer, pos["item"]["client"]
+    assert_kind_of Integer, pos["item"]["clock"]
+    assert_nil pos["type"]
+    assert_nil pos["tname"]
+    assert_equal 0, pos["assoc"]
+  end
+
+  def test_a_position_at_the_end_of_a_block_names_the_block
+    doc = Y::Doc.new
+    block = Y::Lexical.append_paragraph(doc, "Hello caret world")
+    pos = block.relative_position(block.length)
+
+    assert_nil pos["item"]
+    assert_kind_of Integer, pos["type"]["clock"]
+    assert_equal 0, pos["assoc"]
+  end
+
+  def test_a_position_at_a_root_names_the_root
+    pos = Y::Doc.new.get_xml_text("root").relative_position(0)
+
+    assert_equal "root", pos["tname"]
+    assert_nil pos["item"]
+    assert_nil pos["type"]
+  end
+
+  def test_before_association_and_peers_agree_on_a_position
+    doc = Y::Doc.new
+    block = Y::Lexical.append_paragraph(doc, "Hello caret world")
+    before = block.relative_position(6, assoc: :before)
+    after = block.relative_position(6)
+
+    assert_equal(-1, before["assoc"])
+    peer = Y::Doc.new
+    peer.apply_update(doc.encode_state_as_update)
+
+    assert_equal after, peer.get_xml_text("root").xml_text(0).relative_position(6)
+  end
+
   def test_a_stale_block_handle_is_a_no_op_not_an_error
     doc = Y::Doc.new
     root = doc.get_xml_text("root")
