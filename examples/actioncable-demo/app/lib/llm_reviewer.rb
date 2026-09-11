@@ -117,8 +117,9 @@ class LlmReviewer
 
   DRAFT_PROMPT = <<~PROMPT
     Draft the section "%s" for the document below. The heading is already in
-    place; write only the body: two to four short paragraphs, or a bulleted
-    list where the content is a list. Be specific to this document, do not
+    place; write only the body. Match the size the task asks for: one line
+    when it asks for a line or a sentence, otherwise two to four short
+    paragraphs, or a bulleted list where the content is a list. Be specific to this document, do not
     repeat what it already says, and leave a clear "to confirm" line for any
     fact you do not have. Markdown for lists and emphasis is fine; no headings.
 
