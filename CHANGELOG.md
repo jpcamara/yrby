@@ -6,6 +6,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Y::Awareness` lets a Ruby process publish presence. `set_local_state(json)`
+  returns a y-protocol awareness frame to broadcast; browsers apply it as
+  another participant. `clear_local_state` removes it. Same wire format as Yjs.
+
+
 ### Changed
 
 - yrby-client document elements use shared, consumer-scoped document sessions
