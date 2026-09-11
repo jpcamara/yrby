@@ -9,6 +9,8 @@
 # A line's kind is decided from its first two characters, so the writer holds
 # at most that much back; the rest of the line streams through.
 class StreamingWriter
+  include StreamingBlocks
+
   # `at:` is the ordinal the first block goes in at (before the block that is
   # there now); without it blocks go at the end.
   def initialize(doc, flush:, at: nil)
@@ -52,17 +54,23 @@ class StreamingWriter
       write(segment)
     else
       @line << segment
-      decide if @line.length >= 2
+      decide if @line.length >= 3 # "- x", "1. x", "# x": enough to tell
     end
   end
 
-  # Two characters in, the line is a bullet or prose. Route what is buffered
-  # (which may already be more than two characters, if a chunk was long).
+  # Three characters in, the line's kind is known. Route what is buffered
+  # (which may already be longer, if a chunk was long).
   def decide
     @decided = true
     if @line.start_with?("- ", "* ")
       @block = new_item
       write(@line[2..])
+    elsif @line.start_with?("#")
+      @block = new_heading
+      write(@line.sub(/\A#+\s*/, ""))
+    elsif @line.match?(/\A\d+[.)]\s/)
+      @block = new_item(ordered: true)
+      write(@line.sub(/\A\d+[.)]\s+/, ""))
     else
       # Prose after a list starts a new paragraph rather than joining the one
       # above the list. Lines of one paragraph are joined with a space.
@@ -105,38 +113,6 @@ class StreamingWriter
 
   # A paragraph starts with its text node's marker; the characters follow it.
   # Without the marker an editor has no text node to show them in.
-  def new_paragraph
-    @paragraph_text = +""
-    para = nil
-    change do
-      para = new_block(Y::Lexical::PARAGRAPH_ATTRIBUTES)
-      para.insert_embed(0, Y::Lexical::TEXT_ATTRIBUTES)
-    end
-    para
-  end
-
-  # A new top-level block: at the insertion point if there is one (advancing
-  # it), otherwise at the end.
-  def new_block(attributes)
-    root = @doc.get_xml_text("root")
-    return root.push_xml_text(attributes) unless @at
-
-    block = root.insert_xml_text(@at, attributes)
-    @at += 1
-    block
-  end
-
-  def new_item
-    item = nil
-    change do
-      @list ||= new_block(Y::Lexxy.list_attributes)
-      value = @list.xml_text_count + 1
-      item = @list.push_xml_text(Y::Lexxy.list_item_attributes(value))
-      item.insert_embed(0, Y::Lexical::TEXT_ATTRIBUTES)
-    end
-    item
-  end
-
   def change(&)
     update = @doc.diff(&)
     @flush.call(update) if update

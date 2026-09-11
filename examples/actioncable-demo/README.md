@@ -515,10 +515,19 @@ browsers, shows up in the presence roster, highlights one block at a time as
 it reads, then writes a review into the document as a heading, a paragraph,
 and a bulleted list, and parks its caret where it wrote.
 
-The review comes from a Claude model when `ANTHROPIC_API_KEY` is set
-(`AGENT_MODEL` picks the model, default `claude-sonnet-5`); without a key it
-uses a fixed review, so the demo runs either way. Export the key in your
-shell, never in the repo. `AGENT_STUB_PACE` slows the fixed review's typing
+The review comes from a model when a key is set: Fireworks AI through its
+OpenAI-compatible API with `FIREWORKS_API_KEY` (default model
+`accounts/fireworks/models/glm-5p3-flash`), or Anthropic with
+`ANTHROPIC_API_KEY` (default `claude-sonnet-5`); `AGENT_MODEL` overrides
+the model. Without a key it uses a fixed review, so the demo runs either
+way. Keep the key out of the repo: put it in a file outside it, such as
+`~/.config/yrby/fireworks.env` with `FIREWORKS_API_KEY=...`, and load it
+before starting the server:
+
+```sh
+set -a; source ~/.config/yrby/fireworks.env; set +a
+bin/rails s
+``` `AGENT_STUB_PACE` slows the fixed review's typing
 for a demo (try `0.3`).
 
 The agent types its review as the model produces it, follows the document
