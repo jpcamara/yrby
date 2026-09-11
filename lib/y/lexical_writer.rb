@@ -36,6 +36,37 @@ module Y
       append_block(doc, heading_attributes(tag), text, root: root)
     end
 
+    # A list block: `ordered:` false is a bulleted list ("ul"), true a numbered
+    # one ("ol").
+    def self.list_attributes(ordered: false)
+      { "__type" => "list", "__tag" => ordered ? "ol" : "ul",
+        "__listType" => ordered ? "number" : "bullet", "__start" => 1,
+        "__format" => 0, "__style" => "", "__indent" => 0, "__dir" => nil,
+        "__textFormat" => 0, "__textStyle" => "" }
+    end
+
+    # A list item; `value` is its 1-based position. The item node's type is
+    # `list_item_type`, which an editor flavor can override (Lexxy uses its own).
+    def self.list_item_attributes(value)
+      { "__type" => list_item_type, "__value" => value, "__format" => 0, "__style" => "",
+        "__indent" => 0, "__dir" => nil, "__textFormat" => 0, "__textStyle" => "" }
+    end
+
+    def self.list_item_type
+      "listitem"
+    end
+
+    # Append a list of plain-text `items` and return the live list block.
+    def self.append_list(doc, items, ordered: false, root: "root")
+      list = doc.get_xml_text(root).push_xml_text(list_attributes(ordered: ordered))
+      items.each_with_index do |text, i|
+        item = list.push_xml_text(list_item_attributes(i + 1))
+        item.insert_embed(0, TEXT_ATTRIBUTES)
+        item.insert(1, text.to_s)
+      end
+      list
+    end
+
     # Append a block with `attributes` holding one text node of `text`.
     def self.append_block(doc, attributes, text, root: "root")
       block = doc.get_xml_text(root).push_xml_text(attributes)

@@ -14,7 +14,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   build Lexical's exact node shape, so a Ruby-written block renders the same
   as a typed one and an open editor applies it as a remote edit.
   `Y::XmlText#relative_position(index, assoc:)` builds the Yjs relative
-  position editors carry in awareness as a caret.
+  position editors carry in awareness as a caret. `append_list(doc, items,
+  ordered:)` appends a bulleted or numbered list; `Y::Lexxy.append_list`
+  writes Lexxy's own list item type.
 - `Y::Awareness` lets a Ruby process publish presence. `set_local_state(json)`
   returns a y-protocol awareness frame to broadcast; browsers apply it as
   another participant. `clear_local_state` removes it. Same wire format as Yjs.
@@ -36,6 +38,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session as before. Nothing renews on a timer.
 
 ### Fixed
+
+- `Y::Lexxy` renders Lexxy's list items. They are `early_escape_listitem`, Lexxy's
+  own node type, and were falling through to the block fallback as `<p>` inside
+  the list. They now render as `<li>` like standard list items.
 
 - ActionCable providers ignore callbacks from superseded subscriptions, so a
   delayed disconnect or rejection cannot stop a live replacement from delivering
