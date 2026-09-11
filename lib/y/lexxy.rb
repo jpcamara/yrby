@@ -11,6 +11,12 @@ module Y
   # nodes are declarative hashes, nodes with logic are plain methods mapped
   # in NODES.
   class Lexxy < Lexical
+    # Lexxy's list items are its own node type (it leaves a list when you press
+    # Enter on an empty item), so lists written for a Lexxy editor use it.
+    def self.list_item_type
+      "early_escape_listitem"
+    end
+
     # A cursor-placement placeholder; empty ones export to nothing.
     def self.provisional_paragraph(node)
       node.content.empty? ? "" : "<p>#{node.content}</p>"
@@ -109,6 +115,8 @@ module Y
       "wrapped_table_node" => { contains: :blocks, render: method(:table) },
       "tablecell" => { contains: :blocks, render: method(:table_cell) },
       "listitem" => { contains: :blocks, render: method(:list_item) },
+      # Lexxy's own list item (it leaves the list on Enter in an empty item).
+      "early_escape_listitem" => { contains: :blocks, render: method(:list_item) },
       "action_text_attachment" => method(:upload),
       "action_text_attachment_upload" => method(:pending_upload),
       "custom_action_text_attachment" => method(:mention)
