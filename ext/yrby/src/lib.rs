@@ -14,6 +14,7 @@ mod protocol;
 mod read;
 mod shared;
 mod text;
+mod xml_text;
 use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
 use protocol::{
@@ -45,6 +46,7 @@ fn assert_thread_safe() {
     is_send_sync::<map::RbMap>();
     is_send_sync::<array::RbArray>();
     is_send_sync::<text::RbText>();
+    is_send_sync::<xml_text::RbXmlText>();
 }
 
 /// Run `f` with the GVL (Global VM Lock) released, so other Ruby threads,
@@ -254,6 +256,13 @@ impl RbDoc {
     /// absent). This is what an agent appends into.
     fn get_text(&self, name: String) -> text::RbText {
         text::root_text(&self.0, name)
+    }
+
+    /// A live `Y::XmlText` handle to the root xml text named `name` (created
+    /// if absent). Rich-text editors keep their document here; this is how a
+    /// Ruby process writes a paragraph into one.
+    fn get_xml_text(&self, name: String) -> xml_text::RbXmlText {
+        xml_text::root_xml_text(&self.0, name)
     }
 
     /// A live `Y::Map` handle to the root map named `name` (created if absent).
@@ -730,6 +739,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method("get_map", method!(RbDoc::get_map, 1))?;
     doc_class.define_method("get_array", method!(RbDoc::get_array, 1))?;
     doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
+    doc_class.define_method("get_xml_text", method!(RbDoc::get_xml_text, 1))?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
     doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
@@ -762,6 +772,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     map::define(ruby, module)?;
     array::define(ruby, module)?;
     text::define(ruby, module)?;
+    xml_text::define(ruby, module)?;
 
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;
