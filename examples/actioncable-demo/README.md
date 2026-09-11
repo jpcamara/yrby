@@ -533,6 +533,8 @@ for a demo (try `0.3`).
 The agent types its review as the model produces it, follows the document
 live afterwards, and reacts: change a block and it highlights it and notes
 the change in its list; write a line starting with `@agent` and it answers
-in a new paragraph right under your question. Inline Markdown in what it
+in a new paragraph right under your question; write `@agent edit: <what to
+change>` and it edits the document in place, block by block, with the model
+planning the edits and the agent typing them in. Inline Markdown in what it
 writes (`**bold**`, `` `code` ``, links) becomes real formatting when the
 line completes.
