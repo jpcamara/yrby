@@ -27,6 +27,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `append_markdown` for the subset of Markdown a model writes. `Y::Lexxy`
   writes Lexxy's own code block type and `rel="noreferrer"` links, and nests
   a paragraph inside a quote as Lexxy does.
+- `Y::Text#relative_position(index, assoc:)` and `#anchor(index)`, and
+  `Y::Doc#index_at(position_or_anchor, root)`: relative positions over a plain
+  `Y.Text`, the shape `y-codemirror.next` puts in awareness, so a process can
+  tell where a person's caret is in a markdown document and keep its own place.
+- `Y::ActionCable::Peer.new(key, root: nil)` applies updates without block
+  tracking, for documents that are not a Lexical fragment.
 - `Y::Doc#apply_update_changes(update, root)` applies an update and returns the
   ordinals of the top-level blocks it touched.
 - `Y::Doc#diff { |doc| ... }` returns the update a block produced, or nil,

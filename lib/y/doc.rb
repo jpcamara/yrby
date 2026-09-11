@@ -25,6 +25,16 @@ module Y
       native_block_at(position, root)
     end
 
+    # The character index in a root `Text` that a position falls at, or nil
+    # when it points elsewhere or the item is gone. Takes an `Anchor`, or a
+    # raw relative position hash plus the root's name.
+    def index_at(position, root = nil)
+      return native_index_at(position.position, position.root) if position.is_a?(Anchor)
+      raise ArgumentError, "index_at needs the root name with a raw position" unless root
+
+      native_index_at(position, root)
+    end
+
     # The block an anchor points at, as a live handle, or nil once it is gone.
     def find(anchor)
       ordinal = block_at(anchor)

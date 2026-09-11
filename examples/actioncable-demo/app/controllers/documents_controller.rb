@@ -2,16 +2,20 @@
 
 class DocumentsController < ApplicationController
   # The audit control endpoint is a test hook (POST without a form token).
-  skip_forgery_protection only: %i[audit_control agent]
+  skip_forgery_protection only: %i[audit_control agent markdown_agent]
 
   # Start a Ruby agent that joins the document as a live collaborator (see
   # ReviewAgent). It runs in a background thread over the same DocumentChannel
   # the browsers use; nothing in the browser changes beyond the roster.
-  def agent
-    document_id = params[:id]
+  def agent = start_agent(ReviewAgent, params[:id])
+
+  # The markdown page's document is a Y.Text under "<id>:markdown".
+  def markdown_agent = start_agent(MarkdownAgent, "#{params[:id]}:markdown")
+
+  def start_agent(klass, document_id)
     Thread.new do
       Rails.application.executor.wrap do
-        ActiveRecord::Base.connection_pool.with_connection { ReviewAgent.new(document_id).run }
+        ActiveRecord::Base.connection_pool.with_connection { klass.new(document_id).run }
       end
       Rails.logger.info("agent: finished")
     rescue Exception => e # rubocop:disable Lint/RescueException -- a background thread: log whatever ends it
@@ -50,6 +54,7 @@ class DocumentsController < ApplicationController
   # a per-demo suffix on the document id so the shapes don't collide).
   # Y.Text  (code, with cursors)
   def codemirror = (@document_id = params[:id])
+  def markdown = (@document_id = params[:id])
   # Y.Map   (draggable shapes)
   def whiteboard = (@document_id = params[:id])
   # Y.Array (cards)

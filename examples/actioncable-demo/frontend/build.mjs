@@ -94,6 +94,7 @@ const ENTRIES = [
   },
   // "Opaque state" demos: the SAME DocumentChannel syncs any Yjs shape.
   { entry: "src/codemirror.js", name: "codemirror.js" }, // Y.Text + CodeMirror 6
+  { entry: "src/markdown.js", name: "markdown.js" },     // Y.Text + CodeMirror 6 markdown + preview
   { entry: "src/whiteboard.js", name: "whiteboard.js" }, // Y.Map of shapes
   { entry: "src/kanban.js", name: "kanban.js" },         // Y.Array of card Y.Maps
   { entry: "src/forms.js", name: "forms.js" },           // Y.Map of fields

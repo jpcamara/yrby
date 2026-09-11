@@ -73,16 +73,22 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       frame = decode(message) or return
       case Y.message_kind(frame)
       when Sync::MSG_KIND_UPDATE
-        update = Y.update_from_message(frame)
-        return unless update && @doc.update_advances?(update)
-
-        changed = @doc.apply_update_changes(update, @root)
-        @on_update&.call(update, @doc, changed)
+        receive_update(frame)
       when Sync::MSG_KIND_AWARENESS
         @on_awareness&.call(frame)
       end
     rescue StandardError => e
       ::ActionCable.server.logger&.warn("Y::ActionCable::Peer #{@key}: #{e.class}: #{e.message}")
+    end
+
+    # Apply a document update the doc does not already hold and report it,
+    # with the changed blocks when a root is being tracked.
+    def receive_update(frame)
+      update = Y.update_from_message(frame)
+      return unless update && @doc.update_advances?(update)
+
+      changed = @root ? @doc.apply_update_changes(update, @root) : @doc.apply_update(update) && nil
+      @on_update&.call(update, @doc, changed)
     end
 
     def decode(message)

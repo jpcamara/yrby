@@ -75,4 +75,22 @@ class ActionCablePeerTest < ActionCable::Channel::TestCase
     assert_nil @events.pop(timeout: 0.5)
     @peer.subscribe # so teardown's unsubscribe is balanced
   end
+
+  def test_with_no_root_an_update_applies_without_block_tracking
+    events = Queue.new
+    peer = Y::ActionCable::Peer.new("peer-text", root: nil)
+    peer.on_update { |_update, doc, changed| events << [doc.get_text("markdown").to_s, changed] }
+    peer.subscribe
+    source = Y::Doc.new
+    update = source.diff { |d| d.get_text("markdown").insert(0, "# Title\n") }
+
+    Y::ActionCable.broadcast("peer-text", update)
+
+    text, changed = events.pop(timeout: 2)
+
+    assert_equal "# Title\n", text
+    assert_nil changed
+  ensure
+    peer&.unsubscribe
+  end
 end
