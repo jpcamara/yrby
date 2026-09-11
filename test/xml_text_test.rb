@@ -110,6 +110,17 @@ class XmlTextTest < Minitest::Test
     assert_equal "alpha\nbeta", peer.read_xml("root")
   end
 
+  def test_text_is_the_block_without_its_markers
+    doc = Y::Doc.new
+    Y::Lexxy.append_paragraph(doc, ["plain ", { text: "bold", bold: true }])
+    Y::Lexxy.append_list(doc, %w[first second])
+    root = doc.get_xml_text("root")
+
+    assert_equal "plain bold", root.xml_text(0).text
+    assert_equal "first\nsecond", root.xml_text(1).text
+    assert_equal "second", root.xml_text(1).xml_text(1).text
+  end
+
   # --- editing in place ---
 
   def test_blocks_can_be_inserted_between_replaced_and_removed

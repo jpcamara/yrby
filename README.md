@@ -838,8 +838,9 @@ blocks. `append_markdown(doc, text)` takes the subset of Markdown a model
 writes (headings, lists, quotes, fenced code, and inline formatting and
 links) and appends it as blocks.
 
-The document can be edited in place, not only appended to. A block handle
-has `delete(index, length)` and `clear`; a parent has
+A block handle's `text` is what it says, markers skipped and nested blocks
+joined by newlines. The document can be edited in place, not only appended
+to. A block handle has `delete(index, length)` and `clear`; a parent has
 `insert_xml_text(at, attributes)` and `delete_xml_text(at)`. The helpers
 `insert_paragraph(doc, at, runs)`, `replace_runs(block, runs)`, and
 `delete_block(doc, at)` cover the common moves.
