@@ -13,13 +13,13 @@
 
 use magnus::{prelude::*, r_hash::ForEach, Error, RHash, Ruby, Value};
 use yrs::{
-    Assoc, Doc, GetString, IndexScope, IndexedSequence, StickyIndex, Text, Transact, Xml,
+    Any, Assoc, Doc, GetString, IndexScope, IndexedSequence, Out, StickyIndex, Text, Transact, Xml,
     XmlTextPrelim,
 };
 
 use crate::shared::{
-    block_text, embedded_xml_text_count, embedded_xml_text_index, key_to_string, resolve_xml_text,
-    ruby_to_invalue, to_in, to_map_prelim, InValue, Root, Seg,
+    any_to_ruby, block_text, embedded_xml_text_count, embedded_xml_text_index, key_to_string,
+    resolve_xml_text, ruby_to_invalue, to_in, to_map_prelim, InValue, Root, Seg,
 };
 use crate::{nogvl, yrb_error};
 
@@ -102,6 +102,39 @@ impl RbXmlText {
 
     fn is_empty(&self) -> bool {
         self.length() == 0
+    }
+
+    /// The name of the root this block lives under; an anchor carries it.
+    fn root_name(&self) -> String {
+        self.root.clone()
+    }
+
+    /// This block's attributes (`__type`, `__tag`, ...), as a Hash. What a
+    /// process keeps to put a block back the way it was.
+    fn attributes(&self) -> Result<RHash, Error> {
+        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let pairs: Vec<(String, Any)> = nogvl(move || {
+            let txn = doc.transact();
+            match resolve_xml_text(&txn, Root::XmlText, root, path) {
+                Some(x) => x
+                    .attributes(&txn)
+                    .map(|(key, value)| {
+                        let any = match value {
+                            Out::Any(a) => a,
+                            other => Any::from(other.to_string(&txn)),
+                        };
+                        (key.to_string(), any)
+                    })
+                    .collect(),
+                None => Vec::new(),
+            }
+        });
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let hash = ruby.hash_new();
+        for (key, any) in pairs {
+            hash.aset(key, any_to_ruby(&ruby, &any))?;
+        }
+        Ok(hash)
     }
 
     /// How many `XmlText` blocks this one embeds.
@@ -365,6 +398,8 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("length", magnus::method!(RbXmlText::length, 0))?;
     class.define_method("size", magnus::method!(RbXmlText::length, 0))?;
     class.define_method("empty?", magnus::method!(RbXmlText::is_empty, 0))?;
+    class.define_method("root_name", magnus::method!(RbXmlText::root_name, 0))?;
+    class.define_method("attributes", magnus::method!(RbXmlText::attributes, 0))?;
     class.define_method(
         "xml_text_count",
         magnus::method!(RbXmlText::xml_text_count, 0),

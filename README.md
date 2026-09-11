@@ -860,6 +860,29 @@ one: the `{type, tname, item, assoc}` hash editors put in awareness as
 replayed document resolves in every open editor. Put it in the presence
 state and the agent has a caret people can see move.
 
+### Anchors: a block's identity while others edit
+
+A live handle addresses a block by its ordinal under the root, and a block
+someone inserts above moves every ordinal below it. A process that holds a
+block across a model call or a streamed write needs something steadier.
+`XmlText#anchor` returns a `Y::Anchor`: the relative position at the block's
+start plus the root's name, a plain value that serializes to JSON. Ask the
+document where the block is now with `Doc#block_at(anchor)`, which returns the
+ordinal or nil once the block is gone, or fetch the live handle with
+`Doc#find(anchor)`.
+
+```ruby
+block = Y::Lexical.append_paragraph(doc, "Verify the canary rollout.")
+anchor = block.anchor
+doc.get_xml_text("root").insert_xml_text(0, Y::Lexical::PARAGRAPH_ATTRIBUTES)
+doc.block_at(anchor)                          # => 1
+doc.find(anchor).insert(doc.find(anchor).length, " Owner: SRE.")
+Y::Anchor.from_json(anchor.to_json) == anchor # => true
+```
+
+`XmlText#attributes` returns a block's attributes (`__type`, `__tag`, and the
+rest), what a process keeps to put a block back the way it was.
+
 ### Streaming into a document
 
 A process that types into a document over time, an agent writing as a model

@@ -993,7 +993,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "apply_update_changes",
         method!(RbDoc::apply_update_changes, 2),
     )?;
-    doc_class.define_method("block_at", method!(RbDoc::block_at, 2))?;
+    doc_class.define_method("native_block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;

@@ -9,5 +9,12 @@ module Y
     def relative_position(index, assoc: :after)
       native_relative_position(index, assoc.to_s)
     end
+
+    # This block's `Anchor`: its start as a relative position, with the root's
+    # name, so the document can say where the block is later. Works on an
+    # empty block too, where the position names the block itself.
+    def anchor
+      Anchor.new(position: relative_position(0), root: root_name)
+    end
   end
 end

@@ -23,16 +23,17 @@ module StreamingBlocks
     root = @doc.get_xml_text("root")
     at = next_ordinal
     block = at ? root.insert_xml_text(at, attributes) : root.push_xml_text(attributes)
-    @last = BlockAnchor.new(@doc, block)
+    @last = block.anchor
+    @created << @last
     block
   end
 
   def next_ordinal
     if @last
-      last = @last.ordinal
+      last = @doc.block_at(@last)
       last ? last + 1 : @at
     elsif @after
-      after = @after.ordinal
+      after = @doc.block_at(@after)
       after ? after + 1 : @at
     else
       @at
@@ -41,12 +42,12 @@ module StreamingBlocks
 
   # Text goes into the block this anchor finds; an item is found through its list.
   def track(top, item: nil)
-    @anchor = BlockAnchor.new(@doc, top)
+    @anchor = top.anchor
     @item = item
   end
 
   def current_block
-    top = @anchor&.block
+    top = @anchor && @doc.find(@anchor)
     return top unless top && @item
 
     top.xml_text(@item)
@@ -70,17 +71,18 @@ module StreamingBlocks
     @list_ordered = ordered
     item = nil
     index = nil
+    list = nil
     change do
-      list = @list&.block
+      list = @list && @doc.find(@list)
       unless list
         list = new_block(Y::Lexxy.list_attributes(ordered: ordered))
-        @list = BlockAnchor.new(@doc, list)
+        @list = list.anchor
       end
       index = list.xml_text_count
       item = list.push_xml_text(Y::Lexxy.list_item_attributes(index + 1))
       item.insert_embed(0, Y::Lexical::TEXT_ATTRIBUTES)
     end
-    track(@list.block, item: index)
+    track(list, item: index)
     item
   end
 end

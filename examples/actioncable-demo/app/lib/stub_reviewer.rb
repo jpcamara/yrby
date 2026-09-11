@@ -43,7 +43,13 @@ class StubReviewer
   end
 
   # A fixed plan: split the task sentence into a checklist and tighten the intro.
-  def edits(_instruction, blocks)
+  def edits(_instruction, blocks, only: nil)
+    if only
+      return only.map do |i|
+        { "op" => "replace", "block" => i, "text" => "#{blocks[i].to_s.split.first(5).join(" ")}, in short." }
+      end
+    end
+
     tasks = blocks.index { |b| b.start_with?("Collect") } || (blocks.size - 1)
     intro = blocks.index { |b| b.start_with?("This document") }
     plan = [{ "op" => "heading", "block" => 0, "level" => 1 },

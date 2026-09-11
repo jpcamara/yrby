@@ -31,6 +31,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ordinals of the top-level blocks it touched.
 - `Y::Doc#diff { |doc| ... }` returns the update a block produced, or nil,
   the unit a process records and broadcasts as it streams into a document.
+- `Y::Anchor` and `XmlText#anchor`: a block's identity across other people's
+  edits, as the relative position at its start plus the root name, a value
+  that round-trips through JSON. `Doc#block_at(anchor)` gives the block's
+  ordinal now or nil once it is gone; `Doc#find(anchor)` gives the handle.
+  `XmlText#attributes` and `#root_name` read a block's attributes and root.
 - `Y::Awareness#apply_update(frame)` and `#states` read presence: what every
   client set, parsed. `Doc#block_at(position, root)` resolves a peer's caret
   (a relative position) to the top-level block it falls in.

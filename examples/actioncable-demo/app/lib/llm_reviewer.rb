@@ -52,16 +52,23 @@ class LlmReviewer
 
   # An edit plan for `instruction` over `blocks` (the document's top-level
   # blocks, in order). Falls back to the stub's plan.
-  def edits(instruction, blocks)
+  # `only:` is a range of block numbers the request applies to; the plan is
+  # asked for and then held to it.
+  def edits(instruction, blocks, only: nil)
     numbered = blocks.each_with_index.map { |b, i| "[#{i}] #{b}" }.join("\n")
+    if only
+      which = only.first == only.last ? "block #{only.first}" : "blocks #{only.first} to #{only.last}"
+      instruction = "#{instruction} Apply this only to #{which}; do not change any other block."
+    end
     plan = Reviewer.parse_edits(ask(format(EDIT_PROMPT, instruction.inspect, numbered)))
+    plan = plan.select { |e| only.cover?(e["block"]) } if only
     remember("Edited the document on request (#{instruction}): " + plan.map { |e|
       "#{e["op"]} block #{e["block"]}"
     }.join(", "))
     plan
   rescue StandardError => e
     Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
-    StubReviewer.new.edits(instruction, blocks)
+    StubReviewer.new.edits(instruction, blocks, only: only)
   end
 
   def self.available?

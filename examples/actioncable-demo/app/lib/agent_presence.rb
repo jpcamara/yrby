@@ -40,12 +40,65 @@ module AgentPresence
     @others.states.filter_map { |client, s| s["name"] if client != @presence.client_id && s.is_a?(Hash) }.uniq
   end
 
-  # Feed a presence frame the peer received into the mirror of everyone's state.
+  # Feed a presence frame the peer received into the mirror of everyone's
+  # state, and remember what each person last had selected.
   def see_presence(frame)
     (@others ||= Y::Awareness.new).apply_update(frame)
+    note_selections
+  end
+
+  SELECTION_MEMORY = 120 # seconds a selection stays the meaning of "this"
+
+  # The blocks the author of the line at `index` meant by "this": what they
+  # last selected, if it was recent, else the block just above the line.
+  # The author is whoever has their caret in that line.
+  def selection_for(index)
+    remembered = remembered_selection(author_of(index))
+    return remembered if remembered
+
+    [index - 1, index - 1] if index.positive?
+  end
+
+  # The client whose caret is in block `index`.
+  def author_of(index)
+    return unless @others
+
+    @others.states.find do |client, state|
+      client != @presence.client_id && state.is_a?(Hash) && position_block(state["anchorPos"]) == index
+    end&.first
+  end
+
+  # What a client last selected, as the block range it covers now, if recent
+  # and still there.
+  def remembered_selection(client)
+    remembered = client && @selections&.dig(client)
+    return unless remembered && Process.clock_gettime(Process::CLOCK_MONOTONIC) - remembered[:at] < SELECTION_MEMORY
+
+    blocks = remembered[:anchors].map { |a| doc.block_at(a) }
+    blocks.minmax if blocks.all?
   end
 
   private
+
+  # A non-collapsed selection is remembered per client, as anchors, so it
+  # still names the same blocks after edits above it.
+  def note_selections
+    @selections ||= {}
+    @others.states.each do |client, state|
+      next if client == @presence.client_id || !state.is_a?(Hash)
+      next if state["anchorPos"] == state["focusPos"]
+
+      first, last = [position_block(state["anchorPos"]), position_block(state["focusPos"])].compact.minmax
+      next unless first && last < root.xml_text_count
+
+      anchors = [root.xml_text(first).anchor, root.xml_text(last).anchor]
+      @selections[client] = { anchors: anchors, at: Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+    end
+  end
+
+  def position_block(position)
+    doc.block_at(position, "root") if position.is_a?(Hash)
+  end
 
   def block_selection(index)
     return [nil, nil] if root.xml_text_count.zero?
