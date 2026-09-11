@@ -12,7 +12,23 @@ class DocumentsController < ApplicationController
   # The markdown page's document is a Y.Text under "<id>:markdown".
   def markdown_agent = start_agent(MarkdownAgent, "#{params[:id]}:markdown")
 
+  # One agent per document: a second invite while the first is still there
+  # is answered with 409 and nothing starts.
+  AGENTS = {} # rubocop:disable Style/MutableConstant -- the registry of running agent threads
+  AGENTS_LOCK = Mutex.new
+
   def start_agent(klass, document_id)
+    key = [klass.name, document_id]
+    started = AGENTS_LOCK.synchronize do
+      next false if AGENTS[key]&.alive?
+
+      AGENTS[key] = agent_thread(klass, document_id, key)
+      true
+    end
+    head started ? :no_content : :conflict
+  end
+
+  def agent_thread(klass, document_id, key)
     Thread.new do
       Rails.application.executor.wrap do
         ActiveRecord::Base.connection_pool.with_connection { klass.new(document_id).run }
@@ -20,8 +36,9 @@ class DocumentsController < ApplicationController
       Rails.logger.info("agent: finished")
     rescue Exception => e # rubocop:disable Lint/RescueException -- a background thread: log whatever ends it
       Rails.logger.error("agent failed: #{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}")
+    ensure
+      AGENTS_LOCK.synchronize { AGENTS.delete(key) }
     end
-    head :no_content
   end
 
   # The collaborative editor page (Tiptap).

@@ -572,6 +572,18 @@ The blocks it writes into are tracked by `Y::Anchor`, not by number. An anchor
 is a relative position at the block's start, resolved again before every
 write.
 
+When the model fails, the agent says so rather than passing off canned text
+as its own: the ledger gets a line such as `couldn't finish the review: the
+model timed out`, a heading it opened for a draft is taken out again, and the
+task goes back on the list unchecked. It leaves passing changes alone for
+half a minute after that. One agent per document: a second invite while the
+first is still there gets a 409, and the page's button reads "The agent is
+here" until it leaves.
+
+The ledger above the editor keeps the model's reasoning as it streams, one
+block per stream (the review and a draft can run at once), folded to its
+last lines; click a block to read all of it.
+
 ### The markdown page
 
 `/docs/:id/markdown` is the same document idea over a `Y.Text` of markdown:

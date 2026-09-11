@@ -39,6 +39,13 @@ module MarkdownEdits
     from
   end
 
+  # Delete what a region holds now: what was opened for text that never came.
+  def discard_region(reg)
+    bounds = reg && region_bounds(reg) or return
+    from, to = bounds
+    flush.call(@doc.diff { @text.delete(from, to - from) }) if to > from
+  end
+
   # Tasks in the document, never counting the agent's own review section.
   def tasks = MarkdownDoc.tasks(text, except: [MarkdownAgent::REVIEW_TITLE])
 

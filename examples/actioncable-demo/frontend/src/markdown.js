@@ -102,6 +102,7 @@ function renderRoster() {
 }
 const logEl = document.getElementById("agent-log")
 const lastEntry = new Map()
+const recentStatuses = new Map()
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
 }
@@ -112,27 +113,64 @@ function renderAgentLog() {
     if (!s?.status) continue
     const key = `${s.status}|${s.detail ?? ""}`
     let entry = lastEntry.get(clientId)
-    if (!entry || entry.key !== key) {
+    const recent = recentStatuses.get(clientId) ?? []
+    const same = !s.detail && recent.includes(s.status)
+    if (!(entry && (entry.key === key || same))) {
       const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
       const li = document.createElement("li")
-      li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}<div class="thinking" hidden></div>`
+      li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}`
       logEl.append(li)
       while (logEl.children.length > 60) logEl.firstChild.remove()
-      entry = { key, li, thinking: "" }
+      entry = { key, status: s.status, li, thinking: "" }
       lastEntry.set(clientId, entry)
+      recentStatuses.set(clientId, [...recent, s.status].slice(-8))
       changed = true
     }
-    const thinking = s.thinking ?? ""
-    if (thinking !== entry.thinking) {
-      entry.thinking = thinking
-      const div = entry.li.querySelector(".thinking")
-      div.textContent = thinking
-      div.hidden = thinking.length === 0
-      changed = true
-    }
+    if (renderThoughts(clientId, entry, s)) changed = true
   }
   if (changed) logEl.scrollTop = logEl.scrollHeight
 }
+// The agent files its reasoning by what it is for: "the review" and a
+// section it is drafting each get their own block. A block follows the
+// current entry while its stream runs and stays where it was when it ends.
+const thoughtBlocks = new Map()
+function renderThoughts(clientId, entry, s) {
+  const thoughts = typeof s.thinking === "string" ? { [s.status]: s.thinking } : (s.thinking ?? {})
+  const blocks = thoughtBlocks.get(clientId) ?? new Map()
+  thoughtBlocks.set(clientId, blocks)
+  let changed = false
+  for (const label of [...blocks.keys()]) if (!(label in thoughts)) blocks.delete(label)
+  for (const [label, text] of Object.entries(thoughts)) {
+    let div = blocks.get(label)
+    if (!div) {
+      div = document.createElement("div")
+      div.className = "thinking"
+      div.dataset.label = label === s.status ? "" : label
+      blocks.set(label, div)
+    }
+    if (div.parentElement !== entry.li) { entry.li.append(div); changed = true }
+    if (div.dataset.full !== text) { div.dataset.full = text; renderThinking(div); changed = true }
+  }
+  return changed
+}
+// Reasoning streams in by the paragraph. Folded, an entry shows its last few
+// lines, enough to see where the model is going; a click opens the whole thing.
+const THINKING_TAIL = 240
+function renderThinking(div) {
+  const full = div.dataset.full ?? ""
+  div.hidden = full.length === 0
+  const folded = !div.classList.contains("open") && full.length > THINKING_TAIL
+  div.classList.toggle("folded", folded)
+  div.title = folded ? "click to read all of it" : ""
+  const text = folded ? "\u2026" + full.slice(-THINKING_TAIL).replace(/^\S*\s+/, " ") : full
+  div.textContent = div.dataset.label ? `${div.dataset.label}: ${text}` : text
+}
+logEl?.addEventListener("click", (e) => {
+  const div = e.target.closest(".thinking")
+  if (!div) return
+  div.classList.toggle("open")
+  renderThinking(div)
+})
 function refreshAgentLabels() {
   // The remote cursor label is drawn from the state when the cursor moves;
   // keep it current when only the status changed.
@@ -156,12 +194,21 @@ function agentState() {
   for (const s of awareness.getStates().values()) if (s?.status) return s
   return null
 }
+let agentWasHere = false
+const inviteEl = document.querySelector(".invite-agent")
 function renderBar() {
   if (!barEl) return
   const s = agentState()
   const statusEl = barEl.querySelector(".bar-status")
   const detailEl = barEl.querySelector(".bar-detail")
-  if (!s) { statusEl.textContent = "no agent here yet"; detailEl.textContent = ""; barEl.classList.remove("live"); return }
+  if (inviteEl) { inviteEl.disabled = !!s; inviteEl.textContent = s ? "The agent is here" : "Invite the agent" }
+  if (!s) {
+    statusEl.textContent = agentWasHere ? "the agent left" : "no agent here yet"
+    detailEl.textContent = agentWasHere ? "invite it again to keep going" : ""
+    barEl.classList.remove("live")
+    return
+  }
+  agentWasHere = true
   barEl.classList.add("live")
   statusEl.textContent = s.status
   detailEl.textContent = s.detail ?? ""

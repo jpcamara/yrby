@@ -12,8 +12,9 @@ module MarkdownWork
 
   def work_step
     return if @paused
+    return draft_step if @task
 
-    @task ? draft_step : pick_task
+    pick_task if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
   rescue StandardError => e
     Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
     @draft&.stop
@@ -56,7 +57,7 @@ module MarkdownWork
                "drafting the section you pointed at"
              end
     present("drafting #{@section_title}", @draft_writer.index, detail: detail, sticky: true)
-    @draft = StreamJob.new(writer: @draft_writer, on_finish: -> { finish_task }) do |emit|
+    @draft = StreamJob.new(writer: @draft_writer, label: @section_title, on_finish: -> { finish_task }) do |emit|
       @reviewer.draft(task.text, text, &emit)
     end
   end
@@ -100,7 +101,7 @@ module MarkdownWork
     @draft.step
     return if @draft.finished?
 
-    present(working_label, @draft_writer.start_index || @draft_writer.index, @draft_writer.index, sticky: true)
+    present_caret(working_label, @draft_writer.start_index || @draft_writer.index, @draft_writer.index, sticky: true)
   end
 
   def in_my_way?
@@ -111,6 +112,9 @@ module MarkdownWork
   end
 
   def finish_task
+    forget_thinking(@section_title)
+    return draft_failed if @draft.failed?
+
     ensure_trailing_newlines(1) if @draft_writer.index >= @text.length
     mark(@task, :done, anchor: @task_anchor)
     (@sections ||= []) << { title: @section_title, heading: @section_heading }
@@ -120,6 +124,19 @@ module MarkdownWork
     note_in_review("Drafted #{@section_title} from the list; edit it and it's yours.")
     @task = nil
     @next_scan = 0
+  end
+
+  # Take out the heading or blank lines opened for a draft that never came.
+  def discard_draft = discard_region(@draft_region)
+
+  # Nothing came from the model: the task goes back on the list, unchecked,
+  # and the agent waits a while before picking anything up again.
+  def draft_failed
+    discard_draft
+    mark(@task, :open, anchor: @task_anchor)
+    report_failure("drafting #{@section_title}", @draft.error, "the task is back on the list")
+    @task = nil
+    @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
   end
 
   def handoff(line, request)
