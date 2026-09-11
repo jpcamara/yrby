@@ -87,11 +87,10 @@ ytext.observe(renderPreview)
 // Roster and agent log, from awareness. y-codemirror carries the person in
 // `user`; the agent adds `status`, `detail` and `at`.
 const rosterEl = document.getElementById("presence-roster")
-const logEl = document.getElementById("agent-log")
-const lastStatus = new Map()
-function escapeHtml(text) {
-  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
-}
+// The ledger: what the agent is doing, from its presence. Each status change
+// is an entry with its time and the reason the model gave; while the model
+// reasons, the current entry shows its thinking as it streams. Oldest first,
+// scrolled to the newest.
 function renderRoster() {
   if (!rosterEl) return
   rosterEl.innerHTML = [...awareness.getStates().values()].map((s) => {
@@ -101,30 +100,53 @@ function renderRoster() {
     return `<span class="peer" style="--c:${color}">${escapeHtml(name)}${status}</span>`
   }).join("")
 }
+const logEl = document.getElementById("agent-log")
+const lastEntry = new Map()
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+}
 function renderAgentLog() {
   if (!logEl) return
+  let changed = false
   for (const [clientId, s] of awareness.getStates()) {
     if (!s?.status) continue
-    // The remote cursor label is drawn from the state when the cursor moves;
-    // keep it current when only the status changed.
-    const identity = s?.identity?.name
-    if (identity && s.user?.name && s.user.name !== identity) {
-      for (const el of document.querySelectorAll(".cm-ySelectionInfo")) {
-        if (el.textContent.startsWith(identity)) el.textContent = s.user.name
-      }
-    }
     const key = `${s.status}|${s.detail ?? ""}`
-    if (lastStatus.get(clientId) === key) continue
-    lastStatus.set(clientId, key)
-    const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    const li = document.createElement("li")
-    li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}`
-    logEl.prepend(li)
-    while (logEl.children.length > 40) logEl.lastChild.remove()
+    let entry = lastEntry.get(clientId)
+    if (!entry || entry.key !== key) {
+      const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      const li = document.createElement("li")
+      li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}<div class="thinking" hidden></div>`
+      logEl.append(li)
+      while (logEl.children.length > 60) logEl.firstChild.remove()
+      entry = { key, li, thinking: "" }
+      lastEntry.set(clientId, entry)
+      changed = true
+    }
+    const thinking = s.thinking ?? ""
+    if (thinking !== entry.thinking) {
+      entry.thinking = thinking
+      const div = entry.li.querySelector(".thinking")
+      div.textContent = thinking
+      div.hidden = thinking.length === 0
+      changed = true
+    }
+  }
+  if (changed) logEl.scrollTop = logEl.scrollHeight
+}
+function refreshAgentLabels() {
+  // The remote cursor label is drawn from the state when the cursor moves;
+  // keep it current when only the status changed.
+  for (const s of awareness.getStates().values()) {
+    const identity = s?.identity?.name
+    if (!identity || !s?.user?.name || s.user.name === identity) continue
+    for (const el of document.querySelectorAll(".cm-ySelectionInfo")) {
+      if (el.textContent.startsWith(identity)) el.textContent = s.user.name
+    }
   }
 }
 awareness.on("update", renderRoster)
 awareness.on("change", renderAgentLog)
+awareness.on("change", refreshAgentLabels)
 renderRoster()
 
 statusEl.dataset.state = "connecting"

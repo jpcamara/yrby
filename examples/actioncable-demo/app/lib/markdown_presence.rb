@@ -8,6 +8,7 @@ module MarkdownPresence
   IDENTITY = { name: "Agent \u{1F916}", color: "#7c3aed", colorLight: "rgba(124, 58, 237, .28)" }.freeze
   STATUS_TTL = 8
   HEARTBEAT = 5
+  THINKING_KEEP = 6000
   IDLE = 60
   GONE = 45
 
@@ -90,14 +91,28 @@ module MarkdownPresence
     @presence_lock.synchronize do
       anchor = index && @text.relative_position([index, @text.length].min)
       head = to ? @text.relative_position([to, @text.length].min) : anchor
+      @thinking = +"" unless @last_presence && @last_presence[:status] == status
       @last_presence = {
         user: IDENTITY.merge(name: "#{IDENTITY[:name]} · #{status}"), identity: IDENTITY,
         cursor: anchor ? { anchor: anchor, head: head } : nil,
-        status: status, detail: detail, at: (Time.now.to_f * 1000).to_i
+        status: status, detail: detail, thinking: @thinking.presence, at: (Time.now.to_f * 1000).to_i
       }
       @last_index = index
       @status_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @sticky = sticky
+      Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+    end
+  end
+
+  def think(delta)
+    @presence_lock ||= Mutex.new
+    @presence_lock.synchronize do
+      @thinking = (@thinking.to_s + delta)[-THINKING_KEEP..] || (@thinking.to_s + delta)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      next if @last_presence.nil? || (@thought_at && now - @thought_at < 0.3)
+
+      @thought_at = now
+      @last_presence = @last_presence.merge(thinking: @thinking)
       Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
     end
   end
