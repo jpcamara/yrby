@@ -20,8 +20,9 @@ class StreamingWriter
     @prose_lines = 0
   end
 
-  # The block that last received text, for a caret to follow.
-  attr_reader :block
+  # The block that last received text, for a caret to follow, and the list
+  # the bullets went into, if any.
+  attr_reader :block, :list
 
   # One insert per chunk (per newline-free run of it), not per character: a
   # word from the stub or a token from a model is one update.
