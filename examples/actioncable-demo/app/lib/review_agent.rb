@@ -10,8 +10,11 @@
 # Y::Awareness; the writing is Y::Lexical over Y::XmlText, recorded and
 # broadcast like any other edit.
 class ReviewAgent
-  IDENTITY = { name: "Agent \u{1F916}", color: "#7c3aed" }.freeze
+  include AgentPresence
+  include AgentReactions
+
   QUIET = 1.5 # seconds without further edits before the agent notes a change
+  KEEP_ALIVE = 15 # presence expires in editors after 30s of silence; refresh before that
 
   def initialize(document_id, reviewer: Reviewer.default, ticks: 3, pause: 4, watch: 90)
     @document_id = document_id
@@ -26,7 +29,7 @@ class ReviewAgent
   end
 
   def run
-    @peer.on_update { |_update, _doc| @changes << Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+    @peer.on_update { |_update, _doc, changed| @changes << changed }
     @peer.subscribe
     (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
     read
@@ -58,53 +61,66 @@ class ReviewAgent
   def write_review
     flush.call(doc.diff { Y::Lexical.append_heading(doc, "Agent review", tag: "h2") })
     writer = StreamingWriter.new(doc, flush: flush)
+    stream_into(writer, "writing a review into the document") { |emit| @reviewer.stream(text, &emit) }
+    @list = writer.list
+    @answered = []
+    present("wrote a review into the document", end_of(last_block), end_of(last_block))
+  end
+
+  # Stay for a while. The peer reports which blocks each update touched, and
+  # never reports this agent's own edits. A changed block is highlighted; once
+  # the typing pauses, a line addressed to @agent gets an answer written right
+  # below it, and any other change gets a note in the list.
+  def watch
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + @watch
+    while (remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive?
+      changed = @changes.pop(timeout: [remaining, KEEP_ALIVE].min)
+      next keep_alive unless changed
+
+      index = changed.last
+      present("reading your change", *block_selection(index)) if index && index < root.xml_text_count
+      while (more = @changes.pop(timeout: QUIET)) # let a burst of typing settle
+        index = more.last || index
+      end
+      next unless index && index < root.xml_text_count
+
+      question = block_text(index)
+      if question.match?(/\A@agent\b/i)
+        answer(index, question) unless @answered.include?(question)
+      else
+        note_change(index)
+      end
+      @changes.clear # what arrived while the agent was writing is not news
+    end
+  end
+
+  # Feed a stream of chunks into `writer`. The block receives `emit`, a proc
+  # to hand each chunk to; the caret moves to the end of the text a few times
+  # a second so people see the agent writing.
+  def stream_into(writer, status)
     since = 0
-    @reviewer.stream(text) do |chunk|
+    emit = lambda do |chunk|
       writer.feed(chunk)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless writer.block && now - since > 0.25
 
-      present("writing a review into the document", end_of(writer.block), end_of(writer.block))
+      present(status, end_of(writer.block), end_of(writer.block))
       since = now
     end
+    yield emit
     writer.finish
-    @list = writer.list
-    @seen = text.lines
-    present("wrote a review into the document", end_of(last_block), end_of(last_block))
-  end
-
-  # Stay for a while. A change from anyone else (the peer never reports this
-  # agent's own edits) highlights the block that changed; when the edits pause,
-  # the agent notes it in its list.
-  def watch
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + @watch
-    while (remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive?
-      next unless @changes.pop(timeout: [remaining, QUIET].min)
-
-      index = changed_block
-      present("reading your change", *block_selection(index)) if index
-      sleep QUIET while @changes.pop(timeout: QUIET) # let a burst of typing settle
-      note_change(index) if index
-    end
-  end
-
-  # The first block whose text differs from the last time the agent looked.
-  def changed_block
-    now = text.lines
-    index = now.each_index.find { |i| now[i] != @seen[i] } || (now.size > @seen.size ? now.size - 1 : nil)
-    @seen = now
-    index
   end
 
   def note_change(index)
-    snippet = @seen[index].to_s.strip.then { |s| s.length > 40 ? "#{s[0, 40]}…" : s }
+    snippet = block_text(index).then { |s| s.length > 40 ? "#{s[0, 40]}…" : s }
+    return if snippet.empty? || snippet.start_with?("Saw your change")
+
     flush.call(doc.diff do
       @list ||= Y::Lexxy.append_list(doc, [])
       item = @list.push_xml_text(Y::Lexxy.list_item_attributes(@list.xml_text_count + 1))
       item.insert_embed(0, Y::Lexical::TEXT_ATTRIBUTES)
       item.insert(1, "Saw your change to “#{snippet}”.")
     end)
-    @seen = text.lines
     present("noted your change", end_of(last_block), end_of(last_block))
   end
 
@@ -116,21 +132,5 @@ class ReviewAgent
       Store.current.record(@document_id, update)
       Y::ActionCable.broadcast(@document_id, update)
     end
-  end
-
-  def block_selection(index)
-    return [nil, nil] if root.xml_text_count.zero?
-
-    block = root.xml_text(index)
-    [block.relative_position([1, block.length].min), end_of(block)]
-  end
-
-  def last_block = root.xml_text(root.xml_text_count - 1)
-  def end_of(block) = block.relative_position(block.length)
-
-  def present(status, anchor, focus)
-    state = IDENTITY.merge(awarenessData: IDENTITY, anchorPos: anchor, focusPos: focus,
-                           focusing: true, status: status)
-    Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(state.to_json))
   end
 end
