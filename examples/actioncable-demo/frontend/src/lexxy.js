@@ -51,19 +51,52 @@ window.__yrb = {
 }
 
 // A presence roster: everyone the awareness protocol knows about, including the
+
+// A running log of what the agent is doing, from its presence: each status
+// change with the time and the reason it gave, newest first. This is how
+// "why did it just do that" gets answered without reading a server log.
+const logEl = document.getElementById("agent-log")
+const lastStatus = new Map()
+function renderAgentLog() {
+  if (!logEl) return
+  for (const [clientId, s] of awareness.getStates()) {
+    if (!s?.status) continue
+    // Lexical writes a remote cursor's label once, when the cursor appears,
+    // so the status in the agent's name would freeze there. Keep it current.
+    const identity = s?.awarenessData?.name
+    if (identity && s.name && s.name !== identity) {
+      for (const el of document.querySelectorAll(".lexxy-collab-cursor__name")) {
+        if (el.textContent.startsWith(identity)) el.textContent = s.name
+      }
+    }
+    const key = `${s.status}|${s.detail ?? ""}`
+    if (lastStatus.get(clientId) === key) continue
+    lastStatus.set(clientId, key)
+    const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    const li = document.createElement("li")
+    li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}`
+    logEl.prepend(li)
+    while (logEl.children.length > 40) logEl.lastChild.remove()
+  }
+}
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+}
+
 // Ruby agent, which broadcasts its awareness over the same DocumentChannel.
 const rosterEl = document.getElementById("presence-roster")
 function renderRoster() {
   if (!rosterEl) return
   const peers = [...awareness.getStates().values()]
   rosterEl.innerHTML = peers.map((s) => {
-    const name = s?.name ?? s?.awarenessData?.name ?? "someone"
+    const name = s?.awarenessData?.name ?? s?.name ?? "someone"
     const color = s?.color ?? s?.awarenessData?.color ?? "#999"
     const status = s?.status ? `<span class="status">${s.status}</span>` : ""
     return `<span class="peer" style="--c:${color}">${name}${status}</span>`
   }).join("")
 }
 awareness.on("update", renderRoster)
+awareness.on("change", renderAgentLog)
 renderRoster()
 
 const setStatus = (state, text) => {

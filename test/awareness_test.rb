@@ -56,4 +56,15 @@ class AwarenessTest < Minitest::Test
   def test_invalid_json_is_rejected
     assert_raises(Y::Error) { Y::Awareness.new.set_local_state("not json") }
   end
+
+  def test_clocks_advance_when_a_client_renews_its_state
+    ada = Y::Awareness.new(7)
+    mirror = Y::Awareness.new(9)
+    mirror.apply_update(ada.set_local_state(JSON.generate(name: "Ada")))
+    first = mirror.clocks.fetch(7)
+    mirror.apply_update(ada.set_local_state(JSON.generate(name: "Ada")))
+
+    assert_operator mirror.clocks.fetch(7), :>, first
+    assert_equal [7], mirror.clocks.keys
+  end
 end

@@ -43,6 +43,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   returns a y-protocol awareness frame to broadcast; browsers apply it as
   another participant. `clear_local_state` removes it and sends the removal, so peers drop the
   client at once rather than after a timeout. Same wire format as Yjs.
+  `#clocks` gives each client's awareness clock, so a mirror can time out a
+  client that stopped renewing, the way browser clients do.
 
 
 ### Changed

@@ -518,13 +518,14 @@ reverse proxy with basic auth.
 
 `POST /docs/:id/agent` starts a Ruby agent on a Lexxy document (see
 `app/lib/review_agent.rb`). It joins over the same `DocumentChannel` as the
-browsers, shows up in the presence roster, highlights one block at a time as
-it reads, then writes a review into the document as a heading, a paragraph,
-and a bulleted list, and parks its caret where it wrote.
+browsers, shows up in the presence roster with its status in its cursor
+label, writes a review into the document as a heading, a paragraph, and a
+bulleted list, and parks its caret where it wrote.
 
 The review comes from a model when a key is set: Fireworks AI through its
 OpenAI-compatible API with `FIREWORKS_API_KEY` (default model
-`accounts/fireworks/models/glm-5p3-flash`), or Anthropic with
+`accounts/fireworks/routers/glm-5p3-fast`, the same model behind a router
+that answers about three times sooner), or Anthropic with
 `ANTHROPIC_API_KEY` (default `claude-sonnet-5`); `AGENT_MODEL` overrides
 the model. Without a key it uses a fixed review, so the demo runs either
 way. Keep the key out of the repo: put it in a file outside it, such as
@@ -611,11 +612,12 @@ its words keep landing in the right block, and an edit planned against block
 numbers finds those blocks wherever they are by the time it runs. If the block
 is gone, the rest of the text goes into a new paragraph.
 
-The agent types its review as the model produces it, follows the document
-live afterwards, and reacts: change a block and it highlights it and notes
-the change in its list; write a line starting with `@agent` and it answers
-in a new paragraph right under your question; write `@agent edit: <what to
-change>` and it edits the document in place, block by block, with the model
-planning the edits and the agent typing them in. Inline Markdown in what it
-writes (`**bold**`, `` `code` ``, links) becomes real formatting when the
-line completes.
+The agent types its review as the model produces it and then stays. What it
+is doing is always in its cursor label, where you are looking, and in the log
+under the editor, which keeps each status with the time and the reason it
+gave: thinking, left it alone and why, drafting a section. Its caret only goes
+where it works. After you pause typing it considers the change and adds
+something only when that clearly helps; write a line starting with `@agent`
+and it answers underneath. It stays as long as someone is in the document and
+leaves a couple of minutes after the last person, counting a browser that
+closed without saying goodbye as gone once it stops renewing its presence.

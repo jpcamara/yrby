@@ -44,7 +44,8 @@ module AgentWork
     flush.call(doc.diff { Y::Lexical.append_heading(doc, section_title(task.text), tag: "h2") })
     @section_heading = last_block.anchor
     @draft_writer = StreamingWriter.new(doc, flush: flush)
-    present("drafting: #{task.text}", end_of(last_block), end_of(last_block))
+    present("drafting #{section_title(task.text)}", end_of(last_block), end_of(last_block),
+            detail: "took \"#{task.text}\" from the list", sticky: true)
     start_draft(task)
   end
 
@@ -75,15 +76,15 @@ module AgentWork
 
       if in_my_way?
         @held = chunk
-        present("waiting: you are in the section I am drafting", end_of(@draft_writer.block),
-                end_of(@draft_writer.block))
+        present("waiting, you're in this section", end_of(@draft_writer.block), end_of(@draft_writer.block),
+                detail: "I'll carry on with #{section_title(@task.text)} when you leave", sticky: true)
         return
       end
       @held = nil
       @draft_writer.feed(chunk)
       if @draft_writer.block
-        present("drafting: #{@task.text}", end_of(@draft_writer.block),
-                end_of(@draft_writer.block))
+        present("drafting #{section_title(@task.text)}", end_of(@draft_writer.block), end_of(@draft_writer.block),
+                sticky: true)
       end
     end
   end
@@ -104,7 +105,9 @@ module AgentWork
     @draft_writer.finish
     Worklist.mark(doc, @task, :done)&.then { |u| flush.call(u) }
     (@sections ||= []) << { title: @task.text, heading: @section_heading, blocks: @draft_writer.created }
-    present("drafted: #{@task.text}", end_of(last_block), end_of(last_block))
+    at = @draft_writer.block || last_block
+    present("drafted #{section_title(@task.text)}", end_of(at), end_of(at),
+            detail: "\"#{@task.text}\" is done; edit the section and it's yours")
     @task = nil
     @next_scan = 0
   end
@@ -116,11 +119,11 @@ module AgentWork
     case verb.downcase
     when "take"
       flush.call(Worklist.add(doc, rest.to_s.strip))
-      present("took the task: #{rest}", end_of(last_block), end_of(last_block))
+      present("took a task", end_of(last_block), end_of(last_block), detail: rest)
       @next_scan = 0
     when "pause"
       @paused = true
-      present("paused", nil, nil)
+      present("paused", nil, nil, sticky: true)
     when "resume", "continue"
       @paused = false
       present("back to work", nil, nil)
@@ -136,7 +139,7 @@ module AgentWork
     @draft_thread&.kill
     @draft_writer&.finish
     Worklist.mark(doc, @task, :stopped)&.then { |u| flush.call(u) }
-    present("stopped drafting #{@task.text}", nil, nil)
+    present("stopped", nil, nil, detail: "dropped \"#{@task.text}\"; the item is marked [-]")
     @task = nil
   end
 
