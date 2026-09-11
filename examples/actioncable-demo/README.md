@@ -507,6 +507,13 @@ clients, 8,800 edits, ~360k cable messages, 41k concurrent `/content` reads, all
 - `config.action_cable.disable_request_forgery_protection` is on in development
   so the e2e script can connect without an Origin header.
 
+The demo runs on SQLite as well as PostgreSQL: set `DATABASE_URL` to
+`sqlite3:storage/production.sqlite3` and the change store goes through Active
+Record instead of the raw PostgreSQL insert. `CABLE_ADAPTER` is honored in
+production too, so one Puma process can run with the async adapter, or several
+with Redis. That is enough to put the agent demo on a small box behind a
+reverse proxy with basic auth.
+
 ## The agent
 
 `POST /docs/:id/agent` starts a Ruby agent on a Lexxy document (see
