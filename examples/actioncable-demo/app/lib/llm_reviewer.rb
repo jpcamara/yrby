@@ -10,6 +10,10 @@ class LlmReviewer
   # about 5s against 8 to 17s in a test of the small decisions. AGENT_MODEL
   # overrides it.
   FIREWORKS_MODEL = "accounts/fireworks/routers/glm-5p3-fast"
+  # A model without a reasoning phase for the quick calls: whether to add
+  # something after a change, and answers. Reviews and drafts keep the
+  # reasoning model. AGENT_FAST_MODEL overrides; unset, the same model is used.
+  FAST_MODEL = ENV.fetch("AGENT_FAST_MODEL", "accounts/fireworks/models/minimax-m3")
   ANTHROPIC_MODEL = "claude-sonnet-5"
 
   PROMPT = <<~PROMPT
@@ -137,7 +141,7 @@ class LlmReviewer
   def answer(question, text, &block)
     started = false
     said = +""
-    streamed(format(QUESTION_PROMPT, question, text)) do |chunk|
+    streamed(format(QUESTION_PROMPT, question, text), quick: true) do |chunk|
       started = true
       said << chunk
       block.call(chunk)
@@ -213,7 +217,7 @@ class LlmReviewer
   def consider(changed_blocks, occupied, blocks)
     numbered = blocks.each_with_index.map { |b, i| "[#{i}] #{b}" }.join("\n")
     changed = changed_blocks.map { |i| "[#{i}] #{blocks[i]}" }.join("\n")
-    reply = ask(format(CONSIDER_PROMPT, changed, occupied.empty? ? "none" : occupied.join(", "), numbered))
+    reply = ask(format(CONSIDER_PROMPT, changed, occupied.empty? ? "none" : occupied.join(", "), numbered), quick: true)
     json = Reviewer.first_json(reply)
     result = Consideration.new(note: json["note"].to_s, edits: Array(json["edits"]))
     did = result.edits.empty? ? "Saw a change and left it alone" : "Contributed after a change"
@@ -229,8 +233,8 @@ class LlmReviewer
   # Stream a prompt, skipping the chunks a reasoning model sends with no text.
   # Stream a reply. Content chunks go to the block; the model's reasoning,
   # which arrives first, goes to `on_thinking` as it comes.
-  def streamed(prompt)
-    chat.ask(memory_prompt + prompt) do |chunk|
+  def streamed(prompt, quick: false)
+    (quick ? fast_chat : chat).ask(memory_prompt + prompt) do |chunk|
       thought = chunk.respond_to?(:thinking) && chunk.thinking&.text
       @on_thinking&.call(thought) if thought && !thought.empty?
       text = chunk.content.to_s
@@ -239,14 +243,22 @@ class LlmReviewer
   end
 
   # A whole reply, streamed underneath so the thinking still shows.
-  def ask(prompt)
+  def ask(prompt, quick: false)
     reply = +""
-    streamed(prompt) { |text| reply << text }
+    streamed(prompt, quick: quick) { |text| reply << text }
     reply
   end
 
   # A fresh chat per call, with the standing instructions. The reviewer's own
   # memory goes in the prompt, so no reply history is sent back.
+  # The quick model's chat, or the usual one when none is set or it fails.
+  def fast_chat
+    return chat if FAST_MODEL.empty? || ENV["FIREWORKS_API_KEY"].blank?
+
+    require "ruby_llm"
+    RubyLLM.chat(model: FAST_MODEL, provider: :openai, assume_model_exists: true).with_instructions(INSTRUCTIONS)
+  end
+
   def chat
     require "ruby_llm"
     if ENV["FIREWORKS_API_KEY"].to_s.empty?

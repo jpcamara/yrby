@@ -15,6 +15,20 @@
     <p id="status" class="status">connecting…</p>
   </header>
 
+  <div id="agent-bar" class="agent-bar">
+    <span class="bar-dot"></span>
+    <span class="bar-status">no agent here yet</span>
+    <span class="bar-detail"></span>
+    <a href="#" id="jump-to-agent">jump to it</a>
+    <label><input type="checkbox" id="agent-follow" checked> follow</label>
+  </div>
+  <div class="agent-actions">
+    <button type="button" data-say="@agent ">Ask it something</button>
+    <button type="button" data-say="@agent take ">Hand it a task</button>
+    <button type="button" data-say="@agent draft this section">Draft this section</button>
+    <button type="button" data-say="@agent pause">Pause</button>
+    <button type="button" data-say="@agent resume">Resume</button>
+  </div>
   <ol id="agent-log" class="agent-log" aria-label="What the agent is doing"></ol>
 
   <%# data-direct-upload-url / data-blob-url-template: the Trix-convention
@@ -39,6 +53,16 @@
   .presence-roster .peer::before { content: ""; width: .7rem; height: .7rem; border-radius: 50%;
     background: var(--c, #999); }
   .presence-roster .peer .status { color: #6b7280; font-size: .78rem; }
+  .agent-bar { position: sticky; top: 0; z-index: 5; display: flex; gap: .6rem; align-items: center; padding: .4rem .7rem; margin: .5rem 0 .25rem; background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; font-size: .85rem; color: #4c1d95; }
+  .agent-bar .bar-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #c4b5fd; }
+  .agent-bar.live .bar-dot { background: #7c3aed; }
+  .agent-bar .bar-status { font-weight: 600; }
+  .agent-bar .bar-detail { color: #6d28d9; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .8rem; }
+  .agent-bar a { color: #6d28d9; }
+  .agent-bar label { font-size: .8rem; display: inline-flex; gap: .3rem; align-items: center; }
+  .agent-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin: .25rem 0 .5rem; }
+  .agent-actions button { font-size: .8rem; padding: .25rem .6rem; border: 1px solid #ddd6fe; background: #fff; border-radius: 999px; color: #4c1d95; cursor: pointer; }
+  .agent-actions button:hover { background: #f5f3ff; }
   .agent-log { list-style: none; margin: .5rem 0 .75rem; padding: .25rem .5rem; font-size: .8rem; color: #374151; height: 11rem; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fcfcfd; }
   .agent-log li { padding: .15rem 0; border-top: 1px solid #f3f4f6; }
   .agent-log li:first-child { border-top: 0; }

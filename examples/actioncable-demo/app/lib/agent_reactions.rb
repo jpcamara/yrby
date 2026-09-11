@@ -19,9 +19,7 @@ module AgentReactions
   # people are writing in are off limits.
   def contribute(changed)
     changed = changed.select { |i| i < root.xml_text_count }
-    return if changed.empty?
-
-    return if mine?(changed)
+    return unless worth_a_look?(changed)
 
     avoid = (occupied_blocks | my_blocks).sort
     Rails.logger.info("agent: leaving alone #{avoid.inspect}, people #{people_here.inspect}")
@@ -44,6 +42,19 @@ module AgentReactions
     remember_undo("what I added after your change", applied)
     present("added to what you wrote", end_of(last_block), end_of(last_block), detail: result.note.presence)
     note_in_review("Added after your change: #{result.note.presence || "a line"}")
+  end
+
+  def worth_a_look?(changed)
+    !changed.empty? && settled?(changed.last) && !mine?(changed)
+  end
+
+  # A change is worth a look once it reads finished: the block ends with
+  # punctuation, or the person has left it. Mid-sentence is not the moment.
+  def settled?(index)
+    text = block_text(index)
+    return true if text.empty? || text.match?(/[.!?:)\]"”»]\s*\z/) || text.match?(/\A@agent\b/i)
+
+    !occupied_blocks.include?(index)
   end
 
   # A change to the agent's own list means new work, not something to
