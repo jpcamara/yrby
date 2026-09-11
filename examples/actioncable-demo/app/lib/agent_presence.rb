@@ -169,10 +169,10 @@ module AgentPresence
     Rails.logger.info("agent: #{status}#{" — #{detail}" if detail}")
     @presence_lock ||= Mutex.new
     @presence_lock.synchronize do
-      @thinking = +"" unless @last_presence && @last_presence[:status] == status
+      turn_thinking(status)
       @last_presence = IDENTITY.merge(name: "#{IDENTITY[:name]} · #{status}", awarenessData: IDENTITY,
                                       anchorPos: anchor, focusPos: focus, focusing: true,
-                                      status: status, detail: detail, thinking: @thinking.presence,
+                                      status: status, detail: detail, thinking: @thinking.presence&.dup,
                                       at: (Time.now.to_f * 1000).to_i)
       @status_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @sticky = sticky
@@ -182,17 +182,53 @@ module AgentPresence
 
   # The model's reasoning as it streams, attached to the current status and
   # re-sent a few times a second, so the ledger shows the agent thinking.
+  # Reasoning, kept per stream: a review and a draft running together each
+  # show their own. A stream names itself through the thread it runs in; a
+  # call made from the loop is filed under the current status, and dropped
+  # when the status moves on.
   def think(delta)
     @presence_lock ||= Mutex.new
     @presence_lock.synchronize do
-      @thinking = (@thinking.to_s + delta)[-THINKING_KEEP..] || (@thinking.to_s + delta)
+      label = Thread.current[:agent_purpose] || @last_presence&.dig(:status) || "thinking"
+      @thinking ||= {}
+      @thinking[label] = ((@thinking[label] || "") + delta)[-THINKING_KEEP..] || ((@thinking[label] || "") + delta)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next if @last_presence.nil? || (@thought_at && now - @thought_at < 0.3)
 
       @thought_at = now
-      @last_presence = @last_presence.merge(thinking: @thinking)
+      @last_presence = @last_presence.merge(thinking: @thinking.dup)
       Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
     end
+  end
+
+  # A stream is done: its reasoning stays in the ledger where it was, and the
+  # next stream with the same name starts fresh.
+  def forget_thinking(label)
+    @presence_lock ||= Mutex.new
+    @presence_lock.synchronize { @thinking&.delete(label) }
+  end
+
+  # Reasoning filed under a status goes when the status changes; a running
+  # stream's stays.
+  def turn_thinking(status)
+    return if @last_presence && @last_presence[:status] == status
+
+    (@thinking ||= {}).delete_if { |label, _| !StreamJob.running?(label) }
+  end
+
+  # The caret moves with every step of a stream. Say so a few times a second
+  # at most, and not at all when nothing moved.
+  def present_caret(status, *where, **)
+    return if status.blank?
+
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    key = [status, where]
+    unchanged = @last_presence && @last_presence[:status] == status
+    return if unchanged && (@caret_key == key || now - @caret_at < 0.25)
+
+    @caret_key = key
+    @caret_at = now
+    present(status, *where, **)
   end
 
   # Editors drop a peer they have not heard from in a while; say it again.
@@ -211,7 +247,7 @@ module AgentPresence
       loop do
         sleep HEARTBEAT
         if @last_presence && !@sticky && Process.clock_gettime(Process::CLOCK_MONOTONIC) - @status_at > STATUS_TTL
-          present("listening", @last_presence[:anchorPos], @last_presence[:focusPos], sticky: true)
+          present(@paused ? "paused" : "listening", @last_presence[:anchorPos], @last_presence[:focusPos], sticky: true)
         else
           keep_alive
         end
@@ -222,4 +258,19 @@ module AgentPresence
   end
 
   def stop_heartbeat = @heartbeat&.kill
+
+  # A model failure, said where people can see it instead of passed off as
+  # the agent's own words. `what` is the thing that did not happen.
+  def report_failure(what, error, then_what = nil)
+    reason = error.is_a?(LlmReviewer::ModelError) ? error.message : LlmReviewer.describe(error)
+    Rails.logger.warn("agent: #{what} failed: #{error.class}: #{error.message}")
+    where = @last_presence ? [@last_presence[:anchorPos], @last_presence[:focusPos]] : [end_of(last_block)] * 2
+    present("couldn't finish #{what}", *where, detail: [reason, then_what].compact.join("; "))
+    @backoff_until = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+  end
+
+  # After a failure, the agent leaves passing changes alone for a while.
+  def backing_off?
+    @backoff_until && Process.clock_gettime(Process::CLOCK_MONOTONIC) < @backoff_until
+  end
 end

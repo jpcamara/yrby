@@ -4,9 +4,8 @@
 # and how to talk to it, then the review typed at the end as a stream the
 # loop steps, so the first task can start alongside it.
 module AgentReview
-  INTRO = "I'll review the document, and work through any list under a heading that names me at the " \
-          "same time. Ask me with a line starting @agent, hand me a task with @agent take ..., or use " \
-          "the buttons."
+  INTRO = "I'll review the document and work through any list under a heading that names me. " \
+          "Talk to me with a line starting @agent, or use the buttons."
 
   private
 
@@ -24,17 +23,24 @@ module AgentReview
   def start_review
     present("reading the document", end_of(last_block), end_of(last_block), sticky: true)
     flush.call(doc.diff { Y::Lexical.append_heading(doc, "Agent review", tag: "h2") })
+    @review_heading = last_block.anchor
     writer = StreamingWriter.new(doc, flush: flush)
-    @review = StreamJob.new(writer: writer, on_finish: -> { review_written(writer) }) do |emit|
+    @review = StreamJob.new(writer: writer, label: "the review", on_finish: -> { review_written(writer) }) do |emit|
       @reviewer.stream(text, &emit)
     end
   end
 
   def review_written(writer)
+    forget_thinking("the review")
     @list = writer.list
     @review_list = @list&.anchor
     at = writer.block || last_block
-    present("wrote a review", end_of(at), end_of(at))
+    if @review.failed?
+      (i = doc.block_at(@review_heading)) && flush.call(doc.diff { root.delete_xml_text(i) })
+      report_failure("the review", @review.error, "ask me again with @agent review")
+    else
+      present("wrote a review", end_of(at), end_of(at))
+    end
     announce_next
   end
 
@@ -45,10 +51,10 @@ module AgentReview
     return unless reviewing?
 
     @review.step
-    return if drafting? || !@review.writer.block
+    return if @review.finished? || drafting? || !@review.writer.block
 
-    present(working_label, start_of_written(@review.writer) || end_of(@review.writer.block),
-            end_of(@review.writer.block), sticky: true)
+    present_caret(working_label, start_of_written(@review.writer) || end_of(@review.writer.block),
+                  end_of(@review.writer.block), sticky: true)
   end
 
   def reviewing? = @review && !@review.finished?

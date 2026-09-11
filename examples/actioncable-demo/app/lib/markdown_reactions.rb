@@ -14,6 +14,8 @@ module MarkdownReactions
     return contribute(first, last) unless line
 
     request = ls[line].strip
+    return if request.match?(ReviewAgent::UNFINISHED)
+
     case request
     when /\A@agent\s+undo\b/i then undo_last(line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(line, request)
@@ -28,6 +30,8 @@ module MarkdownReactions
   end
 
   def contribute(first, last)
+    return if backing_off?
+
     paragraphs = MarkdownDoc.paragraphs(text)
     changed = paragraphs.select { |p| p.last_line >= first && p.first_line <= last }.map(&:index)
     return if changed.empty? || !settled?(paragraphs[changed.last]) || mine?(changed, paragraphs)

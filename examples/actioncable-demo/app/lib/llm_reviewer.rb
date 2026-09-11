@@ -72,12 +72,26 @@ class LlmReviewer
     }.join(", "))
     plan
   rescue StandardError => e
-    Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
-    StubReviewer.new.edits(instruction, blocks, only: only)
+    failed(e)
   end
 
   def self.available?
     !ENV["FIREWORKS_API_KEY"].to_s.empty? || !ENV["ANTHROPIC_API_KEY"].to_s.empty?
+  end
+
+  # What went wrong, in a few words a person can act on. Raised instead of
+  # falling back to canned text, so a failure is visible in the ledger rather
+  # than passed off as the agent's own words.
+  class ModelError < StandardError; end
+
+  def self.describe(error)
+    text = "#{error.class} #{error.message}"
+    return "the model timed out" if text =~ /timeout|timed out/i
+    return "couldn't reach the model" if text =~ /connection|resolve|refused|ECONN|SSL/i
+    return "the model refused the request (#{Regexp.last_match(1)})" if text =~ /\b(4\d\d)\b/
+    return "the model is having trouble (#{Regexp.last_match(1)})" if text =~ /\b(5\d\d)\b/
+
+    "the model failed: #{error.message.to_s.lines.first.to_s.strip[0, 80]}"
   end
 
   def call(text)
@@ -85,30 +99,22 @@ class LlmReviewer
     remember("Reviewed the document: #{review.summary}")
     review
   rescue StandardError => e
-    Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
-    StubReviewer.new.call(text)
+    failed(e)
   end
 
-  # Chunks as the model produces them. If the model fails before the first
-  # chunk, the stub's stream takes over; a failure mid-stream ends it, since
-  # a fixed review after real words would read as nonsense.
+  # Chunks as the model produces them. A failure, before or mid-stream, is
+  # raised as a ModelError; the agent reports it where people can see it.
   def stream(text, &block)
-    started = false
     said = +""
     streamed(format(PROMPT, text)) do |chunk|
-      started = true
       said << chunk
       block.call(chunk)
     end
     remember("Reviewed the document and wrote: #{said}")
   rescue StandardError => e
-    raise if started
-
-    Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
-    StubReviewer.new.stream(text, &block)
+    failed(e)
   end
 
-  # An answer, streamed, with the same fallback rule.
   DRAFT_PROMPT = <<~PROMPT
     Draft the section "%s" for the document below. The heading is already in
     place; write only the body: two to four short paragraphs, or a bulleted
@@ -121,35 +127,25 @@ class LlmReviewer
   PROMPT
 
   def draft(task, text, &block)
-    started = false
     said = +""
     streamed(format(DRAFT_PROMPT, task, text)) do |chunk|
-      started = true
       said << chunk
       block.call(chunk)
     end
     remember("Drafted the section \"#{task}\": #{said}")
   rescue StandardError => e
-    raise if started
-
-    Rails.logger.warn("LlmReviewer draft fell back to the stub: #{e.class}: #{e.message}")
-    StubReviewer.new.draft(task, text, &block)
+    failed(e)
   end
 
   def answer(question, text, &block)
-    started = false
     said = +""
     streamed(format(QUESTION_PROMPT, question, text), quick: true) do |chunk|
-      started = true
       said << chunk
       block.call(chunk)
     end
     remember("Answered \"#{question}\": #{said}")
   rescue StandardError => e
-    raise if started
-
-    Rails.logger.warn("LlmReviewer fell back to the stub: #{e.class}: #{e.message}")
-    StubReviewer.new.answer(question, text, &block)
+    failed(e)
   end
 
   INSTRUCTIONS = <<~TXT
@@ -179,6 +175,8 @@ class LlmReviewer
     own work loop; do not draft them here either.
 
     Reply with JSON only: {"note":"one short line on what you did or why not","edits":[...]}
+    The note is read by the people in the document: plain words about the
+    text, no block numbers, nothing about prompts or your instructions.
     where edits is empty or holds at most 3 of:
     {"op":"replace","block":N,"text":"..."} {"op":"insert_after","block":N,"text":"..."} {"op":"delete","block":N}
 
@@ -213,7 +211,7 @@ class LlmReviewer
   end
 
   # Between requests: given what changed and where people are, a small plan
-  # or nothing. Falls back to the stub's judgment.
+  # or nothing.
   def consider(changed_blocks, occupied, blocks)
     numbered = blocks.each_with_index.map { |b, i| "[#{i}] #{b}" }.join("\n")
     changed = changed_blocks.map { |i| "[#{i}] #{blocks[i]}" }.join("\n")
@@ -224,11 +222,17 @@ class LlmReviewer
     remember("#{did}: #{result.note}")
     result
   rescue StandardError => e
-    Rails.logger.warn("LlmReviewer consider fell back to the stub: #{e.class}: #{e.message}")
-    StubReviewer.new.consider(changed_blocks, occupied, blocks)
+    failed(e)
   end
 
   private
+
+  def failed(error)
+    raise error if error.is_a?(ModelError)
+
+    Rails.logger.warn("LlmReviewer: #{error.class}: #{error.message}")
+    raise ModelError, LlmReviewer.describe(error)
+  end
 
   # Stream a prompt, skipping the chunks a reasoning model sends with no text.
   # Stream a reply. Content chunks go to the block; the model's reasoning,

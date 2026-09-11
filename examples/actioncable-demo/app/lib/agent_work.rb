@@ -20,8 +20,9 @@ module AgentWork
   # the task dropped; the agent stays in the document.
   def work_step
     return if @paused
+    return draft_step if @task
 
-    @task ? draft_step : pick_task
+    pick_task if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
   rescue StandardError => e
     Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
     @draft&.stop
@@ -72,6 +73,7 @@ module AgentWork
   # caret should sit at while the first words arrive.
   def open_section(task)
     heading = task.under && heading_block(task.under)
+    @made_heading = heading.nil?
     if heading
       @section_heading = heading.anchor
       @section_title = heading.text.strip
@@ -127,7 +129,7 @@ module AgentWork
   end
 
   def start_draft(task)
-    @draft = StreamJob.new(writer: @draft_writer, on_finish: -> { finish_task }) do |emit|
+    @draft = StreamJob.new(writer: @draft_writer, label: @section_title, on_finish: -> { finish_task }) do |emit|
       @reviewer.draft(task.text, text, &emit)
     end
   end
@@ -147,8 +149,8 @@ module AgentWork
     @draft.step
     return unless @draft_writer.block && !@draft.finished?
 
-    present(working_label, start_of_written(@draft_writer) || end_of(@draft_writer.block),
-            end_of(@draft_writer.block), sticky: true)
+    present_caret(working_label, start_of_written(@draft_writer) || end_of(@draft_writer.block),
+                  end_of(@draft_writer.block), sticky: true)
   end
 
   # Someone is in the section being drafted: its heading or any block written so far.
@@ -158,6 +160,9 @@ module AgentWork
   end
 
   def finish_task
+    forget_thinking(@section_title)
+    return draft_failed if @draft.failed?
+
     Worklist.mark(doc, @task, :done)&.then { |u| flush.call(u) }
     (@sections ||= []) << { title: @task.text, heading: @section_heading, blocks: @draft_writer.created }
     at = @draft_writer.block || last_block
@@ -166,6 +171,26 @@ module AgentWork
     note_in_review("Drafted #{@section_title} from the list; edit it and it's yours.")
     @task = nil
     @next_scan = 0
+  end
+
+  # Take out whatever was opened for a draft that never came: the blocks the
+  # writer made, and the heading when the agent added it.
+  def discard_draft
+    anchors = @draft_writer.created.reverse
+    anchors << @section_heading if @made_heading
+    flush.call(doc.diff do
+      anchors.each { |a| (i = doc.block_at(a)) && root.delete_xml_text(i) }
+    end)
+  end
+
+  # Nothing came from the model: the task goes back on the list, unchecked,
+  # and the agent waits a while before picking anything up again.
+  def draft_failed
+    discard_draft
+    Worklist.mark(doc, @task, :open)&.then { |u| flush.call(u) }
+    report_failure("drafting #{@section_title}", @draft.error, "the task is back on the list")
+    @task = nil
+    @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
   end
 
   # "@agent take <task>", "@agent pause", "@agent resume", "@agent stop".

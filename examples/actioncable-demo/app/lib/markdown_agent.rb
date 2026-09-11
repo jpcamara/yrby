@@ -91,7 +91,11 @@ class MarkdownAgent
         first = [first, more[0]].min
         last = [last, more[1]].max
       end
-      react_to(first, last)
+      begin
+        react_to(first, last)
+      rescue StandardError => e
+        report_failure("your request", e)
+      end
       @changes.clear
     end
   end

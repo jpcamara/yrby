@@ -31,6 +31,7 @@
     <button type="button" data-say="@agent pause">Pause</button>
     <button type="button" data-say="@agent resume">Resume</button>
   </div>
+  <p class="agent-hint">Talk to it on a line of its own: <code>@agent</code> and a question, <code>@agent take</code> and a task, or select some text and write <code>@agent rewrite this</code> under it. Tasks under a heading named <b>For the agent</b> get picked up on their own.</p>
   <ol id="agent-log" class="agent-log" aria-label="What the agent is doing"></ol>
 
   <%# data-direct-upload-url / data-blob-url-template: the Trix-convention
@@ -65,6 +66,11 @@
   .agent-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin: .25rem 0 .5rem; }
   .agent-actions button { font-size: .8rem; padding: .25rem .6rem; border: 1px solid #ddd6fe; background: #fff; border-radius: 999px; color: #4c1d95; cursor: pointer; }
   .agent-actions button:hover { background: #f5f3ff; }
+  .agent-hint { margin: 0 0 .5rem; font-size: .78rem; color: #6b7280; }
+  .agent-hint code { background: #f5f3ff; color: #4c1d95; padding: .05em .3em; border-radius: 3px; }
+  .invite-agent[disabled] { opacity: .55; cursor: default; }
+  .agent-log .thinking.folded { cursor: pointer; }
+  .agent-log .thinking.folded::after { content: " (more)"; color: #a78bfa; font-style: normal; }
   .agent-log { list-style: none; margin: .5rem 0 .75rem; padding: .25rem .5rem; font-size: .8rem; color: #374151; height: 11rem; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fcfcfd; }
   .agent-log li { padding: .15rem 0; border-top: 1px solid #f3f4f6; }
   .agent-log li:first-child { border-top: 0; }

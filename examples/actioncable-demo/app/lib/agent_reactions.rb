@@ -20,6 +20,8 @@ module AgentReactions
   # and let the reviewer decide whether to add something small. Blocks
   # people are writing in are off limits.
   def contribute(changed)
+    return if backing_off?
+
     changed = changed.select { |i| i < root.xml_text_count }
     return unless worth_a_look?(changed)
 
