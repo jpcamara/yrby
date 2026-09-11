@@ -6,11 +6,12 @@
 class MarkdownEditor
   OPS = %w[replace insert_after delete heading].freeze
 
-  def initialize(doc, text, flush:, avoid: [])
+  def initialize(doc, text, flush:, avoid: [], presence: nil)
     @doc = doc
     @text = text
     @flush = flush
     @avoid = avoid
+    @presence = presence
   end
 
   def apply(plan)
@@ -22,7 +23,9 @@ class MarkdownEditor
 
       paragraphs = MarkdownDoc.paragraphs(@text.to_s)
       p = paragraphs[edit["block"]] or next
+      @presence&.call("#{edit["op"].tr("_", " ")} paragraph #{edit["block"]}", p)
       send(edit["op"], p, edit)
+      sleep 0.4 if @presence
       applied += 1
     end
     applied

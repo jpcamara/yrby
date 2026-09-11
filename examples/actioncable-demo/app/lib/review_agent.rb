@@ -81,7 +81,7 @@ class ReviewAgent
       else
         empty_since = nil
       end
-      changed = @changes.pop(timeout: work_pending? ? 0.2 : 2)
+      changed = @changes.pop(timeout: work_pending? ? 0.04 : 2)
       unless changed
         work_step
         next

@@ -31,6 +31,8 @@ module MarkdownWork
   def claim(task)
     @task = task
     @held = nil
+    @done = false
+    @pacer = nil
     @draft = Queue.new
     @task_anchor = task.line && @text.relative_position(MarkdownDoc.line_start(text, task.line))
     mark(task, :drafting)
@@ -72,22 +74,30 @@ module MarkdownWork
     section
   end
 
+  # Take what the model has produced into the pacer, then let a little out.
+  # A person in the section holds the pace; the chunks wait in the pacer.
   def draft_step
-    8.times do
-      chunk = @held || next_chunk
-      return unless chunk
-      return finish_task if chunk == :done
+    @pacer ||= Pacer.new { |piece| @draft_writer.feed(piece) }
+    loop do
+      chunk = next_chunk
+      break unless chunk
 
-      if in_my_way?
-        @held = chunk
-        present("waiting, you're in this section", @draft_writer.index,
-                detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
-        return
+      if chunk == :done
+        @done = true
+        break
       end
-      @held = nil
-      @draft_writer.feed(chunk)
-      present("drafting #{@section_title}", @draft_writer.index, sticky: true)
+      @pacer.feed(chunk)
     end
+    return finish_task if @done && !@pacer.pending?
+    return unless @pacer.pending?
+
+    if in_my_way?
+      present("waiting, you're in this section", @draft_writer.index,
+              detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
+      return
+    end
+    @pacer.drain
+    present("drafting #{@section_title}", @draft_writer.index, sticky: true)
   end
 
   def next_chunk
@@ -104,6 +114,7 @@ module MarkdownWork
   end
 
   def finish_task
+    @pacer&.flush
     @draft_writer.finish
     ensure_trailing_newlines(1) if @draft_writer.index >= @text.length
     mark(@task, :done, anchor: @task_anchor)
@@ -139,6 +150,7 @@ module MarkdownWork
     return present("nothing to stop", @last_index) unless @task
 
     @draft_thread&.kill
+    @pacer&.flush
     mark(@task, :stopped, anchor: @task_anchor)
     present("stopped", @last_index, detail: "dropped \"#{@task.text}\"; the item is marked [-]")
     @task = nil
