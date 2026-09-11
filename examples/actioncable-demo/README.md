@@ -597,6 +597,21 @@ after a blur, so a parked caret does not hold a block for good. A section it dra
 is yours once you edit it: the change goes into its memory and it does not
 touch that section again on its own.
 
+Say where a section goes by naming a heading: `Draft the rollback plan under
+Rollout` puts the draft at the end of that section instead of at the end of
+the document. Or put the caret in a heading, or right under it, and type
+`@agent draft this section`. Items in the list under its heading need no box;
+it adds one as it works, which also covers a markdown task list pasted into
+Lexxy, whose paste conversion drops the `[ ]`.
+
+Each thing it does gets a short line in its review list as well as the log:
+what it added after your change and why, what it edited on request, what it
+drafted. The reasoning stays in the document.
+
+Lexxy converts markdown as you type: `## ` for a heading, `- ` for a bullet,
+`> ` for a quote, `**bold**`. A typed `- [ ] task` keeps its box. So the
+whole loop, tasks included, can be driven by typing markdown.
+
 Handoffs are lines it removes once read:
 
 - `@agent take <task>` adds an item to its list (creating the heading and list

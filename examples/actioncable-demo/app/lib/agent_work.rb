@@ -35,18 +35,69 @@ module AgentWork
     claim(task) if task
   end
 
-  # Mark the item, open a section at the end, and start the model streaming.
+  # Mark the item, open the section, and start the model streaming.
   def claim(task)
     @task = task
     @held = nil
     @draft = Queue.new
     Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
-    flush.call(doc.diff { Y::Lexical.append_heading(doc, section_title(task.text), tag: "h2") })
-    @section_heading = last_block.anchor
-    @draft_writer = StreamingWriter.new(doc, flush: flush)
-    present("drafting #{section_title(task.text)}", end_of(last_block), end_of(last_block),
-            detail: "took \"#{task.text}\" from the list", sticky: true)
+    at = open_section(task)
+    where = task.under && @section_title != section_title(task.text) ? ", under #{@section_title}" : ""
+    present("drafting #{@section_title}", end_of(at), end_of(at), sticky: true,
+                                                                  detail: "took \"#{task.text}\" from the list#{where}")
     start_draft(task)
+  end
+
+  # The draft goes at the end of the named section when there is one, else
+  # into a new section at the end of the document. Returns the block the
+  # caret should sit at while the first words arrive.
+  def open_section(task)
+    heading = task.under && heading_block(task.under)
+    if heading
+      @section_heading = heading.anchor
+      @section_title = heading.text.strip
+      last = root.xml_text(section_end(doc.block_at(@section_heading)))
+      @draft_writer = StreamingWriter.new(doc, flush: flush, after: last.anchor)
+      last
+    else
+      @section_title = section_title(task.text)
+      flush.call(doc.diff { Y::Lexical.append_heading(doc, @section_title, tag: "h2") })
+      @section_heading = last_block.anchor
+      @draft_writer = StreamingWriter.new(doc, flush: flush)
+      last_block
+    end
+  end
+
+  # The first heading whose text matches, exactly then loosely.
+  def heading_block(text)
+    headings = (0...root.xml_text_count).map { |i| root.xml_text(i) }.select { |b| b.attributes["__type"] == "heading" }
+    headings.find { |b| b.text.strip.casecmp?(text.strip) } ||
+      headings.find { |b| b.text.strip.downcase.include?(text.strip.downcase) }
+  end
+
+  # Ordinal of the last block of the section that starts at heading `h`.
+  def section_end(h)
+    nxt = ((h + 1)...root.xml_text_count).find { |i| root.xml_text(i).attributes["__type"] == "heading" }
+    (nxt || root.xml_text_count) - 1
+  end
+
+  # "@agent draft this section": the heading meant by "this" (selected, or
+  # just above the line) gets its section drafted in place.
+  def draft_here(index)
+    scope = selection_for(index)
+    from, to = take_request(index, scope)
+    return present("no section to draft", nil, nil) unless from
+
+    h = (from..to).find { |i| root.xml_text(i).attributes["__type"] == "heading" } ||
+        from.downto(0).find { |i| root.xml_text(i).attributes["__type"] == "heading" }
+    unless h
+      return present("no heading to draft under", nil, nil,
+                     detail: "put the line under a heading, or select one")
+    end
+
+    title = root.xml_text(h).text.strip
+    claim(Worklist::Task.new(list: nil, index: nil, text: title, state: :open, under: title))
+    @changes.clear
   end
 
   # "Draft the rollback plan" becomes a section called "Rollback plan".
@@ -77,14 +128,13 @@ module AgentWork
       if in_my_way?
         @held = chunk
         present("waiting, you're in this section", end_of(@draft_writer.block), end_of(@draft_writer.block),
-                detail: "I'll carry on with #{section_title(@task.text)} when you leave", sticky: true)
+                detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
         return
       end
       @held = nil
       @draft_writer.feed(chunk)
       if @draft_writer.block
-        present("drafting #{section_title(@task.text)}", end_of(@draft_writer.block), end_of(@draft_writer.block),
-                sticky: true)
+        present("drafting #{@section_title}", end_of(@draft_writer.block), end_of(@draft_writer.block), sticky: true)
       end
     end
   end
@@ -106,8 +156,9 @@ module AgentWork
     Worklist.mark(doc, @task, :done)&.then { |u| flush.call(u) }
     (@sections ||= []) << { title: @task.text, heading: @section_heading, blocks: @draft_writer.created }
     at = @draft_writer.block || last_block
-    present("drafted #{section_title(@task.text)}", end_of(at), end_of(at),
+    present("drafted #{@section_title}", end_of(at), end_of(at),
             detail: "\"#{@task.text}\" is done; edit the section and it's yours")
+    note_in_review("Drafted #{@section_title} from the list; edit it and it's yours.")
     @task = nil
     @next_scan = 0
   end
