@@ -6,12 +6,15 @@
 class MarkdownEditor
   OPS = %w[replace insert_after delete heading].freeze
 
-  def initialize(doc, text, flush:, avoid: [], presence: nil)
+  # Options: `avoid:` paragraph numbers to skip, `only:` a range the plan
+  # may touch, `presence:` a callable (status, from, to) to highlight.
+  def initialize(doc, text, flush:, **options)
     @doc = doc
     @text = text
     @flush = flush
-    @avoid = avoid
-    @presence = presence
+    @avoid = options.fetch(:avoid, [])
+    @presence = options[:presence]
+    @only = options[:only]
   end
 
   def apply(plan)
@@ -19,7 +22,7 @@ class MarkdownEditor
     order = { "heading" => 0, "replace" => 1, "insert_after" => 2, "delete" => 3 }
     Array(plan).select { |e| OPS.include?(e["op"]) && e["block"].is_a?(Integer) && e["block"] >= 0 }
                .sort_by { |e| [-e["block"], order[e["op"]]] }.each do |edit|
-      next if @avoid.include?(edit["block"])
+      next if @avoid.include?(edit["block"]) || (@only && !@only.cover?(edit["block"]))
 
       paragraphs = MarkdownDoc.paragraphs(@text.to_s)
       p = paragraphs[edit["block"]] or next

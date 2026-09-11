@@ -589,8 +589,10 @@ its blocks, takes tasks from `- [ ]` lines under a heading that names it
 that section, and puts a why-line under its review. Markdown already has
 every structure it needs: sections are headings, blocks are paragraphs, tasks
 are checkbox lines. `Y::Text#relative_position` and `Doc#index_at` keep its
-place and read people's carets. Selection-scoped rewrites and undo are not
-on this page yet.
+place and read people's carets. Select a paragraph and say `@agent rewrite
+this in one sentence` (or use the button) and only that text changes;
+`@agent undo` puts back whatever it did last, a draft, an answer, a rewrite
+or a contribution, wherever that text has moved to.
 
 ### Seeing it and talking to it
 
