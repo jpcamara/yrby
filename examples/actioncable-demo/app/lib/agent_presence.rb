@@ -20,6 +20,31 @@ module AgentPresence
             block.relative_position(block.length))
   end
 
+  # Ordinals of the blocks other people are writing in, from their presence:
+  # each peer's caret is a relative position, and the document says which
+  # block it falls in. The agent's own presence is left out.
+  def occupied_blocks
+    return [] unless @others
+
+    @others.states.flat_map do |client, state|
+      next [] if client == @presence.client_id || !state.is_a?(Hash) || state["focusing"] == false
+
+      %w[anchorPos focusPos].filter_map { |k| state[k].is_a?(Hash) ? doc.block_at(state[k], "root") : nil }
+    end.uniq.sort
+  end
+
+  # Who is here, by name, from their presence.
+  def people_here
+    return [] unless @others
+
+    @others.states.filter_map { |client, s| s["name"] if client != @presence.client_id && s.is_a?(Hash) }.uniq
+  end
+
+  # Feed a presence frame the peer received into the mirror of everyone's state.
+  def see_presence(frame)
+    (@others ||= Y::Awareness.new).apply_update(frame)
+  end
+
   private
 
   def block_selection(index)

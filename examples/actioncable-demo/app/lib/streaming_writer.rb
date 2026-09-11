@@ -11,14 +11,18 @@
 class StreamingWriter
   include StreamingBlocks
 
-  # `at:` is the ordinal the first block goes in at (before the block that is
-  # there now); without it blocks go at the end.
-  def initialize(doc, flush:, at: nil)
+  # `after:` is a BlockAnchor the first block goes after, wherever that block
+  # is by then; `at:` is a plain ordinal; without either, blocks go at the end.
+  def initialize(doc, flush:, at: nil, after: nil)
     @doc = doc
     @flush = flush
     @at = at
+    @after = after
+    @last = nil    # anchor of the last block this writer made
+    @anchor = nil  # anchor of the block text is going into
+    @item = nil    # index within that block when it is a list item
     @paragraph = nil
-    @list = nil
+    @list = nil    # anchor of the list bullets go into
     @block = nil   # the block text is currently going into
     @line = +""    # the current line, until its kind is known
     @decided = false
@@ -26,9 +30,11 @@ class StreamingWriter
     @paragraph_text = +""
   end
 
-  # The block that last received text, for a caret to follow, and the list
-  # the bullets went into, if any.
-  attr_reader :block, :list
+  # The block that last received text, as of now, for a caret to follow, and
+  # the list the bullets went into, if any.
+  def block = current_block
+
+  def list = @list&.block
 
   # One insert per chunk (per newline-free run of it), not per character: a
   # word from the stub or a token from a model is one update.
@@ -100,14 +106,19 @@ class StreamingWriter
     text = @paragraph_text
     return unless text.match?(Y::Lexical::Markdown::INLINE)
 
-    change { Y::Lexical.replace_runs(@paragraph, Y::Lexical::Markdown.runs(text)) }
+    paragraph = current_block
+    change { Y::Lexical.replace_runs(paragraph, Y::Lexical::Markdown.runs(text)) } if paragraph
   end
 
+  # The block is found again for every write: someone may have added or
+  # removed blocks above it since the last one. If it is gone, the rest of
+  # the text goes into a new paragraph.
   def write(text)
     return if text.empty?
 
     @paragraph_text << text if @block.equal?(@paragraph)
-    block = @block
+    block = current_block
+    block ||= (@block = @paragraph = new_paragraph)
     change { block.insert(block.length, text) }
   end
 

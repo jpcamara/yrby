@@ -530,6 +530,28 @@ bin/rails s
 ``` `AGENT_STUB_PACE` slows the fixed review's typing
 for a demo (try `0.3`).
 
+The agent remembers what it did. Every prompt carries a short account of its
+earlier work in the document (the review it wrote, changes it made, questions
+it answered), so a follow-up like `@agent why did you add that?` gets a real
+answer. It keeps that account itself rather than replaying the model's reply
+history: a reasoning model's history is large, and some OpenAI-compatible
+providers reject the reasoning field when it is sent back. Each call is a fresh
+chat with the standing instructions plus that account.
+
+Between requests it behaves like a collaborator rather than a tool. After a
+pause in someone's typing it looks at what changed and contributes only when
+that clearly helps: an owner a task is missing, a question in the text it can
+answer, a plain error. It says what it did, or why it did nothing, in its
+presence label. It never edits a block someone is writing in, which it knows
+from their presence, and it does not act on its own review suggestions.
+
+The blocks it writes into are tracked by anchor, not by number. An anchor is
+a relative position at the block's start, resolved again before every write.
+When someone inserts or removes blocks above while the agent is streaming,
+its words keep landing in the right block, and an edit planned against block
+numbers finds those blocks wherever they are by the time it runs. If the block
+is gone, the rest of the text goes into a new paragraph.
+
 The agent types its review as the model produces it, follows the document
 live afterwards, and reacts: change a block and it highlights it and notes
 the change in its list; write a line starting with `@agent` and it answers

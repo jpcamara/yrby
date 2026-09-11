@@ -35,6 +35,24 @@ class AwarenessTest < Minitest::Test
     refute_includes frame, "Agent"
   end
 
+  def test_a_frame_from_another_client_is_applied_and_readable
+    ada = Y::Awareness.new(7)
+    mirror = Y::Awareness.new(9)
+
+    assert mirror.apply_update(ada.set_local_state(JSON.generate(name: "Ada", color: "#f00")))
+    assert_equal({ "name" => "Ada", "color" => "#f00" }, mirror.states[7])
+
+    mirror.apply_update(ada.clear_local_state)
+
+    assert_nil mirror.states[7]
+  end
+
+  def test_a_document_update_is_not_a_presence_frame
+    frame = Y.wrap_update(Y::Doc.new.encode_state_as_update)
+
+    refute Y::Awareness.new.apply_update(frame)
+  end
+
   def test_invalid_json_is_rejected
     assert_raises(Y::Error) { Y::Awareness.new.set_local_state("not json") }
   end

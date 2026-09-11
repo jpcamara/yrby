@@ -193,6 +193,29 @@ class XmlTextTest < Minitest::Test
     assert_equal expected, Y::Lexxy.new(doc).to_html("root")
   end
 
+  # A peer's caret is a relative position; block_at says which block it is in.
+  def test_block_at_resolves_a_position_to_its_top_level_block
+    doc = Y::Doc.new
+    %w[one two three].each { |s| Y::Lexxy.append_paragraph(doc, s) }
+    Y::Lexxy.append_list(doc, %w[a b])
+    root = doc.get_xml_text("root")
+
+    assert_equal 1, doc.block_at(root.xml_text(1).relative_position(2), "root")
+    assert_equal 2, doc.block_at(root.xml_text(2).relative_position(root.xml_text(2).length), "root")
+    assert_equal 3, doc.block_at(root.xml_text(3).xml_text(1).relative_position(1), "root"), "inside a list item"
+    assert_nil doc.block_at(root.relative_position(root.length), "root"), "the root itself is no block"
+  end
+
+  def test_block_at_accepts_symbol_keys_and_positions_from_a_peer
+    doc = Y::Doc.new
+    Y::Lexxy.append_paragraph(doc, "hello")
+    pos = doc.get_xml_text("root").xml_text(0).relative_position(1)
+    peer = Y::Doc.new
+    peer.apply_update(doc.encode_state_as_update)
+
+    assert_equal 0, peer.block_at({ item: pos["item"], type: nil, tname: nil, assoc: 0 }, "root")
+  end
+
   # A caret is a Yjs relative position: {type, tname, item, assoc}. Inside a
   # text it names the character to the right; at the end of a block it names
   # the block; at a root it names the root. Ids are global, so a position
@@ -248,5 +271,21 @@ class XmlTextTest < Minitest::Test
     assert_equal "", missing.to_s
     assert_equal 0, missing.length
     assert_raises(Y::Error) { missing.insert(0, "x") }
+  end
+
+  def test_a_block_can_be_found_again_after_a_block_is_inserted_above
+    doc = Y::Doc.new
+    Y::Lexical.append_paragraph(doc, "first")
+    Y::Lexical.append_paragraph(doc, "second")
+    root = doc.get_xml_text("root")
+    anchor = root.xml_text(1).relative_position(0, assoc: :after)
+
+    assert_equal 1, doc.block_at(anchor, "root")
+
+    root.insert_xml_text(0, Y::Lexical::PARAGRAPH_ATTRIBUTES)
+    root.insert_xml_text(0, Y::Lexical::PARAGRAPH_ATTRIBUTES)
+
+    assert_equal 3, doc.block_at(anchor, "root")
+    assert_equal "second", root.xml_text(3).text
   end
 end

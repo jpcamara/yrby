@@ -917,7 +917,15 @@ frame = presence.set_local_state({ name: "Agent", color: "#7c3aed" }.to_json)
 `set_local_state` takes a JSON string (the shape your editor renders) and
 returns the y-protocol awareness frame; `Y::ActionCable.broadcast_awareness`
 relays it as is (document updates go through `broadcast`, which frames them).
-Browsers subscribed to the document apply it as another participant. `clear_local_state` returns the frame that
+Browsers subscribed to the document apply it as another participant.
+
+Presence can be read as well as published. `apply_update(frame)` takes a
+presence frame another client broadcast (a `Peer` hands them to
+`on_awareness`), and `states` returns every client's state as
+`{ client_id => state }`. A state carries the peer's caret as relative
+positions, and `Doc#block_at(position, root)` says which top-level block a
+position falls in. That is how a process knows which blocks people are
+writing in, and keeps out of them. `clear_local_state` returns the frame that
 removes the presence. Awareness expires on a timer, so a long-lived process
 re-broadcasts its state periodically to stay present. The bytes are the same
 wire format Yjs and y-protocols use, so nothing on the client changes.

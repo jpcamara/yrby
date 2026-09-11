@@ -49,12 +49,32 @@ class StubReviewer
     plan = [{ "op" => "heading", "block" => 0, "level" => 1 },
             { "op" => "replace", "block" => tasks, "text" => "Launch checklist, one owner per item:" },
             { "op" => "insert_after", "block" => tasks,
-              "text" => "- Collect deployment metrics (owner: SRE)\n- Verify the canary rollout (owner: release lead)\n" \
-                        "- Confirm on-call coverage (owner: on-call manager)\n- Sign off and publish the report (owner: PM)" }]
+              "text" => "- Collect deployment metrics (owner: SRE)\n" \
+                        "- Verify the canary rollout (owner: release lead)\n" \
+                        "- Confirm on-call coverage (owner: on-call manager)\n" \
+                        "- Sign off and publish the report (owner: PM)" }]
     if intro
       plan << { "op" => "replace", "block" => intro,
                 "text" => "Our go-live checklist, edited together with a Ruby agent." }
     end
     plan
+  end
+
+  # Between requests: a task line with no owner gets one asked for; a
+  # question in the text gets a one-line answer; otherwise nothing.
+  def consider(changed_blocks, occupied, blocks)
+    edits = []
+    changed_blocks.each do |i|
+      next if occupied.include?(i)
+
+      line = blocks[i].to_s
+      if line.end_with?("?") && !line.start_with?("@agent")
+        edits << { "op" => "insert_after", "block" => i,
+                   "text" => "Suggestion: the release manager owns that; add it to the checklist." }
+      elsif line.match?(/\A(collect|verify|confirm|run|check|deploy|sign off)\b/i) && !line.match?(/owner/i)
+        edits << { "op" => "replace", "block" => i, "text" => "#{line.sub(/\.\z/, "")} — owner: ?" }
+      end
+    end
+    LlmReviewer::Consideration.new(note: edits.empty? ? "nothing to add" : "added to what you wrote", edits: edits)
   end
 end

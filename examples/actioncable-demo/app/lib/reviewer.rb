@@ -8,12 +8,18 @@ module Reviewer
     LlmReviewer.available? ? LlmReviewer.new : StubReviewer.new
   end
 
+  # The first {...} in a reply, parsed; fences and prose around it ignored.
+  def self.first_json(reply)
+    text = reply.to_s.gsub(/```(?:json)?/, "")
+    raise ArgumentError, "no JSON in reply" unless text.index("{") && text.rindex("}")
+
+    JSON.parse(text[text.index("{")..text.rindex("}")])
+  end
+
   # Model output for an edit plan: JSON, possibly wrapped in a code fence or
   # prose. The first {...} that parses wins.
   def self.parse_edits(reply)
-    text = reply.to_s.gsub(/```(?:json)?/, "")
-    json = text[text.index("{")..text.rindex("}")] if text.index("{") && text.rindex("}")
-    edits = JSON.parse(json.to_s)["edits"]
+    edits = first_json(reply)["edits"]
     raise ArgumentError, "no edits in reply" unless edits.is_a?(Array)
 
     edits

@@ -26,10 +26,12 @@ class ReviewAgent
     @changes = Queue.new
     @peer = Y::ActionCable::Peer.new(document_id)
     @list = nil
+    @recent_changes = []
   end
 
   def run
     @peer.on_update { |_update, _doc, changed| @changes << changed }
+    @peer.on_awareness { |frame| see_presence(frame) }
     @peer.subscribe
     (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
     read
@@ -78,9 +80,11 @@ class ReviewAgent
       next keep_alive unless changed
 
       index = changed.last
+      @recent_changes = changed.dup
       present("reading your change", *block_selection(index)) if index && index < root.xml_text_count
       while (more = @changes.pop(timeout: QUIET)) # let a burst of typing settle
         index = more.last || index
+        @recent_changes |= more
       end
       next unless index && index < root.xml_text_count
 
@@ -106,8 +110,9 @@ class ReviewAgent
     writer.finish
   end
 
-  # A line addressed to the agent is an instruction to edit or a question;
-  # anything else is a change to note.
+  # A line addressed to the agent is an instruction to edit or a question.
+  # Anything else is the document changing under a collaborator: the agent
+  # considers it and contributes only when that clearly helps.
   def react_to(index)
     line = block_text(index)
     if line.match?(/\A@agent\s+edit\b/i)
@@ -115,7 +120,7 @@ class ReviewAgent
     elsif line.match?(/\A@agent\b/i)
       answer(index, line) unless @answered.include?(line)
     else
-      note_change(index)
+      contribute(@recent_changes | [index])
     end
   end
 

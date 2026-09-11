@@ -1,12 +1,12 @@
 use magnus::{
-    function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RString, Ruby,
+    function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RHash, RString, Ruby,
     TryConvert, Value,
 };
 use std::cell::RefCell;
 use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{DeepObservable, Doc, GetString, ReadTxn, Transact};
+use yrs::{DeepObservable, Doc, GetString, ReadTxn, Text, Transact};
 
 mod array;
 mod map;
@@ -313,6 +313,31 @@ impl RbDoc {
             array.push(i)?;
         }
         Ok(array)
+    }
+
+    /// The ordinal of the top-level block of the root `XmlText` named `root`
+    /// that a relative position (the `{type, tname, item, assoc}` hash a peer
+    /// carries as a caret) falls in, or nil. This is how a process knows
+    /// which block a person is writing in.
+    fn block_at(&self, position: RHash, root: String) -> Result<Option<u32>, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let sticky = sticky_from_ruby(&ruby, position)?;
+        let doc = &self.0;
+        Ok(nogvl(move || {
+            let txn = doc.transact();
+            let target = sticky.get_offset(&txn)?.branch;
+            let root_ref = shared::root_xml_text(&txn, root.as_str())?;
+            let mut ordinal = 0u32;
+            for d in root_ref.diff(&txn, yrs::types::text::YChange::identity) {
+                if let yrs::Out::YXmlText(block) = &d.insert {
+                    if contains_branch(&txn, &block, target) {
+                        return Some(ordinal);
+                    }
+                    ordinal += 1;
+                }
+            }
+            None
+        }))
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -736,11 +761,71 @@ impl RbAwareness {
     }
 
     /// Remove this client's presence and return the frame that tells peers to
-    /// drop it.
+    /// drop it: an entry with the next clock and a null state, as y-protocols
+    /// encodes a removal. yrs's own clean just forgets the client, and a
+    /// frame built from that says nothing, so peers would wait for a timeout.
     fn clear_local_state(&self) -> Result<RString, Error> {
         let mut awareness = self.0.borrow_mut();
+        let id = awareness.client_id();
+        let clock = awareness
+            .iter()
+            .find(|(client, _)| *client == id)
+            .map(|(_, state)| state.clock)
+            .unwrap_or(0);
         awareness.clean_local_state();
-        Self::frame(&awareness)
+        let mut clients = std::collections::HashMap::new();
+        clients.insert(
+            id,
+            yrs::sync::awareness::AwarenessUpdateEntry {
+                clock: clock + 1,
+                json: "null".into(),
+            },
+        );
+        let update = yrs::sync::awareness::AwarenessUpdate { clients };
+        Ok(binary_string(&Message::Awareness(update).encode_v1()))
+    }
+
+    /// Apply a presence frame from another client (the bytes a browser or
+    /// another process broadcast). Returns false for a frame that is not an
+    /// awareness message.
+    fn apply_update(&self, frame: RString) -> Result<bool, Error> {
+        let bytes = copy_bytes(frame);
+        let message = Message::decode_v1(&bytes).map_err(|e| yrb_error(e.to_string()))?;
+        match message {
+            Message::Awareness(update) => {
+                self.0
+                    .borrow_mut()
+                    .apply_update(update)
+                    .map_err(|e| yrb_error(e.to_string()))?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// Every client's state, as `{ client_id => state }`, the state being the
+    /// JSON each client set (parsed), or nil for a client that cleared it.
+    fn states(&self) -> Result<RHash, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let entries: Vec<(u64, Option<String>)> = self
+            .0
+            .borrow()
+            .iter()
+            .map(|(id, state)| (id.get(), state.data.as_ref().map(|d| d.to_string())))
+            .collect();
+        let out = ruby.hash_new();
+        for (id, data) in entries {
+            let value: Value = match data {
+                Some(json) => {
+                    let parsed: serde_json::Value = serde_json::from_str(&json)
+                        .map_err(|e| yrb_error(format!("presence state is not JSON: {e}")))?;
+                    json_to_ruby(&ruby, &parsed)
+                }
+                None => ruby.qnil().as_value(),
+            };
+            out.aset(id, value)?;
+        }
+        Ok(out)
     }
 
     fn frame(awareness: &Awareness) -> Result<RString, Error> {
@@ -786,6 +871,104 @@ fn root_positions(txn: &yrs::TransactionMut, event: &yrs::types::Event, hits: &m
     }
 }
 
+/// Whether `branch` is `block` itself or embedded anywhere inside it.
+fn contains_branch<T: ReadTxn>(
+    txn: &T,
+    block: &yrs::XmlTextRef,
+    branch: yrs::branch::BranchPtr,
+) -> bool {
+    let this: &yrs::branch::Branch = block.as_ref();
+    if yrs::branch::BranchPtr::from(this) == branch {
+        return true;
+    }
+    for d in block.diff(txn, yrs::types::text::YChange::identity) {
+        if let yrs::Out::YXmlText(child) = &d.insert {
+            if contains_branch(txn, &child, branch) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn hash_get(ruby: &Ruby, h: RHash, key: &str) -> Option<Value> {
+    h.get(ruby.to_symbol(key))
+        .or_else(|| h.get(key))
+        .filter(|v| !v.is_nil())
+}
+
+/// A yrs sticky index from the `{type, tname, item, assoc}` hash Yjs uses.
+fn sticky_from_ruby(ruby: &Ruby, position: RHash) -> Result<yrs::StickyIndex, Error> {
+    use yrs::{Assoc, IndexScope, StickyIndex};
+    let assoc = match hash_get(ruby, position, "assoc") {
+        Some(v) => {
+            let n: i64 = TryConvert::try_convert(v)?;
+            if n < 0 {
+                Assoc::Before
+            } else {
+                Assoc::After
+            }
+        }
+        None => Assoc::After,
+    };
+    let id_of = |key: &str| -> Result<Option<yrs::block::ID>, Error> {
+        let Some(v) = hash_get(ruby, position, key) else {
+            return Ok(None);
+        };
+        let h = RHash::from_value(v).ok_or_else(|| yrb_error(format!("{key} must be a hash")))?;
+        let client: u64 = TryConvert::try_convert(
+            hash_get(ruby, h, "client").ok_or_else(|| yrb_error("missing client".into()))?,
+        )?;
+        let clock: u32 = TryConvert::try_convert(
+            hash_get(ruby, h, "clock").ok_or_else(|| yrb_error("missing clock".into()))?,
+        )?;
+        Ok(Some(yrs::block::ID::new(
+            yrs::block::ClientID::new(client),
+            clock,
+        )))
+    };
+    if let Some(item) = id_of("item")? {
+        return Ok(StickyIndex::from_id(item, assoc));
+    }
+    if let Some(ty) = id_of("type")? {
+        return Ok(StickyIndex::new(IndexScope::Nested(ty), assoc));
+    }
+    match hash_get(ruby, position, "tname") {
+        Some(v) => {
+            let name: String = TryConvert::try_convert(v)?;
+            Ok(StickyIndex::new(IndexScope::Root(name.into()), assoc))
+        }
+        None => Err(yrb_error("a position needs item, type, or tname".into())),
+    }
+}
+
+/// serde_json to Ruby, for presence states.
+fn json_to_ruby(ruby: &Ruby, v: &serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => ruby.qnil().as_value(),
+        serde_json::Value::Bool(b) => b.into_value_with(ruby),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => i.into_value_with(ruby),
+            None => n.as_f64().unwrap_or(0.0).into_value_with(ruby),
+        },
+        serde_json::Value::String(s) => s.as_str().into_value_with(ruby),
+        serde_json::Value::Array(a) => {
+            let arr = ruby.ary_new();
+            for x in a {
+                let _ = arr.push(json_to_ruby(ruby, x));
+            }
+            arr.as_value()
+        }
+        serde_json::Value::Object(o) => {
+            let h = ruby.hash_new();
+            for (k, x) in o {
+                let _ = h.aset(k.as_str(), json_to_ruby(ruby, x));
+            }
+            h.as_value()
+        }
+    }
+}
+
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("Y")?;
@@ -810,6 +993,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "apply_update_changes",
         method!(RbDoc::apply_update_changes, 2),
     )?;
+    doc_class.define_method("block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
@@ -851,6 +1035,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "clear_local_state",
         method!(RbAwareness::clear_local_state, 0),
     )?;
+    awareness_class.define_method("apply_update", method!(RbAwareness::apply_update, 1))?;
+    awareness_class.define_method("states", method!(RbAwareness::states, 0))?;
 
     // Live shared-type handles.
     map::define(ruby, module)?;
