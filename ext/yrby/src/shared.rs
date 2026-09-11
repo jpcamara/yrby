@@ -105,6 +105,46 @@ pub fn embedded_xml_text<T: ReadTxn>(txn: &T, parent: &XmlTextRef, n: u32) -> Op
         .map(|d| d.insert)
 }
 
+/// The sequence index (the position `insert`/`remove_range` count in) of the
+/// `n`-th `XmlText` embedded in `parent`: characters before it count one
+/// each, embeds count one.
+pub fn embedded_xml_text_index<T: ReadTxn>(txn: &T, parent: &XmlTextRef, n: u32) -> Option<u32> {
+    let mut seen = 0u32;
+    let mut index = 0u32;
+    for d in parent.diff(txn, YChange::identity) {
+        match &d.insert {
+            Out::YXmlText(_) => {
+                if seen == n {
+                    return Some(index);
+                }
+                seen += 1;
+                index += 1;
+            }
+            Out::Any(Any::String(s)) => index += s.encode_utf16().count() as u32,
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// The strings in `block`, markers skipped, nested blocks joined by newlines.
+pub fn block_text<T: ReadTxn>(txn: &T, block: &XmlTextRef) -> String {
+    let mut out = String::new();
+    for d in block.diff(txn, YChange::identity) {
+        match &d.insert {
+            Out::Any(Any::String(s)) => out.push_str(s),
+            Out::YXmlText(child) => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&block_text(txn, child));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// How many `XmlText`s are embedded in `parent`.
 pub fn embedded_xml_text_count<T: ReadTxn>(txn: &T, parent: &XmlTextRef) -> u32 {
     parent

@@ -17,6 +17,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   position editors carry in awareness as a caret. `append_list(doc, items,
   ordered:)` appends a bulleted or numbered list; `Y::Lexxy.append_list`
   writes Lexxy's own list item type.
+- `Y::XmlText#text`: a block's text, markers skipped, nested blocks joined by
+  newlines.
+- Editing in place: `Y::XmlText#delete`, `#clear`, `#insert_xml_text(at, attrs)`,
+  `#delete_xml_text(at)`, and the `Y::Lexical` helpers `insert_paragraph`,
+  `replace_runs`, and `delete_block`.
+- Formatted text: runs with `bold:`, `italic:`, `strikethrough:`, `underline:`,
+  `code:`, or `link:`; `append_quote`; `append_code(doc, code, language:)`;
+  and `append_markdown` for the subset of Markdown a model writes. `Y::Lexxy`
+  writes Lexxy's own code block type and `rel="noreferrer"` links, and nests
+  a paragraph inside a quote as Lexxy does.
+- `Y::Doc#apply_update_changes(update, root)` applies an update and returns the
+  ordinals of the top-level blocks it touched.
 - `Y::Doc#diff { |doc| ... }` returns the update a block produced, or nil,
   the unit a process records and broadcasts as it streams into a document.
 - `Y::Awareness` lets a Ruby process publish presence. `set_local_state(json)`
@@ -41,6 +53,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `Y::Lexxy` renders a quote's content. Lexxy nests a paragraph inside a quote
+  block, which rendered as an empty `<blockquote>`.
 - `Y::Lexxy` renders Lexxy's list items. They are `early_escape_listitem`, Lexxy's
   own node type, and were falling through to the block fallback as `<p>` inside
   the list. They now render as `<li>` like standard list items.
