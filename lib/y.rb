@@ -15,6 +15,7 @@ end
 require_relative "y/rendering"
 require_relative "y/lexxy"
 require_relative "y/lexical_writer"
+require_relative "y/lexical_markdown"
 require_relative "y/xml_text"
 require_relative "y/doc"
 require_relative "y/tiptap"

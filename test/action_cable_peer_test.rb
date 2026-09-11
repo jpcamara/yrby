@@ -12,7 +12,7 @@ class ActionCablePeerTest < ActionCable::Channel::TestCase
   def setup
     @events = Queue.new
     @peer = Y::ActionCable::Peer.new("peer-test")
-    @peer.on_update { |update, doc| @events << [:update, update, doc.read_xml("root")] }
+    @peer.on_update { |update, doc, changed| @events << [:update, update, doc.read_xml("root"), changed] }
     @peer.on_awareness { |frame| @events << [:awareness, frame] }
     @peer.subscribe
   end
@@ -27,11 +27,12 @@ class ActionCablePeerTest < ActionCable::Channel::TestCase
 
     Y::ActionCable.broadcast("peer-test", update)
 
-    kind, received, text = @events.pop(timeout: 2)
+    kind, received, text, changed = @events.pop(timeout: 2)
 
     assert_equal :update, kind
     assert_equal update, received
     assert_equal "hello from a browser", text
+    assert_equal [0], changed, "the first block was added"
     assert_equal "hello from a browser", @peer.doc.read_xml("root")
   end
 

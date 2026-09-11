@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{Doc, GetString, ReadTxn, Transact};
+use yrs::{DeepObservable, Doc, GetString, ReadTxn, Transact};
 
 mod array;
 mod map;
@@ -270,6 +270,49 @@ impl RbDoc {
     /// the actual shared map, with the same thread-safety guarantees as the Doc.
     fn get_map(&self, name: String) -> map::RbMap {
         map::root_map(&self.0, name)
+    }
+
+    /// Apply `update` and report which top-level blocks of the root `XmlText`
+    /// named `root` it touched, as ordinals: a change inside a block, a block
+    /// added, or a block removed (the ordinal it had). This is what lets a
+    /// process following a document react to the part that changed.
+    fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
+        let bytes = copy_bytes(update);
+        let doc = &self.0;
+        let changed = nogvl(move || -> Result<Vec<u32>, String> {
+            let fragment = doc.get_or_insert_xml_fragment(root.as_str());
+            let branch: &yrs::branch::Branch = fragment.as_ref();
+            let target = yrs::XmlTextRef::from(yrs::branch::BranchPtr::from(branch));
+            let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+            let sink = hits.clone();
+            let subscription = target.observe_deep(move |txn, events| {
+                let mut hits = sink.lock().unwrap();
+                for event in events.iter() {
+                    match event.path().front() {
+                        Some(&yrs::types::PathSegment::Index(i)) => hits.push(i),
+                        Some(_) => {}
+                        None => root_positions(txn, event, &mut hits),
+                    }
+                }
+            });
+            let parsed = yrs::Update::decode_v1(&bytes).map_err(|e| e.to_string())?;
+            {
+                let mut txn = doc.transact_mut();
+                txn.apply_update(parsed).map_err(|e| e.to_string())?;
+            }
+            drop(subscription);
+            let mut out = hits.lock().unwrap().clone();
+            out.sort_unstable();
+            out.dedup();
+            Ok(out)
+        })
+        .map_err(yrb_error)?;
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let array = ruby.ary_new();
+        for i in changed {
+            array.push(i)?;
+        }
+        Ok(array)
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -706,6 +749,43 @@ impl RbAwareness {
     }
 }
 
+/// For an event on the root sequence itself (a block added or removed), the
+/// ordinals affected. The root's children are all embedded blocks, so a
+/// sequence position is a block ordinal.
+fn root_positions(txn: &yrs::TransactionMut, event: &yrs::types::Event, hits: &mut Vec<u32>) {
+    use yrs::types::{Change, Delta, Event};
+    let mut pos = 0u32;
+    match event {
+        Event::XmlFragment(e) => {
+            for change in e.delta(txn) {
+                match change {
+                    Change::Retain(n) => pos += n,
+                    Change::Added(items) => {
+                        for k in 0..items.len() as u32 {
+                            hits.push(pos + k);
+                        }
+                        pos += items.len() as u32;
+                    }
+                    Change::Removed(_) => hits.push(pos),
+                }
+            }
+        }
+        Event::XmlText(e) => {
+            for delta in e.delta(txn) {
+                match delta {
+                    Delta::Retain(n, _) => pos += n,
+                    Delta::Inserted(_, _) => {
+                        hits.push(pos);
+                        pos += 1;
+                    }
+                    Delta::Deleted(_) => hits.push(pos),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("Y")?;
@@ -726,6 +806,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbDoc::encode_state_as_update, -1),
     )?;
     doc_class.define_method("apply_update", method!(RbDoc::apply_update, 1))?;
+    doc_class.define_method(
+        "apply_update_changes",
+        method!(RbDoc::apply_update_changes, 2),
+    )?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;

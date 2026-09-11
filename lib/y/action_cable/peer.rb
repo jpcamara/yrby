@@ -10,7 +10,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # happen, rather than only when it next reads the store.
   #
   #   peer = Y::ActionCable::Peer.new(key)
-  #   peer.on_update { |update, doc| ... }   # each update that advanced the doc
+  #   peer.on_update { |update, doc, changed| ... } # changed: block ordinals touched
   #   peer.subscribe
   #   peer.doc.apply_update(store.replay(key)) # then load: an edit that lands
   #                                            # in between is applied, not lost
@@ -22,9 +22,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   class Peer
     attr_reader :key, :doc
 
-    def initialize(key, doc: Y::Doc.new)
+    # `root:` names the root XmlText whose top-level blocks on_update reports as
+    # changed ("root", Lexical's default).
+    def initialize(key, doc: Y::Doc.new, root: "root")
       @key = key.to_s
       @doc = doc
+      @root = root
       @on_update = nil
       @on_awareness = nil
       @active = false
@@ -73,8 +76,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         update = Y.update_from_message(frame)
         return unless update && @doc.update_advances?(update)
 
-        @doc.apply_update(update)
-        @on_update&.call(update, @doc)
+        changed = @doc.apply_update_changes(update, @root)
+        @on_update&.call(update, @doc, changed)
       when Sync::MSG_KIND_AWARENESS
         @on_awareness&.call(frame)
       end
