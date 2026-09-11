@@ -47,6 +47,8 @@ class StubReviewer
 
   def remember(_line) = nil
 
+  attr_accessor :on_thinking
+
   def answer(question, text)
     words = text.split.size
     reply = "You asked: #{question.sub(/\A@agent\s*/i, "").strip} The document has #{words} words. " \

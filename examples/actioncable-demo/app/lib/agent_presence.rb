@@ -5,6 +5,7 @@ module AgentPresence
   IDENTITY = { name: "Agent \u{1F916}", color: "#7c3aed" }.freeze
   STATUS_TTL = 8 # seconds a passing status stays on the label before "listening"
   HEARTBEAT = 5  # seconds between presence refreshes; editors forget a peer after 30
+  THINKING_KEEP = 6000 # characters of reasoning kept in the presence state
 
   # Highlight `block` with a status, the way the editor shows what it is
   # about to change.
@@ -168,11 +169,28 @@ module AgentPresence
     Rails.logger.info("agent: #{status}#{" — #{detail}" if detail}")
     @presence_lock ||= Mutex.new
     @presence_lock.synchronize do
+      @thinking = +"" unless @last_presence && @last_presence[:status] == status
       @last_presence = IDENTITY.merge(name: "#{IDENTITY[:name]} · #{status}", awarenessData: IDENTITY,
                                       anchorPos: anchor, focusPos: focus, focusing: true,
-                                      status: status, detail: detail, at: (Time.now.to_f * 1000).to_i)
+                                      status: status, detail: detail, thinking: @thinking.presence,
+                                      at: (Time.now.to_f * 1000).to_i)
       @status_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @sticky = sticky
+      Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+    end
+  end
+
+  # The model's reasoning as it streams, attached to the current status and
+  # re-sent a few times a second, so the ledger shows the agent thinking.
+  def think(delta)
+    @presence_lock ||= Mutex.new
+    @presence_lock.synchronize do
+      @thinking = (@thinking.to_s + delta)[-THINKING_KEEP..] || (@thinking.to_s + delta)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      next if @last_presence.nil? || (@thought_at && now - @thought_at < 0.3)
+
+      @thought_at = now
+      @last_presence = @last_presence.merge(thinking: @thinking)
       Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
     end
   end

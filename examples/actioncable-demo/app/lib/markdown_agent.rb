@@ -40,6 +40,7 @@ class MarkdownAgent
     @peer.subscribe
     (bytes = Store.current.replay(@document_id)) && @doc.apply_update(bytes)
     @seen = @text.to_s
+    @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
     write_review
     watch
