@@ -55,3 +55,7 @@ gem "anycable-rails", "~> 1.6"
 
 # PostgreSQL store (realistic durable store with concurrent commits)
 gem "pg"
+
+# The demo agent reviews a document with a Claude model when ANTHROPIC_API_KEY
+# is set (see app/lib/reviewer.rb); without a key it uses a fixed review.
+gem "ruby_llm", "~> 1.16", require: false
