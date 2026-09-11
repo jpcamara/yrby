@@ -14,6 +14,7 @@ class ReviewAgent
   include AgentPresence
   include AgentReactions
   include AgentWork
+  include AgentReview
 
   QUIET = 1.5 # seconds without further edits before the agent notes a change
   KEEP_ALIVE = 15 # presence expires in editors after 30s of silence; refresh before that
@@ -39,7 +40,9 @@ class ReviewAgent
     (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
-    write_review
+    introduce
+    start_review
+    @next_scan = 0 # the first task starts alongside the review
     watch
   ensure
     stop_heartbeat
@@ -52,20 +55,6 @@ class ReviewAgent
   def doc = @peer.doc
   def root = doc.get_xml_text("root")
   def text = doc.read_xml("root").to_s
-
-  # The review, typed into the document as the reviewer produces it. Every
-  # insert is a diff the open editors apply, so people watch the agent write.
-  def write_review
-    present("reading the document", end_of(last_block), end_of(last_block), sticky: true)
-    flush.call(doc.diff { Y::Lexical.append_heading(doc, "Agent review", tag: "h2") })
-    writer = StreamingWriter.new(doc, flush: flush)
-    stream_into(writer, "writing a review") { |emit| @reviewer.stream(text, &emit) }
-    @list = writer.list
-    @review_list = @list&.anchor
-    @answered = []
-    @undos = []
-    present("wrote a review", end_of(writer.block || last_block), end_of(writer.block || last_block))
-  end
 
   # Stay for a while. The peer reports which blocks each update touched, and
   # never reports this agent's own edits. A changed block is highlighted; once
@@ -82,11 +71,8 @@ class ReviewAgent
       else
         empty_since = nil
       end
-      changed = @changes.pop(timeout: work_pending? ? 0.04 : 2)
-      unless changed
-        work_step
-        next
-      end
+      changed = @changes.pop(timeout: busy? ? 0.04 : 2)
+      next idle_tick unless changed
 
       index = changed.last
       @recent_changes = changed.dup

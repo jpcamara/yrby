@@ -22,7 +22,7 @@ module MarkdownReactions
   def contribute(first, last)
     paragraphs = MarkdownDoc.paragraphs(text)
     changed = paragraphs.select { |p| p.last_line >= first && p.first_line <= last }.map(&:index)
-    return if changed.empty? || mine?(changed, paragraphs)
+    return if changed.empty? || !settled?(paragraphs[changed.last]) || mine?(changed, paragraphs)
 
     avoid = leave_alone(paragraphs)
     here = MarkdownDoc.line_end(text, paragraphs[changed.last].last_line)
@@ -49,6 +49,17 @@ module MarkdownReactions
 
     present("added to what you wrote", @text.length, detail: result.note.presence)
     note_in_review("Added after your change: #{result.note.presence || "a line"}")
+  end
+
+  # A change is worth a look once it reads finished: the paragraph ends with
+  # punctuation, or the person's caret has left it.
+  def settled?(paragraph)
+    text = paragraph.text.strip
+    return true if text.empty? || text.match?(/[.!?:)\]"”»]\s*\z/) || text.match?(/\A[-*#>]/)
+
+    lines = occupied_lines
+    Rails.logger.debug("agent: gate paragraph #{paragraph.first_line}..#{paragraph.last_line} #{text[-20..].inspect} occupied #{lines.inspect}")
+    lines.none? { |l| l.between?(paragraph.first_line, paragraph.last_line) }
   end
 
   # A change inside a section the agent drafted hands that section over; a

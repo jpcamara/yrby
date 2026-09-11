@@ -10,6 +10,7 @@
 # agent does not edit that section again on its own.
 module AgentWork
   SCAN_EVERY = 3 # seconds between looks at the list while idle
+  LISTENING = "I'll look at changes once a sentence is finished, answer @agent lines, and take tasks you add"
 
   private
 
@@ -23,7 +24,7 @@ module AgentWork
     @task ? draft_step : pick_task
   rescue StandardError => e
     Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
-    @draft_thread&.kill
+    @draft&.stop
     @task = nil
     @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
   end
@@ -31,17 +32,33 @@ module AgentWork
   def pick_task
     @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SCAN_EVERY
     occupied = occupied_blocks
-    task = Worklist.tasks(doc).find { |t| t.state == :open && !occupied.include?(doc.block_at(t.list)) }
-    claim(task) if task
+    task = tasks_for_me.find { |t| t.state == :open && !occupied.include?(doc.block_at(t.list)) }
+    return unless task
+
+    at = end_of(last_block)
+    present("up next: #{section_title(task.text)}", at, at, sticky: true,
+                                                            detail: "from your list; say @agent pause to hold me")
+    sleep 1.5
+    claim(task)
+  end
+
+  def tasks_for_me = Worklist.tasks(doc)
+
+  # After the review, say what comes next.
+  def announce_next
+    return present(working_label, end_of(last_block), end_of(last_block), sticky: true) if drafting?
+
+    task = tasks_for_me.find { |t| t.state == :open }
+    if task
+      present("up next: #{section_title(task.text)}", end_of(last_block), end_of(last_block), detail: "from your list")
+    else
+      present("listening", end_of(last_block), end_of(last_block), sticky: true, detail: LISTENING)
+    end
   end
 
   # Mark the item, open the section, and start the model streaming.
   def claim(task)
     @task = task
-    @held = nil
-    @done = false
-    @pacer = nil
-    @draft = Queue.new
     Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
     at = open_section(task)
     where = task.under && @section_title != section_title(task.text) ? ", under #{@section_title}" : ""
@@ -110,50 +127,27 @@ module AgentWork
   end
 
   def start_draft(task)
-    @draft_thread = Thread.new do
-      @reviewer.draft(task.text, text) { |chunk| @draft << chunk }
-    rescue StandardError => e
-      Rails.logger.warn("agent draft failed: #{e.class}: #{e.message}")
-    ensure
-      @draft << :done
+    @draft = StreamJob.new(writer: @draft_writer, on_finish: -> { finish_task }) do |emit|
+      @reviewer.draft(task.text, text, &emit)
     end
   end
 
   # Write what has streamed in so far, a few chunks per step, yielding the
   # block to a person who is in it.
-  # Take what the model has produced into the pacer, then let a little out.
-  # A person in the section holds the pace; the chunks wait in the pacer.
+  # Let the draft out a little, unless a person is in the section.
   def draft_step
-    @pacer ||= Pacer.new { |piece| @draft_writer.feed(piece) }
-    loop do
-      chunk = next_chunk
-      break unless chunk
-
-      if chunk == :done
-        @done = true
-        break
-      end
-      @pacer.feed(chunk)
-    end
-    return finish_task if @done && !@pacer.pending?
-    return unless @pacer.pending?
+    return unless @draft && !@draft.finished?
 
     if in_my_way?
       present("waiting, you're in this section", end_of(@draft_writer.block), end_of(@draft_writer.block),
               detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
       return
     end
-    @pacer.drain
-    return unless @draft_writer.block
+    @draft.step
+    return unless @draft_writer.block && !@draft.finished?
 
-    present("drafting #{@section_title}", start_of_written(@draft_writer) || end_of(@draft_writer.block),
+    present(working_label, start_of_written(@draft_writer) || end_of(@draft_writer.block),
             end_of(@draft_writer.block), sticky: true)
-  end
-
-  def next_chunk
-    @draft.pop(true)
-  rescue ThreadError
-    nil
   end
 
   # Someone is in the section being drafted: its heading or any block written so far.
@@ -163,8 +157,6 @@ module AgentWork
   end
 
   def finish_task
-    @pacer&.flush
-    @draft_writer.finish
     Worklist.mark(doc, @task, :done)&.then { |u| flush.call(u) }
     (@sections ||= []) << { title: @task.text, heading: @section_heading, blocks: @draft_writer.created }
     at = @draft_writer.block || last_block
@@ -199,9 +191,7 @@ module AgentWork
   def stop_task
     return present("nothing to stop", nil, nil) unless @task
 
-    @draft_thread&.kill
-    @pacer&.flush
-    @draft_writer&.finish
+    @draft&.stop
     Worklist.mark(doc, @task, :stopped)&.then { |u| flush.call(u) }
     present("stopped", nil, nil, detail: "dropped \"#{@task.text}\"; the item is marked [-]")
     @task = nil

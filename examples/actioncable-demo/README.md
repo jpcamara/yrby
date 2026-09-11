@@ -592,6 +592,26 @@ are checkbox lines. `Y::Text#relative_position` and `Doc#index_at` keep its
 place and read people's carets. Selection-scoped rewrites and undo are not
 on this page yet.
 
+### Seeing it and talking to it
+
+A bar pinned under the page header always shows what the agent is doing
+now, with a "jump to it" link that scrolls the editor to its cursor and a
+"follow" switch, on by default, that keeps its cursor in view as it moves
+and holds off for a few seconds after you type. The ledger under the bar
+narrates: a hello that says what it will do first and how to talk to it,
+"up next" before each task so you can hold it, one line per thing it did
+with the reason, and the model's reasoning as it streams.
+
+Buttons under the bar put the things you can say on a new line at your
+caret: ask it something, hand it a task, draft this section, pause, resume.
+
+It starts the first task from your list the moment it arrives, alongside
+the review, rather than after it. Quick decisions (whether to add something
+after a change, and answers) go to a fast model without a reasoning phase,
+`AGENT_FAST_MODEL`, default MiniMax M3 on Fireworks, about two seconds;
+reviews and drafts keep the reasoning model. It only weighs a change once
+the sentence looks finished, or you have left the paragraph.
+
 ### Working alongside it
 
 The agent has its own backlog, kept in the document. Put a heading that names
