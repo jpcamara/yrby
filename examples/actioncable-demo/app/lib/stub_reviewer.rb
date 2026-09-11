@@ -29,4 +29,16 @@ class StubReviewer
       yield "\n"
     end
   end
+
+  # A canned answer, streamed a word at a time.
+  def answer(question, text)
+    words = text.split.size
+    reply = "You asked: #{question.sub(/\A@agent\s*/i, "").strip} The document has #{words} words. " \
+            "What I would add: **a named owner** for sign-off and a `rollback` step after the canary check.\n" \
+            "- Owner for sign-off\n- Rollback after canary\n"
+    reply.split(/(?<= )|(?<=\n)/).each do |piece|
+      yield piece
+      sleep PACE
+    end
+  end
 end

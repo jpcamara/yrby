@@ -13,8 +13,9 @@ class DocumentsController < ApplicationController
       Rails.application.executor.wrap do
         ActiveRecord::Base.connection_pool.with_connection { ReviewAgent.new(document_id).run }
       end
-    rescue StandardError => e
-      Rails.logger.error("agent failed: #{e.class}: #{e.message}")
+      Rails.logger.info("agent: finished")
+    rescue Exception => e # rubocop:disable Lint/RescueException -- a background thread: log whatever ends it
+      Rails.logger.error("agent failed: #{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}")
     end
     head :no_content
   end
