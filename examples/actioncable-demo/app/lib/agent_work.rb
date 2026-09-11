@@ -43,8 +43,8 @@ module AgentWork
     Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
     at = open_section(task)
     where = task.under && @section_title != section_title(task.text) ? ", under #{@section_title}" : ""
-    present("drafting #{@section_title}", end_of(at), end_of(at), sticky: true,
-                                                                  detail: "took \"#{task.text}\" from the list#{where}")
+    detail = task.list ? "took \"#{task.text}\" from the list#{where}" : "drafting the section you pointed at"
+    present("drafting #{@section_title}", end_of(at), end_of(at), sticky: true, detail: detail)
     start_draft(task)
   end
 
@@ -76,8 +76,8 @@ module AgentWork
   end
 
   # Ordinal of the last block of the section that starts at heading `h`.
-  def section_end(h)
-    nxt = ((h + 1)...root.xml_text_count).find { |i| root.xml_text(i).attributes["__type"] == "heading" }
+  def section_end(heading)
+    nxt = ((heading + 1)...root.xml_text_count).find { |i| root.xml_text(i).attributes["__type"] == "heading" }
     (nxt || root.xml_text_count) - 1
   end
 
