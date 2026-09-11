@@ -6,7 +6,10 @@
 # bad key or a network blip never leaves the document without a review.
 class LlmReviewer
   FIREWORKS_BASE = "https://api.fireworks.ai/inference/v1"
-  FIREWORKS_MODEL = "accounts/fireworks/models/glm-5p3-flash"
+  # The router serves the same model with a shorter wait for the first token:
+  # about 5s against 8 to 17s in a test of the small decisions. AGENT_MODEL
+  # overrides it.
+  FIREWORKS_MODEL = "accounts/fireworks/routers/glm-5p3-fast"
   ANTHROPIC_MODEL = "claude-sonnet-5"
 
   PROMPT = <<~PROMPT

@@ -3,6 +3,8 @@
 # How ReviewAgent shows itself: a caret or a selection, published as awareness.
 module AgentPresence
   IDENTITY = { name: "Agent \u{1F916}", color: "#7c3aed" }.freeze
+  STATUS_TTL = 8 # seconds a passing status stays on the label before "listening"
+  HEARTBEAT = 5  # seconds between presence refreshes; editors forget a peer after 30
 
   # Highlight `block` with a status, the way the editor shows what it is
   # about to change.
@@ -24,6 +26,7 @@ module AgentPresence
   # each peer's caret is a relative position, and the document says which
   # block it falls in. The agent's own presence is left out.
   IDLE = 60 # seconds without the caret moving before a person no longer holds a block
+  GONE = 45 # seconds without a presence renewal before a person counts as gone
 
   # Blocks people are writing in: their caret or selection moved within the
   # last minute. Lexxy keeps `focusing: true` after a blur, so a parked caret
@@ -34,7 +37,7 @@ module AgentPresence
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @others.states.flat_map do |client, state|
       next [] if client == @presence.client_id || !state.is_a?(Hash) || state["focusing"] == false
-      next [] if now - @moved_at.fetch(client, now) > IDLE
+      next [] if now - @moved_at.fetch(client, now) > IDLE || gone?(client, now)
 
       %w[anchorPos focusPos].filter_map { |k| state[k].is_a?(Hash) ? doc.block_at(state[k], "root") : nil }
     end.uniq.sort
@@ -44,13 +47,17 @@ module AgentPresence
   def people_here
     return [] unless @others
 
-    @others.states.filter_map { |client, s| s["name"] if client != @presence.client_id && s.is_a?(Hash) }.uniq
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @others.states.filter_map do |client, s|
+      s["name"] if client != @presence.client_id && s.is_a?(Hash) && !gone?(client, now)
+    end.uniq
   end
 
   # Feed a presence frame the peer received into the mirror of everyone's
   # state, and remember what each person last had selected.
   def see_presence(frame)
     (@others ||= Y::Awareness.new).apply_update(frame)
+    note_renewals
     note_movement
     note_selections
   end
@@ -87,6 +94,23 @@ module AgentPresence
   end
 
   private
+
+  # When each client last renewed its presence: its awareness clock moved. A
+  # browser that closed without saying so stops renewing, and after GONE
+  # seconds it no longer counts as here or as holding a block.
+  def note_renewals
+    @seen_at ||= {}
+    @clocks ||= {}
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @others.clocks.each do |client, clock|
+      next if @clocks[client] == clock
+
+      @clocks[client] = clock
+      @seen_at[client] = now
+    end
+  end
+
+  def gone?(client, now) = now - @seen_at.fetch(client, now) > GONE
 
   # When each person's caret or selection last changed. Renewal frames repeat
   # the same positions and do not count.
@@ -135,17 +159,49 @@ module AgentPresence
   def last_block = root.xml_text(root.xml_text_count - 1)
   def end_of(block) = block.relative_position(block.length)
 
-  def present(status, anchor, focus)
-    Rails.logger.info("agent: #{status}")
-    @last_presence = IDENTITY.merge(awarenessData: IDENTITY, anchorPos: anchor, focusPos: focus,
-                                    focusing: true, status: status)
-    Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+  # Say what the agent is doing, where its caret is. The status goes into the
+  # cursor label, so people see it where they are looking; `detail:` is the
+  # fuller reason for the log under the editor. A status is either sticky
+  # (drafting, waiting, paused, listening) or fades to "listening" after a
+  # few seconds.
+  def present(status, anchor, focus, detail: nil, sticky: false)
+    Rails.logger.info("agent: #{status}#{" — #{detail}" if detail}")
+    @presence_lock ||= Mutex.new
+    @presence_lock.synchronize do
+      @last_presence = IDENTITY.merge(name: "#{IDENTITY[:name]} · #{status}", awarenessData: IDENTITY,
+                                      anchorPos: anchor, focusPos: focus, focusing: true,
+                                      status: status, detail: detail, at: (Time.now.to_f * 1000).to_i)
+      @status_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      @sticky = sticky
+      Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+    end
   end
 
   # Editors drop a peer they have not heard from in a while; say it again.
   def keep_alive
     return unless @last_presence
 
-    Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+    @presence_lock.synchronize do
+      Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+    end
   end
+
+  # A thread that keeps the agent in the roster through a slow model call and
+  # lets a passing status fade.
+  def start_heartbeat
+    @heartbeat = Thread.new do
+      loop do
+        sleep HEARTBEAT
+        if @last_presence && !@sticky && Process.clock_gettime(Process::CLOCK_MONOTONIC) - @status_at > STATUS_TTL
+          present("listening", @last_presence[:anchorPos], @last_presence[:focusPos], sticky: true)
+        else
+          keep_alive
+        end
+      rescue StandardError => e
+        Rails.logger.warn("agent heartbeat: #{e.class}: #{e.message}")
+      end
+    end
+  end
+
+  def stop_heartbeat = @heartbeat&.kill
 end

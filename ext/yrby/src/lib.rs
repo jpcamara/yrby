@@ -805,6 +805,20 @@ impl RbAwareness {
 
     /// Every client's state, as `{ client_id => state }`, the state being the
     /// JSON each client set (parsed), or nil for a client that cleared it.
+    /// Each client's awareness clock. A client renews its state every few
+    /// seconds with a higher clock, so a clock that stops moving means the
+    /// client is gone without having said so. A mirror uses this to time
+    /// peers out the way browser clients do.
+    fn clocks(&self) -> Result<RHash, Error> {
+        let awareness = self.0.borrow();
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let out = ruby.hash_new();
+        for (client, state) in awareness.iter() {
+            out.aset(client.get(), state.clock)?;
+        }
+        Ok(out)
+    }
+
     fn states(&self) -> Result<RHash, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let entries: Vec<(u64, Option<String>)> = self
@@ -1037,6 +1051,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     awareness_class.define_method("apply_update", method!(RbAwareness::apply_update, 1))?;
     awareness_class.define_method("states", method!(RbAwareness::states, 0))?;
+    awareness_class.define_method("clocks", method!(RbAwareness::clocks, 0))?;
 
     // Live shared-type handles.
     map::define(ruby, module)?;

@@ -25,21 +25,24 @@ module AgentReactions
 
     avoid = (occupied_blocks | my_blocks).sort
     Rails.logger.info("agent: leaving alone #{avoid.inspect}, people #{people_here.inspect}")
-    present("thinking about your change", *block_selection(changed.last))
+    here = end_of(root.xml_text(changed.last))
+    present("thinking about your change", here, here, sticky: true)
     blocks, anchors = numbered_blocks
     result = @reviewer.consider(changed, avoid, blocks)
     if result.edits.empty?
-      present(result.note.presence || "nothing to add", *block_selection(changed.last))
+      present("left it alone", here, here, detail: result.note.presence)
     else
-      applied = DocumentEditor.new(doc, flush: flush, presence: self, avoid: avoid,
-                                        anchors: anchors).apply(result.edits)
-      if applied.applied.positive?
-        remember_undo("what I added after your change", applied)
-        present(result.note.presence || "added to what you wrote", end_of(last_block),
-                end_of(last_block))
-      end
+      apply_contribution(result, avoid, anchors)
     end
     @changes.clear
+  end
+
+  def apply_contribution(result, avoid, anchors)
+    applied = DocumentEditor.new(doc, flush: flush, presence: self, avoid: avoid, anchors: anchors).apply(result.edits)
+    return unless applied.applied.positive?
+
+    remember_undo("what I added after your change", applied)
+    present("added to what you wrote", end_of(last_block), end_of(last_block), detail: result.note.presence)
   end
 
   # A change to the agent's own list means new work, not something to
@@ -47,12 +50,14 @@ module AgentReactions
   def mine?(changed)
     if changed.intersect?(Worklist.ordinals(doc))
       @next_scan = 0
-      present("saw your change to my list", *block_selection(changed.last))
+      here = end_of(root.xml_text(changed.last))
+      present("saw your change to my list", here, here)
       return true
     end
     title = changed.filter_map { |i| my_section(i) }.first or return false
     @reviewer.remember("Someone edited my draft of \"#{title}\"; that section is theirs now")
-    present("noted your change to my draft of #{title}", *block_selection(changed.last))
+    here = end_of(root.xml_text(changed.last))
+    present("noted your edit to my draft", here, here, detail: "\"#{title}\" is yours now; I will leave it alone")
     true
   end
 
@@ -131,9 +136,26 @@ module AgentReactions
   # Type the answer into a new paragraph right under the question.
   def answer(index, question)
     @answered << question
-    present("answering", *block_selection(index))
+    present("answering", end_of(root.xml_text(index)), end_of(root.xml_text(index)), sticky: true)
     writer = StreamingWriter.new(doc, flush: flush, after: root.xml_text(index).anchor)
     stream_into(writer, "answering") { |emit| @reviewer.answer(question, text, &emit) }
     present("answered", end_of(writer.block), end_of(writer.block)) if writer.block
+  end
+
+  # Feed a stream of chunks into `writer`. The block receives `emit`, a proc
+  # to hand each chunk to; the caret moves to the end of the text a few times
+  # a second so people see the agent writing.
+  def stream_into(writer, status)
+    since = 0
+    emit = lambda do |chunk|
+      writer.feed(chunk)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      next unless writer.block && now - since > 0.25
+
+      present(status, end_of(writer.block), end_of(writer.block), sticky: true)
+      since = now
+    end
+    yield emit
+    writer.finish
   end
 end
