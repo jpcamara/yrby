@@ -45,7 +45,7 @@ class CollaborativeEditTest < ActionCable::Channel::TestCase
 
     assert_equal "from ruby", @page.collaborative_document(:body).doc.read_text("content")
     assert_equal 1, Y::DocumentUpdate.count
-    assert_broadcast_on("yrby:#{attribute.key}", "update" => Base64.strict_encode64(update))
+    assert_broadcast_on("yrby:#{attribute.key}", "update" => Base64.strict_encode64(Y.wrap_update(update)))
   end
 
   def test_an_edit_that_changes_nothing_records_and_broadcasts_nothing
@@ -66,7 +66,7 @@ class CollaborativeEditTest < ActionCable::Channel::TestCase
     assert_equal [update], STORE.updates[[@page.id, "external"]]
     assert_equal "adapter", attribute.doc.read_text("content")
     assert_equal 0, Y::Document.count
-    assert_broadcast_on("yrby:#{attribute.key}", "update" => Base64.strict_encode64(update))
+    assert_broadcast_on("yrby:#{attribute.key}", "update" => Base64.strict_encode64(Y.wrap_update(update)))
   end
 
   def test_edits_build_on_each_other
