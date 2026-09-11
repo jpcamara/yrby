@@ -580,8 +580,9 @@ For the agent
 - [ ] Draft the go/no-go criteria
 ```
 
-An item anywhere that mentions `@agent` counts too. Lexxy has no checkbox
-nodes, so the box is plain text and any editor shows it. The agent takes the
+An item anywhere that mentions `@agent` counts too, and so does a plain
+paragraph that starts with a box, which is the easy way to type one. Lexxy
+has no checkbox nodes, so the box is plain text and any editor shows it. The agent takes the
 first open item, marks it `[~]`, adds a heading with the task at the end of
 the document and drafts the section there, then marks the item `[x]`. You keep
 working anywhere else meanwhile: drafting is interleaved with everything else
