@@ -31,6 +31,22 @@ class StubReviewer
   end
 
   # A canned answer, streamed a word at a time.
+  # A fixed first pass for a task, typed word by word.
+  def draft(task, _text)
+    lines = ["This section covers #{task.sub(/\A(draft|write)\s+/i, "")}. A first pass to edit together.",
+             "- Owner: to be named", "- Steps: outline the work, set a checkpoint, record the outcome",
+             "- Done when: the team has signed off"]
+    lines.each do |line|
+      line.split(/(?<= )/).each do |word|
+        yield word
+        sleep PACE
+      end
+      yield "\n"
+    end
+  end
+
+  def remember(_line) = nil
+
   def answer(question, text)
     words = text.split.size
     reply = "You asked: #{question.sub(/\A@agent\s*/i, "").strip} The document has #{words} words. " \

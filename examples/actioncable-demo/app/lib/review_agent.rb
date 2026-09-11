@@ -12,6 +12,7 @@
 class ReviewAgent
   include AgentPresence
   include AgentReactions
+  include AgentWork
 
   QUIET = 1.5 # seconds without further edits before the agent notes a change
   KEEP_ALIVE = 15 # presence expires in editors after 30s of silence; refresh before that
@@ -72,13 +73,23 @@ class ReviewAgent
 
   # Stay for a while. The peer reports which blocks each update touched, and
   # never reports this agent's own edits. A changed block is highlighted; once
-  # the typing pauses, a line addressed to @agent gets an answer written right
-  # below it, and any other change gets a note in the list.
+  # the typing pauses, a line addressed to @agent gets an answer or is acted
+  # on, and any other change is considered. Between changes the agent does
+  # its own work from its list, a few chunks at a time.
   def watch
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + @watch
+    alive = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     while (remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive?
-      changed = @changes.pop(timeout: [remaining, KEEP_ALIVE].min)
-      next keep_alive unless changed
+      changed = @changes.pop(timeout: work_pending? ? 0.2 : [remaining, KEEP_ALIVE].min)
+      unless changed
+        work_step
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if now - alive > KEEP_ALIVE
+          keep_alive
+          alive = now
+        end
+        next
+      end
 
       index = changed.last
       @recent_changes = changed.dup
@@ -116,30 +127,18 @@ class ReviewAgent
   # considers it and contributes only when that clearly helps.
   def react_to(index)
     line = block_text(index)
-    if line.match?(/\A@agent\s+undo\b/i)
-      undo_last(index)
-    elsif line.match?(/\A@agent\s+edit\b/i)
-      edit_document(index, line)
-    elsif line.match?(/\A@agent\b/i) && scoped_request?(line)
-      edit_selection(index, line)
-    elsif line.match?(/\A@agent\b/i)
-      answer(index, line) unless @answered.include?(line)
-    else
-      contribute(@recent_changes | [index])
+    case line
+    when /\A@agent\s+undo\b/i then undo_last(index)
+    when /\A@agent\s+edit\b/i then edit_document(index, line)
+    when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(index, line)
+    when /\A@agent\b/i
+      if scoped_request?(line)
+        edit_selection(index, line)
+      elsif !@answered.include?(line)
+        answer(index, line)
+      end
+    else contribute(@recent_changes | [index])
     end
-  end
-
-  def note_change(index)
-    snippet = block_text(index).then { |s| s.length > 40 ? "#{s[0, 40]}…" : s }
-    return if snippet.empty? || snippet.start_with?("Saw your change")
-
-    flush.call(doc.diff do
-      @list ||= Y::Lexxy.append_list(doc, [])
-      item = @list.push_xml_text(Y::Lexxy.list_item_attributes(@list.xml_text_count + 1))
-      item.insert_embed(0, Y::Lexical::TEXT_ATTRIBUTES)
-      item.insert(1, "Saw your change to “#{snippet}”.")
-    end)
-    present("noted your change", end_of(last_block), end_of(last_block))
   end
 
   # Record and broadcast one diff, the way the channel does for a browser.
