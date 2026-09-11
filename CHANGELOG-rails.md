@@ -37,6 +37,11 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot be combined with `encrypted: true`, and must supply both operations.
 - `Y::Document.key_for(record, name)` exposes the existing conventional key
   without allocating a document row.
+- `Y::ActionCable::Peer` follows a document live from Ruby: it holds a
+  `Y::Doc`, applies every broadcast update, and fires `on_update` for each one
+  that advanced the doc (never for an update the doc already holds, such as
+  its own). Presence frames go to `on_awareness`. `subscribe` waits for the
+  adapter to confirm, so nothing broadcast right after it is missed.
 - `record.collaborative_document(name).edit { |doc| ... }` edits a document
   from Ruby as a peer of the browsers: it loads the current state, yields a
   live document, records the change through the declared storage, and
