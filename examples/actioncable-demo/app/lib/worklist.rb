@@ -13,18 +13,25 @@ module Worklist
   BOX = /\A\[([ ~xX-])\]\s*(.+)\z/m
   STATES = { " " => :open, "~" => :drafting, "x" => :done, "X" => :done, "-" => :stopped }.freeze
 
+  # Tasks are list items, or plain paragraphs that start with a box (easier
+  # to type in an editor with no list shortcut). A paragraph task has no index.
   def tasks(doc)
     root = doc.get_xml_text("root")
     (0...root.xml_text_count).flat_map do |i|
-      list = root.xml_text(i)
-      next [] if list.xml_text_count.zero?
-
+      block = root.xml_text(i)
       mine = i.positive? && root.xml_text(i - 1).text.match?(/\bagent\b/i)
-      (0...list.xml_text_count).filter_map do |j|
-        m = list.xml_text(j).text.strip.match(BOX) or next
-        next unless mine || m[2].match?(/@agent/i)
+      if block.xml_text_count.zero?
+        m = block.text.strip.match(BOX)
+        next [] unless m && (mine || m[2].match?(/@agent/i))
 
-        Task.new(list: list.anchor, index: j, text: title(m[2]), state: STATES[m[1]])
+        [Task.new(list: block.anchor, index: nil, text: title(m[2]), state: STATES[m[1]])]
+      else
+        (0...block.xml_text_count).filter_map do |j|
+          m = block.xml_text(j).text.strip.match(BOX) or next
+          next unless mine || m[2].match?(/@agent/i)
+
+          Task.new(list: block.anchor, index: j, text: title(m[2]), state: STATES[m[1]])
+        end
       end
     end
   end
@@ -36,9 +43,9 @@ module Worklist
   def mark(doc, task, state)
     box = STATES.key(state) or raise ArgumentError, state.to_s
     list = doc.find(task.list) or return
-    return if task.index >= list.xml_text_count
+    return if task.index && task.index >= list.xml_text_count
 
-    item = list.xml_text(task.index)
+    item = task.index ? list.xml_text(task.index) : list
     text = item.text
     m = text.match(BOX) or return
     return unless title(m[2]) == task.text
@@ -74,8 +81,12 @@ module Worklist
     nil
   end
 
-  # Ordinals of the agent's lists and the headings above them.
+  # Ordinals of the agent's lists and paragraph tasks, and the blocks above
+  # them that name the agent.
   def ordinals(doc)
-    tasks(doc).filter_map { |t| doc.block_at(t.list) }.uniq.flat_map { |i| [i - 1, i] }.reject(&:negative?)
+    root = doc.get_xml_text("root")
+    tasks(doc).filter_map { |t| doc.block_at(t.list) }.uniq.flat_map do |i|
+      i.positive? && root.xml_text(i - 1).text.match?(/\bagent\b/i) ? [i - 1, i] : [i]
+    end.uniq
   end
 end
