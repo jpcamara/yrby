@@ -52,35 +52,42 @@ window.__yrb = {
 
 // A presence roster: everyone the awareness protocol knows about, including the
 
-// A running log of what the agent is doing, from its presence: each status
-// change with the time and the reason it gave, newest first. This is how
-// "why did it just do that" gets answered without reading a server log.
+// The ledger: what the agent is doing, from its presence. Each status change
+// is an entry with its time and the reason the model gave; while the model
+// reasons, the current entry shows its thinking as it streams. Oldest first,
+// scrolled to the newest.
 const logEl = document.getElementById("agent-log")
-const lastStatus = new Map()
-function renderAgentLog() {
-  if (!logEl) return
-  for (const [clientId, s] of awareness.getStates()) {
-    if (!s?.status) continue
-    // Lexical writes a remote cursor's label once, when the cursor appears,
-    // so the status in the agent's name would freeze there. Keep it current.
-    const identity = s?.awarenessData?.name
-    if (identity && s.name && s.name !== identity) {
-      for (const el of document.querySelectorAll(".lexxy-collab-cursor__name")) {
-        if (el.textContent.startsWith(identity)) el.textContent = s.name
-      }
-    }
-    const key = `${s.status}|${s.detail ?? ""}`
-    if (lastStatus.get(clientId) === key) continue
-    lastStatus.set(clientId, key)
-    const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    const li = document.createElement("li")
-    li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}`
-    logEl.prepend(li)
-    while (logEl.children.length > 40) logEl.lastChild.remove()
-  }
-}
+const lastEntry = new Map()
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+}
+function renderAgentLog() {
+  if (!logEl) return
+  let changed = false
+  for (const [clientId, s] of awareness.getStates()) {
+    if (!s?.status) continue
+    const key = `${s.status}|${s.detail ?? ""}`
+    let entry = lastEntry.get(clientId)
+    if (!entry || entry.key !== key) {
+      const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      const li = document.createElement("li")
+      li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}<div class="thinking" hidden></div>`
+      logEl.append(li)
+      while (logEl.children.length > 60) logEl.firstChild.remove()
+      entry = { key, li, thinking: "" }
+      lastEntry.set(clientId, entry)
+      changed = true
+    }
+    const thinking = s.thinking ?? ""
+    if (thinking !== entry.thinking) {
+      entry.thinking = thinking
+      const div = entry.li.querySelector(".thinking")
+      div.textContent = thinking
+      div.hidden = thinking.length === 0
+      changed = true
+    }
+  }
+  if (changed) logEl.scrollTop = logEl.scrollHeight
 }
 
 // Ruby agent, which broadcasts its awareness over the same DocumentChannel.
@@ -96,7 +103,19 @@ function renderRoster() {
   }).join("")
 }
 awareness.on("update", renderRoster)
+function refreshAgentLabels() {
+  // Lexical writes a remote cursor's label once, when the cursor appears,
+  // so the status in the agent's name would freeze there. Keep it current.
+  for (const s of awareness.getStates().values()) {
+    const identity = s?.awarenessData?.name
+    if (!identity || !s?.name || s.name === identity) continue
+    for (const el of document.querySelectorAll(".lexxy-collab-cursor__name")) {
+      if (el.textContent.startsWith(identity)) el.textContent = s.name
+    }
+  }
+}
 awareness.on("change", renderAgentLog)
+awareness.on("change", refreshAgentLabels)
 renderRoster()
 
 const setStatus = (state, text) => {

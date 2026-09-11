@@ -535,7 +535,10 @@ before starting the server:
 ```sh
 set -a; source ~/.config/yrby/fireworks.env; set +a
 bin/rails s
-``` `AGENT_STUB_PACE` slows the fixed review's typing
+``` `AGENT_PACE` sets how fast the agent writes, in
+characters per second (default 60, about fast typing); the model's stream is
+buffered and let out at that pace, and the text it has written so far stays
+selected while it writes. `AGENT_STUB_PACE` slows the fixed review's typing
 for a demo (try `0.3`).
 
 The agent remembers what it did. Every prompt carries a short account of its
@@ -568,6 +571,26 @@ and the label says so.
 The blocks it writes into are tracked by `Y::Anchor`, not by number. An anchor
 is a relative position at the block's start, resolved again before every
 write.
+
+### The markdown page
+
+`/docs/:id/markdown` is the same document idea over a `Y.Text` of markdown:
+CodeMirror 6 with markdown syntax styling (headings sized, emphasis and code
+shown, the markup dimmed), a rendered preview beside it, remote cursors and
+selections from `y-codemirror.next`, and the same roster and agent log. The
+document is `Y.Text` `"markdown"` under the key `<id>:markdown`.
+
+Invite the agent there and `MarkdownAgent` does what `ReviewAgent` does for
+Lexxy, on text: it writes its review at the end, answers `@agent` lines with
+a paragraph under them, considers a change after a pause with paragraphs as
+its blocks, takes tasks from `- [ ]` lines under a heading that names it
+(bullets there need no box), drafts them at the end of a named section
+(`... under Rollout`) or in a new section, yields while someone's caret is in
+that section, and puts a why-line under its review. Markdown already has
+every structure it needs: sections are headings, blocks are paragraphs, tasks
+are checkbox lines. `Y::Text#relative_position` and `Doc#index_at` keep its
+place and read people's carets. Selection-scoped rewrites and undo are not
+on this page yet.
 
 ### Working alongside it
 

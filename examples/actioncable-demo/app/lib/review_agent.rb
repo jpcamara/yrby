@@ -37,6 +37,7 @@ class ReviewAgent
     @peer.on_awareness { |frame| see_presence(frame) }
     @peer.subscribe
     (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
+    @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
     write_review
     watch
@@ -81,7 +82,7 @@ class ReviewAgent
       else
         empty_since = nil
       end
-      changed = @changes.pop(timeout: work_pending? ? 0.2 : 2)
+      changed = @changes.pop(timeout: work_pending? ? 0.04 : 2)
       unless changed
         work_step
         next

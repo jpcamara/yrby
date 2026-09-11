@@ -39,6 +39,8 @@ module AgentWork
   def claim(task)
     @task = task
     @held = nil
+    @done = false
+    @pacer = nil
     @draft = Queue.new
     Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
     at = open_section(task)
@@ -119,24 +121,33 @@ module AgentWork
 
   # Write what has streamed in so far, a few chunks per step, yielding the
   # block to a person who is in it.
+  # Take what the model has produced into the pacer, then let a little out.
+  # A person in the section holds the pace; the chunks wait in the pacer.
   def draft_step
-    8.times do
-      chunk = @held || next_chunk
-      return unless chunk
-      return finish_task if chunk == :done
+    @pacer ||= Pacer.new { |piece| @draft_writer.feed(piece) }
+    loop do
+      chunk = next_chunk
+      break unless chunk
 
-      if in_my_way?
-        @held = chunk
-        present("waiting, you're in this section", end_of(@draft_writer.block), end_of(@draft_writer.block),
-                detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
-        return
+      if chunk == :done
+        @done = true
+        break
       end
-      @held = nil
-      @draft_writer.feed(chunk)
-      if @draft_writer.block
-        present("drafting #{@section_title}", end_of(@draft_writer.block), end_of(@draft_writer.block), sticky: true)
-      end
+      @pacer.feed(chunk)
     end
+    return finish_task if @done && !@pacer.pending?
+    return unless @pacer.pending?
+
+    if in_my_way?
+      present("waiting, you're in this section", end_of(@draft_writer.block), end_of(@draft_writer.block),
+              detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
+      return
+    end
+    @pacer.drain
+    return unless @draft_writer.block
+
+    present("drafting #{@section_title}", start_of_written(@draft_writer) || end_of(@draft_writer.block),
+            end_of(@draft_writer.block), sticky: true)
   end
 
   def next_chunk
@@ -152,6 +163,7 @@ module AgentWork
   end
 
   def finish_task
+    @pacer&.flush
     @draft_writer.finish
     Worklist.mark(doc, @task, :done)&.then { |u| flush.call(u) }
     (@sections ||= []) << { title: @task.text, heading: @section_heading, blocks: @draft_writer.created }
@@ -188,6 +200,7 @@ module AgentWork
     return present("nothing to stop", nil, nil) unless @task
 
     @draft_thread&.kill
+    @pacer&.flush
     @draft_writer&.finish
     Worklist.mark(doc, @task, :stopped)&.then { |u| flush.call(u) }
     present("stopped", nil, nil, detail: "dropped \"#{@task.text}\"; the item is marked [-]")

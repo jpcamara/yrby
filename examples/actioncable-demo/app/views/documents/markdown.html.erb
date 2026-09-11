@@ -1,0 +1,44 @@
+<div class="demo">
+  <header>
+    <h1>yrby collaborative editor <small>(Markdown)</small></h1>
+    <%= render "nav" %>
+    <p>
+      Document <code><%= @document_id %></code> —
+      open this page in another window to edit together. The document is a
+      <code>Y.Text</code> of markdown bound with <code>y-codemirror.next</code>;
+      the preview renders the same text. The agent works on it as markdown.
+    </p>
+    <p id="status" class="status">connecting…</p>
+  </header>
+
+  <ol id="agent-log" class="agent-log" aria-label="What the agent is doing"></ol>
+
+  <div class="markdown-pane">
+    <div id="editor" data-document-id="<%= @document_id %>:markdown"></div>
+    <div id="preview" class="markdown-preview" aria-label="Rendered markdown"></div>
+  </div>
+
+<%= button_to "Invite the agent", document_markdown_agent_path(params[:id]), class: "invite-agent", form: { style: "display:inline" } %>
+  <div id="presence-roster" class="presence-roster" aria-label="Who is here"></div>
+</div>
+
+<style>
+  .markdown-pane { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 1rem; align-items: start; }
+  @media (max-width: 900px) { .markdown-pane { grid-template-columns: minmax(0, 1fr); } }
+  .markdown-preview { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem 1.25rem; background: #fafafa; min-height: 24rem; max-height: 70vh; overflow: auto; font-size: 15px; line-height: 1.6; }
+  .markdown-preview h1 { font-size: 1.5em; margin: .2em 0 .5em; } .markdown-preview h2 { font-size: 1.25em; margin: 1em 0 .4em; }
+  .markdown-preview code { background: #eef; padding: .05em .3em; border-radius: 3px; }
+  .markdown-preview blockquote { color: #6b7280; border-left: 3px solid #ddd; margin: .5em 0; padding-left: .8em; }
+  .presence-roster { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; min-height: 2rem; }
+  .presence-roster .peer { display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .6rem; border-radius: 999px; background: #f3f4f6; font-size: .9rem; }
+  .presence-roster .peer::before { content: ""; width: .7rem; height: .7rem; border-radius: 50%; background: var(--c); }
+  .presence-roster .peer .status { color: #6b7280; font-size: .78rem; }
+  .agent-log { list-style: none; margin: .5rem 0 .75rem; padding: .25rem .5rem; font-size: .8rem; color: #374151; height: 11rem; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fcfcfd; }
+  .agent-log li { padding: .15rem 0; border-top: 1px solid #f3f4f6; }
+  .agent-log li:first-child { border-top: 0; }
+  .agent-log time { color: #9ca3af; font-variant-numeric: tabular-nums; margin-right: .4rem; }
+  .agent-log b { font-weight: 600; color: #7c3aed; }
+  .agent-log span { color: #6b7280; }
+  .agent-log .thinking { margin: .2rem 0 .1rem 1.2rem; padding-left: .6rem; border-left: 2px solid #ddd6fe; color: #6b7280; font-style: italic; white-space: pre-wrap; font-size: .76rem; line-height: 1.4; }
+</style>
+<script src="/markdown.js?v=<%= File.exist?(Rails.public_path.join("markdown.js")) ? File.mtime(Rails.public_path.join("markdown.js")).to_i : 0 %>" defer></script>

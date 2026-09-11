@@ -15,6 +15,8 @@
     <p id="status" class="status">connecting…</p>
   </header>
 
+  <ol id="agent-log" class="agent-log" aria-label="What the agent is doing"></ol>
+
   <%# data-direct-upload-url / data-blob-url-template: the Trix-convention
       attributes both Lexxy and Rhino read for ActiveStorage direct uploads.
       Uploads go straight to ActiveStorage; the editor inserts an attachment
@@ -26,7 +28,6 @@
 
 <%= button_to "Invite the agent", document_agent_path(params[:id]), class: "invite-agent", form: { style: "display:inline" } %>
   <div id="presence-roster" class="presence-roster" aria-label="Who is here"></div>
-  <ol id="agent-log" class="agent-log" aria-label="What the agent is doing" reversed></ol>
 
   <%= render "materialized_note", note: @note, renderer: "Y::Lexxy" %>
 </div>
@@ -38,11 +39,13 @@
   .presence-roster .peer::before { content: ""; width: .7rem; height: .7rem; border-radius: 50%;
     background: var(--c, #999); }
   .presence-roster .peer .status { color: #6b7280; font-size: .78rem; }
-  .agent-log { list-style: none; margin: .25rem 0 1rem; padding: 0; font-size: .8rem; color: #374151; max-height: 9rem; overflow-y: auto; }
-  .agent-log li { padding: .1rem 0; border-top: 1px solid #f3f4f6; }
+  .agent-log { list-style: none; margin: .5rem 0 .75rem; padding: .25rem .5rem; font-size: .8rem; color: #374151; height: 11rem; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fcfcfd; }
+  .agent-log li { padding: .15rem 0; border-top: 1px solid #f3f4f6; }
+  .agent-log li:first-child { border-top: 0; }
   .agent-log time { color: #9ca3af; font-variant-numeric: tabular-nums; margin-right: .4rem; }
   .agent-log b { font-weight: 600; color: #7c3aed; }
   .agent-log span { color: #6b7280; }
+  .agent-log .thinking { margin: .2rem 0 .1rem 1.2rem; padding-left: .6rem; border-left: 2px solid #ddd6fe; color: #6b7280; font-style: italic; white-space: pre-wrap; font-size: .76rem; line-height: 1.4; }
 </style>
 
 <script src="/lexxy.js" defer></script>

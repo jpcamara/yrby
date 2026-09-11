@@ -170,7 +170,9 @@ class LlmReviewer
     owner or date a task is missing, a question in the text you can answer,
     a TODO you can draft in a line or two, a plain error. If not, do nothing.
     Suggestions under the "Agent review" heading are your own earlier
-    review, not requests from the team; do not act on them here.
+    review, not requests from the team; do not act on them here. Task lines
+    under a heading that names the agent ("[ ]", "[~]") are handled by your
+    own work loop; do not draft them here either.
 
     Reply with JSON only: {"note":"one short line on what you did or why not","edits":[...]}
     where edits is empty or holds at most 3 of:
@@ -183,6 +185,9 @@ class LlmReviewer
   Consideration = Data.define(:note, :edits)
 
   MEMORY_LIMIT = 8
+
+  # A proc that receives the model's reasoning as it streams, for the ledger.
+  attr_accessor :on_thinking
 
   def initialize
     @memory = []
@@ -222,16 +227,22 @@ class LlmReviewer
   private
 
   # Stream a prompt, skipping the chunks a reasoning model sends with no text.
+  # Stream a reply. Content chunks go to the block; the model's reasoning,
+  # which arrives first, goes to `on_thinking` as it comes.
   def streamed(prompt)
     chat.ask(memory_prompt + prompt) do |chunk|
-      content = chunk.content.to_s
-      yield content unless content.empty?
+      thought = chunk.respond_to?(:thinking) && chunk.thinking&.text
+      @on_thinking&.call(thought) if thought && !thought.empty?
+      text = chunk.content.to_s
+      yield text unless text.empty?
     end
-    nil
   end
 
+  # A whole reply, streamed underneath so the thinking still shows.
   def ask(prompt)
-    chat.ask(memory_prompt + prompt).content.to_s
+    reply = +""
+    streamed(prompt) { |text| reply << text }
+    reply
   end
 
   # A fresh chat per call, with the standing instructions. The reviewer's own
