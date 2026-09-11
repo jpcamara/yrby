@@ -26,10 +26,10 @@ class DocumentsController < ApplicationController
             status = words.zero? ? "waiting for the first words" : "reviewing \u2014 #{words} words so far"
             state = identity.merge(awarenessData: identity, anchorPos: nil, focusPos: nil,
                                    focusing: true, status: status)
-            Y::ActionCable.broadcast(document_id, presence.set_local_state(state.to_json))
+            Y::ActionCable.broadcast_awareness(document_id, presence.set_local_state(state.to_json))
             sleep 4
           end
-          Y::ActionCable.broadcast(document_id, presence.clear_local_state)
+          Y::ActionCable.broadcast_awareness(document_id, presence.clear_local_state)
         end
       end
     rescue StandardError => e
