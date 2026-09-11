@@ -104,6 +104,33 @@ class LlmReviewer
   end
 
   # An answer, streamed, with the same fallback rule.
+  DRAFT_PROMPT = <<~PROMPT
+    Draft the section "%s" for the document below. The heading is already in
+    place; write only the body: two to four short paragraphs, or a bulleted
+    list where the content is a list. Be specific to this document, do not
+    repeat what it already says, and leave a clear "to confirm" line for any
+    fact you do not have. Markdown for lists and emphasis is fine; no headings.
+
+    Document:
+    %s
+  PROMPT
+
+  def draft(task, text, &block)
+    started = false
+    said = +""
+    streamed(format(DRAFT_PROMPT, task, text)) do |chunk|
+      started = true
+      said << chunk
+      block.call(chunk)
+    end
+    remember("Drafted the section \"#{task}\": #{said}")
+  rescue StandardError => e
+    raise if started
+
+    Rails.logger.warn("LlmReviewer draft fell back to the stub: #{e.class}: #{e.message}")
+    StubReviewer.new.draft(task, text, &block)
+  end
+
   def answer(question, text, &block)
     started = false
     said = +""
@@ -133,7 +160,8 @@ class LlmReviewer
     People just changed these blocks (by number):
     %s
 
-    People are currently writing in blocks: %s. Do not touch those.
+    Do not touch blocks: %s. Someone is writing there, or they are your own
+    task list and the sections you drafted.
 
     Decide whether a small contribution is clearly helpful right now: an
     owner or date a task is missing, a question in the text you can answer,

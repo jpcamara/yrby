@@ -23,11 +23,18 @@ module AgentPresence
   # Ordinals of the blocks other people are writing in, from their presence:
   # each peer's caret is a relative position, and the document says which
   # block it falls in. The agent's own presence is left out.
+  IDLE = 60 # seconds without the caret moving before a person no longer holds a block
+
+  # Blocks people are writing in: their caret or selection moved within the
+  # last minute. Lexxy keeps `focusing: true` after a blur, so a parked caret
+  # would otherwise hold a block for good.
   def occupied_blocks
     return [] unless @others
 
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @others.states.flat_map do |client, state|
       next [] if client == @presence.client_id || !state.is_a?(Hash) || state["focusing"] == false
+      next [] if now - @moved_at.fetch(client, now) > IDLE
 
       %w[anchorPos focusPos].filter_map { |k| state[k].is_a?(Hash) ? doc.block_at(state[k], "root") : nil }
     end.uniq.sort
@@ -44,6 +51,7 @@ module AgentPresence
   # state, and remember what each person last had selected.
   def see_presence(frame)
     (@others ||= Y::Awareness.new).apply_update(frame)
+    note_movement
     note_selections
   end
 
@@ -79,6 +87,23 @@ module AgentPresence
   end
 
   private
+
+  # When each person's caret or selection last changed. Renewal frames repeat
+  # the same positions and do not count.
+  def note_movement
+    @moved_at ||= {}
+    @positions ||= {}
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @others.states.each do |client, state|
+      next unless state.is_a?(Hash)
+
+      position = [state["anchorPos"], state["focusPos"]]
+      next if @positions[client] == position
+
+      @positions[client] = position
+      @moved_at[client] = now
+    end
+  end
 
   # A non-collapsed selection is remembered per client, as anchors, so it
   # still names the same blocks after edits above it.
