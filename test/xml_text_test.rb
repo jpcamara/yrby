@@ -82,6 +82,34 @@ class XmlTextTest < Minitest::Test
     assert_equal "typed", doc.read_xml("root")
   end
 
+  def test_a_list_renders_like_a_typed_one
+    doc = Y::Doc.new
+    Y::Lexxy.append_list(doc, %w[alpha beta])
+    Y::Lexxy.append_list(doc, %w[one two], ordered: true)
+
+    # The exact HTML the renderer produces for the same lists typed in Lexxy.
+    assert_equal "<ul><li value=\"1\">alpha</li><li value=\"2\">beta</li></ul>" \
+                 "<ol><li value=\"1\">one</li><li value=\"2\">two</li></ol>", Y::Lexxy.new(doc).to_html("root")
+  end
+
+  def test_a_vanilla_lexical_list_uses_the_standard_item_type
+    doc = Y::Doc.new
+    list = Y::Lexical.append_list(doc, %w[x y])
+
+    assert_equal 2, list.xml_text_count
+    assert_includes list.xml_text(1).to_s, "y"
+    assert_equal "<ul><li value=\"1\">x</li><li value=\"2\">y</li></ul>", Y::Lexical.new(doc).to_html("root")
+  end
+
+  def test_a_list_round_trips_to_a_peer
+    doc = Y::Doc.new
+    Y::Lexxy.append_list(doc, %w[alpha beta])
+    peer = Y::Doc.new
+    peer.apply_update(doc.encode_state_as_update)
+
+    assert_equal "alpha\nbeta", peer.read_xml("root")
+  end
+
   # A caret is a Yjs relative position: {type, tname, item, assoc}. Inside a
   # text it names the character to the right; at the end of a block it names
   # the block; at a root it names the root. Ids are global, so a position

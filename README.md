@@ -826,6 +826,10 @@ Y::Lexxy.new(doc).to_html("root")
 # => "<h2>Agent review</h2><p>Read 82 words. One suggestion: name who signs off.</p>"
 ```
 
+`append_list(doc, items, ordered:)` appends a bulleted or numbered list. Call
+it on the flavor that matches the editor: `Y::Lexxy.append_list` writes
+Lexxy's own list item type, `Y::Lexical.append_list` the standard one.
+
 To put that into a shared document, do it inside `edit` (or diff against a
 state vector, record the update, and broadcast it). The renderer is the
 check: a Ruby-written paragraph and a typed one render byte for byte the same.

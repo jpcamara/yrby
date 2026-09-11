@@ -69,8 +69,9 @@ class ReviewAgent
     before = doc.encode_state_vector
     Y::Lexical.append_heading(doc, "Agent review", tag: "h2")
     Y::Lexical.append_paragraph(doc, "Read #{words} words across #{blocks} blocks. " \
-                                     "The checklist reads clearly; every step has an owner implied by context. " \
-                                     "One suggestion: name who signs off before the report is published.")
+                                     "The checklist reads clearly; every step has an owner implied by context.")
+    Y::Lexxy.append_list(doc, ["Name who signs off before the report is published.",
+                               "Add a rollback step after the canary check."])
     update = doc.encode_state_as_update(before)
     Store.current.record(@document_id, update)
     Y::ActionCable.broadcast(@document_id, update)
