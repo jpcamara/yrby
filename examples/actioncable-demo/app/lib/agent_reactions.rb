@@ -43,6 +43,7 @@ module AgentReactions
 
     remember_undo("what I added after your change", applied)
     present("added to what you wrote", end_of(last_block), end_of(last_block), detail: result.note.presence)
+    note_in_review("Added after your change: #{result.note.presence || "a line"}")
   end
 
   # A change to the agent's own list means new work, not something to
@@ -61,6 +62,17 @@ module AgentReactions
     true
   end
 
+  # A short line in the agent's review list on each thing it did and why, so
+  # the reasoning lives in the document as well as in the log.
+  def note_in_review(text)
+    list = @review_list && doc.find(@review_list) or return
+    flush.call(doc.diff do
+      item = list.push_xml_text(Y::Lexxy.list_item_attributes(list.xml_text_count + 1))
+      item.insert_embed(0, Y::Lexical::TEXT_ATTRIBUTES)
+      item.insert(1, text.to_s.gsub(/\s+/, " ").strip[0, 200])
+    end)
+  end
+
   # "@agent edit: <instruction>": take the instruction line out of the
   # document, ask for a plan over the numbered blocks that remain, and apply
   # it in place, block by block, visibly.
@@ -75,6 +87,7 @@ module AgentReactions
     result = DocumentEditor.new(doc, flush: flush, presence: self, anchors: anchors).apply(plan)
     remember_undo("the edit: #{instruction}", result)
     present("edited #{result.applied} blocks", end_of(last_block), end_of(last_block))
+    note_in_review("Edited #{result.applied} blocks on request: #{instruction}")
     @changes.clear
   end
 

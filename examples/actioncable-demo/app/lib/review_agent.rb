@@ -60,6 +60,7 @@ class ReviewAgent
     writer = StreamingWriter.new(doc, flush: flush)
     stream_into(writer, "writing a review") { |emit| @reviewer.stream(text, &emit) }
     @list = writer.list
+    @review_list = @list&.anchor
     @answered = []
     @undos = []
     present("wrote a review", end_of(writer.block || last_block), end_of(writer.block || last_block))
@@ -108,6 +109,7 @@ class ReviewAgent
     when /\A@agent\s+undo\b/i then undo_last(index)
     when /\A@agent\s+edit\b/i then edit_document(index, line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(index, line)
+    when /\A@agent\s+draft\s+(this|the|here)\b/i then draft_here(index)
     when /\A@agent\b/i
       if scoped_request?(line)
         edit_selection(index, line)
