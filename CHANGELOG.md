@@ -31,9 +31,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ordinals of the top-level blocks it touched.
 - `Y::Doc#diff { |doc| ... }` returns the update a block produced, or nil,
   the unit a process records and broadcasts as it streams into a document.
+- `Y::Awareness#apply_update(frame)` and `#states` read presence: what every
+  client set, parsed. `Doc#block_at(position, root)` resolves a peer's caret
+  (a relative position) to the top-level block it falls in.
 - `Y::Awareness` lets a Ruby process publish presence. `set_local_state(json)`
   returns a y-protocol awareness frame to broadcast; browsers apply it as
-  another participant. `clear_local_state` removes it. Same wire format as Yjs.
+  another participant. `clear_local_state` removes it and sends the removal, so peers drop the
+  client at once rather than after a timeout. Same wire format as Yjs.
 
 
 ### Changed
