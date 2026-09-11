@@ -30,6 +30,14 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   #     def receive(data)
   #       sync_receive(data)
   #     end
+  #
+  #     private
+  #
+  #     # Required. The default returns false, so nothing syncs until you
+  #     # define this. Return true for public documents.
+  #     def authorized?(key)
+  #       current_user&.member_of?(key)
+  #     end
   #   end
   #
   # There is no unsubscribe hook: the server keeps no per-connection document or
@@ -56,15 +64,28 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       base.extend(ClassMethods)
     end
 
+    # The storage a channel gets when it declares no hooks: the gem's own
+    # models, much as Action Text defaults to its rich_texts table. It only
+    # applies when the yrby-rails models can be loaded. Outside Rails the
+    # concern still fails closed until hooks are declared.
+    DEFAULT_STORAGE = {
+      on_load: ->(key) { Y::Document.load_state(key) },
+      on_change: ->(key, update) { Y::Document.append(key, update) }
+    }.freeze
+
+    def self.default_hook(name)
+      DEFAULT_STORAGE[name] if Object.const_defined?("Y::Document")
+    end
+
     module ClassMethods
       # Load persisted document state. Called once per key with (key); return a
       # binary Y.js update (or nil for a fresh document). Runs in the channel
-      # instance's context (instance_exec).
+      # instance's context (instance_exec). Defaults to Y::Document storage
+      # when yrby-rails' models are present; declare a block to point storage
+      # elsewhere.
       def on_load(&block)
         @on_load = block if block
-        return @on_load if defined?(@on_load) && @on_load
-
-        superclass.respond_to?(:on_load) ? superclass.on_load : nil
+        sync_storage_hook(:on_load)
       end
 
       # Record every document change durably before it is applied or
@@ -73,12 +94,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # neither acknowledged nor broadcast to other subscribers.
       #
       # Runs in the channel instance's context (instance_exec). Fires from within
-      # sync_receive.
+      # sync_receive. Defaults to Y::Document storage when yrby-rails' models
+      # are present.
       def on_change(&block)
         @on_change = block if block
-        return @on_change if defined?(@on_change) && @on_change
-
-        superclass.respond_to?(:on_change) ? superclass.on_change : nil
+        sync_storage_hook(:on_change)
       end
 
       # Maximum size, in decoded bytes, of an incoming document/awareness frame.
@@ -105,13 +125,37 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
         superclass.respond_to?(:on_gap) ? superclass.on_gap : nil
       end
+
+      private
+
+      # The default supplies both hooks or neither, so reads and writes never
+      # go to different stores. Explicit hooks are inherited as a pair, so a
+      # subclass can override one side of a pair its parent defined.
+      def sync_storage_hook(name)
+        hooks = sync_storage_hooks
+        hooks.empty? ? Sync.default_hook(name) : hooks[name]
+      end
+
+      def sync_storage_hooks
+        inherited = superclass.respond_to?(:sync_storage_hooks, true) ? superclass.send(:sync_storage_hooks) : {}
+        inherited.merge({ on_load: @on_load, on_change: @on_change }.compact)
+      end
     end
 
-    # Call from `subscribed`. Streams broadcasts for this document and
-    # transmits the server's opening handshake (SyncStep1 from the store).
+    # Call from `subscribed`. Checks authorized?, then streams broadcasts for
+    # this document and sends the server's opening handshake (SyncStep1 from
+    # the store). Rejects the subscription and returns false when authorized?
+    # returns false. The default authorized? always does, so this rejects until
+    # the channel defines it.
+    # rubocop:disable Naming/PredicateMethod -- reports whether the
+    # subscription was accepted; not a predicate.
     def sync_subscribed(key)
       @sync_key = key.to_s
       sync_validate_required_hooks!
+      unless authorized?(@sync_key)
+        sync_reject_unauthorized
+        return false
+      end
 
       # The document stream is never whisper-enabled; under AnyCable we also
       # subscribe an awareness stream with `whisper: true`, scoping the client-to-
@@ -127,7 +171,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       doc = sync_load_doc
       sync_transmit(doc.sync_step1)
       sync_observe_gap if doc.pending?
+      # Return true so a caller can tell success from rejection. Without it
+      # the method returns whatever the gap check returned, usually nil.
+      true
     end
+    # rubocop:enable Naming/PredicateMethod
 
     # Call from `receive`. Applies the client's message, replies directly
     # when the protocol calls for it, and relays document/awareness changes
@@ -177,7 +225,46 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       sync_send_ack(id, sync_handle_frame(encoded, bytes))
     end
 
+    # The broadcast stream for a document key. Module-level so a process that
+    # is not a channel can publish to the same subscribers.
+    def self.stream_name(key)
+      "yrby:#{key}"
+    end
+
+    def self.envelope(encoded)
+      { "update" => encoded }
+    end
+
     private
+
+    # Whether this subscriber may sync the document named by `key`. The
+    # default returns false, so a channel has to define this before anything
+    # syncs. Override it:
+    #
+    #   def authorized?(key)
+    #     current_user&.member_of?(key)
+    #   end
+    #
+    # It runs before any stream is opened or state is served, and the
+    # connection's context (current_user, params) is available. Return true
+    # for public documents.
+    def authorized?(_key)
+      false
+    end
+
+    # The subscription was refused. If the refusal came from the default
+    # authorized?, log how to fix it, so a channel that never defined one is
+    # not just silently broken.
+    def sync_reject_unauthorized
+      logger.info do
+        hint = if method(:authorized?).owner == Sync
+                 "; no authorized? defined: define authorized?(key) in this channel, " \
+                   "returning true deliberately for public documents"
+               end
+        "[yrby] subscription rejected key=#{@sync_key.inspect}#{hint}"
+      end
+      reject
+    end
 
     # Reliable delivery: acknowledge an accepted update back to the sending
     # connection. An ack-aware client tags each outgoing update with an "id"
@@ -206,7 +293,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     def sync_envelope(encoded)
-      { "update" => encoded }
+      Sync.envelope(encoded)
     end
 
     # Override in the channel to add identifying context to dropped-frame logs --
@@ -281,7 +368,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       raise Y::Error,
             "Y::ActionCable::Sync requires #{missing.join(" and ")}. Updates are acked as " \
             "durably recorded; without a loader and recorder, an ack would claim a persistence " \
-            "that never happened, and a cold load would lose the edit."
+            "that never happened, and a cold load would lose the edit. (With yrby-rails' " \
+            "models installed these default to Y::Document storage.)"
     end
 
     # Fail closed when no document key is set (typically: AnyCable rebuilt the
@@ -356,7 +444,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     def sync_stream_name
-      "yrby:#{@sync_key}"
+      Sync.stream_name(@sync_key)
     end
 
     def sync_awareness_stream_name

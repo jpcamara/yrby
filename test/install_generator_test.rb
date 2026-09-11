@@ -11,17 +11,29 @@ class InstallGeneratorTest < Rails::Generators::TestCase
   destination File.expand_path("../tmp/generator-destination", __dir__)
   setup :prepare_destination
 
-  def test_generates_the_channel_over_gem_owned_storage
+  def test_generates_no_app_code
     run_generator
 
+    # Y::DocumentChannel and the models ship in the gem, so install only
+    # creates the migration.
+    assert_no_file "app/channels/document_channel.rb"
+    assert_no_file "app/models/yrby_document_update.rb"
+  end
+
+  def test_optionally_generates_an_explicit_custom_channel
+    run_generator ["--channel"]
+
     assert_file "app/channels/document_channel.rb" do |channel|
-      assert_match(/include Y::ActionCable\b/, channel)
-      assert_match("Y::Document.load_state(key)", channel)
-      assert_match("Y::Document.append(key, update)", channel)
-      assert_match(/def authorized\?/, channel)
-      assert_match(/false/, channel, "authorization denies everyone by default")
+      assert_includes channel, "include Y::ActionCable"
+      assert_includes channel, "def subscribed = sync_subscribed(params[:id])"
+      assert_includes channel, "def receive(data) = sync_receive(data, params[:id])"
+      refute_includes channel, "authorized?(params[:id])"
+      assert_includes channel, "def authorized?(_document_key)"
+      assert_match(/def authorized\?\(_document_key\)\s+false/, channel)
+      assert_includes channel, "Y::Document.load_state(key)"
+      assert_includes channel, "Y::Document.append(key, update)"
     end
-    assert_no_file "app/models/yrby_document_update.rb" # models ship in the gem
+    assert_migration "db/migrate/create_y_tables.rb"
   end
 
   def test_generates_the_storage_migration

@@ -7,7 +7,122 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Y::DocumentChannel.authorize_document { |record, name| ... }` checks the
+  application's permissions when a client subscribes, in addition to the
+  signed grant. The block runs in channel context. A denial rejects that
+  subscription without opening a stream or serving state. Other subscriptions
+  on the connection are unaffected. Without a block, the signed grant is
+  sufficient.
+
+  The policy runs once, at subscribe. It does not run on every message, which
+  would add a record load and the application's own queries to every keystroke
+  and cursor move. A permission revoked mid-session takes effect the next time
+  that client subscribes. A short `expires_in:` with a `refresh:` URL bounds
+  that window, and the application can stop the subscription itself when access
+  has to be cut off immediately. The decision
+  is stored as channel state so it survives AnyCable's fresh channel instance
+  per command. A frame that arrives without an authorized subscription is
+  refused even if its grant is valid.
+- `record.collaborative_document(name)` returns a bound
+  `Y::Collaborative::Attribute` for application reads/writes and the shipped
+  channel. `doc` reconstructs a native `Y::Doc`; `load_state`, `append`, and `key`
+  follow the same storage choice. `key` never creates a row; the first
+  `load_state` or `append` does. Built-in row operations are explicitly
+  available through `.document`.
+- `has_collaborative_document :body, storage: PostStore` selects one adapter
+  implementing `load(record, name)` and `write(record, name, update)` for both
+  channel persistence and Ruby reads. Custom storage creates no built-in rows,
+  cannot be combined with `encrypted: true`, and must supply both operations.
+- `Y::Document.key_for(record, name)` exposes the existing conventional key
+  without allocating a document row.
+- `record.collaborative_document(name).edit { |doc| ... }` edits a document
+  from Ruby as a peer of the browsers: it loads the current state, yields a
+  live document, records the change through the declared storage, and
+  broadcasts it. `Y::ActionCable.broadcast(key, update)` is the module-level
+  broadcast it uses, for channels that record updates of their own.
+  `examples/agent` shows an agent running a plan people edit while it runs.
+- `collaborative_sgid(name, expires_in:)` and
+  `collaborative_document_tag(record, name, expires_in:, refresh:)`. The grant
+  lifetime was GlobalID's default with no way to shorten it. `refresh:` names a
+  URL the element fetches when a subscription is rejected; the action re-runs
+  the app's authorization and renders `{ grant: ... }`, and the client
+  resubscribes the same session under the new grant. One attempt per
+  rejection, nothing on a timer.
+
+- `Y::DocumentChannel` ships in the gem, the way Turbo ships
+  `Turbo::StreamsChannel`. Clients subscribe to it with the signed grant a
+  page rendered (`{ grant:, name: }`). The channel trades the grant back for
+  its record, finds the document, and stores through `Y::Document`. There is
+  no channel to generate or write. Missing, tampered, wrong-attribute, and
+  destroyed-record grants are rejected.
+
+- `collaborative_document_tag(record, name, **options)`, included into
+  Action View by the engine. It renders the mount element with the signed
+  grant, the attribute name, and the channel name as data attributes.
+  Render it only where the request is already allowed to edit the record.
+  Holding the grant is what the channel checks, the same model as
+  `turbo_stream_from`'s signed stream names.
+
+- Default storage: a channel that declares no `on_load`/`on_change` now
+  gets `Y::Document` storage automatically, the same way Action Text defaults
+  to its own tables. The hooks are still how you point storage elsewhere.
+  Outside a yrby-rails app the concern still fails closed until hooks are
+  declared.
+
+- `has_collaborative_document :name, encrypted: true` declares which storage
+  class backs an attribute, and `Y::DocumentChannel` uses it. Every load and
+  append for an encrypted attribute goes through `Y::EncryptedDocument`, so
+  the bytes are ciphertext at rest and unreadable through the plain classes.
+  Encryption is decided by the model. Nothing a page renders or a client
+  sends can change it. Undeclared attributes keep plain `Y::Document`.
+
+- `Y::Collaborative`: the signed token flow for record-backed documents,
+  included into ActiveRecord::Base by the engine. A page mints
+  `record.collaborative_sgid(:body)` and the channel trades it back with
+  `Y::Collaborative.locate(params[:grant], :body)`. The token is a signed
+  GlobalID scoped to one attribute, so a token minted for one field cannot
+  open another. This is the standard way to implement `authorized?` for
+  record-backed documents. lexxy-realtime already uses this flow, and
+  yrby-rails now provides it.
+
+### Changed
+
+- **Breaking:** subscriptions are refused until the channel defines
+  `authorized?(key)`. `sync_subscribed` now calls it before any stream is
+  opened or state is served, and the default returns `false`. Add the method
+  to every channel that includes `Y::ActionCable`:
+
+  ```ruby
+  private
+
+  def authorized?(key)
+    current_user&.can_edit?(key)
+  end
+  ```
+
+  Return `true` for public documents. When the default is what rejected the
+  subscription, the log message says so.
+
+- `yrby:install` now creates only the storage migration, since the gem ships
+  `Y::DocumentChannel`. `--channel` also generates an application channel for
+  custom authorization or room-keyed documents. The generated channel refuses
+  every subscription until `authorized?` is implemented.
+
 ### Fixed
+
+- Document elements attach editors to independently owned sessions. Pending
+  edits survive navigation under their original grant; rejected delivery stays
+  recoverable. Turbo previews are inert and cached HTML contains no CRDT bytes.
+- Attribute morphs release the old editor binding and acquire the new document
+  without transferring its pending edits or authorization.
+
+- Default storage now supplies the loader and recorder as a pair. Declaring
+  only one custom hook raises before subscribing or acknowledging an update,
+  instead of silently sending reads and writes to different stores.
+
+- Signed grants initialize without requiring the host app to load Active Job.
 
 - The `yrby:tables` migration template caps `y_documents.state` at
   `1.gigabyte - 1` instead of `4.gigabytes - 1`. Postgres raises
