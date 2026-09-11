@@ -137,14 +137,26 @@ function renderBar() {
   statusEl.textContent = s.status
   detailEl.textContent = s.detail ?? ""
 }
+// Follow only while you are not doing anything: typing, clicking, scrolling
+// and keys all hold it for a while (not selection changes, which remote edits
+// cause too), so it never pulls the page
+// away from what you are reading or writing. "jump to it" always works.
+const HOLD_AFTER_INTERACTION = 15000
+let ourScrollUntil = 0
+function noteInteraction() { lastTyped = Date.now() }
 function followAgent() {
   const s = agentState()
   const pos = agentPosition(s)
   if (pos == null || pos === lastAgentPos) return
   lastAgentPos = pos
-  if (!followEl?.checked || Date.now() - lastTyped < 4000) return
+  if (!followEl?.checked || Date.now() - lastTyped < HOLD_AFTER_INTERACTION) return
+  ourScrollUntil = Date.now() + 1500
   revealAgent()
 }
+for (const type of ["keydown", "mousedown", "touchstart"]) document.addEventListener(type, (e) => {
+  if (!e.target.closest(".agent-actions, #agent-bar")) noteInteraction()
+})
+document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction() }, { passive: true })
 
 function agentPosition(s) {
   const p = s?.focusPos ?? s?.anchorPos
@@ -160,7 +172,7 @@ function revealAgent() {
     cursor?.scrollIntoView({ block: "center", behavior: "smooth" })
   })
 }
-document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); revealAgent() })
+document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent() })
 document.querySelector("#editor [contenteditable=true]")?.addEventListener("input", () => { lastTyped = Date.now() })
 
 // The things you can say to the agent, as buttons: each puts the line in a

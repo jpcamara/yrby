@@ -3,6 +3,8 @@
 # How ReviewAgent reacts to a change: answer a question addressed to it, or
 # note the change in its list.
 module AgentReactions
+  ANSWER_PACE = 140 # characters per second: an answer is a reply, not a draft to watch
+
   private
 
   def block_text(index) = root.xml_text(index).text.strip
@@ -161,8 +163,8 @@ module AgentReactions
   def answer(index, question)
     @answered << question
     present("answering", end_of(root.xml_text(index)), end_of(root.xml_text(index)), sticky: true)
-    writer = StreamingWriter.new(doc, flush: flush, after: root.xml_text(index).anchor)
-    stream_into(writer, "answering") { |emit| @reviewer.answer(question, text, &emit) }
+    writer = StreamingWriter.new(doc, flush: flush, after: root.xml_text(index).anchor, headings: false)
+    stream_into(writer, "answering", pace: ANSWER_PACE) { |emit| @reviewer.answer(question, text, &emit) }
     present("answered", end_of(writer.block), end_of(writer.block)) if writer.block
   end
 
@@ -171,9 +173,9 @@ module AgentReactions
   # a second so people see the agent writing.
   # The model's chunks go through a pacer so the text arrives at a steady
   # pace rather than in the bursts the model produces them in.
-  def stream_into(writer, status)
+  def stream_into(writer, status, pace: Pacer::RATE)
     since = 0
-    pacer = Pacer.new { |piece| writer.feed(piece) }
+    pacer = Pacer.new(rate: pace) { |piece| writer.feed(piece) }
     follow = lambda do
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless writer.block && now - since > 0.25

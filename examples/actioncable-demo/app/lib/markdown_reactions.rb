@@ -4,6 +4,8 @@
 # request or a question; anything else is a change to consider, unless it is
 # inside its own list or a section it drafted.
 module MarkdownReactions
+  ANSWER_PACE = 140 # characters per second: an answer is a reply, not a draft to watch
+
   private
 
   def react_to(first, last)
@@ -58,7 +60,7 @@ module MarkdownReactions
     return true if text.empty? || text.match?(/[.!?:)\]"”»]\s*\z/) || text.match?(/\A[-*#>]/)
 
     lines = occupied_lines
-    Rails.logger.debug("agent: gate paragraph #{paragraph.first_line}..#{paragraph.last_line} #{text[-20..].inspect} occupied #{lines.inspect}")
+    Rails.logger.debug { "agent: gate #{paragraph.first_line}..#{paragraph.last_line} occupied #{lines.inspect}" }
     lines.none? { |l| l.between?(paragraph.first_line, paragraph.last_line) }
   end
 
@@ -127,16 +129,34 @@ module MarkdownReactions
     present("answering", at, sticky: true)
     writer = MarkdownWriter.new(@doc, @text, flush: flush, at: at)
     writer.feed("\n\n")
-    stream_into(writer, "answering") { |emit| @reviewer.answer(question, text, &emit) }
+    stream_into(writer, "answering", pace: ANSWER_PACE) do |emit|
+      @reviewer.answer(question, text, &without_headings(emit))
+    end
     present("answered", writer.index)
+  end
+
+  # A reply is not a section: "#" at the start of a line is dropped as the
+  # chunks stream through.
+  def without_headings(emit)
+    at_line_start = true
+    lambda do |chunk|
+      out = +""
+      chunk.to_s.each_char do |c|
+        next if at_line_start && (c == "#" || (c == " " && out.empty? && chunk.start_with?("#")))
+
+        out << c
+        at_line_start = c == "\n"
+      end
+      emit.call(out) unless out.empty?
+    end
   end
 
   # Feed a stream of chunks into `writer`; the caret follows the text.
   # The model's chunks go through a pacer so the text arrives at a steady
   # pace rather than in the bursts the model produces them in.
-  def stream_into(writer, status)
+  def stream_into(writer, status, pace: Pacer::RATE)
     since = 0
-    pacer = Pacer.new { |piece| writer.feed(piece) }
+    pacer = Pacer.new(rate: pace) { |piece| writer.feed(piece) }
     follow = lambda do
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless now - since > 0.25

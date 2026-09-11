@@ -27,13 +27,11 @@ class LlmReviewer
   PROMPT
 
   QUESTION_PROMPT = <<~PROMPT
-    You are a collaborator in a short working document that a team is editing
-    together. Someone in the document asked you a question, marked with @agent.
-    Answer it in plain text with no markdown headings: a short paragraph, then
-    if useful two or three concrete points, each on its own line starting with "- ".
+    Someone in the document asked: %s
 
-    Question:
-    %s
+    Answer in two or three sentences, as a colleague would in the margin,
+    from what the document says and what you did. Add a short list only if
+    the question asks for several things. No headings, no preamble.
 
     Document:
     %s
@@ -161,6 +159,8 @@ class LlmReviewer
     write and contribute only when it clearly helps. Keep contributions
     small, concrete, and additive. Never restate the document. Remember what
     you have already said and done in this document.
+    A task line marked "[~]" is one you are drafting right now, and its section
+    may still end mid-sentence: that is work in progress, not an error.
   TXT
 
   CONSIDER_PROMPT = <<~PROMPT

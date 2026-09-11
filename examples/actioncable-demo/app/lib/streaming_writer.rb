@@ -13,11 +13,14 @@ class StreamingWriter
 
   # `after:` is a Y::Anchor the first block goes after, wherever that block
   # is by then; `at:` is a plain ordinal; without either, blocks go at the end.
-  def initialize(doc, flush:, at: nil, after: nil)
+  # `headings: false` writes a "# " line as prose: an answer is a reply, not
+  # a section.
+  def initialize(doc, flush:, at: nil, after: nil, headings: true)
     @doc = doc
     @flush = flush
     @at = at
     @after = after
+    @headings = headings
     @last = nil    # anchor of the last block this writer made
     @created = []  # anchors of every top-level block this writer made
     @anchor = nil  # anchor of the block text is going into
@@ -76,7 +79,7 @@ class StreamingWriter
     if @line.start_with?("- ", "* ")
       @block = new_item
       write(@line[2..])
-    elsif @line.start_with?("#")
+    elsif @line.start_with?("#") && @headings
       @block = new_heading
       write(@line.sub(/\A#+\s*/, ""))
     elsif @line.match?(/\A\d+[.)]\s/)

@@ -6,11 +6,11 @@
 # loop calls `step` to let a little out. `on_finish` runs once everything
 # streamed has been written.
 class StreamJob
-  def initialize(writer:, on_finish: nil, &produce)
+  def initialize(writer:, on_finish: nil, pace: Pacer::RATE, &produce)
     @writer = writer
     @on_finish = on_finish
     @queue = Queue.new
-    @pacer = Pacer.new { |piece| writer.feed(piece) }
+    @pacer = Pacer.new(rate: pace) { |piece| writer.feed(piece) }
     @done = false
     @finished = false
     @thread = Thread.new do

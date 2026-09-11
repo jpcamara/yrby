@@ -21,7 +21,10 @@ module Worklist
   # task list loses its boxes in Lexxy. An item that mentions @agent is the
   # agent's anywhere. "<task> under <Heading>" places the draft in that
   # section. A paragraph task has no index.
-  def tasks(doc)
+  # Only a heading names the agent's group, and never one in `except:`
+  # (the agent's own review), so a paragraph that mentions the agent, or the
+  # agent's own suggestions, do not turn into tasks.
+  def tasks(doc, except: [])
     root = doc.get_xml_text("root")
     mine = false
     (0...root.xml_text_count).flat_map do |i|
@@ -35,7 +38,9 @@ module Worklist
 
         [build(block.anchor, nil, m[2], STATES[m[1]])]
       else
-        mine = block.text.match?(/\bagent\b/i)
+        title = block.text.strip
+        mine = block.attributes["__type"] == "heading" && title.match?(/\bagent\b/i) &&
+               except.none? { |x| title.casecmp?(x) }
         []
       end
     end
@@ -107,7 +112,9 @@ module Worklist
   def agent_list(root)
     (1...root.xml_text_count).each do |i|
       list = root.xml_text(i)
-      return list if list.xml_text_count.positive? && root.xml_text(i - 1).text.match?(/\bagent\b/i)
+      above = root.xml_text(i - 1)
+      next unless list.xml_text_count.positive? && above.attributes["__type"] == "heading"
+      return list if above.text.match?(/\bagent\b/i) && !above.text.strip.casecmp?("Agent review")
     end
     nil
   end
@@ -116,8 +123,9 @@ module Worklist
   # above them.
   def ordinals(doc)
     root = doc.get_xml_text("root")
-    tasks(doc).filter_map { |t| doc.block_at(t.list) }.uniq.flat_map do |i|
-      i.positive? && root.xml_text(i - 1).text.match?(/\bagent\b/i) ? [i - 1, i] : [i]
+    tasks(doc, except: ["Agent review"]).filter_map { |t| doc.block_at(t.list) }.uniq.flat_map do |i|
+      above = i.positive? && root.xml_text(i - 1)
+      above && above.attributes["__type"] == "heading" && above.text.match?(/\bagent\b/i) ? [i - 1, i] : [i]
     end.uniq
   end
 end
