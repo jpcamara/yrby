@@ -340,6 +340,23 @@ impl RbDoc {
         }))
     }
 
+    /// The character index in the root `Text` named `root` that a relative
+    /// position (a peer's caret from awareness, or an anchor) falls at, or
+    /// nil when it points elsewhere or the item is gone.
+    fn index_at(&self, position: RHash, root: String) -> Result<Option<u32>, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let sticky = sticky_from_ruby(&ruby, position)?;
+        let doc = &self.0;
+        Ok(nogvl(move || {
+            let txn = doc.transact();
+            let offset = sticky.get_offset(&txn)?;
+            let text = txn.get_text(root.as_str())?;
+            let branch: &yrs::branch::Branch = text.as_ref();
+            let ptr = yrs::branch::BranchPtr::from(branch);
+            (ptr == offset.branch).then_some(offset.index)
+        }))
+    }
+
     /// Encode state as update (optionally diffed against a state vector)
     fn encode_state_as_update(&self, args: &[Value]) -> Result<RString, Error> {
         let sv_bytes: Option<Vec<u8>> = if args.is_empty() {
@@ -1003,6 +1020,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbDoc::encode_state_as_update, -1),
     )?;
     doc_class.define_method("apply_update", method!(RbDoc::apply_update, 1))?;
+    doc_class.define_method("native_index_at", method!(RbDoc::index_at, 2))?;
     doc_class.define_method(
         "apply_update_changes",
         method!(RbDoc::apply_update_changes, 2),

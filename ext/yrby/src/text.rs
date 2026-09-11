@@ -9,11 +9,17 @@
 //! person typing in the same paragraph while the agent appends does not lose
 //! their edit and neither does the agent.
 
-use magnus::{prelude::*, Error, Ruby};
-use yrs::{Doc, GetString, Text, Transact};
+use magnus::{prelude::*, Error, RHash, Ruby};
+use yrs::{Assoc, Doc, GetString, IndexScope, IndexedSequence, StickyIndex, Text, Transact};
 
 use crate::shared::{resolve_text, Root, Seg};
 use crate::{nogvl, yrb_error};
+
+enum RelPos {
+    Item(u64, u32),
+    Type(u64, u32),
+    Root(String),
+}
 
 #[magnus::wrap(class = "Y::Text", free_immediately, size)]
 pub struct RbText {
@@ -113,6 +119,57 @@ impl RbText {
         Ok(chunk)
     }
 
+    /// The name of the root this text lives under.
+    fn root_name(&self) -> String {
+        self.root.clone()
+    }
+
+    /// The Yjs relative position of `index` as the `{type, tname, item, assoc}`
+    /// hash editors put in awareness as a caret. `assoc` is "after" (the
+    /// default) or "before". Past the end the position names the text itself.
+    fn native_relative_position(&self, index: i64, assoc: String) -> Result<RHash, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let assoc = if assoc == "before" {
+            Assoc::Before
+        } else {
+            Assoc::After
+        };
+        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
+        let (pos, assoc) = nogvl(move || -> Result<(RelPos, i32), String> {
+            let txn = doc.transact();
+            let text = resolve_text(&txn, kind, root, path)
+                .ok_or_else(|| "text no longer exists".to_string())?;
+            let at = clamp(index, text.len(&txn));
+            let sticky = text
+                .sticky_index(&txn, at, assoc)
+                .unwrap_or_else(|| StickyIndex::from_type(&txn, &text, assoc));
+            let pos = match sticky.scope() {
+                IndexScope::Relative(id) => RelPos::Item(id.client.get(), id.clock),
+                IndexScope::Nested(id) => RelPos::Type(id.client.get(), id.clock),
+                IndexScope::Root(name) => RelPos::Root(name.to_string()),
+            };
+            Ok((pos, sticky.assoc as i32))
+        })
+        .map_err(yrb_error)?;
+        let id = |client: u64, clock: u32| -> Result<RHash, Error> {
+            let h = ruby.hash_new();
+            h.aset("client", client)?;
+            h.aset("clock", clock)?;
+            Ok(h)
+        };
+        let h = ruby.hash_new();
+        h.aset("type", ruby.qnil())?;
+        h.aset("tname", ruby.qnil())?;
+        h.aset("item", ruby.qnil())?;
+        match pos {
+            RelPos::Item(c, k) => h.aset("item", id(c, k)?)?,
+            RelPos::Type(c, k) => h.aset("type", id(c, k)?)?,
+            RelPos::Root(name) => h.aset("tname", name)?,
+        }
+        h.aset("assoc", assoc)?;
+        Ok(h)
+    }
+
     /// Remove `length` units from `index`. Both are clamped, so deleting past
     /// the end removes what is there rather than raising.
     fn delete(&self, index: i64, length: i64) -> Result<(), Error> {
@@ -169,6 +226,11 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("length", magnus::method!(RbText::length, 0))?;
     class.define_method("size", magnus::method!(RbText::length, 0))?;
     class.define_method("empty?", magnus::method!(RbText::is_empty, 0))?;
+    class.define_method("root_name", magnus::method!(RbText::root_name, 0))?;
+    class.define_method(
+        "native_relative_position",
+        magnus::method!(RbText::native_relative_position, 2),
+    )?;
     Ok(())
 }
 

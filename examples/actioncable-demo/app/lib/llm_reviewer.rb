@@ -170,7 +170,9 @@ class LlmReviewer
     owner or date a task is missing, a question in the text you can answer,
     a TODO you can draft in a line or two, a plain error. If not, do nothing.
     Suggestions under the "Agent review" heading are your own earlier
-    review, not requests from the team; do not act on them here.
+    review, not requests from the team; do not act on them here. Task lines
+    under a heading that names the agent ("[ ]", "[~]") are handled by your
+    own work loop; do not draft them here either.
 
     Reply with JSON only: {"note":"one short line on what you did or why not","edits":[...]}
     where edits is empty or holds at most 3 of:
