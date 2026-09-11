@@ -16,7 +16,8 @@ class DocumentsController < ApplicationController
         ActiveRecord::Base.connection_pool.with_connection do
           presence = Y::Awareness.new
           identity = { name: "Agent \u{1F916}", color: "#7c3aed" }
-          16.times do
+          wrote = false
+          16.times do |tick|
             # Read the shared document the way any Ruby process would: replay
             # the store into a Y::Doc and read its rich text. The agent reacts
             # to what people have written so far.
@@ -24,6 +25,24 @@ class DocumentsController < ApplicationController
             (bytes = Store.current.replay(document_id)) && doc.apply_update(bytes)
             words = doc.read_xml("root").to_s.split.size
             status = words.zero? ? "waiting for the first words" : "reviewing \u2014 #{words} words so far"
+
+            # After a few looks, write the review into the document itself: a
+            # heading and a paragraph, built in Lexical's own node shape, sent
+            # as a diff the open editors apply like any remote edit.
+            if !wrote && tick >= 2 && words.positive?
+              blocks = doc.get_xml_text("root").xml_text_count
+              before = doc.encode_state_vector
+              Y::Lexical.append_heading(doc, "Agent review", tag: "h2")
+              Y::Lexical.append_paragraph(doc, "Read #{words} words across #{blocks} blocks. " \
+                "The checklist reads clearly; every step has an owner implied by context. " \
+                "One suggestion: name who signs off before the report is published.")
+              update = doc.encode_state_as_update(before)
+              Store.current.record(document_id, update)
+              Y::ActionCable.broadcast(document_id, update)
+              wrote = true
+              status = "wrote a review into the document"
+            end
+
             state = identity.merge(awarenessData: identity, anchorPos: nil, focusPos: nil,
                                    focusing: true, status: status)
             Y::ActionCable.broadcast_awareness(document_id, presence.set_local_state(state.to_json))

@@ -14,13 +14,23 @@ use magnus::{
     prelude::*, r_hash::ForEach, Error, Float, Integer, IntoValue, RArray, RHash, RString, Ruby,
     Value,
 };
-use yrs::{Any, Array, ArrayRef, In, Map, MapPrelim, MapRef, Out, ReadTxn, TextRef};
+use yrs::branch::BranchPtr;
+use yrs::types::text::YChange;
+use yrs::{
+    Any, Array, ArrayRef, In, Map, MapPrelim, MapRef, Out, ReadTxn, Text, TextRef, XmlTextRef,
+};
+
+/// The largest integer a double represents exactly (2^53).
+const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
 /// One step of a handle's path: a key into a map, or an index into an array.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Seg {
     Key(String),
     Index(u32),
+    /// The n-th `XmlText` embedded in an `XmlText`: how a rich-text block
+    /// (a Lexical paragraph, say) is addressed inside its parent.
+    Embed(u32),
 }
 
 /// Which root a path starts from. The root's type is fixed by the handle that
@@ -30,6 +40,7 @@ pub enum Root {
     Map,
     Array,
     Text,
+    XmlText,
 }
 
 /// A resolved branch. Callers narrow it to the type they need.
@@ -37,12 +48,14 @@ pub enum Branch {
     Map(MapRef),
     Array(ArrayRef),
     Text(TextRef),
+    XmlText(XmlTextRef),
 }
 
 fn descend<T: ReadTxn>(txn: &T, branch: Branch, seg: &Seg) -> Option<Branch> {
     let out = match (branch, seg) {
         (Branch::Map(m), Seg::Key(k)) => m.get(txn, k),
         (Branch::Array(a), Seg::Index(i)) => a.get(txn, *i),
+        (Branch::XmlText(x), Seg::Embed(n)) => embedded_xml_text(txn, &x, *n),
         // A key into an array or an index into a map is a path that no longer
         // describes the document.
         _ => None,
@@ -51,6 +64,7 @@ fn descend<T: ReadTxn>(txn: &T, branch: Branch, seg: &Seg) -> Option<Branch> {
         Out::YMap(m) => Some(Branch::Map(m)),
         Out::YArray(a) => Some(Branch::Array(a)),
         Out::YText(t) => Some(Branch::Text(t)),
+        Out::YXmlText(x) => Some(Branch::XmlText(x)),
         _ => None,
     }
 }
@@ -62,11 +76,54 @@ pub fn resolve<T: ReadTxn>(txn: &T, kind: Root, root: &str, path: &[Seg]) -> Opt
         Root::Map => Branch::Map(txn.get_map(root)?),
         Root::Array => Branch::Array(txn.get_array(root)?),
         Root::Text => Branch::Text(txn.get_text(root)?),
+        Root::XmlText => Branch::XmlText(root_xml_text(txn, root)?),
     };
     for seg in path {
         branch = descend(txn, branch, seg)?;
     }
     Some(branch)
+}
+
+/// The root `XmlText` named `root`. Editors like Lexical keep their document in
+/// a root of this type. yrs has no root accessor for it, but a root's type is
+/// local metadata: it is repaired on first lookup and never encoded, so we look
+/// it up the way the reader does (as an XML fragment) and address the same
+/// branch as an `XmlText`.
+pub fn root_xml_text<T: ReadTxn>(txn: &T, root: &str) -> Option<XmlTextRef> {
+    let fragment = txn.get_xml_fragment(root)?;
+    let branch: &yrs::branch::Branch = fragment.as_ref();
+    Some(XmlTextRef::from(BranchPtr::from(branch)))
+}
+
+/// The `n`-th `XmlText` embedded in `parent`, in document order.
+pub fn embedded_xml_text<T: ReadTxn>(txn: &T, parent: &XmlTextRef, n: u32) -> Option<Out> {
+    parent
+        .diff(txn, YChange::identity)
+        .into_iter()
+        .filter(|d| matches!(d.insert, Out::YXmlText(_)))
+        .nth(n as usize)
+        .map(|d| d.insert)
+}
+
+/// How many `XmlText`s are embedded in `parent`.
+pub fn embedded_xml_text_count<T: ReadTxn>(txn: &T, parent: &XmlTextRef) -> u32 {
+    parent
+        .diff(txn, YChange::identity)
+        .iter()
+        .filter(|d| matches!(d.insert, Out::YXmlText(_)))
+        .count() as u32
+}
+
+pub fn resolve_xml_text<T: ReadTxn>(
+    txn: &T,
+    kind: Root,
+    root: &str,
+    path: &[Seg],
+) -> Option<XmlTextRef> {
+    match resolve(txn, kind, root, path)? {
+        Branch::XmlText(x) => Some(x),
+        _ => None,
+    }
 }
 
 pub fn resolve_map<T: ReadTxn>(txn: &T, kind: Root, root: &str, path: &[Seg]) -> Option<MapRef> {
@@ -105,11 +162,13 @@ pub enum InValue {
 pub fn to_in(v: InValue) -> In {
     match v {
         InValue::Any(a) => In::Any(a),
-        InValue::Map(entries) => {
-            let m: MapPrelim = entries.into_iter().map(|(k, cv)| (k, to_in(cv))).collect();
-            In::from(m)
-        }
+        InValue::Map(entries) => In::from(to_map_prelim(entries)),
     }
+}
+
+/// A nested shared map from Ruby pairs (what an editor's node marker is).
+pub fn to_map_prelim(entries: Vec<(String, InValue)>) -> MapPrelim {
+    entries.into_iter().map(|(k, cv)| (k, to_in(cv))).collect()
 }
 
 /// Flatten an `InValue` to `Any` (nested maps become `Any::Map` snapshots).
@@ -163,7 +222,16 @@ pub fn ruby_to_invalue(ruby: &Ruby, v: Value) -> Result<InValue, Error> {
         return Ok(InValue::Any(Any::Array(items.into())));
     }
     if let Some(i) = Integer::from_value(v) {
-        return Ok(InValue::Any(Any::BigInt(i.to_i64()?)));
+        // Yjs encodes ordinary integers as numbers, which JavaScript reads as
+        // plain numbers. A BigInt would come back as a JS BigInt, which breaks
+        // JSON.stringify and the bitwise math editors do on flags like
+        // `__format`. Only an integer a double cannot hold stays a BigInt.
+        let i = i.to_i64()?;
+        return Ok(InValue::Any(if i.unsigned_abs() <= MAX_SAFE_INTEGER {
+            Any::Number(i as f64)
+        } else {
+            Any::BigInt(i)
+        }));
     }
     if let Some(f) = Float::from_value(v) {
         return Ok(InValue::Any(Any::Number(f.to_f64())));
@@ -180,6 +248,10 @@ pub fn any_to_ruby(ruby: &Ruby, a: &Any) -> Value {
     match a {
         Any::Null | Any::Undefined => ruby.qnil().as_value(),
         Any::Bool(b) => (*b).into_value_with(ruby),
+        // A whole number reads back as an Integer, as JSON.parse would give.
+        Any::Number(n) if n.fract() == 0.0 && n.abs() <= MAX_SAFE_INTEGER as f64 => {
+            (*n as i64).into_value_with(ruby)
+        }
         Any::Number(n) => (*n).into_value_with(ruby),
         Any::BigInt(i) => (*i).into_value_with(ruby),
         Any::String(s) => s.as_ref().into_value_with(ruby),
