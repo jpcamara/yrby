@@ -121,7 +121,8 @@ module MarkdownWork
     case verb.downcase
     when "take"
       add_task(rest.to_s.strip)
-      present("took a task", @text.length, detail: rest)
+      queued = @task ? "#{rest}; I'll start it after #{@section_title}" : rest
+      present("took a task", @text.length, detail: queued)
       @next_scan = 0
     when "pause"
       @paused = true

@@ -11,14 +11,21 @@ class Pacer
   # point is that people can watch the words arrive. AGENT_PACE overrides.
   RATE = ENV.fetch("AGENT_PACE", "60").to_f
 
-  def initialize(&write)
+  def initialize(rate: RATE, &write)
+    @rate = rate
     @write = write
     @buffer = +""
     @last = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @credit = 0.0
   end
 
+  # Credit only accrues while there is something to write: after a silence,
+  # the first chunk starts at the calm pace rather than paying out the wait.
   def feed(chunk)
+    if @buffer.empty?
+      @last = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      @credit = 0.0
+    end
     @buffer << chunk.to_s
   end
 
@@ -50,5 +57,5 @@ class Pacer
 
   private
 
-  def rate = RATE
+  attr_reader :rate
 end

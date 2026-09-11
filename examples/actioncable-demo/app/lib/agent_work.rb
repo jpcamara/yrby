@@ -42,7 +42,7 @@ module AgentWork
     claim(task)
   end
 
-  def tasks_for_me = Worklist.tasks(doc)
+  def tasks_for_me = Worklist.tasks(doc, except: ["Agent review"])
 
   # After the review, say what comes next.
   def announce_next
@@ -139,7 +139,8 @@ module AgentWork
     return unless @draft && !@draft.finished?
 
     if in_my_way?
-      present("waiting, you're in this section", end_of(@draft_writer.block), end_of(@draft_writer.block),
+      at = @draft_writer.block || doc.find(@section_heading) || last_block
+      present("waiting, you're in this section", end_of(at), end_of(at),
               detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
       return
     end
@@ -174,7 +175,8 @@ module AgentWork
     case verb.downcase
     when "take"
       flush.call(Worklist.add(doc, rest.to_s.strip))
-      present("took a task", end_of(last_block), end_of(last_block), detail: rest)
+      queued = @task ? "#{rest}; I'll start it after #{@section_title}" : rest
+      present("took a task", end_of(last_block), end_of(last_block), detail: queued)
       @next_scan = 0
     when "pause"
       @paused = true
