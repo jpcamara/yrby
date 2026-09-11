@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 module Reviewer
-  # A real model when an Anthropic key is present, a stand-in otherwise, so the
-  # demo runs either way. Never put a key in the repo: export it in the shell.
+  # A real model when a Fireworks or Anthropic key is present, a stand-in
+  # otherwise, so the demo runs either way. Never put a key in the repo:
+  # export it in the shell.
   def self.default
-    ENV["ANTHROPIC_API_KEY"].to_s.empty? ? StubReviewer.new : LlmReviewer.new
+    LlmReviewer.available? ? LlmReviewer.new : StubReviewer.new
   end
 
   # Model output as plain text: lines starting with "- " or "* " are the
