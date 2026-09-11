@@ -830,6 +830,12 @@ To put that into a shared document, do it inside `edit` (or diff against a
 state vector, record the update, and broadcast it). The renderer is the
 check: a Ruby-written paragraph and a typed one render byte for byte the same.
 
+A caret is a Yjs relative position, and `relative_position(index)` builds
+one: the `{type, tname, item, assoc}` hash editors put in awareness as
+`anchorPos` and `focusPos`. Ids are global, so a position built from a
+replayed document resolves in every open editor. Put it in the presence
+state and the agent has a caret people can see move.
+
 ### Presence from Ruby
 
 `Y::Awareness` lets a Ruby process show up as a live collaborator, the way a
