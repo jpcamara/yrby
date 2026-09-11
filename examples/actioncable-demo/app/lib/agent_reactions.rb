@@ -21,15 +21,17 @@ module AgentReactions
     changed = changed.select { |i| i < root.xml_text_count }
     return if changed.empty?
 
-    occupied = occupied_blocks
-    Rails.logger.info("agent: occupied blocks #{occupied.inspect}, people #{people_here.inspect}")
+    return if mine?(changed)
+
+    avoid = (occupied_blocks | my_blocks).sort
+    Rails.logger.info("agent: leaving alone #{avoid.inspect}, people #{people_here.inspect}")
     present("thinking about your change", *block_selection(changed.last))
     blocks, anchors = numbered_blocks
-    result = @reviewer.consider(changed, occupied, blocks)
+    result = @reviewer.consider(changed, avoid, blocks)
     if result.edits.empty?
       present(result.note.presence || "nothing to add", *block_selection(changed.last))
     else
-      applied = DocumentEditor.new(doc, flush: flush, presence: self, avoid: occupied,
+      applied = DocumentEditor.new(doc, flush: flush, presence: self, avoid: avoid,
                                         anchors: anchors).apply(result.edits)
       if applied.applied.positive?
         remember_undo("what I added after your change", applied)
@@ -38,6 +40,20 @@ module AgentReactions
       end
     end
     @changes.clear
+  end
+
+  # A change to the agent's own list means new work, not something to
+  # consider; a change to a section it drafted hands that section over.
+  def mine?(changed)
+    if changed.intersect?(Worklist.ordinals(doc))
+      @next_scan = 0
+      present("saw your change to my list", *block_selection(changed.last))
+      return true
+    end
+    title = changed.filter_map { |i| my_section(i) }.first or return false
+    @reviewer.remember("Someone edited my draft of \"#{title}\"; that section is theirs now")
+    present("noted your change to my draft of #{title}", *block_selection(changed.last))
+    true
   end
 
   # "@agent edit: <instruction>": take the instruction line out of the

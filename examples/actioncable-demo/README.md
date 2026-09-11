@@ -567,6 +567,42 @@ and the label says so.
 The blocks it writes into are tracked by `Y::Anchor`, not by number. An anchor
 is a relative position at the block's start, resolved again before every
 write.
+
+### Working alongside it
+
+The agent has its own backlog, kept in the document. Put a heading that names
+it, like `For the agent`, above a bulleted list, and start each item with a
+text checkbox:
+
+```
+For the agent
+- [ ] Draft the rollback plan
+- [ ] Draft the go/no-go criteria
+```
+
+An item anywhere that mentions `@agent` counts too. Lexxy has no checkbox
+nodes, so the box is plain text and any editor shows it. The agent takes the
+first open item, marks it `[~]`, adds a heading with the task at the end of
+the document and drafts the section there, then marks the item `[x]`. You keep
+working anywhere else meanwhile: drafting is interleaved with everything else
+it does, a few chunks at a time, so it still answers you and still looks at
+your changes.
+
+If you step into the block it is drafting, it holds the next chunk and says
+so in its presence label; it carries on when you leave. A section it drafted
+is yours once you edit it: the change goes into its memory and it does not
+touch that section again on its own.
+
+Handoffs are lines it removes once read:
+
+- `@agent take <task>` adds an item to its list (creating the heading and list
+  at the end if needed) and picks it up.
+- `@agent pause` and `@agent resume` hold and release its own work; it still
+  reacts to you while paused.
+- `@agent stop` drops the task it is drafting and marks the item `[-]`.
+
+The blocks it writes into are tracked by anchor, not by number. An anchor is
+a relative position at the block's start, resolved again before every write.
 When someone inserts or removes blocks above while the agent is streaming,
 its words keep landing in the right block, and an edit planned against block
 numbers finds those blocks wherever they are by the time it runs. If the block
