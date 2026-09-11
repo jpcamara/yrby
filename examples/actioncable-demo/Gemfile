@@ -55,6 +55,8 @@ gem "anycable-rails", "~> 1.6"
 
 # PostgreSQL store (realistic durable store with concurrent commits)
 gem "pg"
+# The demo also runs on SQLite: DATABASE_URL=sqlite3:storage/production.sqlite3
+gem "sqlite3"
 
 # The demo agent reviews a document with a Claude model when ANTHROPIC_API_KEY
 # is set (see app/lib/reviewer.rb); without a key it uses a fixed review.

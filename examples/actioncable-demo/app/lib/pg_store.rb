@@ -20,9 +20,20 @@ module PgStore
   # RPC worker threads group-commit in Postgres.
   def record(key, update)
     Fault.simulate(key)
+    unless postgres?
+      DocumentChange.insert!({ doc_key: key, delta: binary(update), created_at: Time.current })
+      return
+    end
+
     DocumentChange.connection.raw_connection.exec_params(
       INSERT_SQL, [key, { value: binary(update), type: 17, format: 1 }]
     )
+  end
+
+  # The raw insert is PostgreSQL's. On another database (the demo also runs
+  # on SQLite, DATABASE_URL=sqlite3:...) the row goes through Active Record.
+  def postgres?
+    DocumentChange.connection.adapter_name.casecmp?("PostgreSQL")
   end
 
   # Rebuild the document by replaying every recorded delta in id order.
