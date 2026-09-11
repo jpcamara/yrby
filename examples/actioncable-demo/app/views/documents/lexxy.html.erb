@@ -24,7 +24,7 @@
                 data-direct-upload-url="<%= rails_direct_uploads_url %>"
                 data-blob-url-template="<%= rails_service_blob_url(":signed_id", ":filename") %>"></lexxy-editor>
 
-<%= button_to "Invite the agent", agent_document_path(params[:id]), class: "invite-agent", form: { style: "display:inline" } %>
+<%= button_to "Invite the agent", document_agent_path(params[:id]), class: "invite-agent", form: { style: "display:inline" } %>
   <div id="presence-roster" class="presence-roster" aria-label="Who is here"></div>
 
   <%= render "materialized_note", note: @note, renderer: "Y::Lexxy" %>
