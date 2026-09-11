@@ -13,6 +13,7 @@ class MarkdownAgent
   include MarkdownReactions
   include MarkdownWork
   include MarkdownEdits
+  include MarkdownReview
 
   QUIET = 1.5
   EMPTY_FOR = 120
@@ -42,7 +43,9 @@ class MarkdownAgent
     @seen = @text.to_s
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
-    write_review
+    introduce
+    start_review
+    @next_scan = 0
     watch
   ensure
     stop_heartbeat
@@ -70,17 +73,6 @@ class MarkdownAgent
     @changes << [first, [last, after.length - 1].min]
   end
 
-  def write_review
-    present("reading the document", @text.length, sticky: true)
-    ensure_trailing_newlines(2)
-    flush.call(@doc.diff { @text.insert(@text.length, "## #{REVIEW_TITLE}\n\n") })
-    @review = @text.relative_position(@text.length - 1)
-    writer = MarkdownWriter.new(@doc, @text, flush: flush, at: @text.length)
-    stream_into(writer, "writing a review") { |emit| @reviewer.stream(text, &emit) }
-    ensure_trailing_newlines(1)
-    present("wrote a review", @text.length)
-  end
-
   def watch
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     empty_since = nil
@@ -91,11 +83,9 @@ class MarkdownAgent
       else
         empty_since = nil
       end
-      changed = @changes.pop(timeout: work_pending? ? 0.04 : 2)
-      unless changed
-        work_step
-        next
-      end
+      changed = @changes.pop(timeout: busy? ? 0.04 : 2)
+      next idle_tick unless changed
+
       first, last = changed
       while (more = @changes.pop(timeout: QUIET))
         first = [first, more[0]].min

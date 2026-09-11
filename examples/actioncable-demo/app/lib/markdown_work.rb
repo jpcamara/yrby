@@ -16,7 +16,7 @@ module MarkdownWork
     @task ? draft_step : pick_task
   rescue StandardError => e
     Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
-    @draft_thread&.kill
+    @draft&.stop
     @task = nil
     @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
   end
@@ -25,15 +25,27 @@ module MarkdownWork
     @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SCAN_EVERY
     busy = occupied_lines
     task = tasks.find { |t| t.state == :open && !busy.include?(t.line) }
-    claim(task) if task
+    return unless task
+
+    present("up next: #{section_title(task.text)}", @last_index, sticky: true,
+                                                                 detail: "from your list; say @agent pause to hold me")
+    sleep 1.5
+    claim(task)
+  end
+
+  def announce_next
+    return present(working_label, @last_index, sticky: true) if drafting?
+
+    task = tasks.find { |t| t.state == :open }
+    if task
+      present("up next: #{section_title(task.text)}", @last_index, detail: "from your list")
+    else
+      present("listening", @last_index, sticky: true, detail: AgentWork::LISTENING)
+    end
   end
 
   def claim(task)
     @task = task
-    @held = nil
-    @done = false
-    @pacer = nil
-    @draft = Queue.new
     @task_anchor = task.line && @text.relative_position(MarkdownDoc.line_start(text, task.line))
     mark(task, :drafting)
     section = open_section(task)
@@ -44,12 +56,8 @@ module MarkdownWork
                "drafting the section you pointed at"
              end
     present("drafting #{@section_title}", @draft_writer.index, detail: detail, sticky: true)
-    @draft_thread = Thread.new do
-      @reviewer.draft(task.text, text) { |chunk| @draft << chunk }
-    rescue StandardError => e
-      Rails.logger.warn("agent draft failed: #{e.class}: #{e.message}")
-    ensure
-      @draft << :done
+    @draft = StreamJob.new(writer: @draft_writer, on_finish: -> { finish_task }) do |emit|
+      @reviewer.draft(task.text, text, &emit)
     end
   end
 
@@ -74,37 +82,19 @@ module MarkdownWork
     section
   end
 
-  # Take what the model has produced into the pacer, then let a little out.
-  # A person in the section holds the pace; the chunks wait in the pacer.
+  # Let the draft out a little, unless a person is in the section.
   def draft_step
-    @pacer ||= Pacer.new { |piece| @draft_writer.feed(piece) }
-    loop do
-      chunk = next_chunk
-      break unless chunk
-
-      if chunk == :done
-        @done = true
-        break
-      end
-      @pacer.feed(chunk)
-    end
-    return finish_task if @done && !@pacer.pending?
-    return unless @pacer.pending?
+    return unless @draft && !@draft.finished?
 
     if in_my_way?
       present("waiting, you're in this section", @draft_writer.index,
               detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
       return
     end
-    @pacer.drain
-    present("drafting #{@section_title}", @draft_writer.start_index || @draft_writer.index, @draft_writer.index,
-            sticky: true)
-  end
+    @draft.step
+    return if @draft.finished?
 
-  def next_chunk
-    @draft.pop(true)
-  rescue ThreadError
-    nil
+    present(working_label, @draft_writer.start_index || @draft_writer.index, @draft_writer.index, sticky: true)
   end
 
   def in_my_way?
@@ -115,8 +105,6 @@ module MarkdownWork
   end
 
   def finish_task
-    @pacer&.flush
-    @draft_writer.finish
     ensure_trailing_newlines(1) if @draft_writer.index >= @text.length
     mark(@task, :done, anchor: @task_anchor)
     (@sections ||= []) << { title: @section_title, heading: @section_heading }
@@ -133,7 +121,8 @@ module MarkdownWork
     case verb.downcase
     when "take"
       add_task(rest.to_s.strip)
-      present("took a task", @text.length, detail: rest)
+      queued = @task ? "#{rest}; I'll start it after #{@section_title}" : rest
+      present("took a task", @text.length, detail: queued)
       @next_scan = 0
     when "pause"
       @paused = true
@@ -150,8 +139,7 @@ module MarkdownWork
   def stop_task
     return present("nothing to stop", @last_index) unless @task
 
-    @draft_thread&.kill
-    @pacer&.flush
+    @draft&.stop
     mark(@task, :stopped, anchor: @task_anchor)
     present("stopped", @last_index, detail: "dropped \"#{@task.text}\"; the item is marked [-]")
     @task = nil

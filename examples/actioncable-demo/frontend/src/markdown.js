@@ -144,6 +144,87 @@ function refreshAgentLabels() {
     }
   }
 }
+// The agent bar: pinned under the page header, always in view. It shows what
+// the agent is doing now, a link to jump to its cursor, and a switch for
+// following it. Following scrolls the editor to the agent's cursor when it
+// moves, and holds off for a few seconds after you type.
+const barEl = document.getElementById("agent-bar")
+const followEl = document.getElementById("agent-follow")
+let lastTyped = 0
+let lastAgentPos = null
+function agentState() {
+  for (const s of awareness.getStates().values()) if (s?.status) return s
+  return null
+}
+function renderBar() {
+  if (!barEl) return
+  const s = agentState()
+  const statusEl = barEl.querySelector(".bar-status")
+  const detailEl = barEl.querySelector(".bar-detail")
+  if (!s) { statusEl.textContent = "no agent here yet"; detailEl.textContent = ""; barEl.classList.remove("live"); return }
+  barEl.classList.add("live")
+  statusEl.textContent = s.status
+  detailEl.textContent = s.detail ?? ""
+}
+// Follow only while you are not doing anything: typing, clicking, scrolling
+// and keys all hold it for a while (not selection changes, which remote edits
+// cause too), so it never pulls the page
+// away from what you are reading or writing. "jump to it" always works.
+const HOLD_AFTER_INTERACTION = 15000
+let ourScrollUntil = 0
+function noteInteraction() { lastTyped = Date.now() }
+function followAgent() {
+  const s = agentState()
+  const pos = agentPosition(s)
+  if (pos == null || pos === lastAgentPos) return
+  lastAgentPos = pos
+  if (!followEl?.checked || Date.now() - lastTyped < HOLD_AFTER_INTERACTION) return
+  ourScrollUntil = Date.now() + 1500
+  revealAgent()
+}
+for (const type of ["keydown", "mousedown", "touchstart"]) document.addEventListener(type, (e) => {
+  if (!e.target.closest(".agent-actions, #agent-bar")) noteInteraction()
+})
+document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction() }, { passive: true })
+
+// The agent's caret as a document index. The relative position it sends
+// names the character after its insertion point, which stays the same while
+// it writes, so the index is what changes.
+function agentPosition(s) {
+  const index = agentIndex(s)
+  return index == null ? null : String(index)
+}
+function agentIndex(s = agentState()) {
+  const rel = s?.cursor?.head ?? s?.cursor?.anchor
+  if (!rel) return null
+  const abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(rel), ydoc)
+  return abs && abs.type === ytext ? abs.index : null
+}
+function revealAgent() {
+  const index = agentIndex()
+  if (index == null) return
+  view.dispatch({ effects: EditorView.scrollIntoView(index, { y: "center" }) })
+}
+document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent() })
+view.dom.addEventListener("input", () => { lastTyped = Date.now() })
+view.dom.addEventListener("keydown", () => { lastTyped = Date.now() })
+
+// The things you can say to the agent, as buttons: each puts the line on a
+// new line after the current one and leaves the caret at its end.
+function sayToAgent(text) {
+  const line = view.state.doc.lineAt(view.state.selection.main.head)
+  const insert = `\n${text}`
+  view.dispatch({ changes: { from: line.to, insert }, selection: { anchor: line.to + insert.length }, scrollIntoView: true })
+  view.focus()
+  lastTyped = Date.now()
+}
+for (const button of document.querySelectorAll(".agent-actions button")) {
+  button.addEventListener("click", () => sayToAgent(button.dataset.say))
+}
+awareness.on("change", renderBar)
+awareness.on("change", followAgent)
+renderBar()
+window.__yrb.follow = { state: () => ({ sinceTyped: Date.now() - lastTyped, lastAgentPos, index: agentIndex(), checked: followEl?.checked }), reveal: revealAgent }
 awareness.on("update", renderRoster)
 awareness.on("change", renderAgentLog)
 awareness.on("change", refreshAgentLabels)

@@ -13,6 +13,7 @@ import "@37signals/lexxy"
 // path. Bun bundles it (and its relative @imports) and emits ../public/lexxy.css.
 import "../node_modules/@37signals/lexxy/dist/stylesheets/lexxy.css"
 import * as Y from "yjs"
+import { $getSelection, $getRoot, $createParagraphNode, $createTextNode, $isRangeSelection } from "lexical"
 import { createConsumer } from "@rails/actioncable"
 import { YrbyProvider } from "lexxy-realtime" // also registers <lexxy-collaboration>
 
@@ -114,6 +115,89 @@ function refreshAgentLabels() {
     }
   }
 }
+// The agent bar: pinned under the page header, always in view. It shows what
+// the agent is doing now, a link to jump to its cursor, and a switch for
+// following it. Following scrolls the editor to the agent's cursor when it
+// moves, and holds off for a few seconds after you type.
+const barEl = document.getElementById("agent-bar")
+const followEl = document.getElementById("agent-follow")
+let lastTyped = 0
+let lastAgentPos = null
+function agentState() {
+  for (const s of awareness.getStates().values()) if (s?.status) return s
+  return null
+}
+function renderBar() {
+  if (!barEl) return
+  const s = agentState()
+  const statusEl = barEl.querySelector(".bar-status")
+  const detailEl = barEl.querySelector(".bar-detail")
+  if (!s) { statusEl.textContent = "no agent here yet"; detailEl.textContent = ""; barEl.classList.remove("live"); return }
+  barEl.classList.add("live")
+  statusEl.textContent = s.status
+  detailEl.textContent = s.detail ?? ""
+}
+// Follow only while you are not doing anything: typing, clicking, scrolling
+// and keys all hold it for a while (not selection changes, which remote edits
+// cause too), so it never pulls the page
+// away from what you are reading or writing. "jump to it" always works.
+const HOLD_AFTER_INTERACTION = 15000
+let ourScrollUntil = 0
+function noteInteraction() { lastTyped = Date.now() }
+function followAgent() {
+  const s = agentState()
+  const pos = agentPosition(s)
+  if (pos == null || pos === lastAgentPos) return
+  lastAgentPos = pos
+  if (!followEl?.checked || Date.now() - lastTyped < HOLD_AFTER_INTERACTION) return
+  ourScrollUntil = Date.now() + 1500
+  revealAgent()
+}
+for (const type of ["keydown", "mousedown", "touchstart"]) document.addEventListener(type, (e) => {
+  if (!e.target.closest(".agent-actions, #agent-bar")) noteInteraction()
+})
+document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction() }, { passive: true })
+
+function agentPosition(s) {
+  const p = s?.focusPos ?? s?.anchorPos
+  return p ? JSON.stringify(p) : null
+}
+// Lexical draws the agent's cursor as an element; scroll it into view once
+// it has been drawn for the new position.
+function revealAgent() {
+  requestAnimationFrame(() => {
+    const identity = agentState()?.awarenessData?.name
+    const name = [...document.querySelectorAll(".lexxy-collab-cursor__name")].find((el) => identity && el.textContent.startsWith(identity))
+    const cursor = name?.closest(".lexxy-collab-cursor") ?? name
+    cursor?.scrollIntoView({ block: "center", behavior: "smooth" })
+  })
+}
+document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent() })
+document.querySelector("#editor [contenteditable=true]")?.addEventListener("input", () => { lastTyped = Date.now() })
+
+// The things you can say to the agent, as buttons: each puts the line in a
+// new paragraph after the one you are in and leaves the caret at its end.
+function sayToAgent(text) {
+  const editor = document.querySelector("lexxy-editor")?.editor
+  if (!editor) return
+  editor.update(() => {
+    const paragraph = $createParagraphNode()
+    paragraph.append($createTextNode(text))
+    const selection = $getSelection()
+    const top = $isRangeSelection(selection) ? selection.anchor.getNode().getTopLevelElement() : null
+    if (top) top.insertAfter(paragraph)
+    else $getRoot().append(paragraph)
+    paragraph.selectEnd()
+  })
+  editor.focus()
+  lastTyped = Date.now()
+}
+for (const button of document.querySelectorAll(".agent-actions button")) {
+  button.addEventListener("click", () => sayToAgent(button.dataset.say))
+}
+awareness.on("change", renderBar)
+awareness.on("change", followAgent)
+renderBar()
 awareness.on("change", renderAgentLog)
 awareness.on("change", refreshAgentLabels)
 renderRoster()
