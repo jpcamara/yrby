@@ -506,3 +506,16 @@ clients, 8,800 edits, ~360k cable messages, 41k concurrent `/content` reads, all
   deployments.
 - `config.action_cable.disable_request_forgery_protection` is on in development
   so the e2e script can connect without an Origin header.
+
+## The agent
+
+`POST /docs/:id/agent` starts a Ruby agent on a Lexxy document (see
+`app/lib/review_agent.rb`). It joins over the same `DocumentChannel` as the
+browsers, shows up in the presence roster, highlights one block at a time as
+it reads, then writes a review into the document as a heading, a paragraph,
+and a bulleted list, and parks its caret where it wrote.
+
+The review comes from a Claude model when `ANTHROPIC_API_KEY` is set
+(`AGENT_MODEL` picks the model, default `claude-sonnet-5`); without a key it
+uses a fixed review, so the demo runs either way. Export the key in your
+shell, never in the repo.
