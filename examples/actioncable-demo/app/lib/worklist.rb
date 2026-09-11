@@ -8,16 +8,19 @@
 module Worklist
   module_function
 
-  Task = Data.define(:list, :index, :text, :state)
+  Task = Data.define(:list, :index, :text, :state, :under)
 
   BOX = /\A\[([ ~xX-])\]\s*(.+)\z/m
+  UNDER = /\A(.+?)\s+under\s+["“]?([^"”]+?)["”]?\s*\z/i
   STATES = { " " => :open, "~" => :drafting, "x" => :done, "X" => :done, "-" => :stopped }.freeze
 
   # Tasks are list items, or plain paragraphs that start with a box (easier
   # to type in an editor with no list shortcut). A block that names the agent
   # starts a group: the list or the run of box paragraphs right after it is
-  # the agent's. An item that mentions @agent is the agent's anywhere. A
-  # paragraph task has no index.
+  # the agent's, and items in that list need no box, since a pasted markdown
+  # task list loses its boxes in Lexxy. An item that mentions @agent is the
+  # agent's anywhere. "<task> under <Heading>" places the draft in that
+  # section. A paragraph task has no index.
   def tasks(doc)
     root = doc.get_xml_text("root")
     mine = false
@@ -30,7 +33,7 @@ module Worklist
       elsif (m = block.text.strip.match(BOX))
         next [] unless mine || m[2].match?(/@agent/i)
 
-        [Task.new(list: block.anchor, index: nil, text: title(m[2]), state: STATES[m[1]])]
+        [build(block.anchor, nil, m[2], STATES[m[1]])]
       else
         mine = block.text.match?(/\bagent\b/i)
         []
@@ -40,31 +43,48 @@ module Worklist
 
   def list_tasks(list, mine)
     (0...list.xml_text_count).filter_map do |j|
-      m = list.xml_text(j).text.strip.match(BOX) or next
-      next unless mine || m[2].match?(/@agent/i)
-
-      Task.new(list: list.anchor, index: j, text: title(m[2]), state: STATES[m[1]])
+      text = list.xml_text(j).text.strip
+      if (m = text.match(BOX))
+        build(list.anchor, j, m[2], STATES[m[1]]) if mine || m[2].match?(/@agent/i)
+      elsif !text.empty? && (mine || text.match?(/@agent/i))
+        build(list.anchor, j, text, :open)
+      end
     end
   end
 
-  def title(text) = text.sub(/@agent\s*/i, "").strip
+  def build(list, index, body, state)
+    body = body.sub(/@agent\s*/i, "").strip
+    text, under = body.match(UNDER)&.captures || [body, nil]
+    Task.new(list: list, index: index, text: text.strip, state: state, under: under&.strip)
+  end
 
-  # Rewrite an item's checkbox. The item is found through its list's anchor,
-  # and only if it still reads as this task. Returns the update, or nil.
+  def title(text)
+    body = text.sub(/@agent\s*/i, "").strip
+    (body.match(UNDER)&.captures&.first || body).strip
+  end
+
+  # Rewrite an item's checkbox, adding one if the item has none. The item is
+  # found through its list's anchor, and only if it still reads as this
+  # task. Returns the update, or nil.
   def mark(doc, task, state)
     box = STATES.key(state) or raise ArgumentError, state.to_s
-    list = doc.find(task.list) or return
+    list = task.list && doc.find(task.list) or return
     return if task.index && task.index >= list.xml_text_count
 
     item = task.index ? list.xml_text(task.index) : list
     text = item.text
-    m = text.match(BOX) or return
-    return unless title(m[2]) == task.text
+    m = text.match(BOX)
+    return unless title(m ? m[2] : text) == task.text
 
-    at = text.index("[")
+    offset = item.length - text.length # the text node marker sits before the text
     doc.diff do
-      item.delete(at + 1, 3)
-      item.insert(at + 1, "[#{box}]")
+      if m
+        at = offset + text.index("[")
+        item.delete(at, 3)
+        item.insert(at, "[#{box}]")
+      else
+        item.insert(offset, "[#{box}] ")
+      end
     end
   end
 
