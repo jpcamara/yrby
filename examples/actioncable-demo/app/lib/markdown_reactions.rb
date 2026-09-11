@@ -43,7 +43,11 @@ module MarkdownReactions
   end
 
   def apply_contribution(result, avoid)
-    applied = MarkdownEditor.new(@doc, @text, flush: flush, avoid: avoid).apply(result.edits)
+    highlight = lambda do |status, paragraph|
+      from = MarkdownDoc.line_start(text, paragraph.first_line)
+      present(status, from, MarkdownDoc.line_end(text, paragraph.last_line), sticky: true)
+    end
+    applied = MarkdownEditor.new(@doc, @text, flush: flush, avoid: avoid, presence: highlight).apply(result.edits)
     return unless applied.positive?
 
     present("added to what you wrote", @text.length, detail: result.note.presence)
@@ -120,17 +124,28 @@ module MarkdownReactions
   end
 
   # Feed a stream of chunks into `writer`; the caret follows the text.
+  # The model's chunks go through a pacer so the text arrives at a steady
+  # pace rather than in the bursts the model produces them in.
   def stream_into(writer, status)
     since = 0
-    emit = lambda do |chunk|
-      writer.feed(chunk)
+    pacer = Pacer.new { |piece| writer.feed(piece) }
+    follow = lambda do
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless now - since > 0.25
 
       present(status, writer.index, sticky: true)
       since = now
     end
+    emit = lambda do |chunk|
+      pacer.feed(chunk)
+      while pacer.pending?
+        pacer.drain
+        follow.call
+        sleep 0.03 if pacer.pending?
+      end
+    end
     yield emit
+    pacer.flush
     writer.finish
   end
 end

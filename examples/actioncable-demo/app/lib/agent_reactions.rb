@@ -158,17 +158,28 @@ module AgentReactions
   # Feed a stream of chunks into `writer`. The block receives `emit`, a proc
   # to hand each chunk to; the caret moves to the end of the text a few times
   # a second so people see the agent writing.
+  # The model's chunks go through a pacer so the text arrives at a steady
+  # pace rather than in the bursts the model produces them in.
   def stream_into(writer, status)
     since = 0
-    emit = lambda do |chunk|
-      writer.feed(chunk)
+    pacer = Pacer.new { |piece| writer.feed(piece) }
+    follow = lambda do
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless writer.block && now - since > 0.25
 
       present(status, end_of(writer.block), end_of(writer.block), sticky: true)
       since = now
     end
+    emit = lambda do |chunk|
+      pacer.feed(chunk)
+      while pacer.pending?
+        pacer.drain
+        follow.call
+        sleep 0.03 if pacer.pending?
+      end
+    end
     yield emit
+    pacer.flush
     writer.finish
   end
 end
