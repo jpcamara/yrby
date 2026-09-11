@@ -7,8 +7,9 @@
 # the model by more than a moment. `feed` takes chunks; `drain` writes what
 # is due now; `flush` writes the rest.
 class Pacer
-  RATE = 90.0 # characters per second at the calm pace, about fast typing
-  MAX_LAG = 1.2 # seconds of buffered text before the pace picks up
+  # Characters per second, a hard cap: the model is always faster, and the
+  # point is that people can watch the words arrive. AGENT_PACE overrides.
+  RATE = ENV.fetch("AGENT_PACE", "60").to_f
 
   def initialize(&write)
     @write = write
@@ -33,7 +34,7 @@ class Pacer
 
     take = [@credit.floor, @buffer.length].min
     boundary = @buffer.index(/\s/, take)
-    take = boundary + 1 if boundary && boundary - take <= 12
+    take = boundary + 1 if boundary && boundary - take <= 6
     piece = @buffer.slice!(0, take)
     @credit -= piece.length
     @write.call(piece)
@@ -49,8 +50,5 @@ class Pacer
 
   private
 
-  # Calm when little is waiting; as fast as needed to clear a backlog in MAX_LAG.
-  def rate
-    [RATE, @buffer.length / MAX_LAG].max
-  end
+  def rate = RATE
 end

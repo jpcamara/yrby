@@ -146,7 +146,8 @@ module AgentWork
     @pacer.drain
     return unless @draft_writer.block
 
-    present("drafting #{@section_title}", end_of(@draft_writer.block), end_of(@draft_writer.block), sticky: true)
+    present("drafting #{@section_title}", start_of_written(@draft_writer) || end_of(@draft_writer.block),
+            end_of(@draft_writer.block), sticky: true)
   end
 
   def next_chunk

@@ -43,10 +43,7 @@ module MarkdownReactions
   end
 
   def apply_contribution(result, avoid)
-    highlight = lambda do |status, paragraph|
-      from = MarkdownDoc.line_start(text, paragraph.first_line)
-      present(status, from, MarkdownDoc.line_end(text, paragraph.last_line), sticky: true)
-    end
+    highlight = ->(status, from, to) { present(status, from, to, sticky: true) }
     applied = MarkdownEditor.new(@doc, @text, flush: flush, avoid: avoid, presence: highlight).apply(result.edits)
     return unless applied.positive?
 
@@ -133,7 +130,7 @@ module MarkdownReactions
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless now - since > 0.25
 
-      present(status, writer.index, sticky: true)
+      present(status, writer.start_index || writer.index, writer.index, sticky: true)
       since = now
     end
     emit = lambda do |chunk|

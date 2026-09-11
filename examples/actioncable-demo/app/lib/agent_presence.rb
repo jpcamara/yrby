@@ -18,7 +18,7 @@ module AgentPresence
     return if @followed_at && now - @followed_at < 0.25
 
     @followed_at = now
-    present(@last_presence ? @last_presence[:status] : "editing", block.relative_position(block.length),
+    present(@last_presence ? @last_presence[:status] : "editing", block.relative_position([1, block.length].min),
             block.relative_position(block.length))
   end
 
