@@ -806,6 +806,30 @@ channel you write, you define it, and it receives the document key. The shipped
 block a valid grant is enough. A subclass can override `authorized?` directly
 instead; the located record is available as `record`.
 
+### Writing rich text from Ruby
+
+Rich-text editors built on Yjs keep their document in `XmlText` nodes.
+`Doc#get_xml_text` returns a live `Y::XmlText` handle with the operations that
+shape needs: `insert` a string, `insert_embed` a JSON value, `set_attribute`,
+and `push_xml_text(attributes)` to append a nested block and get its handle.
+Blocks are addressed by ordinal, so a handle stays valid after other edits.
+
+`Y::Lexical` builds Lexical's exact node shape on top of that, so what Ruby
+appends renders the same as what a person typed and an open editor applies it
+as an ordinary remote edit:
+
+```ruby
+doc = Y::Doc.new
+Y::Lexical.append_heading(doc, "Agent review", tag: "h2")
+Y::Lexical.append_paragraph(doc, "Read 82 words. One suggestion: name who signs off.")
+Y::Lexxy.new(doc).to_html("root")
+# => "<h2>Agent review</h2><p>Read 82 words. One suggestion: name who signs off.</p>"
+```
+
+To put that into a shared document, do it inside `edit` (or diff against a
+state vector, record the update, and broadcast it). The renderer is the
+check: a Ruby-written paragraph and a typed one render byte for byte the same.
+
 ### Presence from Ruby
 
 `Y::Awareness` lets a Ruby process show up as a live collaborator, the way a
