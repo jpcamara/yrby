@@ -111,6 +111,7 @@ class MarkdownAgent
 
       Store.current.record(@document_id, update)
       Y::ActionCable.broadcast(@document_id, update)
+      @seen = text # its own writes are not changes to react to
     end
   end
 end
