@@ -18,7 +18,7 @@ use yrs::{
 };
 
 use crate::shared::{
-    embedded_xml_text_count, embedded_xml_text_index, key_to_string, resolve_xml_text,
+    block_text, embedded_xml_text_count, embedded_xml_text_index, key_to_string, resolve_xml_text,
     ruby_to_invalue, to_in, to_map_prelim, InValue, Root, Seg,
 };
 use crate::{nogvl, yrb_error};
@@ -73,6 +73,19 @@ impl RbXmlText {
             let txn = doc.transact();
             resolve_xml_text(&txn, Root::XmlText, root, path)
                 .map(|x| x.get_string(&txn))
+                .unwrap_or_default()
+        })
+    }
+
+    /// The text of this block: its strings, without the node markers, with
+    /// nested blocks (a list's items) joined by newlines. What a process reads
+    /// when it wants to know what a block says.
+    fn text(&self) -> String {
+        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        nogvl(move || {
+            let txn = doc.transact();
+            resolve_xml_text(&txn, Root::XmlText, root, path)
+                .map(|x| block_text(&txn, &x))
                 .unwrap_or_default()
         })
     }
@@ -348,6 +361,7 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     let class = module.define_class("XmlText", ruby.class_object())?;
     class.define_method("to_s", magnus::method!(RbXmlText::to_s, 0))?;
     class.define_method("to_str", magnus::method!(RbXmlText::to_s, 0))?;
+    class.define_method("text", magnus::method!(RbXmlText::text, 0))?;
     class.define_method("length", magnus::method!(RbXmlText::length, 0))?;
     class.define_method("size", magnus::method!(RbXmlText::length, 0))?;
     class.define_method("empty?", magnus::method!(RbXmlText::is_empty, 0))?;

@@ -17,6 +17,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   position editors carry in awareness as a caret. `append_list(doc, items,
   ordered:)` appends a bulleted or numbered list; `Y::Lexxy.append_list`
   writes Lexxy's own list item type.
+- `Y::XmlText#text`: a block's text, markers skipped, nested blocks joined by
+  newlines.
 - Editing in place: `Y::XmlText#delete`, `#clear`, `#insert_xml_text(at, attrs)`,
   `#delete_xml_text(at)`, and the `Y::Lexical` helpers `insert_paragraph`,
   `replace_runs`, and `delete_block`.
