@@ -545,8 +545,21 @@ answer, a plain error. It says what it did, or why it did nothing, in its
 presence label. It never edits a block someone is writing in, which it knows
 from their presence, and it does not act on its own review suggestions.
 
-The blocks it writes into are tracked by anchor, not by number. An anchor is
-a relative position at the block's start, resolved again before every write.
+Two more requests. Select some text, then write `@agent rewrite this in one
+short sentence` (any request that says "this", "these" or "the selection" and
+is not a question): the agent rewrites what you selected and nothing else.
+The agent knows what you selected from your presence, and keeps the last
+selection for two minutes; with no selection it takes the block just above
+the request. Write `@agent undo` and it puts back whatever it did last: a
+contribution after your change, an `@agent edit`, or a rewrite of a
+selection. Each of its actions leaves an undo plan addressed by anchor, so
+the undo still works after people edited around it. A rewritten block goes
+back as plain text; if a block the undo needs is gone, that part is skipped
+and the label says so.
+
+The blocks it writes into are tracked by `Y::Anchor`, not by number. An anchor
+is a relative position at the block's start, resolved again before every
+write.
 When someone inserts or removes blocks above while the agent is streaming,
 its words keep landing in the right block, and an edit planned against block
 numbers finds those blocks wherever they are by the time it runs. If the block

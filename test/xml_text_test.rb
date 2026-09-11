@@ -288,4 +288,34 @@ class XmlTextTest < Minitest::Test
     assert_equal 3, doc.block_at(anchor, "root")
     assert_equal "second", root.xml_text(3).text
   end
+
+  def test_an_anchor_finds_its_block_after_edits_above_and_is_nil_once_it_is_gone
+    doc = Y::Doc.new
+    Y::Lexical.append_paragraph(doc, "first")
+    block = Y::Lexical.append_paragraph(doc, "second")
+    root = doc.get_xml_text("root")
+    anchor = block.anchor
+
+    assert_equal 1, doc.block_at(anchor)
+    root.insert_xml_text(0, Y::Lexical::PARAGRAPH_ATTRIBUTES)
+
+    assert_equal 2, doc.block_at(anchor)
+    assert_equal "second", doc.find(anchor).text
+    root.delete_xml_text(2)
+
+    assert_nil doc.block_at(anchor)
+    assert_nil doc.find(anchor)
+  end
+
+  def test_an_anchor_survives_json_and_an_empty_block_has_one
+    doc = Y::Doc.new
+    Y::Lexical.append_paragraph(doc, "first")
+    empty = doc.get_xml_text("root").push_xml_text(Y::Lexical::PARAGRAPH_ATTRIBUTES)
+    anchor = Y::Anchor.from_json(empty.anchor.to_json)
+
+    assert_equal empty.anchor, anchor
+    assert_equal "root", anchor.root
+    assert_equal 1, doc.block_at(anchor)
+    assert_raises(ArgumentError) { doc.block_at(anchor.position) }
+  end
 end

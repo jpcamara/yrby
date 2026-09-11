@@ -66,6 +66,7 @@ class ReviewAgent
     stream_into(writer, "writing a review into the document") { |emit| @reviewer.stream(text, &emit) }
     @list = writer.list
     @answered = []
+    @undos = []
     present("wrote a review into the document", end_of(last_block), end_of(last_block))
   end
 
@@ -115,8 +116,12 @@ class ReviewAgent
   # considers it and contributes only when that clearly helps.
   def react_to(index)
     line = block_text(index)
-    if line.match?(/\A@agent\s+edit\b/i)
+    if line.match?(/\A@agent\s+undo\b/i)
+      undo_last(index)
+    elsif line.match?(/\A@agent\s+edit\b/i)
       edit_document(index, line)
+    elsif line.match?(/\A@agent\b/i) && scoped_request?(line)
+      edit_selection(index, line)
     elsif line.match?(/\A@agent\b/i)
       answer(index, line) unless @answered.include?(line)
     else

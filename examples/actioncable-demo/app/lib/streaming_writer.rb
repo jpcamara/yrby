@@ -11,7 +11,7 @@
 class StreamingWriter
   include StreamingBlocks
 
-  # `after:` is a BlockAnchor the first block goes after, wherever that block
+  # `after:` is a Y::Anchor the first block goes after, wherever that block
   # is by then; `at:` is a plain ordinal; without either, blocks go at the end.
   def initialize(doc, flush:, at: nil, after: nil)
     @doc = doc
@@ -19,6 +19,7 @@ class StreamingWriter
     @at = at
     @after = after
     @last = nil    # anchor of the last block this writer made
+    @created = []  # anchors of every top-level block this writer made
     @anchor = nil  # anchor of the block text is going into
     @item = nil    # index within that block when it is a list item
     @paragraph = nil
@@ -34,7 +35,11 @@ class StreamingWriter
   # the list the bullets went into, if any.
   def block = current_block
 
-  def list = @list&.block
+  def list = @list && @doc.find(@list)
+
+  # Anchors of the top-level blocks this writer made, in order, so an undo
+  # can find and remove them later.
+  attr_reader :created
 
   # One insert per chunk (per newline-free run of it), not per character: a
   # word from the stub or a token from a model is one update.
