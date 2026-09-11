@@ -589,8 +589,10 @@ working anywhere else meanwhile: drafting is interleaved with everything else
 it does, a few chunks at a time, so it still answers you and still looks at
 your changes.
 
-If you step into the block it is drafting, it holds the next chunk and says
-so in its presence label; it carries on when you leave. A section it drafted
+If you step into the section it is drafting, it holds the next chunk and says
+so in its presence label; it carries on when you leave. "In" means your caret
+or selection moved there within the last minute: Lexxy keeps reporting focus
+after a blur, so a parked caret does not hold a block for good. A section it drafted
 is yours once you edit it: the change goes into its memory and it does not
 touch that section again on its own.
 
