@@ -41,4 +41,20 @@ class StubReviewer
       sleep PACE
     end
   end
+
+  # A fixed plan: split the task sentence into a checklist and tighten the intro.
+  def edits(_instruction, blocks)
+    tasks = blocks.index { |b| b.start_with?("Collect") } || (blocks.size - 1)
+    intro = blocks.index { |b| b.start_with?("This document") }
+    plan = [{ "op" => "heading", "block" => 0, "level" => 1 },
+            { "op" => "replace", "block" => tasks, "text" => "Launch checklist, one owner per item:" },
+            { "op" => "insert_after", "block" => tasks,
+              "text" => "- Collect deployment metrics (owner: SRE)\n- Verify the canary rollout (owner: release lead)\n" \
+                        "- Confirm on-call coverage (owner: on-call manager)\n- Sign off and publish the report (owner: PM)" }]
+    if intro
+      plan << { "op" => "replace", "block" => intro,
+                "text" => "Our go-live checklist, edited together with a Ruby agent." }
+    end
+    plan
+  end
 end
