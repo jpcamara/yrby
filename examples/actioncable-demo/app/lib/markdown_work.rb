@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 # MarkdownAgent's own work: tasks from its list in the document, drafted
-# where they point (a named section, or a new one at the end), up to two at
-# once, interleaved with reacting, yielding while someone is at the point
-# being written.
+# where they point (a named section, or a new one at the end), one at a
+# time after the review (AGENT_DRAFTS raises that), interleaved with
+# reacting, yielding while someone is at the point being written.
 module MarkdownWork
   SCAN_EVERY = 3 # seconds between looks at the list while idle
-  MAX_DRAFTS = 2
+  MAX_DRAFTS = ENV.fetch("AGENT_DRAFTS", "1").to_i
 
   # One section being drafted: the task, an anchor on its list line, the
   # writer, the section heading's position and title, the region the draft
@@ -27,7 +27,9 @@ module MarkdownWork
     return if @paused
 
     drafts.dup.each { |d| draft_step(d) }
-    pick_task if drafts.size < MAX_DRAFTS && Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
+    return if reviewing? || drafts.size >= MAX_DRAFTS
+
+    pick_task if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
   rescue StandardError => e
     Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
     drafts.each { |d| d.job.stop }

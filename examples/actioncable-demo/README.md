@@ -591,8 +591,10 @@ history and a reload keeps it. The model's reasoning streams into the
 newest entry as it arrives, one block per stream, folded to its last lines;
 click a block to read all of it.
 
-Up to two drafts run at once, each streaming from the model at its own
-pace, so a second task does not wait for the first. A draft yields only
+It writes in one place at a time, like a person: the review first, then
+the tasks one after another, the caret always on the words. `AGENT_DRAFTS`
+lets several drafts stream at once (they share the one caret, which reads
+as text appearing from nowhere; it is off for a reason). A draft yields only
 while someone is at the point it is writing (the block the words go into or
 the one after it); reading or editing higher up in the section does not
 hold it.

@@ -3,15 +3,16 @@
 # The agent's own work, done alongside people rather than in reply to them.
 # It takes open tasks from its list in the document, drafts a section for each
 # (at the end of the document, or under the heading the task names), and
-# checks the item off. Up to two drafts run at once, each streaming from the
-# model in its own thread while the watch loop lets a little out per turn and
-# keeps reacting in between. A draft yields while someone is at the point it
-# is writing. A section it drafted belongs to whoever edits it next: their
+# checks the item off. Like a person, it writes in one place at a time: the
+# review first, then one task after another (AGENT_DRAFTS raises that; the
+# streams then share one caret). The model streams in a thread while the
+# watch loop lets a little out per turn and keeps reacting in between. A
+# draft yields while someone is at the point it is writing. A section it drafted belongs to whoever edits it next: their
 # change goes into memory, and the agent does not edit that section again on
 # its own.
 module AgentWork
   SCAN_EVERY = 3 # seconds between looks at the list while idle
-  MAX_DRAFTS = 2
+  MAX_DRAFTS = ENV.fetch("AGENT_DRAFTS", "1").to_i
   LISTENING = "I'll look at changes once a sentence is finished, answer @agent lines, and take tasks you add"
 
   # One section being drafted: the task it came from, the writer streaming
@@ -36,7 +37,9 @@ module AgentWork
     return if @paused
 
     drafts.dup.each { |d| draft_step(d) }
-    pick_task if drafts.size < MAX_DRAFTS && Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
+    return if reviewing? || drafts.size >= MAX_DRAFTS
+
+    pick_task if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
   rescue StandardError => e
     Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
     drafts.each { |d| d.job.stop }

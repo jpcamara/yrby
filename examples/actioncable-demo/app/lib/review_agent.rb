@@ -45,7 +45,7 @@ class ReviewAgent
     start_heartbeat
     introduce
     start_review
-    @next_scan = 0 # the first task starts alongside the review
+    @next_scan = 0 # the first task starts once the review is written
     watch
   ensure
     stop_heartbeat
