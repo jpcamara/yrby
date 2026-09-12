@@ -16,7 +16,7 @@ module MarkdownReview
     @review_region = region(@text.length, @text.length)
     flush.call(@doc.diff { @text.insert(@text.length, "## #{MarkdownAgent::REVIEW_TITLE}\n\n") })
     @review = @text.relative_position(@text.length - 1)
-    writer = MarkdownWriter.new(@doc, @text, flush: flush, at: @text.length)
+    writer = MarkdownWriter.new(@doc, @text, flush: flush, at: @text.length - 1) # before the closing newline
     @review_job = StreamJob.new(writer: writer, label: "the review", on_finish: -> { review_written(writer) }) do |emit|
       @reviewer.stream(text, &emit)
     end
@@ -45,11 +45,11 @@ module MarkdownReview
   end
 
   def reviewing? = @review_job && !@review_job.finished?
-  def drafting? = @draft && !@draft.finished?
   def busy? = reviewing? || work_pending?
 
   def working_label
-    [reviewing? ? "writing a review" : nil, drafting? ? "drafting #{@section_title}" : nil].compact.join(" and ")
+    titles = drafts.map(&:title).join(" and ")
+    [reviewing? ? "writing a review" : nil, drafting? ? "drafting #{titles}" : nil].compact.join(" and ")
   end
 
   def idle_tick

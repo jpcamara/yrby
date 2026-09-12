@@ -94,6 +94,9 @@ module AgentPresence
     blocks.minmax if blocks.all?
   end
 
+  LEDGER = "agent-log" # the ledger, a Y.Array in the document
+  LEDGER_KEEP = 200
+
   private
 
   # When each client last renewed its presence: its awareness clock moved. A
@@ -157,15 +160,17 @@ module AgentPresence
     [block.relative_position([1, block.length].min), end_of(block)]
   end
 
-  def last_block = root.xml_text(root.xml_text_count - 1)
-  def end_of(block) = block.relative_position(block.length)
+  # nil on an empty document, and a caret with no position then.
+  def last_block = root.xml_text_count.positive? ? root.xml_text(root.xml_text_count - 1) : nil
+  def end_of(block) = block&.relative_position(block.length)
 
   # Say what the agent is doing, where its caret is. The status goes into the
   # cursor label, so people see it where they are looking; `detail:` is the
   # fuller reason for the log under the editor. A status is either sticky
   # (drafting, waiting, paused, listening) or fades to "listening" after a
   # few seconds.
-  def present(status, anchor, focus, detail: nil, sticky: false)
+  def present(status, anchor, focus, detail: nil, sticky: false, log: true) # rubocop:disable Metrics/ParameterLists
+    log_entry(status, detail) if log
     Rails.logger.info("agent: #{status}#{" — #{detail}" if detail}")
     @presence_lock ||= Mutex.new
     @presence_lock.synchronize do
@@ -228,7 +233,20 @@ module AgentPresence
 
     @caret_key = key
     @caret_at = now
-    present(status, *where, **)
+    present(status, *where, **, log: false)
+  end
+
+  # The ledger, kept in the document: a Y.Array of {at, status, detail}
+  # entries, so every page shows the same history and a reload keeps it.
+  def log_entry(status, detail)
+    entries = doc.get_array(LEDGER)
+    update = doc.diff do
+      entries.push({ "at" => (Time.now.to_f * 1000).to_i, "status" => status, "detail" => detail })
+      entries.delete_at(0) while entries.size > LEDGER_KEEP
+    end
+    flush.call(update) if update
+  rescue StandardError => e
+    Rails.logger.warn("agent ledger: #{e.class}: #{e.message}")
   end
 
   # Editors drop a peer they have not heard from in a while; say it again.
@@ -247,7 +265,8 @@ module AgentPresence
       loop do
         sleep HEARTBEAT
         if @last_presence && !@sticky && Process.clock_gettime(Process::CLOCK_MONOTONIC) - @status_at > STATUS_TTL
-          present(@paused ? "paused" : "listening", @last_presence[:anchorPos], @last_presence[:focusPos], sticky: true)
+          present(@paused ? "paused" : "listening", @last_presence[:anchorPos], @last_presence[:focusPos],
+                  sticky: true, log: false)
         else
           keep_alive
         end

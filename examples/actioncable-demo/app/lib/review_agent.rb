@@ -40,6 +40,7 @@ class ReviewAgent
     @peer.on_awareness { |frame| see_presence(frame) }
     @peer.subscribe
     (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
+    Rails.logger.info("agent: joined #{@document_id} with #{root.xml_text_count} blocks")
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
     introduce
