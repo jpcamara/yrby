@@ -88,8 +88,41 @@ module AgentWork
     end
   end
 
+  def edit_task?(task) = !task.text.match?(MarkdownWork::DRAFT_TASK) && task.text.match?(MarkdownWork::EDIT_TASK)
+
+  # An edit task: a plan from the model over the whole document, applied in
+  # place, leaving the task list itself alone.
+  def run_edit_task(task)
+    Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
+    present("working on: #{task.text}", nil, nil, sticky: true, detail: "editing in place")
+    result = apply_edit_task(task)
+    Worklist.mark(doc, task, :done)&.then { |u| flush.call(u) }
+    present("done: #{task.text}", end_of(last_block), end_of(last_block),
+            detail: changed_in_place(result.applied, "block"))
+    note_in_review("#{task.text}: changed #{result.applied} blocks in place.") if result.applied.positive?
+    @next_scan = 0
+  end
+
+  def apply_edit_task(task)
+    blocks, anchors = numbered_blocks
+    instruction = "#{task.text}. Change only what this calls for and keep everything else word for word."
+    plan = @reviewer.edits(instruction, blocks)
+    result = DocumentEditor.new(doc, flush: flush, presence: self, anchors: anchors,
+                                     avoid: Worklist.ordinals(doc)).apply(plan)
+    remember_undo("the edit: #{task.text}", result)
+    result
+  end
+
+  def changed_in_place(count, unit)
+    return "nothing needed changing" unless count.positive?
+
+    "changed #{count} #{count == 1 ? unit : "#{unit}s"} in place"
+  end
+
   # Mark the item, open the section, and start the model streaming.
   def claim(task)
+    return run_edit_task(task) if edit_task?(task)
+
     Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
     section = open_section(task)
     title = section[:title]

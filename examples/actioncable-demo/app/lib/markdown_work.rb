@@ -15,7 +15,18 @@ module MarkdownWork
     def done? = job.finished?
   end
 
+  # A task that asks for a change to what is there ("fix the spelling",
+  # "tighten the intro", "rename X to Y") is an edit across the document,
+  # not a new section.
+  EDIT_TASK = /
+    \b(fix|correct|tackle|clean\s+up|proofread|tighten|shorten|polish|rename|replace|remove|delete|reword|rephrase)\b
+    |\b(grammar|spelling|typos?|consistent|consistency|punctuation)\b
+  /ix
+  DRAFT_TASK = /\A\s*(draft|write|add|create|outline|prepare)\b/i
+
   private
+
+  def edit_task?(task) = !task.text.match?(DRAFT_TASK) && task.text.match?(EDIT_TASK)
 
   def drafts = (@drafts ||= [])
 
@@ -75,22 +86,63 @@ module MarkdownWork
   end
 
   def claim(task)
+    return run_edit_task(task) if edit_task?(task)
+
     anchor = task.line && @text.relative_position(MarkdownDoc.line_start(text, task.line))
     mark(task, :drafting)
     section = open_section(task)
-    where = section[:named] ? ", under #{section[:title]}" : ""
-    detail = if task.line
-               "took \"#{task.text}\" from the list#{where}"
-             else
-               "drafting the section you pointed at"
-             end
-    present("drafting #{section[:title]}", section[:writer].index, detail: detail, sticky: true)
+    present("drafting #{section[:title]}", section[:writer].index, detail: took_detail(task, section), sticky: true)
     job = nil
     job = StreamJob.new(writer: section[:writer], label: section[:title], on_finish: -> { finish_draft(job) }) do |emit|
       @reviewer.draft(task.text, text, &emit)
     end
     drafts << Draft.new(task: task, anchor: anchor, writer: section[:writer], heading: section[:heading],
                         title: section[:title], region: section[:region], job: job)
+  end
+
+  # An edit task: a plan from the model over the whole document, applied in
+  # place, leaving the task list itself alone. Runs in the loop like an
+  # answer does.
+  def run_edit_task(task)
+    anchor = task.line && @text.relative_position(MarkdownDoc.line_start(text, task.line))
+    mark(task, :drafting)
+    present("working on: #{task.text}", @last_index, sticky: true, detail: "editing in place")
+    applied = apply_edit_plan(*edit_plan(task), task)
+    mark(task, :done, anchor: anchor)
+    present("done: #{task.text}", @last_index, detail: changed_in_place(applied, "paragraph"))
+    note_in_review("#{task.text}: changed #{applied} paragraphs in place.") if applied.positive?
+    @next_scan = 0
+  end
+
+  # The model's plan for the task over the whole document, minus the
+  # paragraphs that hold the task list itself.
+  def edit_plan(task)
+    paragraphs = MarkdownDoc.paragraphs(text)
+    avoid = paragraphs.select { |p| tasks.any? { |t| t.line&.between?(p.first_line, p.last_line) } }.map(&:index)
+    plan = @reviewer.edits("#{task.text}. Change only what this calls for and keep everything else word for word.",
+                           paragraphs.map(&:text))
+    [plan.reject { |e| avoid.include?(e["block"]) }, avoid]
+  end
+
+  def apply_edit_plan(plan, avoid, task)
+    reg = region_of_plan(plan)
+    highlight = ->(status, from, to) { present(status, from, to, sticky: true, log: false) }
+    applied = MarkdownEditor.new(@doc, @text, flush: flush, avoid: avoid, presence: highlight).apply(plan)
+    remember_undo("the edit: #{task.text}", reg) if reg && applied.positive?
+    applied
+  end
+
+  def changed_in_place(count, unit)
+    return "nothing needed changing" unless count.positive?
+
+    "changed #{count} #{count == 1 ? unit : "#{unit}s"} in place"
+  end
+
+  def took_detail(task, section)
+    return "drafting the section you pointed at" unless task.line
+
+    where = section[:named] ? ", under #{section[:title]}" : ""
+    "took \"#{task.text}\" from the list#{where}"
   end
 
   # The draft goes at the end of the named section when there is one, else
