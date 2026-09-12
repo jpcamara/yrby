@@ -41,9 +41,21 @@ module AgentWork
 
     pick_task if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
   rescue StandardError => e
-    Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
-    drafts.each { |d| d.job.stop }
+    Rails.logger.warn("agent work failed: #{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}")
+    abandon_drafts(e)
+  end
+
+  # Whatever went wrong, the tasks go back on the list unchecked and the
+  # failure is said where people can see it. The drafts leave the list first
+  # so stopping their streams does not count them as done.
+  def abandon_drafts(error)
+    stopped = drafts.dup
     drafts.clear
+    stopped.each do |d|
+      d.job.stop
+      Worklist.mark(doc, d.task, :open)&.then { |u| flush.call(u) }
+      report_failure("drafting #{d.title}", error, "the task is back on the list")
+    end
     @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
   end
 
@@ -54,8 +66,10 @@ module AgentWork
     return unless task
 
     at = end_of(last_block)
-    present("up next: #{section_title(task.text)}", at, at, sticky: true,
-                                                            detail: "from your list; say @agent pause to hold me")
+    unless @last_presence&.dig(:status) == "up next: #{section_title(task.text)}" # announce_next may have said so
+      present("up next: #{section_title(task.text)}", at, at, sticky: true,
+                                                              detail: "from your list; say @agent pause to hold me")
+    end
     sleep 1.5 unless drafting? # a pause to read it, unless a draft is waiting on this loop
     claim(task)
   end

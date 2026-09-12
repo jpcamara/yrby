@@ -44,7 +44,7 @@ class MarkdownAgent
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
     introduce
-    start_review
+    AgentReview::REVIEW_ON_JOIN ? start_review : announce_next
     @next_scan = 0
     watch
   ensure

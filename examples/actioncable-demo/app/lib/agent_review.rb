@@ -4,8 +4,10 @@
 # and how to talk to it, then the review typed at the end as a stream the
 # loop steps, so the first task can start alongside it.
 module AgentReview
-  INTRO = "I'll review the document and work through any list under a heading that names me. " \
-          "Talk to me with a line starting @agent, or use the buttons."
+  INTRO = "I'll work through any list under a heading that names me. Say @agent review for a review, " \
+          "talk to me with a line starting @agent, or use the buttons."
+  # A review on joining is off by default: the agent gets to the list first.
+  REVIEW_ON_JOIN = ENV.fetch("AGENT_REVIEW", "0") == "1"
 
   private
 
@@ -42,6 +44,15 @@ module AgentReview
       @review_heading = last_block.anchor
       StreamingWriter.new(doc, flush: flush, after: @review_heading)
     end
+  end
+
+  # "@agent review": a review of the document as it is now.
+  def review_now(index)
+    flush.call(doc.diff { root.delete_xml_text(index) })
+    return present("still writing the last review", nil, nil) if reviewing?
+
+    start_review
+    @changes.clear
   end
 
   def review_written(writer)
