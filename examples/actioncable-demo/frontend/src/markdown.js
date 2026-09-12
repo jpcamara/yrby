@@ -76,11 +76,23 @@ const view = new EditorView({
 window.__yrb.view = view
 
 // The rendered view, from the same text. Collaborators' own content only.
+// Rendered at most twice a second while text streams in: parsing and
+// replacing the whole preview on every update blocked the page for long
+// enough that incoming updates piled up and then landed in a clump.
 let previewTimer = null
+let previewAt = 0
+let previewText = null
 function renderPreview() {
-  if (!previewEl) return
-  clearTimeout(previewTimer)
-  previewTimer = setTimeout(() => { previewEl.innerHTML = marked.parse(ytext.toString()) }, 80)
+  if (!previewEl || previewTimer) return
+  const wait = Math.max(0, 500 - (Date.now() - previewAt))
+  previewTimer = setTimeout(() => {
+    previewTimer = null
+    previewAt = Date.now()
+    const text = ytext.toString()
+    if (text === previewText) return
+    previewText = text
+    previewEl.innerHTML = marked.parse(text)
+  }, wait)
 }
 ytext.observe(renderPreview)
 
@@ -267,17 +279,27 @@ function agentIndex(s = agentState()) {
 // the middle of its own update (a click sets the local cursor into
 // awareness from inside one), and a dispatch there crashes the remote-cursor
 // plugin for good.
-function revealAgent() {
+// Only when the caret is out of view: scrolling on every move, several
+// times a second, kept the page busy for nothing.
+function revealAgent(force = false) {
   const index = agentIndex()
   if (index == null) return
-  setTimeout(() => view.dispatch({ effects: EditorView.scrollIntoView(index, { y: "center" }) }), 0)
-  requestAnimationFrame(() => {
-    const c = view.coordsAtPos(Math.min(index, view.state.doc.length))
-    if (!c) return
-    if (c.top < 90 || c.bottom > window.innerHeight - 40) window.scrollBy({ top: c.top - window.innerHeight / 2, behavior: "smooth" })
-  })
+  setTimeout(() => {
+    const at = Math.min(index, view.state.doc.length)
+    const c = view.coordsAtPos(at)
+    const box = view.scrollDOM.getBoundingClientRect()
+    const inEditor = c && c.top >= box.top + 24 && c.bottom <= box.bottom - 24
+    const onScreen = c && c.top >= 90 && c.bottom <= window.innerHeight - 40
+    if (!force && inEditor && onScreen) return
+    view.dispatch({ effects: EditorView.scrollIntoView(at, { y: "center" }) })
+    requestAnimationFrame(() => {
+      const d = view.coordsAtPos(at)
+      if (!d) return
+      if (d.top < 90 || d.bottom > window.innerHeight - 40) window.scrollBy({ top: d.top - window.innerHeight / 2, behavior: "smooth" })
+    })
+  }, 0)
 }
-document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent() })
+document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent(true) })
 view.dom.addEventListener("input", () => noteInteraction(HOLD_TYPING))
 
 // The things you can say to the agent, as buttons: each puts the line on a
