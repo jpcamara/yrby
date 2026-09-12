@@ -96,16 +96,19 @@ module AgentWork
   # caret sits at while the first words arrive.
   def open_section(task)
     heading = task.under && heading_block(task.under)
-    if heading
-      last = root.xml_text(section_end(doc.block_at(heading.anchor)))
-      { heading: heading.anchor, title: heading.text.strip, made_heading: false, at: last,
-        writer: StreamingWriter.new(doc, flush: flush, after: last.anchor) }
-    else
-      title = section_title(task.text)
-      flush.call(doc.diff { Y::Lexical.append_heading(doc, title, tag: "h2") })
-      { heading: last_block.anchor, title: title, made_heading: true, at: last_block,
-        writer: StreamingWriter.new(doc, flush: flush, after: last_block.anchor) }
-    end
+    heading ? open_under(heading) : open_new_section(section_title(task.text))
+  end
+
+  def open_under(heading)
+    last = root.xml_text(section_end(doc.block_at(heading.anchor)))
+    { heading: heading.anchor, title: heading.text.strip, made_heading: false, at: last,
+      writer: StreamingWriter.new(doc, flush: flush, after: last.anchor) }
+  end
+
+  def open_new_section(title)
+    flush.call(doc.diff { Y::Lexical.append_heading(doc, title, tag: "h2") })
+    { heading: last_block.anchor, title: title, made_heading: true, at: last_block,
+      writer: StreamingWriter.new(doc, flush: flush, after: last_block.anchor) }
   end
 
   # The first heading whose text matches, exactly then loosely.
