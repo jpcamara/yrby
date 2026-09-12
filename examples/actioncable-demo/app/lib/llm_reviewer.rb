@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-# A review from a model through ruby_llm. Fireworks AI (OpenAI-compatible,
-# FIREWORKS_API_KEY) or Anthropic (ANTHROPIC_API_KEY), whichever key is set;
-# AGENT_MODEL overrides the model. Any failure falls back to the stub, so a
-# bad key or a network blip never leaves the document without a review.
+# A review from a model through ruby_llm. Whichever key is set is used:
+# Fireworks AI (FIREWORKS_API_KEY), OpenRouter (OPENROUTER_API_KEY, which
+# has free models), or Anthropic (ANTHROPIC_API_KEY). AGENT_PROVIDER picks
+# one when several keys are set; AGENT_MODEL overrides the model. A failure
+# is raised as a ModelError and said in the document, never papered over.
 class LlmReviewer
   FIREWORKS_BASE = "https://api.fireworks.ai/inference/v1"
   # The router serves the same model with a shorter wait for the first token:
@@ -21,6 +22,12 @@ class LlmReviewer
   EFFORT = ENV.fetch("AGENT_REASONING", "medium")
   QUICK_EFFORT = ENV.fetch("AGENT_QUICK_REASONING", "low")
   ANTHROPIC_MODEL = "claude-sonnet-5"
+  # OpenRouter's free tier. "openrouter/free" routes across the free models,
+  # which spreads the per-model rate limits; a specific one (they end in
+  # ":free", listed at https://openrouter.ai/api/v1/models) is steadier.
+  # Free models need "model training" allowed in the OpenRouter account's
+  # privacy settings, and are capped per day.
+  OPENROUTER_MODEL = "openrouter/free"
 
   PROMPT = <<~PROMPT
     You are reviewing a short working document that a team is editing together.
@@ -81,8 +88,17 @@ class LlmReviewer
     failed(e)
   end
 
-  def self.available?
-    !ENV["FIREWORKS_API_KEY"].to_s.empty? || !ENV["ANTHROPIC_API_KEY"].to_s.empty?
+  def self.available? = !provider.nil?
+
+  # The provider to use: the one AGENT_PROVIDER names, else whichever key is
+  # set, Fireworks first.
+  def self.provider
+    named = ENV["AGENT_PROVIDER"].to_s.downcase
+    return named.to_sym if %w[fireworks openrouter anthropic].include?(named)
+    return :fireworks unless ENV["FIREWORKS_API_KEY"].to_s.empty?
+    return :openrouter unless ENV["OPENROUTER_API_KEY"].to_s.empty?
+
+    :anthropic unless ENV["ANTHROPIC_API_KEY"].to_s.empty?
   end
 
   # What went wrong, in a few words a person can act on. Raised instead of
@@ -92,6 +108,8 @@ class LlmReviewer
 
   def self.describe(error)
     text = "#{error.class} #{error.message}"
+    return "the free model is rate limited; try again in a minute" if text =~ /\b429\b|rate.?limit/i
+    return "the API key was rejected" if text =~ /\b401\b|user not found|invalid.{0,12}(api )?key|unauthor/i
     return "the model timed out" if text =~ /timeout|timed out/i
     return "couldn't reach the model" if text =~ /connection|resolve|refused|ECONN|SSL/i
     return "the model refused the request (#{Regexp.last_match(1)})" if text =~ /\b(4\d\d)\b/
@@ -265,27 +283,42 @@ class LlmReviewer
   # memory goes in the prompt, so no reply history is sent back.
   # The quick model's chat, or the usual one when none is set or it fails.
   def fast_chat
-    return chat if FAST_MODEL.empty? || ENV["FIREWORKS_API_KEY"].blank?
+    return chat if FAST_MODEL.empty?
 
-    require "ruby_llm"
-    RubyLLM.chat(model: FAST_MODEL, provider: :openai, assume_model_exists: true).with_instructions(INSTRUCTIONS)
+    configure
+    RubyLLM.chat(model: FAST_MODEL, provider: ruby_llm_provider, assume_model_exists: true)
+           .with_instructions(INSTRUCTIONS)
   end
 
   def chat
+    configure
+    RubyLLM.chat(model: ENV.fetch("AGENT_MODEL", default_model), provider: ruby_llm_provider,
+                 assume_model_exists: true).with_instructions(INSTRUCTIONS)
+  end
+
+  # Fireworks is reached through the OpenAI-compatible provider with its own
+  # base; OpenRouter and Anthropic have providers of their own.
+  def ruby_llm_provider = LlmReviewer.provider == :fireworks ? :openai : LlmReviewer.provider
+
+  def default_model
+    case LlmReviewer.provider
+    when :openrouter then OPENROUTER_MODEL
+    when :anthropic then ANTHROPIC_MODEL
+    else FIREWORKS_MODEL
+    end
+  end
+
+  def configure
     require "ruby_llm"
-    if ENV["FIREWORKS_API_KEY"].to_s.empty?
-      RubyLLM.configure do |c|
-        c.anthropic_api_key = ENV.fetch("ANTHROPIC_API_KEY")
-        c.request_timeout = 90
-      end
-      RubyLLM.chat(model: ENV.fetch("AGENT_MODEL", ANTHROPIC_MODEL), provider: :anthropic, assume_model_exists: true)
-    else
-      RubyLLM.configure do |c|
+    RubyLLM.configure do |c|
+      c.request_timeout = 90
+      case LlmReviewer.provider
+      when :openrouter then c.openrouter_api_key = ENV.fetch("OPENROUTER_API_KEY")
+      when :anthropic then c.anthropic_api_key = ENV.fetch("ANTHROPIC_API_KEY")
+      else
         c.openai_api_key = ENV.fetch("FIREWORKS_API_KEY")
         c.openai_api_base = FIREWORKS_BASE
-        c.request_timeout = 90
       end
-      RubyLLM.chat(model: ENV.fetch("AGENT_MODEL", FIREWORKS_MODEL), provider: :openai, assume_model_exists: true)
-    end.with_instructions(INSTRUCTIONS)
+    end
   end
 end

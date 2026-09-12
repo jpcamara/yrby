@@ -523,12 +523,22 @@ label, and goes straight to the task list. `@agent review` on a line of its
 own asks for a review, written into the document as a heading, a paragraph,
 and a bulleted list; `AGENT_REVIEW=1` writes one on joining instead.
 
-The review comes from a model when a key is set: Fireworks AI through its
-OpenAI-compatible API with `FIREWORKS_API_KEY` (default model
-`accounts/fireworks/routers/glm-5p3-fast`; any model the account can call
-works, `GET /inference/v1/models` lists them), or Anthropic with
-`ANTHROPIC_API_KEY` (default `claude-sonnet-5`); `AGENT_MODEL` overrides
-the model. `AGENT_REASONING` sets how long the model thinks before it
+The review comes from a model when a key is set. Three providers, picked
+by whichever key is present (Fireworks first, then OpenRouter, then
+Anthropic); `AGENT_PROVIDER` chooses when several are set, and
+`AGENT_MODEL` overrides the model:
+
+- **Fireworks AI**, `FIREWORKS_API_KEY`, default
+  `accounts/fireworks/routers/glm-5p3-fast`. Any model the account can call
+  works; `GET https://api.fireworks.ai/inference/v1/models` lists them.
+- **OpenRouter**, `OPENROUTER_API_KEY`, default `openrouter/free`, which
+  routes across their free models and so spreads the per-model rate limits.
+  A specific free model is steadier: their ids end in `:free`, and
+  `curl https://openrouter.ai/api/v1/models` lists everything with pricing
+  (no key needed). Free models need "model training" allowed in the
+  account's privacy settings, and are capped per day, so the agent will
+  sometimes say it is rate limited.
+- **Anthropic**, `ANTHROPIC_API_KEY`, default `claude-sonnet-5`. `AGENT_REASONING` sets how long the model thinks before it
 writes a review or a draft: `medium` (default) starts in about a second and
 shows some reasoning in the ledger, `low` starts in half a second with none,
 `high` thinks for many seconds. Answers, edit plans, and the look at a
@@ -541,6 +551,15 @@ before starting the server:
 ```sh
 set -a; source ~/.config/yrby/fireworks.env; set +a
 bin/rails s
+```
+
+The same for OpenRouter, whose free models cost nothing to try:
+
+```sh
+echo 'OPENROUTER_API_KEY=sk-or-...' > ~/.config/yrby/openrouter.env
+chmod 600 ~/.config/yrby/openrouter.env
+set -a; source ~/.config/yrby/openrouter.env; set +a
+AGENT_PROVIDER=openrouter bin/rails s
 ``` `AGENT_PACE` sets how fast the agent writes, in
 characters per second (default 60, about fast typing); the model's stream is
 buffered and let out at that pace, and the text it has written so far stays
