@@ -54,7 +54,9 @@ module MarkdownPresence
   # The byte range the author of the line at `line` meant by "this": what
   # they last selected, if recent and still there, else nil.
   def selection_for(line)
-    client = author_of(line) or return
+    client = author_of(line)
+    Rails.logger.debug { "agent: author of line #{line}: #{client.inspect}; selections: #{@selections&.keys.inspect}" }
+    client or return
     remembered = @selections&.dig(client) or return
     return if Process.clock_gettime(Process::CLOCK_MONOTONIC) - remembered[:at] > SELECTION_MEMORY
 
@@ -64,15 +66,17 @@ module MarkdownPresence
   end
 
   # The client whose caret is on `line`.
+  # Who wrote the line: the person whose caret is on it, or on the line
+  # after it (they pressed Enter). With one other person here, it is them.
   def author_of(line)
     return unless @others
 
-    @others.states.find do |client, state|
-      next false if client == @presence.client_id || !state.is_a?(Hash)
-
+    people = @others.states.reject { |client, state| client == @presence.client_id || !state.is_a?(Hash) }
+    on_line = people.find do |_client, state|
       head = state.dig("cursor", "head")
-      head.is_a?(Hash) && line_of(@doc.index_at(head, @text.root_name)) == line
-    end&.first
+      head.is_a?(Hash) && [line, line + 1].include?(line_of(@doc.index_at(head, @text.root_name)))
+    end
+    (on_line || (people.one? ? people.first : nil))&.first
   end
 
   LEDGER = "agent-log" # the ledger, a Y.Array in the document

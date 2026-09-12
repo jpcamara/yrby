@@ -9,8 +9,11 @@ module AgentPresence
 
   # Highlight `block` with a status, the way the editor shows what it is
   # about to change.
+  # A step of an edit: shown at the caret, not written to the ledger, since
+  # the action around it says what happened.
   def show(status, block)
-    present(status, block.relative_position([1, block.length].min), block.relative_position(block.length))
+    leaf = leaf_of(block) or return
+    present(status, leaf.relative_position([1, leaf.length].min), leaf.relative_position(leaf.length), log: false)
   end
 
   # Move the caret to the end of `block` a few times a second while typing.
@@ -162,7 +165,20 @@ module AgentPresence
 
   # nil on an empty document, and a caret with no position then.
   def last_block = root.xml_text_count.positive? ? root.xml_text(root.xml_text_count - 1) : nil
-  def end_of(block) = block&.relative_position(block.length)
+  # The end of a block, as a position Lexical can draw a caret at: for a
+  # list that is the end of its last item, since a position on the list
+  # itself has no place on screen.
+  def end_of(block)
+    leaf = leaf_of(block) or return nil
+    leaf.relative_position(leaf.length)
+  end
+
+  def leaf_of(block)
+    return nil unless block
+    return block unless block.attributes["__type"] == "list" && block.xml_text_count.positive?
+
+    leaf_of(block.xml_text(block.xml_text_count - 1))
+  end
 
   # Say what the agent is doing, where its caret is. The status goes into the
   # cursor label, so people see it where they are looking; `detail:` is the

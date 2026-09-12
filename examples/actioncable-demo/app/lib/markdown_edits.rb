@@ -84,11 +84,27 @@ module MarkdownEdits
     end
   end
 
+  # Delete a line and its newline. A blank line left on each side of it
+  # would make a double gap, so one of those goes too.
   def delete_line(line)
     from = MarkdownDoc.line_start(text, line)
-    len = MarkdownDoc.lines(text)[line].to_s.bytesize
-    len += 1 if from + len < @text.length # take the newline too
-    flush.call(@doc.diff { @text.delete(from, len) })
+    to = MarkdownDoc.line_end(text, line)
+    to += 1 if to < @text.length # take the newline too
+    flush.call(@doc.diff { @text.delete(from, to - from) })
+    close_gap(from)
+  end
+
+  # A run of three or more newlines around `at` (the request line sat between
+  # a paragraph and the blank line after it) becomes one blank line.
+  def close_gap(at)
+    bytes = text.b
+    start = at
+    start -= 1 while start.positive? && bytes[start - 1] == "\n"
+    finish = at
+    finish += 1 while finish < bytes.length && bytes[finish] == "\n"
+    return if finish - start <= 2
+
+    flush.call(@doc.diff { @text.delete(start, finish - start - 2) })
   end
 
   # A short line in the review section on each thing it did and why.

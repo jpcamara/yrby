@@ -245,6 +245,7 @@ for (const button of document.querySelectorAll(".agent-actions button")) {
 }
 awareness.on("change", renderBar)
 awareness.on("change", followAgent)
+window.__yrb.follow = { state: () => ({ sinceTyped: Date.now() - lastTyped, lastAgentPos, checked: followEl?.checked, scrollY: window.scrollY }), reveal: revealAgent }
 renderBar()
 awareness.on("update", renderRoster)
 awareness.on("change", renderThoughts)
