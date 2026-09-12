@@ -268,11 +268,9 @@ function agentIndex(s = agentState()) {
 // awareness from inside one), and a dispatch there crashes the remote-cursor
 // plugin for good.
 function revealAgent() {
-  setTimeout(() => {
-    const index = agentIndex()
-    if (index == null) return
-    view.dispatch({ effects: EditorView.scrollIntoView(index, { y: "center" }) })
-  }, 0)
+  const index = agentIndex()
+  if (index == null) return
+  setTimeout(() => view.dispatch({ effects: EditorView.scrollIntoView(index, { y: "center" }) }), 0)
   requestAnimationFrame(() => {
     const c = view.coordsAtPos(Math.min(index, view.state.doc.length))
     if (!c) return
