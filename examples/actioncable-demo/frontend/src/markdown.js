@@ -219,22 +219,34 @@ function renderBar() {
 // and keys all hold it for a while (not selection changes, which remote edits
 // cause too), so it never pulls the page
 // away from what you are reading or writing. "jump to it" always works.
-const HOLD_AFTER_INTERACTION = 15000
+// Typing holds it longer than a click or a scroll; when the hold ends the
+// page catches up with the agent if it moved meanwhile.
+const HOLD_TYPING = 8000
+const HOLD_CLICK = 3000
+let holdUntil = 0
 let ourScrollUntil = 0
-function noteInteraction() { lastTyped = Date.now() }
+let catchUp = null
+function noteInteraction(ms = HOLD_CLICK) { lastTyped = Date.now(); holdUntil = Math.max(holdUntil, Date.now() + ms) }
 function followAgent() {
   const s = agentState()
   const pos = agentPosition(s)
   if (pos == null || pos === lastAgentPos) return
   lastAgentPos = pos
-  if (!followEl?.checked || Date.now() - lastTyped < HOLD_AFTER_INTERACTION) return
+  if (!followEl?.checked) return
+  const remaining = holdUntil - Date.now()
+  if (remaining > 0) {
+    clearTimeout(catchUp)
+    catchUp = setTimeout(() => { if (followEl?.checked && Date.now() >= holdUntil) { ourScrollUntil = Date.now() + 1500; revealAgent() } }, remaining + 50)
+    return
+  }
   ourScrollUntil = Date.now() + 1500
   revealAgent()
 }
-for (const type of ["keydown", "mousedown", "touchstart"]) document.addEventListener(type, (e) => {
-  if (!e.target.closest(".agent-actions, #agent-bar, .invite-agent")) noteInteraction()
+document.addEventListener("keydown", (e) => { if (!e.target.closest(".agent-actions, #agent-bar, .invite-agent")) noteInteraction(HOLD_TYPING) })
+for (const type of ["mousedown", "touchstart"]) document.addEventListener(type, (e) => {
+  if (!e.target.closest(".agent-actions, #agent-bar, .invite-agent")) noteInteraction(HOLD_CLICK)
 })
-document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction() }, { passive: true })
+document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction(HOLD_CLICK) }, { passive: true })
 
 // The agent's caret as a document index. The relative position it sends
 // names the character after its insertion point, which stays the same while
@@ -249,14 +261,26 @@ function agentIndex(s = agentState()) {
   const abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(rel), ydoc)
   return abs && abs.type === ytext ? abs.index : null
 }
+// Scroll the editor to the agent's caret, then the page so that spot is on
+// screen: the editor scrolls inside itself and may sit below the fold.
+// Always deferred: an awareness change can arrive while the editor is in
+// the middle of its own update (a click sets the local cursor into
+// awareness from inside one), and a dispatch there crashes the remote-cursor
+// plugin for good.
 function revealAgent() {
-  const index = agentIndex()
-  if (index == null) return
-  view.dispatch({ effects: EditorView.scrollIntoView(index, { y: "center" }) })
+  setTimeout(() => {
+    const index = agentIndex()
+    if (index == null) return
+    view.dispatch({ effects: EditorView.scrollIntoView(index, { y: "center" }) })
+  }, 0)
+  requestAnimationFrame(() => {
+    const c = view.coordsAtPos(Math.min(index, view.state.doc.length))
+    if (!c) return
+    if (c.top < 90 || c.bottom > window.innerHeight - 40) window.scrollBy({ top: c.top - window.innerHeight / 2, behavior: "smooth" })
+  })
 }
 document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent() })
-view.dom.addEventListener("input", () => { lastTyped = Date.now() })
-view.dom.addEventListener("keydown", () => { lastTyped = Date.now() })
+view.dom.addEventListener("input", () => noteInteraction(HOLD_TYPING))
 
 // The things you can say to the agent, as buttons: each puts the line on a
 // new line after the current one and leaves the caret at its end.
@@ -273,7 +297,7 @@ for (const button of document.querySelectorAll(".agent-actions button")) {
 awareness.on("change", renderBar)
 awareness.on("change", followAgent)
 renderBar()
-window.__yrb.follow = { state: () => ({ sinceTyped: Date.now() - lastTyped, lastAgentPos, index: agentIndex(), checked: followEl?.checked }), reveal: revealAgent }
+window.__yrb.follow = { state: () => ({ sinceTyped: Date.now() - lastTyped, holdRemaining: holdUntil - Date.now(), lastAgentPos, index: agentIndex(), checked: followEl?.checked }), reveal: revealAgent }
 awareness.on("update", renderRoster)
 awareness.on("change", renderThoughts)
 awareness.on("change", refreshAgentLabels)

@@ -116,15 +116,19 @@ class ReviewAgent
     line = block_text(index)
     return if line.strip.match?(UNFINISHED)
 
+    if line.match?(/\A@agent\b/i)
+      asked = line.sub(/\A@agent\s*:?\s*/i, "")[0, 90]
+      present("on it", end_of(root.xml_text(index)), end_of(root.xml_text(index)), sticky: true, detail: asked)
+    end
     case line
     when /\A@agent\s+undo\b/i then undo_last(index)
     when /\A@agent\s+edit\b/i then edit_document(index, line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(index, line)
     when /\A@agent\s+draft\s+(this|the|here)\b/i then draft_here(index)
     when /\A@agent\b/i
-      if scoped_request?(line)
+      if scoped_request?(line, index)
         edit_selection(index, line)
-      elsif !@answered.include?(line)
+      elsif !answered?(index, line)
         answer(index, line)
       end
     else contribute(@recent_changes | [index])
