@@ -25,6 +25,7 @@ module MarkdownReactions
     asked = request.sub(/\A@agent\s*:?\s*/i, "")[0, 90]
     present("on it", MarkdownDoc.line_start(text, line), MarkdownDoc.line_end(text, line), sticky: true, detail: asked)
     case request
+    when /\A@agent\s+review\b/i then review_now(line)
     when /\A@agent\s+undo\b/i then undo_last(line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(line, request)
     when /\A@agent\s+draft\s+(this|the|here)\b/i then draft_here(line)
@@ -168,6 +169,15 @@ module MarkdownReactions
     present("taking your request", MarkdownDoc.line_start(text, line), MarkdownDoc.line_end(text, line), sticky: true)
     delete_line(line)
     [@doc.index_at(start, @text.root_name), @doc.index_at(finish, @text.root_name)]
+  end
+
+  # "@agent review": a review of the document as it is now.
+  def review_now(line)
+    delete_line(line)
+    return present("still writing the last review", @last_index) if reviewing?
+
+    start_review
+    @changes.clear
   end
 
   # "@agent undo": put back whatever the agent did last.

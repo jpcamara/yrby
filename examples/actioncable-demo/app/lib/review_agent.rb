@@ -44,7 +44,7 @@ class ReviewAgent
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
     introduce
-    start_review
+    AgentReview::REVIEW_ON_JOIN ? start_review : announce_next
     @next_scan = 0 # the first task starts once the review is written
     watch
   ensure
@@ -121,6 +121,7 @@ class ReviewAgent
       present("on it", end_of(root.xml_text(index)), end_of(root.xml_text(index)), sticky: true, detail: asked)
     end
     case line
+    when /\A@agent\s+review\b/i then review_now(index)
     when /\A@agent\s+undo\b/i then undo_last(index)
     when /\A@agent\s+edit\b/i then edit_document(index, line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(index, line)

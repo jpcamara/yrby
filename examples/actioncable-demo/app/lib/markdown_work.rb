@@ -31,9 +31,21 @@ module MarkdownWork
 
     pick_task if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
   rescue StandardError => e
-    Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
-    drafts.each { |d| d.job.stop }
+    Rails.logger.warn("agent work failed: #{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}")
+    abandon_drafts(e)
+  end
+
+  # Whatever went wrong, the tasks go back on the list unchecked and the
+  # failure is said where people can see it. The drafts leave the list first
+  # so stopping their streams does not count them as done.
+  def abandon_drafts(error)
+    stopped = drafts.dup
     drafts.clear
+    stopped.each do |d|
+      d.job.stop
+      mark(d.task, :open, anchor: d.anchor)
+      report_failure("drafting #{d.title}", error, "the task is back on the list")
+    end
     @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
   end
 
@@ -43,8 +55,10 @@ module MarkdownWork
     task = tasks.find { |t| t.state == :open && !busy.include?(t.line) }
     return unless task
 
-    present("up next: #{section_title(task.text)}", @last_index, sticky: true,
-                                                                 detail: "from your list; say @agent pause to hold me")
+    unless @last_presence&.dig(:status) == "up next: #{section_title(task.text)}" # announce_next may have said so
+      present("up next: #{section_title(task.text)}", @last_index,
+              sticky: true, detail: "from your list; say @agent pause to hold me")
+    end
     sleep 1.5 unless drafting?
     claim(task)
   end

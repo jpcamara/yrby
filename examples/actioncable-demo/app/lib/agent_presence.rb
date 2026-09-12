@@ -246,7 +246,7 @@ module AgentPresence
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     key = [status, where]
     unchanged = @last_presence && @last_presence[:status] == status
-    return if unchanged && (@caret_key == key || now - @caret_at < 0.25)
+    return if unchanged && (@caret_key == key || now - (@caret_at || 0) < 0.25)
 
     @caret_key = key
     @caret_at = now

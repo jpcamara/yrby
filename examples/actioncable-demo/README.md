@@ -519,8 +519,9 @@ reverse proxy with basic auth.
 `POST /docs/:id/agent` starts a Ruby agent on a Lexxy document (see
 `app/lib/review_agent.rb`). It joins over the same `DocumentChannel` as the
 browsers, shows up in the presence roster with its status in its cursor
-label, writes a review into the document as a heading, a paragraph, and a
-bulleted list, and parks its caret where it wrote.
+label, and goes straight to the task list. `@agent review` on a line of its
+own asks for a review, written into the document as a heading, a paragraph,
+and a bulleted list; `AGENT_REVIEW=1` writes one on joining instead.
 
 The review comes from a model when a key is set: Fireworks AI through its
 OpenAI-compatible API with `FIREWORKS_API_KEY` (default model
