@@ -17,6 +17,7 @@ class ReviewAgent
   include AgentReview
 
   QUIET = 1.5 # seconds without further edits before the agent notes a change
+  TURN = 0.1 # seconds between turns while writing: a word or so per turn
   KEEP_ALIVE = 15 # presence expires in editors after 30s of silence; refresh before that
 
   EMPTY_FOR = 120 # seconds with nobody else here before the agent leaves
@@ -74,7 +75,7 @@ class ReviewAgent
       else
         empty_since = nil
       end
-      changed = @changes.pop(timeout: busy? ? 0.04 : 2)
+      changed = @changes.pop(timeout: busy? ? TURN : 2)
       next idle_tick unless changed
 
       index = settle(changed)

@@ -45,10 +45,31 @@ class MarkdownEditor
     sleep 0.4
   end
 
+  # Only the part that differs is retyped: a fixed word is a small change
+  # in place, not a paragraph wiped and written again.
   def replace(paragraph, edit)
     from = MarkdownDoc.line_start(@text.to_s, paragraph.first_line)
-    change { @text.delete(from, paragraph.text.bytesize) }
-    type(from, edit["text"].to_s.strip)
+    old_text = paragraph.text
+    new_text = edit["text"].to_s.strip
+    head, old_mid, new_mid = differing_span(old_text, new_text)
+    at = from + head.bytesize
+    change { @text.delete(at, old_mid.bytesize) } if old_mid.bytesize.positive?
+    type(at, new_mid) unless new_mid.empty?
+  end
+
+  # The common start and end of two strings, and what lies between.
+  def differing_span(old_text, new_text)
+    a = old_text.chars
+    b = new_text.chars
+    prefix = common_length(a, b)
+    suffix = common_length(a[prefix..].reverse, b[prefix..].reverse)
+    [a[0, prefix].join, a[prefix, a.length - prefix - suffix].join, b[prefix, b.length - prefix - suffix].join]
+  end
+
+  def common_length(left, right)
+    n = 0
+    n += 1 while n < left.length && n < right.length && left[n] == right[n]
+    n
   end
 
   def insert_after(paragraph, edit)

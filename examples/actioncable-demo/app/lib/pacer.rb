@@ -33,9 +33,11 @@ class Pacer
 
   # Write the characters that have come due since the last drain, ending at
   # a word boundary when one is in reach.
+  # A stall in the caller (a model call, a burst of someone's typing) does
+  # not pay out all at once: credit never exceeds half a second of writing.
   def drain
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    @credit += (now - @last) * rate
+    @credit = [@credit + ((now - @last) * rate), rate / 2].min
     @last = now
     return if @buffer.empty? || @credit < 1
 
