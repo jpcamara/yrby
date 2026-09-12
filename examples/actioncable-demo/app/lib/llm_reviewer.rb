@@ -22,12 +22,13 @@ class LlmReviewer
   EFFORT = ENV.fetch("AGENT_REASONING", "medium")
   QUICK_EFFORT = ENV.fetch("AGENT_QUICK_REASONING", "low")
   ANTHROPIC_MODEL = "claude-sonnet-5"
-  # OpenRouter's free tier. "openrouter/free" routes across the free models,
-  # which spreads the per-model rate limits; a specific one (they end in
-  # ":free", listed at https://openrouter.ai/api/v1/models) is steadier.
-  # Free models need "model training" allowed in the OpenRouter account's
-  # privacy settings, and are capped per day.
-  OPENROUTER_MODEL = "openrouter/free"
+  # OpenRouter's free tier. A named model, not their "openrouter/free"
+  # router: the router picks a different provider per call, and one of them
+  # answered an edit-plan request with the template instead of JSON. This
+  # one answers in about a second and gets edit plans right. Free models
+  # need "model training" allowed in the account's privacy settings, and are
+  # capped per day; the rest are at https://openrouter.ai/api/v1/models.
+  OPENROUTER_MODEL = "nex-agi/nex-n2.5-mini:free"
 
   PROMPT = <<~PROMPT
     You are reviewing a short working document that a team is editing together.

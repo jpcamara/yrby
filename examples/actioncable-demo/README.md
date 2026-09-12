@@ -531,13 +531,16 @@ Anthropic); `AGENT_PROVIDER` chooses when several are set, and
 - **Fireworks AI**, `FIREWORKS_API_KEY`, default
   `accounts/fireworks/routers/glm-5p3-fast`. Any model the account can call
   works; `GET https://api.fireworks.ai/inference/v1/models` lists them.
-- **OpenRouter**, `OPENROUTER_API_KEY`, default `openrouter/free`, which
-  routes across their free models and so spreads the per-model rate limits.
-  A specific free model is steadier: their ids end in `:free`, and
+- **OpenRouter**, `OPENROUTER_API_KEY`, default
+  `nex-agi/nex-n2.5-mini:free`, which costs nothing and answers in about a
+  second. Their `openrouter/free` router is not the default: it picks a
+  different provider per call, and one of those answered an edit-plan
+  request with the template instead of JSON. Other free ids end in `:free`;
   `curl https://openrouter.ai/api/v1/models` lists everything with pricing
-  (no key needed). Free models need "model training" allowed in the
-  account's privacy settings, and are capped per day, so the agent will
-  sometimes say it is rate limited.
+  and needs no key. Free models need "model training" allowed in the
+  account's privacy settings, and are capped per day (50 requests, or 1000
+  once the account has ever held $10), so the agent will sometimes say it
+  is rate limited.
 - **Anthropic**, `ANTHROPIC_API_KEY`, default `claude-sonnet-5`. `AGENT_REASONING` sets how long the model thinks before it
 writes a review or a draft: `medium` (default) starts in about a second and
 shows some reasoning in the ledger, `low` starts in half a second with none,
