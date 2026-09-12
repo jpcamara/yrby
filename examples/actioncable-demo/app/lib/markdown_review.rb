@@ -12,13 +12,29 @@ module MarkdownReview
 
   def start_review
     present("reading the document", @text.length, sticky: true)
-    ensure_trailing_newlines(2)
-    @review_region = region(@text.length, @text.length)
-    flush.call(@doc.diff { @text.insert(@text.length, "## #{MarkdownAgent::REVIEW_TITLE}\n\n") })
-    @review = @text.relative_position(@text.length - 1)
-    writer = MarkdownWriter.new(@doc, @text, flush: flush, at: @text.length - 1) # before the closing newline
+    writer = open_review
     @review_job = StreamJob.new(writer: writer, label: "the review", on_finish: -> { review_written(writer) }) do |emit|
       @reviewer.stream(text, &emit)
+    end
+  end
+
+  # A document invited more than once keeps one review section: a new review
+  # goes at the end of the existing one.
+  def open_review
+    existing = MarkdownDoc.section(text, MarkdownAgent::REVIEW_TITLE)
+    if existing
+      at = MarkdownDoc.line_end(text, MarkdownDoc.section_content_end(text, existing))
+      @review_region = region(at, at)
+      @review = @text.relative_position(at)
+      writer = MarkdownWriter.new(@doc, @text, flush: flush, at: at)
+      writer.feed("\n\n")
+      writer
+    else
+      ensure_trailing_newlines(2)
+      @review_region = region(@text.length, @text.length)
+      flush.call(@doc.diff { @text.insert(@text.length, "## #{MarkdownAgent::REVIEW_TITLE}\n\n") })
+      @review = @text.relative_position(@text.length - 1)
+      MarkdownWriter.new(@doc, @text, flush: flush, at: @text.length - 1) # before the closing newline
     end
   end
 
