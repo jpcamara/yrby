@@ -165,6 +165,7 @@ module AgentPresence
 
   # nil on an empty document, and a caret with no position then.
   def last_block = root.xml_text_count.positive? ? root.xml_text(root.xml_text_count - 1) : nil
+
   # The end of a block, as a position Lexical can draw a caret at: for a
   # list that is the end of its last item, since a position on the list
   # itself has no place on screen.
