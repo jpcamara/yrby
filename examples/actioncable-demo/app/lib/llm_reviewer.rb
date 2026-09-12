@@ -245,7 +245,8 @@ class LlmReviewer
   # Stream a reply. Content chunks go to the block; the model's reasoning,
   # which arrives first, goes to `on_thinking` as it comes.
   def streamed(prompt, quick: false)
-    (quick ? fast_chat : chat).with_thinking(effort: quick ? QUICK_EFFORT : EFFORT).ask(memory_prompt + prompt) do |chunk|
+    effort = quick ? QUICK_EFFORT : EFFORT
+    (quick ? fast_chat : chat).with_thinking(effort: effort).ask(memory_prompt + prompt) do |chunk|
       thought = chunk.respond_to?(:thinking) && chunk.thinking&.text
       @on_thinking&.call(thought) if thought && !thought.empty?
       text = chunk.content.to_s
