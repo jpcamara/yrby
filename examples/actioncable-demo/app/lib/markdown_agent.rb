@@ -16,6 +16,10 @@ class MarkdownAgent
   include MarkdownReview
 
   QUIET = 1.5
+  # Seconds between turns while writing: a word or so per turn, ten turns a
+  # second. Finer turns wrote two characters at a time, each its own store
+  # insert and broadcast, and crowded out the cable's delivery to browsers.
+  TURN = 0.1
   EMPTY_FOR = 120
   MAX_STAY = 2 * 60 * 60
   ROOT = "markdown"
@@ -44,7 +48,7 @@ class MarkdownAgent
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
     introduce
-    start_review
+    AgentReview::REVIEW_ON_JOIN ? start_review : announce_next
     @next_scan = 0
     watch
   ensure
@@ -59,8 +63,12 @@ class MarkdownAgent
 
   # Which lines an update touched: the first and last lines that differ from
   # what the agent last saw.
+  # An update that leaves the text as it was (a resync, a change to another
+  # part of the document) is not a change to react to.
   def note_update
     now = text
+    return if now == @seen
+
     before = MarkdownDoc.lines(@seen)
     after = MarkdownDoc.lines(now)
     @seen = now
@@ -73,6 +81,16 @@ class MarkdownAgent
     @changes << [first, [last, after.length - 1].min]
   end
 
+  # While writing, a gap between loop turns shows as a jump in the text;
+  # log any so the cause can be found.
+  def note_stall
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    if @last_turn && drafting? && now - @last_turn > 0.5
+      Rails.logger.warn("agent: loop stalled #{(now - @last_turn).round(2)}s while drafting")
+    end
+    @last_turn = now
+  end
+
   def watch
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     empty_since = nil
@@ -83,7 +101,8 @@ class MarkdownAgent
       else
         empty_since = nil
       end
-      changed = @changes.pop(timeout: busy? ? 0.04 : 2)
+      changed = @changes.pop(timeout: busy? ? TURN : 2)
+      note_stall
       next idle_tick unless changed
 
       first, last = changed
@@ -91,7 +110,11 @@ class MarkdownAgent
         first = [first, more[0]].min
         last = [last, more[1]].max
       end
-      react_to(first, last)
+      begin
+        react_to(first, last)
+      rescue StandardError => e
+        report_failure("your request", e)
+      end
       @changes.clear
     end
   end

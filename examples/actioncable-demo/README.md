@@ -519,15 +519,34 @@ reverse proxy with basic auth.
 `POST /docs/:id/agent` starts a Ruby agent on a Lexxy document (see
 `app/lib/review_agent.rb`). It joins over the same `DocumentChannel` as the
 browsers, shows up in the presence roster with its status in its cursor
-label, writes a review into the document as a heading, a paragraph, and a
-bulleted list, and parks its caret where it wrote.
+label, and goes straight to the task list. `@agent review` on a line of its
+own asks for a review, written into the document as a heading, a paragraph,
+and a bulleted list; `AGENT_REVIEW=1` writes one on joining instead.
 
-The review comes from a model when a key is set: Fireworks AI through its
-OpenAI-compatible API with `FIREWORKS_API_KEY` (default model
-`accounts/fireworks/routers/glm-5p3-fast`, the same model behind a router
-that answers about three times sooner), or Anthropic with
-`ANTHROPIC_API_KEY` (default `claude-sonnet-5`); `AGENT_MODEL` overrides
-the model. Without a key it uses a fixed review, so the demo runs either
+The review comes from a model when a key is set. Three providers, picked
+by whichever key is present (Fireworks first, then OpenRouter, then
+Anthropic); `AGENT_PROVIDER` chooses when several are set, and
+`AGENT_MODEL` overrides the model:
+
+- **Fireworks AI**, `FIREWORKS_API_KEY`, default
+  `accounts/fireworks/routers/glm-5p3-fast`. Any model the account can call
+  works; `GET https://api.fireworks.ai/inference/v1/models` lists them.
+- **OpenRouter**, `OPENROUTER_API_KEY`, default
+  `nex-agi/nex-n2.5-mini:free`, which costs nothing and answers in about a
+  second. Their `openrouter/free` router is not the default: it picks a
+  different provider per call, and one of those answered an edit-plan
+  request with the template instead of JSON. Other free ids end in `:free`;
+  `curl https://openrouter.ai/api/v1/models` lists everything with pricing
+  and needs no key. Free models need "model training" allowed in the
+  account's privacy settings, and are capped per day (50 requests, or 1000
+  once the account has ever held $10), so the agent will sometimes say it
+  is rate limited.
+- **Anthropic**, `ANTHROPIC_API_KEY`, default `claude-sonnet-5`. `AGENT_REASONING` sets how long the model thinks before it
+writes a review or a draft: `medium` (default) starts in about a second and
+shows some reasoning in the ledger, `low` starts in half a second with none,
+`high` thinks for many seconds. Answers, edit plans, and the look at a
+change use `AGENT_QUICK_REASONING` (default `low`); `AGENT_FAST_MODEL` can
+point those at another model instead. Without a key it uses a fixed review, so the demo runs either
 way. Keep the key out of the repo: put it in a file outside it, such as
 `~/.config/yrby/fireworks.env` with `FIREWORKS_API_KEY=...`, and load it
 before starting the server:
@@ -535,6 +554,15 @@ before starting the server:
 ```sh
 set -a; source ~/.config/yrby/fireworks.env; set +a
 bin/rails s
+```
+
+The same for OpenRouter, whose free models cost nothing to try:
+
+```sh
+echo 'OPENROUTER_API_KEY=sk-or-...' > ~/.config/yrby/openrouter.env
+chmod 600 ~/.config/yrby/openrouter.env
+set -a; source ~/.config/yrby/openrouter.env; set +a
+AGENT_PROVIDER=openrouter bin/rails s
 ``` `AGENT_PACE` sets how fast the agent writes, in
 characters per second (default 60, about fast typing); the model's stream is
 buffered and let out at that pace, and the text it has written so far stays
@@ -571,6 +599,28 @@ and the label says so.
 The blocks it writes into are tracked by `Y::Anchor`, not by number. An anchor
 is a relative position at the block's start, resolved again before every
 write.
+
+When the model fails, the agent says so rather than passing off canned text
+as its own: the ledger gets a line such as `couldn't finish the review: the
+model timed out`, a heading it opened for a draft is taken out again, and the
+task goes back on the list unchecked. It leaves passing changes alone for
+half a minute after that. One agent per document: a second invite while the
+first is still there gets a 409, and the page's button reads "The agent is
+here" until it leaves.
+
+The ledger above the editor is part of the document: the agent appends each
+status to a `Y.Array` named `agent-log`, so every page shows the same
+history and a reload keeps it. The model's reasoning streams into the
+newest entry as it arrives, one block per stream, folded to its last lines;
+click a block to read all of it.
+
+It writes in one place at a time, like a person: the review first, then
+the tasks one after another, the caret always on the words. `AGENT_DRAFTS`
+lets several drafts stream at once (they share the one caret, which reads
+as text appearing from nowhere; it is off for a reason). A draft yields only
+while someone is at the point it is writing (the block the words go into or
+the one after it); reading or editing higher up in the section does not
+hold it.
 
 ### The markdown page
 

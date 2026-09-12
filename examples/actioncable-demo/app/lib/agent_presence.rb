@@ -9,8 +9,11 @@ module AgentPresence
 
   # Highlight `block` with a status, the way the editor shows what it is
   # about to change.
+  # A step of an edit: shown at the caret, not written to the ledger, since
+  # the action around it says what happened.
   def show(status, block)
-    present(status, block.relative_position([1, block.length].min), block.relative_position(block.length))
+    leaf = leaf_of(block) or return
+    present(status, leaf.relative_position([1, leaf.length].min), leaf.relative_position(leaf.length), log: false)
   end
 
   # Move the caret to the end of `block` a few times a second while typing.
@@ -94,6 +97,9 @@ module AgentPresence
     blocks.minmax if blocks.all?
   end
 
+  LEDGER = "agent-log" # the ledger, a Y.Array in the document
+  LEDGER_KEEP = 200
+
   private
 
   # When each client last renewed its presence: its awareness clock moved. A
@@ -157,22 +163,38 @@ module AgentPresence
     [block.relative_position([1, block.length].min), end_of(block)]
   end
 
-  def last_block = root.xml_text(root.xml_text_count - 1)
-  def end_of(block) = block.relative_position(block.length)
+  # nil on an empty document, and a caret with no position then.
+  def last_block = root.xml_text_count.positive? ? root.xml_text(root.xml_text_count - 1) : nil
+
+  # The end of a block, as a position Lexical can draw a caret at: for a
+  # list that is the end of its last item, since a position on the list
+  # itself has no place on screen.
+  def end_of(block)
+    leaf = leaf_of(block) or return nil
+    leaf.relative_position(leaf.length)
+  end
+
+  def leaf_of(block)
+    return nil unless block
+    return block unless block.attributes["__type"] == "list" && block.xml_text_count.positive?
+
+    leaf_of(block.xml_text(block.xml_text_count - 1))
+  end
 
   # Say what the agent is doing, where its caret is. The status goes into the
   # cursor label, so people see it where they are looking; `detail:` is the
   # fuller reason for the log under the editor. A status is either sticky
   # (drafting, waiting, paused, listening) or fades to "listening" after a
   # few seconds.
-  def present(status, anchor, focus, detail: nil, sticky: false)
+  def present(status, anchor, focus, detail: nil, sticky: false, log: true) # rubocop:disable Metrics/ParameterLists
+    log_entry(status, detail) if log
     Rails.logger.info("agent: #{status}#{" — #{detail}" if detail}")
     @presence_lock ||= Mutex.new
     @presence_lock.synchronize do
-      @thinking = +"" unless @last_presence && @last_presence[:status] == status
+      turn_thinking(status)
       @last_presence = IDENTITY.merge(name: "#{IDENTITY[:name]} · #{status}", awarenessData: IDENTITY,
                                       anchorPos: anchor, focusPos: focus, focusing: true,
-                                      status: status, detail: detail, thinking: @thinking.presence,
+                                      status: status, detail: detail, thinking: @thinking.presence&.dup,
                                       at: (Time.now.to_f * 1000).to_i)
       @status_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @sticky = sticky
@@ -182,17 +204,66 @@ module AgentPresence
 
   # The model's reasoning as it streams, attached to the current status and
   # re-sent a few times a second, so the ledger shows the agent thinking.
+  # Reasoning, kept per stream: a review and a draft running together each
+  # show their own. A stream names itself through the thread it runs in; a
+  # call made from the loop is filed under the current status, and dropped
+  # when the status moves on.
   def think(delta)
     @presence_lock ||= Mutex.new
     @presence_lock.synchronize do
-      @thinking = (@thinking.to_s + delta)[-THINKING_KEEP..] || (@thinking.to_s + delta)
+      label = Thread.current[:agent_purpose] || @last_presence&.dig(:status) || "thinking"
+      @thinking ||= {}
+      @thinking[label] = ((@thinking[label] || "") + delta)[-THINKING_KEEP..] || ((@thinking[label] || "") + delta)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next if @last_presence.nil? || (@thought_at && now - @thought_at < 0.3)
 
       @thought_at = now
-      @last_presence = @last_presence.merge(thinking: @thinking)
+      @last_presence = @last_presence.merge(thinking: @thinking.dup)
       Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
     end
+  end
+
+  # A stream is done: its reasoning stays in the ledger where it was, and the
+  # next stream with the same name starts fresh.
+  def forget_thinking(label)
+    @presence_lock ||= Mutex.new
+    @presence_lock.synchronize { @thinking&.delete(label) }
+  end
+
+  # Reasoning filed under a status goes when the status changes; a running
+  # stream's stays.
+  def turn_thinking(status)
+    return if @last_presence && @last_presence[:status] == status
+
+    (@thinking ||= {}).delete_if { |label, _| !StreamJob.running?(label) }
+  end
+
+  # The caret moves with every step of a stream. Say so a few times a second
+  # at most, and not at all when nothing moved.
+  def present_caret(status, *where, **)
+    return if status.blank?
+
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    key = [status, where]
+    unchanged = @last_presence && @last_presence[:status] == status
+    return if unchanged && (@caret_key == key || now - (@caret_at || 0) < 0.25)
+
+    @caret_key = key
+    @caret_at = now
+    present(status, *where, **, log: false)
+  end
+
+  # The ledger, kept in the document: a Y.Array of {at, status, detail}
+  # entries, so every page shows the same history and a reload keeps it.
+  def log_entry(status, detail)
+    entries = doc.get_array(LEDGER)
+    update = doc.diff do
+      entries.push({ "at" => (Time.now.to_f * 1000).to_i, "status" => status, "detail" => detail })
+      entries.delete_at(0) while entries.size > LEDGER_KEEP
+    end
+    flush.call(update) if update
+  rescue StandardError => e
+    Rails.logger.warn("agent ledger: #{e.class}: #{e.message}")
   end
 
   # Editors drop a peer they have not heard from in a while; say it again.
@@ -211,7 +282,8 @@ module AgentPresence
       loop do
         sleep HEARTBEAT
         if @last_presence && !@sticky && Process.clock_gettime(Process::CLOCK_MONOTONIC) - @status_at > STATUS_TTL
-          present("listening", @last_presence[:anchorPos], @last_presence[:focusPos], sticky: true)
+          present(@paused ? "paused" : "listening", @last_presence[:anchorPos], @last_presence[:focusPos],
+                  sticky: true, log: false)
         else
           keep_alive
         end
@@ -222,4 +294,19 @@ module AgentPresence
   end
 
   def stop_heartbeat = @heartbeat&.kill
+
+  # A model failure, said where people can see it instead of passed off as
+  # the agent's own words. `what` is the thing that did not happen.
+  def report_failure(what, error, then_what = nil)
+    reason = error.is_a?(LlmReviewer::ModelError) ? error.message : LlmReviewer.describe(error)
+    Rails.logger.warn("agent: #{what} failed: #{error.class}: #{error.message}")
+    where = @last_presence ? [@last_presence[:anchorPos], @last_presence[:focusPos]] : [end_of(last_block)] * 2
+    present("couldn't finish #{what}", *where, detail: [reason, then_what].compact.join("; "))
+    @backoff_until = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+  end
+
+  # After a failure, the agent leaves passing changes alone for a while.
+  def backing_off?
+    @backoff_until && Process.clock_gettime(Process::CLOCK_MONOTONIC) < @backoff_until
+  end
 end

@@ -49,10 +49,10 @@ const markdownStyle = HighlightStyle.define([
 ])
 
 const theme = EditorView.theme({
-  "&": { background: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "16px" },
-  "&.cm-focused": { outline: "2px solid #c4b5fd", outlineOffset: "1px" },
-  ".cm-content": { fontFamily: "-apple-system, BlinkMacSystemFont, Inter, system-ui, sans-serif", lineHeight: "1.6", padding: "1rem 1.25rem", caretColor: "#111" },
-  ".cm-scroller": { overflow: "auto", minHeight: "24rem", maxHeight: "70vh" },
+  "&": { background: "#fff", border: "1px solid #e8eaf0", borderRadius: "12px", fontSize: "16px", boxShadow: "0 1px 2px rgba(17, 24, 39, .04), 0 8px 24px -12px rgba(17, 24, 39, .12)" },
+  "&.cm-focused": { outline: "none", borderColor: "#c4b5fd", boxShadow: "0 0 0 3px rgba(196, 181, 253, .35), 0 8px 24px -12px rgba(17, 24, 39, .12)" },
+  ".cm-content": { fontFamily: "-apple-system, BlinkMacSystemFont, Inter, system-ui, sans-serif", lineHeight: "1.65", padding: "1.25rem 1.5rem", caretColor: "#111", color: "#1f2937" },
+  ".cm-scroller": { overflow: "auto", height: "60vh" },
   ".cm-line": { padding: "0" },
   ".cm-ySelectionInfo": { opacity: "1", fontFamily: "system-ui, sans-serif", fontSize: ".72rem", padding: ".1rem .35rem", borderRadius: "4px", top: "-1.4em" },
   ".cm-ySelection": { borderRadius: "2px" },
@@ -76,11 +76,23 @@ const view = new EditorView({
 window.__yrb.view = view
 
 // The rendered view, from the same text. Collaborators' own content only.
+// Rendered at most twice a second while text streams in: parsing and
+// replacing the whole preview on every update blocked the page for long
+// enough that incoming updates piled up and then landed in a clump.
 let previewTimer = null
+let previewAt = 0
+let previewText = null
 function renderPreview() {
-  if (!previewEl) return
-  clearTimeout(previewTimer)
-  previewTimer = setTimeout(() => { previewEl.innerHTML = marked.parse(ytext.toString()) }, 80)
+  if (!previewEl || previewTimer) return
+  const wait = Math.max(0, 500 - (Date.now() - previewAt))
+  previewTimer = setTimeout(() => {
+    previewTimer = null
+    previewAt = Date.now()
+    const text = ytext.toString()
+    if (text === previewText) return
+    previewText = text
+    previewEl.innerHTML = marked.parse(text)
+  }, wait)
 }
 ytext.observe(renderPreview)
 
@@ -101,38 +113,77 @@ function renderRoster() {
   }).join("")
 }
 const logEl = document.getElementById("agent-log")
-const lastEntry = new Map()
+const logEntries = ydoc.getArray("agent-log")
+let logRendered = 0
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
 }
-function renderAgentLog() {
+// The ledger is part of the document: the agent appends {at, status, detail}
+// entries to a Y.Array, so every page shows the same history and a reload
+// keeps it. Entries are appended as they arrive; a trim at the front
+// redraws the whole list.
+function renderAgentLog(event) {
   if (!logEl) return
+  const all = logEntries.toArray()
+  if (event?.changes?.deleted?.size || all.length < logRendered) { logEl.replaceChildren(); logRendered = 0 }
+  for (const raw of all.slice(logRendered)) {
+    const e = typeof raw?.toJSON === "function" ? raw.toJSON() : raw // entries arrive as Y.Maps
+    const time = new Date(e.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    const li = document.createElement("li")
+    li.innerHTML = `<time>${time}</time> <b>${escapeHtml(e.status)}</b>${e.detail ? ` <span>${escapeHtml(e.detail)}</span>` : ""}`
+    logEl.append(li)
+  }
+  if (all.length !== logRendered) { logRendered = all.length; logEl.scrollTop = logEl.scrollHeight }
+}
+logEntries.observe(renderAgentLog)
+renderAgentLog()
+// The agent files its reasoning by what it is for: "the review" and a
+// section it is drafting each get their own block, from its presence. A
+// block follows the newest entry while its stream runs and stays where it
+// was when the stream ends.
+const thoughtBlocks = new Map()
+function renderThoughts() {
+  if (!logEl || !logEl.lastElementChild) return
   let changed = false
   for (const [clientId, s] of awareness.getStates()) {
     if (!s?.status) continue
-    const key = `${s.status}|${s.detail ?? ""}`
-    let entry = lastEntry.get(clientId)
-    if (!entry || entry.key !== key) {
-      const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-      const li = document.createElement("li")
-      li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}<div class="thinking" hidden></div>`
-      logEl.append(li)
-      while (logEl.children.length > 60) logEl.firstChild.remove()
-      entry = { key, li, thinking: "" }
-      lastEntry.set(clientId, entry)
-      changed = true
-    }
-    const thinking = s.thinking ?? ""
-    if (thinking !== entry.thinking) {
-      entry.thinking = thinking
-      const div = entry.li.querySelector(".thinking")
-      div.textContent = thinking
-      div.hidden = thinking.length === 0
-      changed = true
+    const thoughts = typeof s.thinking === "string" ? { [s.status]: s.thinking } : (s.thinking ?? {})
+    const blocks = thoughtBlocks.get(clientId) ?? new Map()
+    thoughtBlocks.set(clientId, blocks)
+    for (const label of [...blocks.keys()]) if (!(label in thoughts)) blocks.delete(label)
+    const li = logEl.lastElementChild
+    for (const [label, text] of Object.entries(thoughts)) {
+      let div = blocks.get(label)
+      if (!div) {
+        div = document.createElement("div")
+        div.className = "thinking"
+        div.dataset.label = label === s.status ? "" : label
+        blocks.set(label, div)
+      }
+      if (div.parentElement !== li) { li.append(div); changed = true }
+      if (div.dataset.full !== text) { div.dataset.full = text; renderThinking(div); changed = true }
     }
   }
   if (changed) logEl.scrollTop = logEl.scrollHeight
 }
+// Folded, a block shows its last few lines, enough to see where the model
+// is going; a click opens the whole thing.
+const THINKING_TAIL = 240
+function renderThinking(div) {
+  const full = div.dataset.full ?? ""
+  div.hidden = full.length === 0
+  const folded = !div.classList.contains("open") && full.length > THINKING_TAIL
+  div.classList.toggle("folded", folded)
+  div.title = folded ? "click to read all of it" : ""
+  const text = folded ? "\u2026" + full.slice(-THINKING_TAIL).replace(/^\S*\s+/, " ") : full
+  div.textContent = div.dataset.label ? `${div.dataset.label}: ${text}` : text
+}
+logEl?.addEventListener("click", (e) => {
+  const div = e.target.closest(".thinking")
+  if (!div) return
+  div.classList.toggle("open")
+  renderThinking(div)
+})
 function refreshAgentLabels() {
   // The remote cursor label is drawn from the state when the cursor moves;
   // keep it current when only the status changed.
@@ -156,12 +207,22 @@ function agentState() {
   for (const s of awareness.getStates().values()) if (s?.status) return s
   return null
 }
+let agentWasHere = false
+const inviteEl = document.querySelector(".invite-agent")
 function renderBar() {
   if (!barEl) return
   const s = agentState()
   const statusEl = barEl.querySelector(".bar-status")
   const detailEl = barEl.querySelector(".bar-detail")
-  if (!s) { statusEl.textContent = "no agent here yet"; detailEl.textContent = ""; barEl.classList.remove("live"); return }
+  if (inviteEl) { inviteEl.disabled = !!s; inviteEl.textContent = s ? "The agent is here" : "Invite the agent" }
+  if (!s) {
+    statusEl.textContent = agentWasHere ? "the agent left" : "no agent here yet"
+    detailEl.textContent = agentWasHere ? "invite it again to keep going" : ""
+    barEl.classList.remove("live")
+    return
+  }
+  if (!agentWasHere && followEl?.checked) setTimeout(revealAgent, 300) // it just arrived: show where
+  agentWasHere = true
   barEl.classList.add("live")
   statusEl.textContent = s.status
   detailEl.textContent = s.detail ?? ""
@@ -170,22 +231,34 @@ function renderBar() {
 // and keys all hold it for a while (not selection changes, which remote edits
 // cause too), so it never pulls the page
 // away from what you are reading or writing. "jump to it" always works.
-const HOLD_AFTER_INTERACTION = 15000
+// Typing holds it longer than a click or a scroll; when the hold ends the
+// page catches up with the agent if it moved meanwhile.
+const HOLD_TYPING = 8000
+const HOLD_CLICK = 3000
+let holdUntil = 0
 let ourScrollUntil = 0
-function noteInteraction() { lastTyped = Date.now() }
+let catchUp = null
+function noteInteraction(ms = HOLD_CLICK) { lastTyped = Date.now(); holdUntil = Math.max(holdUntil, Date.now() + ms) }
 function followAgent() {
   const s = agentState()
   const pos = agentPosition(s)
   if (pos == null || pos === lastAgentPos) return
   lastAgentPos = pos
-  if (!followEl?.checked || Date.now() - lastTyped < HOLD_AFTER_INTERACTION) return
+  if (!followEl?.checked) return
+  const remaining = holdUntil - Date.now()
+  if (remaining > 0) {
+    clearTimeout(catchUp)
+    catchUp = setTimeout(() => { if (followEl?.checked && Date.now() >= holdUntil) { ourScrollUntil = Date.now() + 1500; revealAgent() } }, remaining + 50)
+    return
+  }
   ourScrollUntil = Date.now() + 1500
   revealAgent()
 }
-for (const type of ["keydown", "mousedown", "touchstart"]) document.addEventListener(type, (e) => {
-  if (!e.target.closest(".agent-actions, #agent-bar")) noteInteraction()
+document.addEventListener("keydown", (e) => { if (!e.target.closest(".agent-actions, #agent-bar, .invite-agent")) noteInteraction(HOLD_TYPING) })
+for (const type of ["mousedown", "touchstart"]) document.addEventListener(type, (e) => {
+  if (!e.target.closest(".agent-actions, #agent-bar, .invite-agent")) noteInteraction(HOLD_CLICK)
 })
-document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction() }, { passive: true })
+document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction(HOLD_CLICK) }, { passive: true })
 
 // The agent's caret as a document index. The relative position it sends
 // names the character after its insertion point, which stays the same while
@@ -200,14 +273,34 @@ function agentIndex(s = agentState()) {
   const abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(rel), ydoc)
   return abs && abs.type === ytext ? abs.index : null
 }
-function revealAgent() {
+// Scroll the editor to the agent's caret, then the page so that spot is on
+// screen: the editor scrolls inside itself and may sit below the fold.
+// Always deferred: an awareness change can arrive while the editor is in
+// the middle of its own update (a click sets the local cursor into
+// awareness from inside one), and a dispatch there crashes the remote-cursor
+// plugin for good.
+// Only when the caret is out of view: scrolling on every move, several
+// times a second, kept the page busy for nothing.
+function revealAgent(force = false) {
   const index = agentIndex()
   if (index == null) return
-  view.dispatch({ effects: EditorView.scrollIntoView(index, { y: "center" }) })
+  setTimeout(() => {
+    const at = Math.min(index, view.state.doc.length)
+    const c = view.coordsAtPos(at)
+    const box = view.scrollDOM.getBoundingClientRect()
+    const inEditor = c && c.top >= box.top + 24 && c.bottom <= box.bottom - 24
+    const onScreen = c && c.top >= 90 && c.bottom <= window.innerHeight - 40
+    if (!force && inEditor && onScreen) return
+    view.dispatch({ effects: EditorView.scrollIntoView(at, { y: "center" }) })
+    requestAnimationFrame(() => {
+      const d = view.coordsAtPos(at)
+      if (!d) return
+      if (d.top < 90 || d.bottom > window.innerHeight - 40) window.scrollBy({ top: d.top - window.innerHeight / 2, behavior: "smooth" })
+    })
+  }, 0)
 }
-document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent() })
-view.dom.addEventListener("input", () => { lastTyped = Date.now() })
-view.dom.addEventListener("keydown", () => { lastTyped = Date.now() })
+document.getElementById("jump-to-agent")?.addEventListener("click", (e) => { e.preventDefault(); ourScrollUntil = Date.now() + 1500; revealAgent(true) })
+view.dom.addEventListener("input", () => noteInteraction(HOLD_TYPING))
 
 // The things you can say to the agent, as buttons: each puts the line on a
 // new line after the current one and leaves the caret at its end.
@@ -224,9 +317,9 @@ for (const button of document.querySelectorAll(".agent-actions button")) {
 awareness.on("change", renderBar)
 awareness.on("change", followAgent)
 renderBar()
-window.__yrb.follow = { state: () => ({ sinceTyped: Date.now() - lastTyped, lastAgentPos, index: agentIndex(), checked: followEl?.checked }), reveal: revealAgent }
+window.__yrb.follow = { state: () => ({ sinceTyped: Date.now() - lastTyped, holdRemaining: holdUntil - Date.now(), lastAgentPos, index: agentIndex(), checked: followEl?.checked }), reveal: revealAgent }
 awareness.on("update", renderRoster)
-awareness.on("change", renderAgentLog)
+awareness.on("change", renderThoughts)
 awareness.on("change", refreshAgentLabels)
 renderRoster()
 

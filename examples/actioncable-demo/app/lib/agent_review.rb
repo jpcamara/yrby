@@ -4,9 +4,10 @@
 # and how to talk to it, then the review typed at the end as a stream the
 # loop steps, so the first task can start alongside it.
 module AgentReview
-  INTRO = "I'll review the document, and work through any list under a heading that names me at the " \
-          "same time. Ask me with a line starting @agent, hand me a task with @agent take ..., or use " \
-          "the buttons."
+  INTRO = "I'll work through any list under a heading that names me. Say @agent review for a review, " \
+          "talk to me with a line starting @agent, or use the buttons."
+  # A review on joining is off by default: the agent gets to the list first.
+  REVIEW_ON_JOIN = ENV.fetch("AGENT_REVIEW", "0") == "1"
 
   private
 
@@ -23,18 +24,48 @@ module AgentReview
   # stream the watch loop steps so the first task can start alongside it.
   def start_review
     present("reading the document", end_of(last_block), end_of(last_block), sticky: true)
-    flush.call(doc.diff { Y::Lexical.append_heading(doc, "Agent review", tag: "h2") })
-    writer = StreamingWriter.new(doc, flush: flush)
-    @review = StreamJob.new(writer: writer, on_finish: -> { review_written(writer) }) do |emit|
+    writer = open_review
+    @review = StreamJob.new(writer: writer, label: "the review", on_finish: -> { review_written(writer) }) do |emit|
       @reviewer.stream(text, &emit)
     end
   end
 
+  # A document invited more than once keeps one review section: a new review
+  # goes at the end of the existing one.
+  def open_review
+    heading = heading_block("Agent review")
+    @made_review_heading = heading.nil?
+    if heading
+      @review_heading = heading.anchor
+      last = root.xml_text(section_end(doc.block_at(heading.anchor)))
+      StreamingWriter.new(doc, flush: flush, after: last.anchor)
+    else
+      flush.call(doc.diff { Y::Lexical.append_heading(doc, "Agent review", tag: "h2") })
+      @review_heading = last_block.anchor
+      StreamingWriter.new(doc, flush: flush, after: @review_heading)
+    end
+  end
+
+  # "@agent review": a review of the document as it is now.
+  def review_now(index)
+    flush.call(doc.diff { root.delete_xml_text(index) })
+    return present("still writing the last review", nil, nil) if reviewing?
+
+    start_review
+    @changes.clear
+  end
+
   def review_written(writer)
+    forget_thinking("the review")
     @list = writer.list
     @review_list = @list&.anchor
     at = writer.block || last_block
-    present("wrote a review", end_of(at), end_of(at))
+    if @review.failed?
+      @made_review_heading && (i = doc.block_at(@review_heading)) && flush.call(doc.diff { root.delete_xml_text(i) })
+      report_failure("the review", @review.error, "ask me again with @agent review")
+    else
+      present("wrote a review", end_of(at), end_of(at))
+    end
     announce_next
   end
 
@@ -45,19 +76,19 @@ module AgentReview
     return unless reviewing?
 
     @review.step
-    return if drafting? || !@review.writer.block
+    return if @review.finished? || drafting? || !@review.writer.block
 
-    present(working_label, start_of_written(@review.writer) || end_of(@review.writer.block),
-            end_of(@review.writer.block), sticky: true)
+    present_caret(working_label, start_of_written(@review.writer) || end_of(@review.writer.block),
+                  end_of(@review.writer.block), sticky: true)
   end
 
   def reviewing? = @review && !@review.finished?
-  def drafting? = @draft && !@draft.finished?
   def busy? = reviewing? || work_pending?
 
   # One label for everything in flight.
   def working_label
-    [reviewing? ? "writing a review" : nil, drafting? ? "drafting #{@section_title}" : nil].compact.join(" and ")
+    titles = drafts.map(&:title).join(" and ")
+    [reviewing? ? "writing a review" : nil, drafting? ? "drafting #{titles}" : nil].compact.join(" and ")
   end
 
   # What the loop does between changes: let the streams out, do own work,

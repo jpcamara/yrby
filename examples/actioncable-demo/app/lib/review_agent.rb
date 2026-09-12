@@ -17,10 +17,13 @@ class ReviewAgent
   include AgentReview
 
   QUIET = 1.5 # seconds without further edits before the agent notes a change
+  TURN = 0.1 # seconds between turns while writing: a word or so per turn
   KEEP_ALIVE = 15 # presence expires in editors after 30s of silence; refresh before that
 
   EMPTY_FOR = 120 # seconds with nobody else here before the agent leaves
   MAX_STAY = 2 * 60 * 60
+  # "@agent" with nothing after it is a request still being typed.
+  UNFINISHED = /\A@agent(\s+(take|rewrite\s+this))?\s*\z/i
 
   def initialize(document_id, reviewer: Reviewer.default, stay: MAX_STAY)
     @document_id = document_id
@@ -38,11 +41,12 @@ class ReviewAgent
     @peer.on_awareness { |frame| see_presence(frame) }
     @peer.subscribe
     (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
+    Rails.logger.info("agent: joined #{@document_id} with #{root.xml_text_count} blocks")
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
     introduce
-    start_review
-    @next_scan = 0 # the first task starts alongside the review
+    AgentReview::REVIEW_ON_JOIN ? start_review : announce_next
+    @next_scan = 0 # the first task starts once the review is written
     watch
   ensure
     stop_heartbeat
@@ -71,36 +75,62 @@ class ReviewAgent
       else
         empty_since = nil
       end
-      changed = @changes.pop(timeout: busy? ? 0.04 : 2)
+      changed = @changes.pop(timeout: busy? ? TURN : 2)
       next idle_tick unless changed
 
-      index = changed.last
-      @recent_changes = changed.dup
-      while (more = @changes.pop(timeout: QUIET)) # let a burst of typing settle
-        index = more.last || index
-        @recent_changes |= more
-      end
+      index = settle(changed)
       next unless index && index < root.xml_text_count
 
-      react_to(index)
+      handle(request_in(@recent_changes) || index)
       @changes.clear # what arrived while the agent was writing is not news
     end
+  end
+
+  # Let a burst of typing settle; returns the last block changed.
+  def settle(changed)
+    index = changed.last
+    @recent_changes = changed.dup
+    while (more = @changes.pop(timeout: QUIET))
+      index = more.last || index
+      @recent_changes |= more
+    end
+    index
   end
 
   # A line addressed to the agent is an instruction to edit or a question.
   # Anything else is the document changing under a collaborator: the agent
   # considers it and contributes only when that clearly helps.
+  # A burst of typing that ends with Enter changes two blocks: the request
+  # and the empty one after it. The request is the one to act on.
+  def request_in(indexes)
+    indexes.select { |i| i < root.xml_text_count }.find { |i| block_text(i).strip.match?(/\A@agent\b/i) }
+  end
+
+  # A failure while reacting is reported in the ledger; the agent stays.
+  def handle(index)
+    react_to(index)
+  rescue StandardError => e
+    report_failure("your request", e)
+  end
+
   def react_to(index)
     line = block_text(index)
+    return if line.strip.match?(UNFINISHED)
+
+    if line.match?(/\A@agent\b/i)
+      asked = line.sub(/\A@agent\s*:?\s*/i, "")[0, 90]
+      present("on it", end_of(root.xml_text(index)), end_of(root.xml_text(index)), sticky: true, detail: asked)
+    end
     case line
+    when /\A@agent\s+review\b/i then review_now(index)
     when /\A@agent\s+undo\b/i then undo_last(index)
     when /\A@agent\s+edit\b/i then edit_document(index, line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(index, line)
     when /\A@agent\s+draft\s+(this|the|here)\b/i then draft_here(index)
     when /\A@agent\b/i
-      if scoped_request?(line)
+      if scoped_request?(line, index)
         edit_selection(index, line)
-      elsif !@answered.include?(line)
+      elsif !answered?(index, line)
         answer(index, line)
       end
     else contribute(@recent_changes | [index])

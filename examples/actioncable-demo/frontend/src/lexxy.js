@@ -58,41 +58,79 @@ window.__yrb = {
 // reasons, the current entry shows its thinking as it streams. Oldest first,
 // scrolled to the newest.
 const logEl = document.getElementById("agent-log")
-const lastEntry = new Map()
+const logEntries = ydoc.getArray("agent-log")
+let logRendered = 0
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
 }
-function renderAgentLog() {
+// The ledger is part of the document: the agent appends {at, status, detail}
+// entries to a Y.Array, so every page shows the same history and a reload
+// keeps it. Entries are appended as they arrive; a trim at the front
+// redraws the whole list.
+function renderAgentLog(event) {
   if (!logEl) return
+  const all = logEntries.toArray()
+  if (event?.changes?.deleted?.size || all.length < logRendered) { logEl.replaceChildren(); logRendered = 0 }
+  for (const raw of all.slice(logRendered)) {
+    const e = typeof raw?.toJSON === "function" ? raw.toJSON() : raw // entries arrive as Y.Maps
+    const time = new Date(e.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    const li = document.createElement("li")
+    li.innerHTML = `<time>${time}</time> <b>${escapeHtml(e.status)}</b>${e.detail ? ` <span>${escapeHtml(e.detail)}</span>` : ""}`
+    logEl.append(li)
+  }
+  if (all.length !== logRendered) { logRendered = all.length; logEl.scrollTop = logEl.scrollHeight }
+}
+logEntries.observe(renderAgentLog)
+renderAgentLog()
+// The agent files its reasoning by what it is for: "the review" and a
+// section it is drafting each get their own block, from its presence. A
+// block follows the newest entry while its stream runs and stays where it
+// was when the stream ends.
+const thoughtBlocks = new Map()
+function renderThoughts() {
+  if (!logEl || !logEl.lastElementChild) return
   let changed = false
   for (const [clientId, s] of awareness.getStates()) {
     if (!s?.status) continue
-    const key = `${s.status}|${s.detail ?? ""}`
-    let entry = lastEntry.get(clientId)
-    if (!entry || entry.key !== key) {
-      const time = new Date(s.at ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-      const li = document.createElement("li")
-      li.innerHTML = `<time>${time}</time> <b>${escapeHtml(s.status)}</b>${s.detail ? ` <span>${escapeHtml(s.detail)}</span>` : ""}<div class="thinking" hidden></div>`
-      logEl.append(li)
-      while (logEl.children.length > 60) logEl.firstChild.remove()
-      entry = { key, li, thinking: "" }
-      lastEntry.set(clientId, entry)
-      changed = true
-    }
-    const thinking = s.thinking ?? ""
-    if (thinking !== entry.thinking) {
-      entry.thinking = thinking
-      const div = entry.li.querySelector(".thinking")
-      div.textContent = thinking
-      div.hidden = thinking.length === 0
-      changed = true
+    const thoughts = typeof s.thinking === "string" ? { [s.status]: s.thinking } : (s.thinking ?? {})
+    const blocks = thoughtBlocks.get(clientId) ?? new Map()
+    thoughtBlocks.set(clientId, blocks)
+    for (const label of [...blocks.keys()]) if (!(label in thoughts)) blocks.delete(label)
+    const li = logEl.lastElementChild
+    for (const [label, text] of Object.entries(thoughts)) {
+      let div = blocks.get(label)
+      if (!div) {
+        div = document.createElement("div")
+        div.className = "thinking"
+        div.dataset.label = label === s.status ? "" : label
+        blocks.set(label, div)
+      }
+      if (div.parentElement !== li) { li.append(div); changed = true }
+      if (div.dataset.full !== text) { div.dataset.full = text; renderThinking(div); changed = true }
     }
   }
   if (changed) logEl.scrollTop = logEl.scrollHeight
 }
-
-// Ruby agent, which broadcasts its awareness over the same DocumentChannel.
+// Folded, a block shows its last few lines, enough to see where the model
+// is going; a click opens the whole thing.
+const THINKING_TAIL = 240
+function renderThinking(div) {
+  const full = div.dataset.full ?? ""
+  div.hidden = full.length === 0
+  const folded = !div.classList.contains("open") && full.length > THINKING_TAIL
+  div.classList.toggle("folded", folded)
+  div.title = folded ? "click to read all of it" : ""
+  const text = folded ? "\u2026" + full.slice(-THINKING_TAIL).replace(/^\S*\s+/, " ") : full
+  div.textContent = div.dataset.label ? `${div.dataset.label}: ${text}` : text
+}
+logEl?.addEventListener("click", (e) => {
+  const div = e.target.closest(".thinking")
+  if (!div) return
+  div.classList.toggle("open")
+  renderThinking(div)
+})
 const rosterEl = document.getElementById("presence-roster")
+// A presence roster: everyone the awareness protocol knows about, including the agent.
 function renderRoster() {
   if (!rosterEl) return
   const peers = [...awareness.getStates().values()]
@@ -103,7 +141,7 @@ function renderRoster() {
     return `<span class="peer" style="--c:${color}">${name}${status}</span>`
   }).join("")
 }
-awareness.on("update", renderRoster)
+
 function refreshAgentLabels() {
   // Lexical writes a remote cursor's label once, when the cursor appears,
   // so the status in the agent's name would freeze there. Keep it current.
@@ -127,12 +165,22 @@ function agentState() {
   for (const s of awareness.getStates().values()) if (s?.status) return s
   return null
 }
+let agentWasHere = false
+const inviteEl = document.querySelector(".invite-agent")
 function renderBar() {
   if (!barEl) return
   const s = agentState()
   const statusEl = barEl.querySelector(".bar-status")
   const detailEl = barEl.querySelector(".bar-detail")
-  if (!s) { statusEl.textContent = "no agent here yet"; detailEl.textContent = ""; barEl.classList.remove("live"); return }
+  if (inviteEl) { inviteEl.disabled = !!s; inviteEl.textContent = s ? "The agent is here" : "Invite the agent" }
+  if (!s) {
+    statusEl.textContent = agentWasHere ? "the agent left" : "no agent here yet"
+    detailEl.textContent = agentWasHere ? "invite it again to keep going" : ""
+    barEl.classList.remove("live")
+    return
+  }
+  if (!agentWasHere && followEl?.checked) setTimeout(revealAgent, 300) // it just arrived: show where
+  agentWasHere = true
   barEl.classList.add("live")
   statusEl.textContent = s.status
   detailEl.textContent = s.detail ?? ""
@@ -154,7 +202,7 @@ function followAgent() {
   revealAgent()
 }
 for (const type of ["keydown", "mousedown", "touchstart"]) document.addEventListener(type, (e) => {
-  if (!e.target.closest(".agent-actions, #agent-bar")) noteInteraction()
+  if (!e.target.closest(".agent-actions, #agent-bar, .invite-agent")) noteInteraction()
 })
 document.addEventListener("wheel", () => { if (Date.now() > ourScrollUntil) noteInteraction() }, { passive: true })
 
@@ -197,8 +245,10 @@ for (const button of document.querySelectorAll(".agent-actions button")) {
 }
 awareness.on("change", renderBar)
 awareness.on("change", followAgent)
+window.__yrb.follow = { state: () => ({ sinceTyped: Date.now() - lastTyped, lastAgentPos, checked: followEl?.checked, scrollY: window.scrollY }), reveal: revealAgent }
 renderBar()
-awareness.on("change", renderAgentLog)
+awareness.on("update", renderRoster)
+awareness.on("change", renderThoughts)
 awareness.on("change", refreshAgentLabels)
 renderRoster()
 

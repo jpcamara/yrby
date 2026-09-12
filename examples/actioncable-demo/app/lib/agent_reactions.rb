@@ -20,6 +20,8 @@ module AgentReactions
   # and let the reviewer decide whether to add something small. Blocks
   # people are writing in are off limits.
   def contribute(changed)
+    return if backing_off?
+
     changed = changed.select { |i| i < root.xml_text_count }
     return unless worth_a_look?(changed)
 
@@ -106,8 +108,12 @@ module AgentReactions
 
   # A request that says "this": rewrite what the person last selected, or
   # the block just above the request, and nothing else.
-  def scoped_request?(line)
-    !line.end_with?("?") && line.match?(/\b(this|these|that|the selection|selected)\b/i)
+  # See MarkdownReactions#scoped_request?.
+  def scoped_request?(line, index)
+    return false if line.end_with?("?") || line.match?(/\b(this|the)\s+(document|doc|page|file|whole)\b/i)
+    return line.match?(/\b(this|these|that|the selection|selected)\b/i) if remembered_selection(author_of(index))
+
+    line.match?(MarkdownReactions::REWRITE_OF_THIS)
   end
 
   def edit_selection(index, line)
@@ -160,8 +166,12 @@ module AgentReactions
   end
 
   # Type the answer into a new paragraph right under the question.
+  def answered?(index, question)
+    Array(@answered).any? { |anchor, asked| asked == question && doc.block_at(anchor) == index }
+  end
+
   def answer(index, question)
-    @answered << question
+    (@answered ||= []) << [root.xml_text(index).anchor, question]
     present("answering", end_of(root.xml_text(index)), end_of(root.xml_text(index)), sticky: true)
     writer = StreamingWriter.new(doc, flush: flush, after: root.xml_text(index).anchor, headings: false)
     stream_into(writer, "answering", pace: ANSWER_PACE) { |emit| @reviewer.answer(question, text, &emit) }
@@ -180,7 +190,7 @@ module AgentReactions
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless writer.block && now - since > 0.25
 
-      present(status, start_of_written(writer) || end_of(writer.block), end_of(writer.block), sticky: true)
+      present(status, start_of_written(writer) || end_of(writer.block), end_of(writer.block), sticky: true, log: false)
       since = now
     end
     emit = lambda do |chunk|

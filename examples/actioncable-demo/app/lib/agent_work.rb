@@ -2,30 +2,60 @@
 
 # The agent's own work, done alongside people rather than in reply to them.
 # It takes open tasks from its list in the document, drafts a section for each
-# at the end of the document, and checks the item off. Drafting is interleaved
-# with reacting: the model streams in a thread, and the watch loop writes a
-# few chunks whenever no edit is waiting. If someone steps into the block it
-# is writing, it holds the next chunk until they leave. A section it drafted
-# belongs to whoever edits it next: their change goes into memory, and the
-# agent does not edit that section again on its own.
+# (at the end of the document, or under the heading the task names), and
+# checks the item off. Like a person, it writes in one place at a time: the
+# review first, then one task after another (AGENT_DRAFTS raises that; the
+# streams then share one caret). The model streams in a thread while the
+# watch loop lets a little out per turn and keeps reacting in between. A
+# draft yields while someone is at the point it is writing. A section it drafted belongs to whoever edits it next: their
+# change goes into memory, and the agent does not edit that section again on
+# its own.
 module AgentWork
   SCAN_EVERY = 3 # seconds between looks at the list while idle
+  MAX_DRAFTS = ENV.fetch("AGENT_DRAFTS", "1").to_i
   LISTENING = "I'll look at changes once a sentence is finished, answer @agent lines, and take tasks you add"
+
+  # One section being drafted: the task it came from, the writer streaming
+  # into the document, the section's heading and title, whether the agent
+  # added that heading, the block the caret sat at before the first words,
+  # and the model stream.
+  Draft = Data.define(:task, :writer, :heading, :title, :made_heading, :at, :job) do
+    def done? = job.finished?
+  end
 
   private
 
-  def work_pending? = !@task.nil? || Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
+  def drafts = (@drafts ||= [])
+
+  def drafting? = drafts.any?
+
+  def work_pending? = drafting? || Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
 
   # One step of the agent's own work. Whatever goes wrong here is logged and
-  # the task dropped; the agent stays in the document.
+  # the drafts dropped; the agent stays in the document.
   def work_step
     return if @paused
 
-    @task ? draft_step : pick_task
+    drafts.dup.each { |d| draft_step(d) }
+    return if reviewing? || drafts.size >= MAX_DRAFTS
+
+    pick_task if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= (@next_scan || 0)
   rescue StandardError => e
-    Rails.logger.warn("agent work failed: #{e.class}: #{e.message}")
-    @draft&.stop
-    @task = nil
+    Rails.logger.warn("agent work failed: #{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}")
+    abandon_drafts(e)
+  end
+
+  # Whatever went wrong, the tasks go back on the list unchecked and the
+  # failure is said where people can see it. The drafts leave the list first
+  # so stopping their streams does not count them as done.
+  def abandon_drafts(error)
+    stopped = drafts.dup
+    drafts.clear
+    stopped.each do |d|
+      d.job.stop
+      Worklist.mark(doc, d.task, :open)&.then { |u| flush.call(u) }
+      report_failure("drafting #{d.title}", error, "the task is back on the list")
+    end
     @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
   end
 
@@ -36,9 +66,11 @@ module AgentWork
     return unless task
 
     at = end_of(last_block)
-    present("up next: #{section_title(task.text)}", at, at, sticky: true,
-                                                            detail: "from your list; say @agent pause to hold me")
-    sleep 1.5
+    unless @last_presence&.dig(:status) == "up next: #{section_title(task.text)}" # announce_next may have said so
+      present("up next: #{section_title(task.text)}", at, at, sticky: true,
+                                                              detail: "from your list; say @agent pause to hold me")
+    end
+    sleep 1.5 unless drafting? # a pause to read it, unless a draft is waiting on this loop
     claim(task)
   end
 
@@ -56,35 +88,77 @@ module AgentWork
     end
   end
 
+  def edit_task?(task) = !task.text.match?(MarkdownWork::DRAFT_TASK) && task.text.match?(MarkdownWork::EDIT_TASK)
+
+  # An edit task: a plan from the model over the whole document, applied in
+  # place, leaving the task list itself alone.
+  def run_edit_task(task)
+    Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
+    present("working on: #{task.text}", nil, nil, sticky: true, detail: "editing in place")
+    result = apply_edit_task(task)
+    Worklist.mark(doc, task, :done)&.then { |u| flush.call(u) }
+    present("done: #{task.text}", end_of(last_block), end_of(last_block),
+            detail: changed_in_place(result.applied, "block"))
+    note_in_review("#{task.text}: changed #{result.applied} blocks in place.") if result.applied.positive?
+    @next_scan = 0
+  end
+
+  def apply_edit_task(task)
+    blocks, anchors = numbered_blocks
+    instruction = "#{task.text}. Change only what this calls for and keep everything else word for word."
+    plan = @reviewer.edits(instruction, blocks)
+    result = DocumentEditor.new(doc, flush: flush, presence: self, anchors: anchors,
+                                     avoid: Worklist.ordinals(doc)).apply(plan)
+    remember_undo("the edit: #{task.text}", result)
+    result
+  end
+
+  def changed_in_place(count, unit)
+    return "nothing needed changing" unless count.positive?
+
+    "changed #{count} #{count == 1 ? unit : "#{unit}s"} in place"
+  end
+
   # Mark the item, open the section, and start the model streaming.
   def claim(task)
-    @task = task
+    return run_edit_task(task) if edit_task?(task)
+
     Worklist.mark(doc, task, :drafting)&.then { |u| flush.call(u) }
-    at = open_section(task)
-    where = task.under && @section_title != section_title(task.text) ? ", under #{@section_title}" : ""
+    section = open_section(task)
+    title = section[:title]
+    where = task.under && title != section_title(task.text) ? ", under #{title}" : ""
     detail = task.list ? "took \"#{task.text}\" from the list#{where}" : "drafting the section you pointed at"
-    present("drafting #{@section_title}", end_of(at), end_of(at), sticky: true, detail: detail)
-    start_draft(task)
+    present("drafting #{title}", end_of(section[:at]), end_of(section[:at]), sticky: true, detail: detail)
+    start_draft(task, section)
+  end
+
+  def start_draft(task, section)
+    job = nil
+    job = StreamJob.new(writer: section[:writer], label: section[:title], on_finish: -> { finish_draft(job) }) do |emit|
+      @reviewer.draft(task.text, text, &emit)
+    end
+    drafts << Draft.new(task: task, writer: section[:writer], heading: section[:heading], title: section[:title],
+                        made_heading: section[:made_heading], at: section[:at].anchor, job: job)
   end
 
   # The draft goes at the end of the named section when there is one, else
-  # into a new section at the end of the document. Returns the block the
-  # caret should sit at while the first words arrive.
+  # into a new section at the end of the document. `at` is the block the
+  # caret sits at while the first words arrive.
   def open_section(task)
     heading = task.under && heading_block(task.under)
-    if heading
-      @section_heading = heading.anchor
-      @section_title = heading.text.strip
-      last = root.xml_text(section_end(doc.block_at(@section_heading)))
-      @draft_writer = StreamingWriter.new(doc, flush: flush, after: last.anchor)
-      last
-    else
-      @section_title = section_title(task.text)
-      flush.call(doc.diff { Y::Lexical.append_heading(doc, @section_title, tag: "h2") })
-      @section_heading = last_block.anchor
-      @draft_writer = StreamingWriter.new(doc, flush: flush)
-      last_block
-    end
+    heading ? open_under(heading) : open_new_section(section_title(task.text))
+  end
+
+  def open_under(heading)
+    last = root.xml_text(section_end(doc.block_at(heading.anchor)))
+    { heading: heading.anchor, title: heading.text.strip, made_heading: false, at: last,
+      writer: StreamingWriter.new(doc, flush: flush, after: last.anchor) }
+  end
+
+  def open_new_section(title)
+    flush.call(doc.diff { Y::Lexical.append_heading(doc, title, tag: "h2") })
+    { heading: last_block.anchor, title: title, made_heading: true, at: last_block,
+      writer: StreamingWriter.new(doc, flush: flush, after: last_block.anchor) }
   end
 
   # The first heading whose text matches, exactly then loosely.
@@ -126,46 +200,72 @@ module AgentWork
     title[0].upcase + title[1..].to_s
   end
 
-  def start_draft(task)
-    @draft = StreamJob.new(writer: @draft_writer, on_finish: -> { finish_task }) do |emit|
-      @reviewer.draft(task.text, text, &emit)
-    end
-  end
+  # Let one draft out a little, unless a person is where it is writing. The
+  # caret follows the first draft that is moving.
+  def draft_step(draft)
+    return if draft.done?
 
-  # Write what has streamed in so far, a few chunks per step, yielding the
-  # block to a person who is in it.
-  # Let the draft out a little, unless a person is in the section.
-  def draft_step
-    return unless @draft && !@draft.finished?
-
-    if in_my_way?
-      at = @draft_writer.block || doc.find(@section_heading) || last_block
-      present("waiting, you're in this section", end_of(at), end_of(at),
-              detail: "I'll carry on with #{@section_title} when you leave", sticky: true)
+    if in_my_way?(draft)
+      at = draft.writer.block || doc.find(draft.heading) || last_block
+      present_caret("waiting, you're in this section", end_of(at), end_of(at),
+                    detail: "I'll carry on with #{draft.title} when you leave", sticky: true)
       return
     end
-    @draft.step
-    return unless @draft_writer.block && !@draft.finished?
+    draft.job.step
+    return unless draft.writer.block && !draft.done? && draft.equal?(caret_draft)
 
-    present(working_label, start_of_written(@draft_writer) || end_of(@draft_writer.block),
-            end_of(@draft_writer.block), sticky: true)
+    present_caret(working_label, start_of_written(draft.writer) || end_of(draft.writer.block),
+                  end_of(draft.writer.block), sticky: true)
   end
 
-  # Someone is in the section being drafted: its heading or any block written so far.
-  def in_my_way?
-    section = [@section_heading, *@draft_writer.created].filter_map { |a| doc.block_at(a) }
-    occupied_blocks.intersect?(section)
+  def caret_draft = drafts.find { |d| !in_my_way?(d) } || drafts.first
+
+  # Someone is at the point being written: the block the words go into, or
+  # the one right after it. Reading or editing higher up in the section is
+  # not in the way; new text lands below them.
+  def in_my_way?(draft)
+    point = draft.writer.block ? doc.block_at(draft.writer.block.anchor) : doc.block_at(draft.at)
+    return false unless point
+
+    occupied_blocks.intersect?([point, point + 1])
   end
 
-  def finish_task
-    Worklist.mark(doc, @task, :done)&.then { |u| flush.call(u) }
-    (@sections ||= []) << { title: @task.text, heading: @section_heading, blocks: @draft_writer.created }
-    at = @draft_writer.block || last_block
-    present("drafted #{@section_title}", end_of(at), end_of(at),
-            detail: "\"#{@task.text}\" is done; edit the section and it's yours")
-    note_in_review("Drafted #{@section_title} from the list; edit it and it's yours.")
-    @task = nil
+  def finish_draft(job)
+    draft = drafts.find { |d| d.job.equal?(job) } or return
+    drafts.delete(draft)
+    forget_thinking(draft.title)
+    return draft_failed(draft) if job.failed?
+
+    Worklist.mark(doc, draft.task, :done)&.then { |u| flush.call(u) }
+    (@sections ||= []) << { title: draft.task.text, heading: draft.heading, blocks: draft.writer.created }
+    say_drafted(draft)
     @next_scan = 0
+  end
+
+  def say_drafted(draft)
+    at = draft.writer.block || last_block
+    present("drafted #{draft.title}", end_of(at), end_of(at),
+            detail: "\"#{draft.task.text}\" is done; edit the section and it's yours")
+    note_in_review("Drafted #{draft.title} from the list; edit it and it's yours.")
+  end
+
+  # Take out whatever was opened for a draft that never came: the blocks the
+  # writer made, and the heading when the agent added it.
+  def discard_draft(draft)
+    anchors = draft.writer.created.reverse
+    anchors << draft.heading if draft.made_heading
+    flush.call(doc.diff do
+      anchors.each { |a| (i = doc.block_at(a)) && root.delete_xml_text(i) }
+    end)
+  end
+
+  # Nothing came from the model: the task goes back on the list, unchecked,
+  # and the agent waits a while before picking anything up again.
+  def draft_failed(draft)
+    discard_draft(draft)
+    Worklist.mark(doc, draft.task, :open)&.then { |u| flush.call(u) }
+    report_failure("drafting #{draft.title}", draft.job.error, "the task is back on the list")
+    @next_scan = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
   end
 
   # "@agent take <task>", "@agent pause", "@agent resume", "@agent stop".
@@ -175,8 +275,8 @@ module AgentWork
     case verb.downcase
     when "take"
       flush.call(Worklist.add(doc, rest.to_s.strip))
-      queued = @task ? "#{rest}; I'll start it after #{@section_title}" : rest
-      present("took a task", end_of(last_block), end_of(last_block), detail: queued)
+      after = drafts.size >= MAX_DRAFTS ? "; I'll start it after #{drafts.map(&:title).join(" and ")}" : ""
+      present("took a task", end_of(last_block), end_of(last_block), detail: "#{rest}#{after}")
       @next_scan = 0
     when "pause"
       @paused = true
@@ -191,12 +291,16 @@ module AgentWork
   end
 
   def stop_task
-    return present("nothing to stop", nil, nil) unless @task
+    return present("nothing to stop", nil, nil) unless drafting?
 
-    @draft&.stop
-    Worklist.mark(doc, @task, :stopped)&.then { |u| flush.call(u) }
-    present("stopped", nil, nil, detail: "dropped \"#{@task.text}\"; the item is marked [-]")
-    @task = nil
+    stopped = drafts.dup
+    drafts.clear
+    stopped.each do |d|
+      d.job.stop
+      Worklist.mark(doc, d.task, :stopped)&.then { |u| flush.call(u) }
+    end
+    dropped = stopped.map { |d| "\"#{d.task.text}\"" }.join(" and ")
+    present("stopped", nil, nil, detail: "dropped #{dropped}; the item is marked [-]")
   end
 
   # The title of the drafted section a block belongs to, if any.
@@ -207,9 +311,9 @@ module AgentWork
   end
 
   # Blocks the agent's reactions must leave alone: its task lists and their
-  # headings, the section it is drafting now, and the sections it drafted.
+  # headings, the sections it is drafting now, and the sections it drafted.
   def my_blocks
-    current = @task ? [@section_heading, *@draft_writer.created] : []
+    current = drafts.flat_map { |d| [d.heading, *d.writer.created] }
     done = Array(@sections).flat_map { |s| [s[:heading], *s[:blocks]] }
     (Worklist.ordinals(doc) + (current + done).filter_map { |a| doc.block_at(a) }).uniq.sort
   end

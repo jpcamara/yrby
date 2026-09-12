@@ -6,23 +6,43 @@
 # loop calls `step` to let a little out. `on_finish` runs once everything
 # streamed has been written.
 class StreamJob
-  def initialize(writer:, on_finish: nil, pace: Pacer::RATE, &produce)
+  RUNNING = Set.new
+  RUNNING_LOCK = Mutex.new
+
+  # Names of the streams running right now, for the presence to file
+  # reasoning under.
+  def self.running?(label) = RUNNING_LOCK.synchronize { RUNNING.include?(label) }
+
+  # `label:` names the stream in the ledger ("the review", a section title).
+  def initialize(writer:, on_finish: nil, pace: Pacer::RATE, label: nil, &produce)
     @writer = writer
     @on_finish = on_finish
+    @label = label
+    RUNNING_LOCK.synchronize { RUNNING << label } if label
     @queue = Queue.new
     @pacer = Pacer.new(rate: pace) { |piece| writer.feed(piece) }
     @done = false
     @finished = false
+    @error = nil
+    @produced = false
     @thread = Thread.new do
-      produce.call(->(chunk) { @queue << chunk })
+      Thread.current[:agent_purpose] = label
+      produce.call(lambda { |chunk|
+        @produced = true
+        @queue << chunk
+      })
     rescue StandardError => e
       Rails.logger.warn("agent stream failed: #{e.class}: #{e.message}")
+      @error = e
     ensure
       @queue << :done
     end
   end
 
-  attr_reader :writer
+  attr_reader :writer, :error, :label
+
+  # Nothing came out of the model at all.
+  def failed? = !@error.nil? && !@produced
 
   def finished? = @finished
 
@@ -58,6 +78,7 @@ class StreamJob
     return if @finished
 
     @finished = true
+    RUNNING_LOCK.synchronize { RUNNING.delete(@label) } if @label
     @writer.finish
     @on_finish&.call
   end

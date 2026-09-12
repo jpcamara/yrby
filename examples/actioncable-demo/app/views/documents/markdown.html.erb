@@ -1,15 +1,9 @@
-<div class="demo">
-  <header>
-    <h1>yrby collaborative editor <small>(Markdown)</small></h1>
-    <%= render "nav" %>
-    <p>
-      Document <code><%= @document_id %></code> —
-      open this page in another window to edit together. The document is a
-      <code>Y.Text</code> of markdown bound with <code>y-codemirror.next</code>;
-      the preview renders the same text. The agent works on it as markdown.
-    </p>
-    <p id="status" class="status">connecting…</p>
-  </header>
+<div class="demo demo--markdown">
+  <p id="status" class="status" hidden>connecting…</p>
+  <div class="top-row">
+    <div id="presence-roster" class="presence-roster" aria-label="Who is here"></div>
+    <%= button_to "Invite the agent", document_markdown_agent_path(params[:id]), class: "invite-agent", form: { style: "display:inline" } %>
+  </div>
 
   <div id="agent-bar" class="agent-bar">
     <span class="bar-dot"></span>
@@ -24,47 +18,61 @@
     <button type="button" data-say="@agent draft this section">Draft this section</button>
     <button type="button" data-say="@agent rewrite this ">Rewrite what I selected</button>
     <button type="button" data-say="@agent undo">Undo its last change</button>
+    <button type="button" data-say="@agent review">Review the document</button>
     <button type="button" data-say="@agent pause">Pause</button>
     <button type="button" data-say="@agent resume">Resume</button>
   </div>
-  <ol id="agent-log" class="agent-log" aria-label="What the agent is doing"></ol>
-
+  <p class="agent-hint">Talk to it on a line of its own: <code>@agent</code> and a question, <code>@agent take</code> and a task, or select some text and write <code>@agent rewrite this</code> under it. Tasks under a heading named <b>For the agent</b> get picked up on their own.</p>
   <div class="markdown-pane">
     <div id="editor" data-document-id="<%= @document_id %>:markdown"></div>
     <div id="preview" class="markdown-preview" aria-label="Rendered markdown"></div>
   </div>
-
-<%= button_to "Invite the agent", document_markdown_agent_path(params[:id]), class: "invite-agent", form: { style: "display:inline" } %>
-  <div id="presence-roster" class="presence-roster" aria-label="Who is here"></div>
+  <h2 class="ledger-title">Agent activity</h2>
+  <ol id="agent-log" class="agent-log" aria-label="What the agent is doing"></ol>
 </div>
 
 <style>
+  body { background: #f6f7fb; }
+  .demo--markdown { max-width: 1180px; margin: 0 auto; padding: 1rem 1.25rem 2rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; color: #111827; --accent: #6d28d9; --accent-soft: #ede9fe; --card: #fff; --line: #e8eaf0; --muted: #6b7280; --shadow: 0 1px 2px rgba(17, 24, 39, .04), 0 8px 24px -12px rgba(17, 24, 39, .12); }
+  .top-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 .75rem; }
+  .presence-roster { display: flex; gap: .4rem; flex-wrap: wrap; margin: 0; min-height: 2rem; align-items: center; }
+  .presence-roster .peer { display: inline-flex; align-items: center; gap: .45rem; padding: .3rem .7rem .3rem .45rem; border-radius: 999px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(17, 24, 39, .04); font-size: .85rem; font-weight: 500; }
+  .presence-roster .peer::before { content: ""; width: .75rem; height: .75rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent); }
+  .presence-roster .peer .status { color: var(--muted); font-size: .76rem; font-weight: 400; }
+  .invite-agent { font: inherit; font-size: .85rem; font-weight: 600; padding: .5rem 1.05rem; border: 0; border-radius: 999px; background: linear-gradient(135deg, #7c3aed, #6d28d9); color: #fff; cursor: pointer; box-shadow: 0 2px 6px -1px rgba(109, 40, 217, .45); white-space: nowrap; transition: transform .12s ease, box-shadow .12s ease; }
+  .invite-agent:hover { transform: translateY(-1px); box-shadow: 0 4px 10px -2px rgba(109, 40, 217, .5); }
+  .invite-agent[disabled] { background: var(--accent-soft); color: var(--accent); box-shadow: none; cursor: default; transform: none; }
+  .agent-bar { position: sticky; top: .5rem; z-index: 5; display: flex; gap: .7rem; align-items: center; padding: .55rem .9rem; margin: 0 0 .6rem; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); font-size: .88rem; color: #111827; }
+  .agent-bar .bar-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #cbd5e1; flex: none; }
+  .agent-bar.live .bar-dot { background: #7c3aed; box-shadow: 0 0 0 0 rgba(124, 58, 237, .5); animation: pulse 1.8s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(124, 58, 237, .45); } 70% { box-shadow: 0 0 0 7px rgba(124, 58, 237, 0); } 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); } }
+  .agent-bar .bar-status { font-weight: 600; color: #3b0764; flex: none; }
+  .agent-bar .bar-detail { color: var(--muted); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .82rem; }
+  .agent-bar a { color: var(--accent); font-weight: 500; text-decoration: none; padding: .2rem .55rem; border-radius: 999px; background: var(--accent-soft); font-size: .8rem; }
+  .agent-bar a:hover { background: #ddd6fe; }
+  .agent-bar label { font-size: .8rem; display: inline-flex; gap: .35rem; align-items: center; color: var(--muted); }
+  .agent-bar input[type="checkbox"] { accent-color: #7c3aed; }
+  .agent-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin: 0 0 .4rem; }
+  .agent-actions button { font: inherit; font-size: .8rem; font-weight: 500; padding: .35rem .75rem; border: 1px solid var(--line); background: var(--card); border-radius: 999px; color: #374151; cursor: pointer; box-shadow: 0 1px 2px rgba(17, 24, 39, .04); transition: background .12s ease, border-color .12s ease; }
+  .agent-actions button:hover { background: var(--accent-soft); border-color: #ddd6fe; color: var(--accent); }
+  .agent-hint { margin: 0 0 .9rem; font-size: .78rem; color: var(--muted); }
+  .agent-hint code { background: var(--accent-soft); color: var(--accent); padding: .08em .35em; border-radius: 4px; font-size: .95em; }
   .markdown-pane { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 1rem; align-items: start; }
   @media (max-width: 900px) { .markdown-pane { grid-template-columns: minmax(0, 1fr); } }
-  .markdown-preview { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem 1.25rem; background: #fafafa; min-height: 24rem; max-height: 70vh; overflow: auto; font-size: 15px; line-height: 1.6; }
-  .markdown-preview h1 { font-size: 1.5em; margin: .2em 0 .5em; } .markdown-preview h2 { font-size: 1.25em; margin: 1em 0 .4em; }
-  .markdown-preview code { background: #eef; padding: .05em .3em; border-radius: 3px; }
-  .markdown-preview blockquote { color: #6b7280; border-left: 3px solid #ddd; margin: .5em 0; padding-left: .8em; }
-  .presence-roster { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; min-height: 2rem; }
-  .presence-roster .peer { display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .6rem; border-radius: 999px; background: #f3f4f6; font-size: .9rem; }
-  .presence-roster .peer::before { content: ""; width: .7rem; height: .7rem; border-radius: 50%; background: var(--c); }
-  .presence-roster .peer .status { color: #6b7280; font-size: .78rem; }
-  .agent-bar { position: sticky; top: 0; z-index: 5; display: flex; gap: .6rem; align-items: center; padding: .4rem .7rem; margin: .5rem 0 .25rem; background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; font-size: .85rem; color: #4c1d95; }
-  .agent-bar .bar-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #c4b5fd; }
-  .agent-bar.live .bar-dot { background: #7c3aed; }
-  .agent-bar .bar-status { font-weight: 600; }
-  .agent-bar .bar-detail { color: #6d28d9; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .8rem; }
-  .agent-bar a { color: #6d28d9; }
-  .agent-bar label { font-size: .8rem; display: inline-flex; gap: .3rem; align-items: center; }
-  .agent-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin: .25rem 0 .5rem; }
-  .agent-actions button { font-size: .8rem; padding: .25rem .6rem; border: 1px solid #ddd6fe; background: #fff; border-radius: 999px; color: #4c1d95; cursor: pointer; }
-  .agent-actions button:hover { background: #f5f3ff; }
-  .agent-log { list-style: none; margin: .5rem 0 .75rem; padding: .25rem .5rem; font-size: .8rem; color: #374151; height: 11rem; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fcfcfd; }
-  .agent-log li { padding: .15rem 0; border-top: 1px solid #f3f4f6; }
+  .markdown-preview { border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem 1.5rem; background: var(--card); box-shadow: var(--shadow); height: 60vh; box-sizing: border-box; overflow: auto; font-size: 15px; line-height: 1.65; color: #1f2937; }
+  .markdown-preview h1 { font-size: 1.5em; margin: .2em 0 .5em; letter-spacing: -.01em; } .markdown-preview h2 { font-size: 1.2em; margin: 1.2em 0 .4em; letter-spacing: -.01em; }
+  .markdown-preview code { background: #f3f4f6; padding: .05em .3em; border-radius: 4px; }
+  .markdown-preview blockquote { color: var(--muted); border-left: 3px solid #ddd6fe; margin: .5em 0; padding-left: .8em; }
+  .markdown-preview ul { padding-left: 1.3em; }
+  .ledger-title { margin: 1rem 0 .35rem; font-size: .72rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .agent-log { list-style: none; margin: 0; padding: .35rem .8rem; font-size: .8rem; color: #374151; height: 9rem; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); }
+  .agent-log li { padding: .25rem 0; border-top: 1px solid #f1f2f6; }
   .agent-log li:first-child { border-top: 0; }
-  .agent-log time { color: #9ca3af; font-variant-numeric: tabular-nums; margin-right: .4rem; }
-  .agent-log b { font-weight: 600; color: #7c3aed; }
-  .agent-log span { color: #6b7280; }
-  .agent-log .thinking { margin: .2rem 0 .1rem 1.2rem; padding-left: .6rem; border-left: 2px solid #ddd6fe; color: #6b7280; font-style: italic; white-space: pre-wrap; font-size: .76rem; line-height: 1.4; }
+  .agent-log time { color: #9ca3af; font-variant-numeric: tabular-nums; margin-right: .5rem; font-size: .74rem; }
+  .agent-log b { font-weight: 600; color: var(--accent); }
+  .agent-log span { color: var(--muted); }
+  .agent-log .thinking { margin: .25rem 0 .15rem 1.2rem; padding-left: .7rem; border-left: 2px solid #ddd6fe; color: var(--muted); font-style: italic; white-space: pre-wrap; font-size: .76rem; line-height: 1.45; }
+  .agent-log .thinking.folded { cursor: pointer; }
+  .agent-log .thinking.folded::after { content: " (more)"; color: #a78bfa; font-style: normal; }
 </style>
 <script src="/markdown.js?v=<%= File.exist?(Rails.public_path.join("markdown.js")) ? File.mtime(Rails.public_path.join("markdown.js")).to_i : 0 %>" defer></script>

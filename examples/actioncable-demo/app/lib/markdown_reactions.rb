@@ -4,6 +4,12 @@
 # request or a question; anything else is a change to consider, unless it is
 # inside its own list or a section it drafted.
 module MarkdownReactions
+  # "rewrite this", "shorten these": an edit of what is meant by "this".
+  REWRITE_OF_THIS = /
+    \b(rewrite|reword|rephrase|shorten|tighten|expand|polish|simplify|condense|fix|edit)\b
+    .*\b(this|these|the\ selection|selected)\b
+  /ix
+
   ANSWER_PACE = 140 # characters per second: an answer is a reply, not a draft to watch
 
   private
@@ -14,20 +20,27 @@ module MarkdownReactions
     return contribute(first, last) unless line
 
     request = ls[line].strip
+    return if request.match?(ReviewAgent::UNFINISHED)
+
+    asked = request.sub(/\A@agent\s*:?\s*/i, "")[0, 90]
+    present("on it", MarkdownDoc.line_start(text, line), MarkdownDoc.line_end(text, line), sticky: true, detail: asked)
     case request
+    when /\A@agent\s+review\b/i then review_now(line)
     when /\A@agent\s+undo\b/i then undo_last(line)
     when /\A@agent\s+(take|pause|resume|continue|stop)\b/i then handoff(line, request)
     when /\A@agent\s+draft\s+(this|the|here)\b/i then draft_here(line)
     when /\A@agent\b/i
-      if scoped_request?(request)
+      if scoped_request?(request, line)
         edit_selection(line, request)
-      elsif !@answered.include?(request)
+      elsif !answered?(line, request)
         answer(line, request)
       end
     end
   end
 
   def contribute(first, last)
+    return if backing_off?
+
     paragraphs = MarkdownDoc.paragraphs(text)
     changed = paragraphs.select { |p| p.last_line >= first && p.first_line <= last }.map(&:index)
     return if changed.empty? || !settled?(paragraphs[changed.last]) || mine?(changed, paragraphs)
@@ -51,7 +64,7 @@ module MarkdownReactions
   end
 
   def apply_contribution(result, avoid)
-    highlight = ->(status, from, to) { present(status, from, to, sticky: true) }
+    highlight = ->(status, from, to) { present(status, from, to, sticky: true, log: false) }
     reg = region_of_plan(result.edits)
     applied = MarkdownEditor.new(@doc, @text, flush: flush, avoid: avoid, presence: highlight).apply(result.edits)
     return unless applied.positive?
@@ -71,8 +84,14 @@ module MarkdownReactions
            MarkdownDoc.line_end(text, paragraphs[blocks.max].last_line))
   end
 
-  def scoped_request?(request)
-    !request.end_with?("?") && request.match?(/\b(this|these|that|the selection|selected)\b/i)
+  # A request about "this" is about the selection when there is one. With
+  # nothing selected it is a rewrite of the paragraph above only when it says
+  # so, and never when "this" is the document itself.
+  def scoped_request?(request, line)
+    return false if request.end_with?("?") || request.match?(/\b(this|the)\s+(document|doc|page|file|whole)\b/i)
+    return request.match?(/\b(this|these|that|the selection|selected)\b/i) if selection_for(line)
+
+    request.match?(REWRITE_OF_THIS)
   end
 
   # "@agent rewrite this in one sentence": the paragraphs the author last
@@ -88,7 +107,8 @@ module MarkdownReactions
     from, to = take_request(line, range)
     return present("what you selected is gone", @last_index) unless from
 
-    rewrite(*paragraph_span(from, to), instruction)
+    first, last = paragraph_span(from, to)
+    rewrite(first, last, held_to(instruction, from, to, first, last))
     @changes.clear
   end
 
@@ -106,7 +126,7 @@ module MarkdownReactions
                  MarkdownDoc.line_end(text, paragraphs[last].last_line))
     present("rewriting what you selected", *region_bounds(reg), sticky: true)
     plan = @reviewer.edits(instruction, paragraphs.map(&:text), only: first..last)
-    highlight = ->(status, a, b) { present(status, a, b, sticky: true) }
+    highlight = ->(status, a, b) { present(status, a, b, sticky: true, log: false) }
     applied = MarkdownEditor.new(@doc, @text, flush: flush, presence: highlight, only: first..last).apply(plan)
     label = first == last ? "the rewrite of paragraph #{first}" : "the rewrite of paragraphs #{first} to #{last}"
     remember_undo(label, reg)
@@ -115,8 +135,29 @@ module MarkdownReactions
   end
 
   # The paragraph just above a line, as a byte range, or nil.
+  # What "this" means with nothing selected: the paragraph the request line
+  # was typed under. A request typed right below a paragraph, with no blank
+  # line between, is part of that paragraph in markdown terms, so the lines
+  # above it in the same paragraph are the target.
+  # A selection inside one paragraph: the model rewrites the paragraph, so
+  # it is told which words the request is about and to leave the rest.
+  def held_to(instruction, from, to, first, last)
+    return instruction unless first == last
+
+    chosen = text.byteslice(from, to - from).to_s.strip
+    paragraph = MarkdownDoc.paragraphs(text)[first]&.text.to_s.strip
+    return instruction if chosen.empty? || chosen == paragraph
+
+    "#{instruction}. This is about these words only: \"#{chosen}\". " \
+      "Change them and keep the rest of the paragraph exactly as it is."
+  end
+
   def paragraph_above(line)
-    p = MarkdownDoc.paragraphs(text).select { |x| x.last_line < line }.max_by(&:last_line) or return
+    paragraphs = MarkdownDoc.paragraphs(text)
+    own = paragraphs.find { |x| x.first_line < line && line <= x.last_line }
+    return [MarkdownDoc.line_start(text, own.first_line), MarkdownDoc.line_end(text, line - 1)] if own
+
+    p = paragraphs.select { |x| x.last_line < line }.max_by(&:last_line) or return
     [MarkdownDoc.line_start(text, p.first_line), MarkdownDoc.line_end(text, p.last_line)]
   end
 
@@ -128,6 +169,15 @@ module MarkdownReactions
     present("taking your request", MarkdownDoc.line_start(text, line), MarkdownDoc.line_end(text, line), sticky: true)
     delete_line(line)
     [@doc.index_at(start, @text.root_name), @doc.index_at(finish, @text.root_name)]
+  end
+
+  # "@agent review": a review of the document as it is now.
+  def review_now(line)
+    delete_line(line)
+    return present("still writing the last review", @last_index) if reviewing?
+
+    start_review
+    @changes.clear
   end
 
   # "@agent undo": put back whatever the agent did last.
@@ -216,8 +266,13 @@ module MarkdownReactions
     MarkdownDoc.line_of_index(text, i)
   end
 
+  def answered?(line, question)
+    start = MarkdownDoc.line_start(text, line)
+    Array(@answered).any? { |pos, asked| asked == question && @doc.index_at(pos, @text.root_name) == start }
+  end
+
   def answer(line, question)
-    @answered << question
+    (@answered ||= []) << [@text.relative_position(MarkdownDoc.line_start(text, line)), question]
     at = MarkdownDoc.line_end(text, line)
     present("answering", at, sticky: true)
     reg = region(at, at)
@@ -256,7 +311,7 @@ module MarkdownReactions
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       next unless now - since > 0.25
 
-      present(status, writer.start_index || writer.index, writer.index, sticky: true)
+      present(status, writer.start_index || writer.index, writer.index, sticky: true, log: false)
       since = now
     end
     emit = lambda do |chunk|
