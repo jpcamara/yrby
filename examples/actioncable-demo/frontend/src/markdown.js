@@ -49,9 +49,9 @@ const markdownStyle = HighlightStyle.define([
 ])
 
 const theme = EditorView.theme({
-  "&": { background: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "16px" },
-  "&.cm-focused": { outline: "2px solid #c4b5fd", outlineOffset: "1px" },
-  ".cm-content": { fontFamily: "-apple-system, BlinkMacSystemFont, Inter, system-ui, sans-serif", lineHeight: "1.6", padding: "1rem 1.25rem", caretColor: "#111" },
+  "&": { background: "#fff", border: "1px solid #e8eaf0", borderRadius: "12px", fontSize: "16px", boxShadow: "0 1px 2px rgba(17, 24, 39, .04), 0 8px 24px -12px rgba(17, 24, 39, .12)" },
+  "&.cm-focused": { outline: "none", borderColor: "#c4b5fd", boxShadow: "0 0 0 3px rgba(196, 181, 253, .35), 0 8px 24px -12px rgba(17, 24, 39, .12)" },
+  ".cm-content": { fontFamily: "-apple-system, BlinkMacSystemFont, Inter, system-ui, sans-serif", lineHeight: "1.65", padding: "1.25rem 1.5rem", caretColor: "#111", color: "#1f2937" },
   ".cm-scroller": { overflow: "auto", height: "70vh" },
   ".cm-line": { padding: "0" },
   ".cm-ySelectionInfo": { opacity: "1", fontFamily: "system-ui, sans-serif", fontSize: ".72rem", padding: ".1rem .35rem", borderRadius: "4px", top: "-1.4em" },
