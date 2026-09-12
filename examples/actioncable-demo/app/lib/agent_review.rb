@@ -24,7 +24,7 @@ module AgentReview
     present("reading the document", end_of(last_block), end_of(last_block), sticky: true)
     flush.call(doc.diff { Y::Lexical.append_heading(doc, "Agent review", tag: "h2") })
     @review_heading = last_block.anchor
-    writer = StreamingWriter.new(doc, flush: flush)
+    writer = StreamingWriter.new(doc, flush: flush, after: @review_heading)
     @review = StreamJob.new(writer: writer, label: "the review", on_finish: -> { review_written(writer) }) do |emit|
       @reviewer.stream(text, &emit)
     end
@@ -58,12 +58,12 @@ module AgentReview
   end
 
   def reviewing? = @review && !@review.finished?
-  def drafting? = @draft && !@draft.finished?
   def busy? = reviewing? || work_pending?
 
   # One label for everything in flight.
   def working_label
-    [reviewing? ? "writing a review" : nil, drafting? ? "drafting #{@section_title}" : nil].compact.join(" and ")
+    titles = drafts.map(&:title).join(" and ")
+    [reviewing? ? "writing a review" : nil, drafting? ? "drafting #{titles}" : nil].compact.join(" and ")
   end
 
   # What the loop does between changes: let the streams out, do own work,

@@ -10,10 +10,16 @@ class LlmReviewer
   # about 5s against 8 to 17s in a test of the small decisions. AGENT_MODEL
   # overrides it.
   FIREWORKS_MODEL = "accounts/fireworks/routers/glm-5p3-fast"
-  # A model without a reasoning phase for the quick calls: whether to add
-  # something after a change, and answers. Reviews and drafts keep the
-  # reasoning model. AGENT_FAST_MODEL overrides; unset, the same model is used.
-  FAST_MODEL = ENV.fetch("AGENT_FAST_MODEL", "accounts/fireworks/models/minimax-m3")
+  # An optional other model for the quick calls (answers, whether to add
+  # something after a change, edit plans). Unset, the same model is used at
+  # low reasoning effort, which is as quick.
+  FAST_MODEL = ENV.fetch("AGENT_FAST_MODEL", "")
+  # How long the model thinks before it writes. "low" answers in under a
+  # second with no reasoning shown; "medium" shows some and starts in about
+  # a second; "high" thinks for many seconds. Quick calls (answers,
+  # considering a change, edit plans) use the second setting.
+  EFFORT = ENV.fetch("AGENT_REASONING", "medium")
+  QUICK_EFFORT = ENV.fetch("AGENT_QUICK_REASONING", "low")
   ANTHROPIC_MODEL = "claude-sonnet-5"
 
   PROMPT = <<~PROMPT
@@ -239,7 +245,7 @@ class LlmReviewer
   # Stream a reply. Content chunks go to the block; the model's reasoning,
   # which arrives first, goes to `on_thinking` as it comes.
   def streamed(prompt, quick: false)
-    (quick ? fast_chat : chat).ask(memory_prompt + prompt) do |chunk|
+    (quick ? fast_chat : chat).with_thinking(effort: quick ? QUICK_EFFORT : EFFORT).ask(memory_prompt + prompt) do |chunk|
       thought = chunk.respond_to?(:thinking) && chunk.thinking&.text
       @on_thinking&.call(thought) if thought && !thought.empty?
       text = chunk.content.to_s

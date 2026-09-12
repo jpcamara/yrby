@@ -524,10 +524,15 @@ bulleted list, and parks its caret where it wrote.
 
 The review comes from a model when a key is set: Fireworks AI through its
 OpenAI-compatible API with `FIREWORKS_API_KEY` (default model
-`accounts/fireworks/routers/glm-5p3-fast`, the same model behind a router
-that answers about three times sooner), or Anthropic with
+`accounts/fireworks/routers/glm-5p3-fast`; any model the account can call
+works, `GET /inference/v1/models` lists them), or Anthropic with
 `ANTHROPIC_API_KEY` (default `claude-sonnet-5`); `AGENT_MODEL` overrides
-the model. Without a key it uses a fixed review, so the demo runs either
+the model. `AGENT_REASONING` sets how long the model thinks before it
+writes a review or a draft: `medium` (default) starts in about a second and
+shows some reasoning in the ledger, `low` starts in half a second with none,
+`high` thinks for many seconds. Answers, edit plans, and the look at a
+change use `AGENT_QUICK_REASONING` (default `low`); `AGENT_FAST_MODEL` can
+point those at another model instead. Without a key it uses a fixed review, so the demo runs either
 way. Keep the key out of the repo: put it in a file outside it, such as
 `~/.config/yrby/fireworks.env` with `FIREWORKS_API_KEY=...`, and load it
 before starting the server:
@@ -580,9 +585,17 @@ half a minute after that. One agent per document: a second invite while the
 first is still there gets a 409, and the page's button reads "The agent is
 here" until it leaves.
 
-The ledger above the editor keeps the model's reasoning as it streams, one
-block per stream (the review and a draft can run at once), folded to its
-last lines; click a block to read all of it.
+The ledger above the editor is part of the document: the agent appends each
+status to a `Y.Array` named `agent-log`, so every page shows the same
+history and a reload keeps it. The model's reasoning streams into the
+newest entry as it arrives, one block per stream, folded to its last lines;
+click a block to read all of it.
+
+Up to two drafts run at once, each streaming from the model at its own
+pace, so a second task does not wait for the first. A draft yields only
+while someone is at the point it is writing (the block the words go into or
+the one after it); reading or editing higher up in the section does not
+hold it.
 
 ### The markdown page
 

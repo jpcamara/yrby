@@ -75,6 +75,9 @@ module MarkdownPresence
     end&.first
   end
 
+  LEDGER = "agent-log" # the ledger, a Y.Array in the document
+  LEDGER_KEEP = 200
+
   private
 
   def line_of(index)
@@ -135,7 +138,8 @@ module MarkdownPresence
 
   # Say what the agent is doing with its caret at character `index` (or a
   # selection from `index` to `to`).
-  def present(status, index, to = nil, detail: nil, sticky: false)
+  def present(status, index, to = nil, detail: nil, sticky: false, log: true) # rubocop:disable Metrics/ParameterLists
+    log_entry(status, detail) if log
     Rails.logger.info("agent: #{status}#{" — #{detail}" if detail}")
     @presence_lock ||= Mutex.new
     @presence_lock.synchronize do
@@ -200,7 +204,20 @@ module MarkdownPresence
 
     @caret_key = key
     @caret_at = now
-    present(status, *where, **)
+    present(status, *where, **, log: false)
+  end
+
+  # The ledger, kept in the document: a Y.Array of {at, status, detail}
+  # entries, so every page shows the same history and a reload keeps it.
+  def log_entry(status, detail)
+    entries = @doc.get_array(LEDGER)
+    update = @doc.diff do
+      entries.push({ "at" => (Time.now.to_f * 1000).to_i, "status" => status, "detail" => detail })
+      entries.delete_at(0) while entries.size > LEDGER_KEEP
+    end
+    flush.call(update) if update
+  rescue StandardError => e
+    Rails.logger.warn("agent ledger: #{e.class}: #{e.message}")
   end
 
   def keep_alive
@@ -216,7 +233,7 @@ module MarkdownPresence
       loop do
         sleep HEARTBEAT
         if @last_presence && !@sticky && Process.clock_gettime(Process::CLOCK_MONOTONIC) - @status_at > STATUS_TTL
-          present(@paused ? "paused" : "listening", @last_index, sticky: true)
+          present(@paused ? "paused" : "listening", @last_index, sticky: true, log: false)
         else
           keep_alive
         end
