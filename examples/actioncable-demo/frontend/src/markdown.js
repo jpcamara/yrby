@@ -52,7 +52,7 @@ const theme = EditorView.theme({
   "&": { background: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "16px" },
   "&.cm-focused": { outline: "2px solid #c4b5fd", outlineOffset: "1px" },
   ".cm-content": { fontFamily: "-apple-system, BlinkMacSystemFont, Inter, system-ui, sans-serif", lineHeight: "1.6", padding: "1rem 1.25rem", caretColor: "#111" },
-  ".cm-scroller": { overflow: "auto", minHeight: "16rem", maxHeight: "55vh" },
+  ".cm-scroller": { overflow: "auto", height: "70vh" },
   ".cm-line": { padding: "0" },
   ".cm-ySelectionInfo": { opacity: "1", fontFamily: "system-ui, sans-serif", fontSize: ".72rem", padding: ".1rem .35rem", borderRadius: "4px", top: "-1.4em" },
   ".cm-ySelection": { borderRadius: "2px" },
