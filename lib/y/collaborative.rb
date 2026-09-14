@@ -36,8 +36,10 @@ module Y
     class << self
       # The signed-GlobalID purpose for one collaborative attribute. A token
       # minted for one attribute only verifies against that attribute's
-      # purpose, so it cannot locate a record for any other attribute or
-      # channel.
+      # purpose, so it cannot locate a record for any other attribute. The
+      # purpose names no channel: any channel that calls locate with the same
+      # attribute resolves the record, which is how a custom channel and the
+      # shipped one share tokens.
       def sgid_purpose(name) = "yrby/#{name}"
 
       # Resolves a signed token minted by `collaborative_sgid(name)` back to
