@@ -143,7 +143,7 @@ class BrowserController < ActionController::Base
       render json: { text: attribute.doc.read_text("content"), storage: "BrowserStore",
                      built_in_rows: Y::Document.where(record: Page.find(1), name: "external").count }
     else
-      document = attribute.document
+      document = attribute.collaborative_record
       raw = Y::DocumentUpdate.where(document_id: document.id).pick(:payload)
       render json: { text: attribute.doc.read_text("content"), storage: document.class.name,
                      raw_payload: raw && Base64.strict_encode64(raw) }
