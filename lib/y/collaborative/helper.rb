@@ -36,7 +36,7 @@ module Y
     #                                  refresh: grant_post_path(@post) %>
     module Helper
       def collaborative_document_tag(record, name, expires_in: nil, refresh: nil, **, &)
-        grant = expires_in ? record.collaborative_sgid(name, expires_in: expires_in) : record.collaborative_sgid(name)
+        grant = record.collaborative_sgid(name, **{ expires_in: expires_in }.compact)
         attributes = { grant: grant, name: name }
         attributes[:refresh] = refresh if refresh
         # The helper's attributes come last: a later key wins in a keyword
