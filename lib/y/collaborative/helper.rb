@@ -36,9 +36,11 @@ module Y
     #                                  refresh: grant_post_path(@post) %>
     module Helper
       def collaborative_document_tag(record, name, expires_in: nil, refresh: nil, **, &)
-        grant = record.collaborative_sgid(name, expires_in: expires_in)
+        grant = expires_in ? record.collaborative_sgid(name, expires_in: expires_in) : record.collaborative_sgid(name)
         attributes = { grant: grant, name: name }
         attributes[:refresh] = refresh if refresh
+        # The helper's attributes come last: a later key wins in a keyword
+        # splat, so a template cannot override the grant or the name.
         tag.yrby_document(**, **attributes, &)
       end
     end
