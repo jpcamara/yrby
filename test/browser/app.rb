@@ -140,12 +140,12 @@ class BrowserController < ActionController::Base
   def state
     attribute = Page.find(1).collaborative_document(params[:name])
     if params[:name] == "external"
-      render json: { text: attribute.doc.read_text("content"), storage: "BrowserStore",
+      render json: { text: attribute.y_doc.read_text("content"), storage: "BrowserStore",
                      built_in_rows: Y::Document.where(record: Page.find(1), name: "external").count }
     else
       document = attribute.collaborative_record
       raw = Y::DocumentUpdate.where(document_id: document.id).pick(:payload)
-      render json: { text: attribute.doc.read_text("content"), storage: document.class.name,
+      render json: { text: attribute.y_doc.read_text("content"), storage: document.class.name,
                      raw_payload: raw && Base64.strict_encode64(raw) }
     end
   end
