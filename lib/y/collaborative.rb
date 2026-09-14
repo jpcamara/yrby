@@ -72,8 +72,13 @@ module Y
         ).freeze
       end
 
-      # Resolve built-in classes lazily, respecting Rails model load order.
-      # A custom store must never silently fall back to plain database reads.
+      # The model that stores this attribute's document: Y::Document, or
+      # Y::EncryptedDocument when declared encrypted. An undeclared attribute
+      # gets the plain model. Looked up on each call rather than stored at
+      # declaration, so the engine's models are not loaded while the app's
+      # are still loading. A custom store keeps the document elsewhere and
+      # has no model, so asking for one is an error: returning Y::Document
+      # would quietly read an empty row while the store held the real one.
       def collaborative_document_class(name)
         options = collaborative_document_options.fetch(name.to_s, {})
         if options[:storage]
