@@ -71,7 +71,7 @@ See the [client lifecycle and recovery contract](packages/client/README.md#docum
 The document is rows in your database, and you can read it back in Ruby:
 
 ```ruby
-doc = post.collaborative_document(:body).doc
+doc = post.collaborative_document(:body).y_doc
 doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
@@ -592,7 +592,7 @@ Rows written encrypted read back as ciphertext through the plain classes.
 `post.collaborative_document(:body)` returns a bound `Y::Collaborative::Attribute`
 with `load_state`, `append(update)`, `key`, and `doc`. `doc` reconstructs a fresh
 native `Y::Doc` for Ruby reads and rendering. For built-in row operations such
-as compaction, use `post.collaborative_document(:body).document.compact!`.
+as compaction, use `post.collaborative_document(:body).collaborative_record.compact!`.
 The same accessor serves the channel and application code, including encryption.
 
 Custom storage can use the shipped channel too. Declare one adapter implementing
@@ -615,7 +615,7 @@ end
 ```
 
 The helper and Ruby accessor stay the same. The adapter supplies both channel
-loads/appends and `post.collaborative_document(:body).doc`; yrby creates no
+loads/appends and `post.collaborative_document(:body).y_doc`; yrby creates no
 built-in document rows for it. A failed write is neither acknowledged nor
 broadcast. Custom storage owns encryption and compaction, so combining `storage:`
 with `encrypted: true` raises, as does asking a custom attribute for `.document`.
