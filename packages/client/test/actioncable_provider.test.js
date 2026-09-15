@@ -68,6 +68,47 @@ test("constructs with a default awareness and exposes synced/hasPending", (t) =>
   assert.equal(p.hasPending, false);
 });
 
+test("late callbacks from an old subscription cannot affect a new connection", async (t) => {
+  const subscriptions = [];
+  const consumer = { subscriptions: { create(_params, mixin) {
+    const sub = { ...mixin, send() {}, unsubscribe() {} };
+    subscriptions.push(sub);
+    return sub;
+  } } };
+  const errors = [];
+  const doc = new Y.Doc();
+  const p = makeProvider(t, doc, consumer, {}, { onError: (e) => errors.push(e) });
+  p.connect();
+  const old = subscriptions[0];
+  old.connected();
+  p.disconnect();
+  p.connect();
+  const fresh = subscriptions[1];
+  fresh.connected();
+  doc.getText("body").insert(0, "pending");
+  old.received({ ack: 1 });
+  old.disconnected();
+  old.rejected();
+  assert.equal(p.hasPending, true);
+  assert.equal(p.status, "connected");
+  assert.equal(errors.length, 0);
+  fresh.received({ ack: 1 });
+  assert.equal(p.hasPending, false);
+});
+
+test("synchronous consumer connection callbacks send the opening handshake after create returns", async (t) => {
+  const sent = [];
+  const consumer = { subscriptions: { create(_params, mixin) {
+    mixin.connected();
+    return { ...mixin, send: (message) => sent.push(message), unsubscribe() {} };
+  } } };
+  const p = makeProvider(t, new Y.Doc(), consumer);
+  p.connect();
+  await Promise.resolve();
+  assert.equal(p.status, "connected");
+  assert.ok(sent.some((message) => fromBase64(message.update)[0] === 0));
+});
+
 test("on connect: the SyncStep1 handshake goes via normal send, never whisper", (t) => {
   const c = fakeConsumer({ withWhisper: true });
   const p = makeProvider(t, new Y.Doc(), c, { id: "r2" });
@@ -449,4 +490,30 @@ test("bfcache: a non-persisted pageshow (normal load) does not resurrect stale p
   listeners.get("pageshow")({ persisted: false }); // a fresh navigation, not a restore
 
   assert.equal(p.awareness.getLocalState(), null, "no restore on a normal load");
+});
+
+test("whenAcknowledged waits for the entire queue across disconnect and partial or invalid acks", async (t) => {
+  const consumer = fakeConsumer();
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+  const provider = makeProvider(t, doc, consumer, { id: "r1" });
+  await provider.whenAcknowledged;
+  provider.connect();
+  consumer.deliverConnected();
+  doc.getText("content").insert(0, "first");
+  let acknowledged = false;
+  const settled = provider.whenAcknowledged.then(() => { acknowledged = true; });
+  const first = consumer.calls.send.filter(m => m.id !== undefined).at(-1);
+  doc.getText("content").insert(5, "second");
+  const last = consumer.calls.send.filter(m => m.id !== undefined).at(-1);
+  assert.notEqual(first.id, last.id);
+  consumer.deliverReceived({ ack: first.id });
+  consumer.deliverReceived({ ack: last.id + 1 });
+  consumer.deliverDisconnected();
+  await Promise.resolve();
+  assert.equal(acknowledged, false);
+  consumer.deliverConnected();
+  consumer.deliverReceived({ ack: last.id });
+  await settled;
+  assert.equal(provider.hasPending, false);
 });
