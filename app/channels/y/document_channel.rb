@@ -115,8 +115,7 @@ module Y
     # can handle a document frame, and only document frames need it. Awareness
     # frames are relayed without touching it.
     def document
-      @record ||= Y::Collaborative.locate(params[:grant], params[:name])
-      record&.collaborative_document(params[:name].to_s)
+      (record || locate_record)&.collaborative_document(params[:name].to_s)
     end
   end
 end
