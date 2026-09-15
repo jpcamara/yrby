@@ -101,12 +101,17 @@ module Y
       !authorizer || instance_exec(record, params[:name].to_s, &authorizer)
     end
 
+    # Refuse a subscription that was already confirmed. Inside subscribed,
+    # reject alone is enough: Action Cable checks the flag afterwards, drops
+    # the channel, and tells the client. Later, nothing checks it, so reject
+    # alone would leave the streams open and the client unaware. Calling
+    # reject_subscription, the framework's own routine, removes this channel
+    # from the connection and sends the client the rejection, which the
+    # provider treats as "keep the unacked edits and get a fresh grant". Only
+    # this subscription goes; others on the same connection keep running.
     def reject_document_subscription
       stop_all_streams
       reject
-      # Action Cable's reject only marks a channel; after subscription it does
-      # not remove it or notify the client. Use the framework's rejection path
-      # so the provider retains unacknowledged work and other channels stay up.
       reject_subscription
     end
 
