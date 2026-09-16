@@ -269,7 +269,10 @@ export class ActionCableProvider {
   disconnect(): void {
     if (!this.#subscription) return;
     const sub = this.#subscription;
-    ++this.#generation; // Obsolete callbacks cannot pause or reject a replacement.
+    // Silence the old subscription now, not when a replacement arrives: its
+    // unsubscribe is deferred below, so a frame still on the wire, or a late
+    // rejected/connected, must not reach the session or a replacement.
+    ++this.#generation;
     // Tell peers we're gone while the transport is still live, then pause and
     // detach. Defer the unsubscribe one microtask so the removal frame flushes
     // before the channel tears down.
