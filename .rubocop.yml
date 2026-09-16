@@ -56,6 +56,10 @@ Metrics/BlockLength:
 Metrics/ClassLength:
   Exclude:
     - "test/**/*"
+    # The websocket client: one socket's life in one place, and the protocol
+    # session it drives.
+    - "lib/y/action_cable/client.rb"
+    - "lib/y/action_cable/client/session.rb"
 Minitest/MultipleAssertions:
   Enabled: false
 

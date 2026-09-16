@@ -25,3 +25,7 @@ gem "sqlite3", require: false
 gem "rubocop", require: false
 gem "rubocop-minitest", require: false
 gem "rubocop-rake", require: false
+
+# The websocket client (Y::ActionCable::Client) speaks Action Cable over
+# socketry. Optional at runtime: an app that uses the client adds this gem.
+gem "async-websocket", require: false
