@@ -61,3 +61,6 @@ gem "sqlite3"
 # The demo agent reviews a document with a Claude model when ANTHROPIC_API_KEY
 # is set (see app/lib/reviewer.rb); without a key it uses a fixed review.
 gem "ruby_llm", "~> 1.16", require: false
+
+# The Ruby websocket client the out-of-process agent (bin/agent-client) uses.
+gem "async-websocket"

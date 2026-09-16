@@ -6,7 +6,8 @@ class DocumentsController < ApplicationController
 
   # Start a Ruby agent that joins the document as a live collaborator (see
   # ReviewAgent). It runs in a background thread over the same DocumentChannel
-  # the browsers use; nothing in the browser changes beyond the roster.
+  # the browsers use; nothing in the browser changes beyond the roster. This
+  # is the Puma path; under Falcon AgentInvite answers the route instead.
   def agent = start_agent(ReviewAgent, params[:id])
 
   # The markdown page's document is a Y.Text under "<id>:markdown".

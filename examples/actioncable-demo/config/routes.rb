@@ -3,7 +3,9 @@ Rails.application.routes.draw do
 
   get "docs/:id", to: "documents#show", as: :document
   get "docs/:id/lexxy", to: "documents#lexxy", as: :document_lexxy
-  post "docs/:id/agent", to: "documents#agent", as: :document_agent
+  # A Rack endpoint: under Falcon the answer streams while the agent runs
+  # (see AgentInvite); under Puma it is documents#agent.
+  post "docs/:id/agent", to: AgentInvite, as: :document_agent
   get "docs/:id/rhino", to: "documents#rhino", as: :document_rhino
   # "Opaque state" demos: the same DocumentChannel, different Yjs shapes.
   get "docs/:id/codemirror", to: "documents#codemirror", as: :document_codemirror

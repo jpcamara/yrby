@@ -198,7 +198,7 @@ module AgentPresence
                                       at: (Time.now.to_f * 1000).to_i)
       @status_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @sticky = sticky
-      Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+      publish_presence(@presence.set_local_state(@last_presence.to_json))
     end
   end
 
@@ -219,7 +219,7 @@ module AgentPresence
 
       @thought_at = now
       @last_presence = @last_presence.merge(thinking: @thinking.dup)
-      Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+      publish_presence(@presence.set_local_state(@last_presence.to_json))
     end
   end
 
@@ -271,7 +271,7 @@ module AgentPresence
     return unless @last_presence
 
     @presence_lock.synchronize do
-      Y::ActionCable.broadcast_awareness(@document_id, @presence.set_local_state(@last_presence.to_json))
+      publish_presence(@presence.set_local_state(@last_presence.to_json))
     end
   end
 

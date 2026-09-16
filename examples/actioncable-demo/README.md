@@ -62,6 +62,25 @@ come from [TanStack Table](https://tanstack.com/table)'s headless core and are
 deliberately never written to the document — two browsers can sort the same rows
 differently while editing the same cells.
 
+### The agent, over the websocket
+
+The Lexxy page's "Invite the agent" starts a Ruby agent (`ReviewAgent`) in the
+web server: a thread that follows the cable's pubsub and records its own edits.
+The same agent can run anywhere as a client of the cable, the way a browser
+does, with the server recording, acking, and distributing what it writes:
+
+```bash
+CABLE_URL=ws://127.0.0.1:3000/cable bin/agent-client demo   # then open /docs/demo/lexxy
+```
+
+`bin/agent-client` joins over `Y::ActionCable::Client` and shares one Async
+reactor with the agent. Under Falcon (`bundle exec falcon serve --bind
+http://127.0.0.1:3000`) the invite itself takes that shape: the agent runs as
+a child task of the request, joined over the websocket, and the response
+streams its status for as long as it runs (`curl -N -X POST
+localhost:3000/docs/demo/agent`). The page holds that stream with a fetch, so
+leaving the page stops the agent. See `AgentInvite`.
+
 ### Using this in your own app
 
 You don't need the demo's build setup. Two things keep an integration

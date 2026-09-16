@@ -167,6 +167,16 @@ function agentState() {
 }
 let agentWasHere = false
 const inviteEl = document.querySelector(".invite-agent")
+// The invite is a fetch, not a navigation. Under Falcon the answer is a
+// stream that stays open while the agent runs, and this page holds it:
+// leaving the page closes it, and the agent goes with it. Under Puma the
+// answer is an empty 204 and the agent runs on its own.
+inviteEl?.closest("form")?.addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const response = await fetch(e.target.action, { method: "POST", headers: { Accept: "text/event-stream" } })
+  const reader = response.body?.getReader()
+  while (reader && !(await reader.read()).done) { /* hold the stream until the agent leaves */ }
+})
 function renderBar() {
   if (!barEl) return
   const s = agentState()
