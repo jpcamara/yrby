@@ -1,15 +1,21 @@
 # frozen_string_literal: true
 
 # A Ruby agent that joins a document as a live collaborator. It follows the
-# document through a Y::ActionCable::Peer, one live doc for the whole run,
-# so it sees people's edits as they happen. It types its review into the
-# document as the reviewer produces it, then stays: it considers changes
-# once the typing pauses, answers lines addressed to it, and works through
-# its own list. What it is doing is always in its cursor label and in the
-# log under the editor, and its caret only goes where it is working. It
-# leaves when nobody else has been here for a while. The presence is
-# Y::Awareness; the writing is Y::Lexical over Y::XmlText, recorded and
-# broadcast like any other edit.
+# document through a peer, one live doc for the whole run, so it sees
+# people's edits as they happen. It types its review into the document as
+# the reviewer produces it, then stays: it considers changes once the
+# typing pauses, answers lines addressed to it, and works through its own
+# list. What it is doing is always in its cursor label and in the log under
+# the editor, and its caret only goes where it is working. It leaves when
+# nobody else has been here for a while. The presence is Y::Awareness; the
+# writing is Y::Lexical over Y::XmlText, recorded and broadcast like any
+# other edit.
+#
+# The peer is a Y::ActionCable::Peer by default: the agent runs inside the
+# web server, follows the cable's pubsub, and records its own edits. Given a
+# Y::ActionCable::Client it runs anywhere, joined over the websocket like a
+# browser, and the server records, acks, and distributes what it writes
+# (see bin/agent-client).
 class ReviewAgent
   include AgentPresence
   include AgentReactions
@@ -25,13 +31,13 @@ class ReviewAgent
   # "@agent" with nothing after it is a request still being typed.
   UNFINISHED = /\A@agent(\s+(take|rewrite\s+this))?\s*\z/i
 
-  def initialize(document_id, reviewer: Reviewer.default, stay: MAX_STAY)
+  def initialize(document_id, reviewer: Reviewer.default, stay: MAX_STAY, peer: nil)
     @document_id = document_id
     @reviewer = reviewer
     @stay = stay
     @presence = Y::Awareness.new
     @changes = Queue.new
-    @peer = Y::ActionCable::Peer.new(document_id)
+    @peer = peer || Y::ActionCable::Peer.new(document_id)
     @list = nil
     @recent_changes = []
   end
@@ -39,8 +45,7 @@ class ReviewAgent
   def run
     @peer.on_update { |_update, _doc, changed| @changes << changed }
     @peer.on_awareness { |frame| see_presence(frame) }
-    @peer.subscribe
-    (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
+    join
     Rails.logger.info("agent: joined #{@document_id} with #{root.xml_text_count} blocks")
     @reviewer.on_thinking = ->(delta) { think(delta) } if @reviewer.respond_to?(:on_thinking=)
     start_heartbeat
@@ -50,8 +55,8 @@ class ReviewAgent
     watch
   ensure
     stop_heartbeat
+    publish_presence(@presence.clear_local_state)
     @peer.unsubscribe
-    Y::ActionCable.broadcast_awareness(@document_id, @presence.clear_local_state)
   end
 
   private
@@ -137,13 +142,37 @@ class ReviewAgent
     end
   end
 
-  # Record and broadcast one diff, the way the channel does for a browser.
+  # Over the pubsub the document is loaded from the store after subscribing,
+  # so an edit that lands in between is applied, not lost. Over the
+  # websocket the handshake delivers it.
+  def join
+    @peer.subscribe
+    return if socket?
+
+    (bytes = Store.current.replay(@document_id)) && doc.apply_update(bytes)
+  end
+
+  def socket? = @peer.is_a?(Y::ActionCable::Client)
+
+  # One diff, on its way to everyone. Over the pubsub the agent records it
+  # and broadcasts it, the way the channel does for a browser. Over the
+  # websocket it sends it, and the server records, acks, and broadcasts it,
+  # the way it does for a browser.
   def flush
     @flush ||= lambda do |update|
       next unless update
 
-      Store.current.record(@document_id, update)
-      Y::ActionCable.broadcast(@document_id, update)
+      if socket?
+        @peer.send_update(update)
+      else
+        Store.current.record(@document_id, update)
+        Y::ActionCable.broadcast(@document_id, update)
+      end
     end
+  end
+
+  # A presence frame, on its way to everyone, by the same two routes.
+  def publish_presence(frame)
+    socket? ? @peer.send_awareness(frame) : Y::ActionCable.broadcast_awareness(@document_id, frame)
   end
 end
