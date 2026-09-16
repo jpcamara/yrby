@@ -9,6 +9,22 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Y::ActionCable::Client`: a Ruby websocket client of the document channel,
+  so a process joins a document the way a browser does instead of following
+  the cable's pubsub from inside the server. It subscribes with the channel's
+  name and params (a grant from `record.collaborative_sgid(name)` for
+  `Y::DocumentChannel`), performs the sync handshake, applies incoming
+  updates into its own `Y::Doc`, sends its own updates with ids and keeps
+  them until the server acks them (resent on a timer and after a reconnect,
+  as yrby-client does), and relays presence both ways. The server records,
+  acks, and distributes what it sends like anyone else's; the process touches
+  neither the store nor the pubsub. Same surface as `Y::ActionCable::Peer`
+  (`doc`, `on_update`, `on_awareness`, `subscribe`, `unsubscribe`) plus
+  `send_update` and `send_awareness`. Built on `async-websocket`, which an
+  app adds itself: `require "y/action_cable/client"` loads it. It runs as a
+  task of the reactor `subscribe` is called from (Falcon, an `Async` block)
+  and in a thread of its own otherwise (Puma, a script).
+
 - `Y::DocumentChannel.authorize_document { |record, name| ... }` checks the
   application's permissions when a client subscribes, in addition to the
   signed grant. The block runs in channel context. A denial rejects that
