@@ -123,8 +123,8 @@ YrbyDocumentElement.consumer = createConsumer();
 
 A store is scoped to one consumer. Matching `{ channel, grant, name }` tuples
 share a document and queue. Grants are compared exactly, never decoded to
-infer a common record. Different consumers have separate scopes. Each provider
-lifetime adds an opaque `session_id` subscription parameter to isolate its
+infer a common record. Different consumers have separate scopes. Each session
+adds an opaque `session_id` subscription parameter to isolate its
 acknowledgments; this parameter never selects or authorizes a server document.
 
 Headless workflows can hold an explicit attachment through their own lifetime:
@@ -195,12 +195,14 @@ const provider = new ActionCableProvider(doc, consumer, "DocumentChannel", { id:
 provider.connect(); // does not auto-connect — wire your editor binding first
 
 // Observe the connection (one signal, no separate "sync" event):
-provider.onStatusChange(({ status }) => render(status)); // returns an unsubscribe fn
+provider.onStatusChange(({ status, pending }) => render(status, pending)); // returns an unsubscribe fn
 //   "connecting"  -> subscription created, transport not up yet
 //   "connected"   -> transport up, exchanging sync steps (show "syncing")
 //   "synced"      -> caught up with the server
 //   "disconnected"-> torn down via disconnect()/destroy()
 //                    (a dropped transport ActionCable will retry shows as "connecting")
+//   pending       -> true while local edits await acknowledgment; listeners
+//                    fire when either status or pending changes
 
 // provider.status     -> the current status (same union as above)
 // provider.awareness  -> the provider's Awareness instance (always a fresh one)
