@@ -1,7 +1,5 @@
 import * as Turbo from "@hotwired/turbo";
 import { YrbyDocumentElement } from "../src/document_element.ts";
-import { DocumentSessionStore } from "../src/document_session.ts";
-window.DocumentSessionStore = DocumentSessionStore;
 window.anyCableConsumer = async () => (await import("@anycable/web")).createConsumer("/cable");
 window.Turbo = Turbo;
 window.YrbyDocumentElement = YrbyDocumentElement;

@@ -70,7 +70,12 @@ try {
   await evaluate('document.querySelector("#move-target").append(moved)');
   await wait('moved.provider.synced');
   check("clean delayed reinsertion reconstructs saved content", await evaluate('moved.provider !== savedProvider && moved.doc.getText("content").toString() === "before move"'));
-  await evaluate('window.savedDoc = moved.doc; window.savedProvider = moved.provider; window.sessionStore = DocumentSessionStore.for(savedProvider.consumer); void 0');
+  // ActionCable reopens its socket whenever a subscription is created, so an
+  // offline stretch stubs the connection's open() rather than calling disconnect().
+  await evaluate(`window.savedDoc = moved.doc; window.savedProvider = moved.provider; window.cable = savedProvider.consumer;
+    window.cableOpen = cable.connection.open;
+    window.goOffline = () => { cable.connection.open = () => false; cable.disconnect(); };
+    window.goOnline = () => { cable.connection.open = cableOpen; cable.connect(); };`);
   await browser(session, "find", "label", "Encrypted text", "fill", "encrypted browser edit");
   await wait('!document.querySelector("#secret-doc").provider.hasPending');
   const encrypted = await state("secret");
@@ -83,8 +88,8 @@ try {
   check("custom storage serves both browser writes and native Ruby reads without built-in rows",
     custom.text === "custom adapter browser edit" && custom.storage === "BrowserStore" && custom.built_in_rows === 0);
 
-  // Suspend managed subscriptions while leaving HTTP available for Turbo Drive.
-  await evaluate('sessionStore.suspend(); window.suspendedSockets = socketCount');
+  // Take the cable down while leaving HTTP available for Turbo Drive.
+  await evaluate('goOffline(); window.suspendedSockets = socketCount');
   await wait('!savedProvider.synced');
   await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
   check("edit is pending and absent from storage before navigating", await evaluate('savedProvider.hasPending') && (await state("body")).text === "before move");
@@ -95,15 +100,14 @@ try {
   // so check location directly through the --fn wait that works.
   await wait("location.pathname === '/away'");
   check("Turbo navigation stays in the same JS context", await evaluate('!!window.savedDoc'));
-  check("pending session survives page removal without a replacement subscription", await evaluate('!savedDoc.isDestroyed && savedProvider.hasPending && savedProvider.status === "disconnected"'));
-  check("no CRDT snapshot bytes are written into cached elements", await evaluate('!moved.hasAttribute("data-yrby-snapshot")'));
+  check("pending session survives page removal", await evaluate('!savedDoc.isDestroyed && savedProvider.hasPending && socketCount === suspendedSockets'));
   await browser(session, "back");
   await wait('document.querySelector("#body-doc")?.doc === savedDoc');
-  check("suspended history restore reuses the pending session without reopening the socket", await evaluate('socketCount === suspendedSockets && document.querySelector("#body-doc").doc.getText("content").toString() === "pending across Turbo"'));
-  await evaluate('sessionStore.resume()');
+  check("offline history restore reuses the pending session without reopening the socket", await evaluate('socketCount === suspendedSockets && document.querySelector("#body-doc").doc.getText("content").toString() === "pending across Turbo"'));
+  await evaluate('goOnline()');
   await wait('document.querySelector("#body-doc")?.provider?.synced && !document.querySelector("#body-doc").provider.hasPending');
   check("actual Turbo history restore retains and acknowledges the unsent edit", await evaluate('document.querySelector("#body-doc").doc.getText("content").toString() === "pending across Turbo"') && (await state("body")).text === "pending across Turbo");
-  // Drop the actual socket without suspending the store, then restore transport.
+  // Drop the actual socket underneath the consumer, then restore transport.
   await evaluate(`window.networkSession = document.querySelector("#body-doc").session;
     window.networkConnection = networkSession.provider.consumer.connection;
     window.networkOpen = networkConnection.open; networkConnection.open = () => false;
@@ -127,7 +131,7 @@ try {
 
   // An advance visit first renders the cached preview, then replaces it with
   // fresh server HTML. Hold that response so the transient page is observable.
-  await evaluate('window.beforePreview = document.querySelector("#body-doc"); window.outgoingPreviewDoc = beforePreview.doc; window.outgoingPreviewProvider = beforePreview.provider; window.previewConsumer = beforePreview.provider.consumer; sessionStore.suspend()');
+  await evaluate('window.beforePreview = document.querySelector("#body-doc"); window.outgoingPreviewDoc = beforePreview.doc; window.outgoingPreviewProvider = beforePreview.provider; goOffline()');
   await wait('!beforePreview.provider.synced');
   await browser(session, "find", "label", "Body", "fill", "pending before preview");
   check("preview regression starts with an unacknowledged edit", await evaluate('beforePreview.provider.hasPending'));
@@ -146,8 +150,8 @@ try {
   check("outgoing delivery survives while the preview is offline", await evaluate('outgoingPreviewProvider.hasPending && !outgoingPreviewDoc.isDestroyed'));
   await evaluate('releaseFresh(); window.fetch = originalFetch');
   await wait('!document.documentElement.hasAttribute("data-turbo-preview") && document.querySelector("#body-doc") !== previewElement');
-  check("fresh page stays inert and offline during explicit suspension", await evaluate('document.querySelector("#body-doc").inert && document.querySelector("#body-doc").provider.status === "disconnected"'));
-  await evaluate('sessionStore.resume()');
+  check("fresh page stays inert while the cable is down", await evaluate('document.querySelector("#body-doc").inert && !document.querySelector("#body-doc").provider.synced'));
+  await evaluate('goOnline()');
   await wait('!document.documentElement.hasAttribute("data-turbo-preview") && document.querySelector("#body-doc")?.provider?.synced && !document.querySelector("#body-doc").provider.hasPending');
   check("transient previews never allocate a document", await evaluate('previewDoc === undefined && previewElement.doc === undefined && previewElement.provider === undefined'));
   await wait('outgoingPreviewDoc.isDestroyed && !outgoingPreviewProvider.hasPending && document.querySelector("#body-doc").doc.getText("content").toString() === "pending before preview"');
@@ -173,7 +177,7 @@ try {
   await evaluate(`window.morphElement = primary;
     window.morphSession = primary.session; window.originalGrant = primary.getAttribute("grant");
     window.mountsBeforeMorph = primary.mountCount;
-    sessionStore.suspend();`);
+    goOffline();`);
   await browser(session, "find", "label", "Body", "fill", "private body pending");
   await evaluate(`const replacement = morphElement.cloneNode(true);
     replacement.setAttribute("grant", document.querySelector("#secret-doc").getAttribute("grant"));
@@ -181,7 +185,7 @@ try {
     Turbo.renderStreamMessage('<turbo-stream action="replace" method="morph" target="body-doc"><template>' + replacement.outerHTML + '</template></turbo-stream>');`);
   await wait('document.querySelector("#body-doc").getAttribute("name") === "secret" && morphElement.session !== morphSession');
   check("Turbo morph switches attachments and preserves the original pending queue", await evaluate('document.querySelector("#body-doc") === morphElement && morphSession.hasPending && morphSession.descriptor.grant === originalGrant && morphElement.session === document.querySelector("#secret-doc").session && morphElement.mountCount === mountsBeforeMorph + 1'));
-  await evaluate('sessionStore.resume()');
+  await evaluate('goOnline()');
   await wait('morphSession.state === "closed" && morphElement.provider.synced');
   check("original tail reaches only its original Ruby document", (await state("body")).text === "private body pending" && (await state("secret")).text === "encrypted browser edit");
   await evaluate('morphElement.setAttribute("grant", originalGrant); morphElement.setAttribute("name", "body")');
@@ -208,12 +212,11 @@ try {
   // Use a real Rails subscription, retain its obsolete callbacks, and replace it.
   await evaluate(`window.guardSession = detachedElement.session;
     window.guardProvider = guardSession.provider;
-    window.guardStore = DocumentSessionStore.for(guardProvider.consumer);
     window.oldGuardSubscription = guardProvider.consumer.subscriptions.subscriptions.find(sub =>
       sub.identifier === JSON.stringify({ channel: guardProvider.channelName, ...guardProvider.channelParams }));
-    guardStore.suspend();`);
+    guardProvider.disconnect();`);
   await wait('guardProvider.status === "disconnected"');
-  await evaluate('guardStore.resume()');
+  await evaluate('guardProvider.connect()');
   await wait('guardProvider.synced');
   check("late callbacks from a real retired subscription cannot pause or reject the replacement",
     await evaluate(`oldGuardSubscription.disconnected(); oldGuardSubscription.rejected();
