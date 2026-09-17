@@ -9,8 +9,8 @@
 // the server's persistence/ack path.
 //
 // The constructor does not auto-connect: wire up your editor binding first, then
-// call `connect()`. Watch the connection with `onStatusChange(({ status }) => ...)`
-// or the `status` getter. Editors that must not bind before the first sync
+// call `connect()`. Watch the connection with `onStatusChange(({ status, pending }) => ...)`
+// or the `status` and `hasPending` getters. Editors that must not bind before the first sync
 // can `await provider.whenSynced` after connect(). On `disconnect()`/`destroy()`,
 // and on browser `pagehide`, the provider broadcasts a presence removal so peers
 // drop our cursor right away instead of waiting for the awareness timeout.
@@ -28,9 +28,11 @@ import type { Doc } from "yjs";
  */
 export type ProviderStatus = "connecting" | "connected" | "synced" | "disconnected";
 
-/** Payload passed to onStatusChange listeners. */
+/** Payload passed to onStatusChange listeners. Fires when either field changes. */
 export interface StatusEvent {
   status: ProviderStatus;
+  /** True while local edits await the server's acknowledgment. */
+  pending: boolean;
 }
 
 /** The minimal slice of an ActionCable/AnyCable subscription this provider uses. */
@@ -79,9 +81,10 @@ export class ActionCableProvider {
   #generation = 0;
   #destroyed = false;
   #status: ProviderStatus = "disconnected";
+  #pending = false;
+  #onDocUpdate = (): void => this.#refreshStatus(); // a local edit may have made the queue non-empty
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #whenSynced: Promise<void> | null = null;
-  #acknowledgmentWaiters = new Set<() => void>();
   // `session.synced` resets on every transport drop (a reconnect
   // re-handshakes). Whether the first catch-up has ever happened is tracked
   // separately here, so `whenSynced` does not depend on when it is first
@@ -111,6 +114,8 @@ export class ActionCableProvider {
       onError: this.#onError,
       send: (frame, id) => this.#send(frame, id),
     });
+    // After the session's own listener, so the queue already holds the edit.
+    this.doc.on("update", this.#onDocUpdate);
   }
 
   /** True once the document has caught up with the server (received a SyncStep2). */
@@ -156,7 +161,13 @@ export class ActionCableProvider {
   /** Resolves when the delivery queue is empty; remains pending if destroyed before ack. */
   get whenAcknowledged(): Promise<void> {
     if (!this.hasPending) return Promise.resolve();
-    return new Promise(resolve => { this.#acknowledgmentWaiters.add(resolve); });
+    return new Promise(resolve => {
+      const off = this.onStatusChange(({ pending }) => {
+        if (pending) return;
+        off();
+        resolve();
+      });
+    });
   }
 
   /** Copy the unacknowledged tail for a page snapshot, without the full document. */
@@ -167,6 +178,7 @@ export class ActionCableProvider {
   /** Restore an unsent local tail, which must still be delivered and acknowledged. */
   restorePendingUpdate(update: Uint8Array): void {
     this.session.restorePendingUpdate(update);
+    this.#refreshStatus();
   }
 
   /**
@@ -216,10 +228,7 @@ export class ActionCableProvider {
           // Reliable-delivery ack: confirm + prune the local queue.
           if (message && message.ack !== undefined) {
             provider.session.ack(message.ack);
-            if (!provider.hasPending) {
-              for (const resolve of provider.#acknowledgmentWaiters) resolve();
-              provider.#acknowledgmentWaiters.clear();
-            }
+            provider.#refreshStatus(); // the queue may have just emptied
             return;
           }
           const awarenessPayload = message && message.awareness;
@@ -307,8 +316,8 @@ export class ActionCableProvider {
     this.#destroyed = true;
     this.session.destroy();
     this.awareness.destroy(); // stops its reaper timer
+    this.doc.off("update", this.#onDocUpdate);
     this.#statusListeners.clear();
-    this.#acknowledgmentWaiters.clear();
   }
 
   #computeStatus(): ProviderStatus {
@@ -318,11 +327,13 @@ export class ActionCableProvider {
   }
 
   #refreshStatus(): void {
-    const next = this.#computeStatus();
-    if (next === this.#status) return;
-    this.#status = next;
-    if (next === "synced") this.#everSynced = true;
-    for (const listener of this.#statusListeners) listener({ status: next });
+    const status = this.#computeStatus();
+    const pending = this.hasPending;
+    if (status === this.#status && pending === this.#pending) return;
+    this.#status = status;
+    this.#pending = pending;
+    if (status === "synced") this.#everSynced = true;
+    for (const listener of this.#statusListeners) listener({ status, pending });
   }
 
   // Presence teardown/restore around page lifecycle:

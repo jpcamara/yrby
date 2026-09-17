@@ -68,7 +68,7 @@ export class DocumentSessionStore extends EventTarget {
   /** Stop this scope's network activity while keeping unsaved work in memory. */
   suspend(): void {
     this.#suspended = true;
-    for (const session of this.sessions) session.provider?.disconnect();
+    for (const session of this.sessions) session.provider.disconnect();
   }
   resume(): void {
     this.#suspended = false;
@@ -100,21 +100,12 @@ export class DocumentAttachment {
 
 export class DocumentSession extends EventTarget {
   readonly doc = new Y.Doc();
+  readonly #provider: ActionCableProvider;
   #phase: Phase = "open";
   #renewal: Renewal = "idle";
-  #provider: ActionCableProvider | undefined;
   #attachments = new Set<DocumentAttachment>();
   #presenceOwner: DocumentAttachment | undefined;
-  // The grant currently in use. Starts as the descriptor's and changes only
-  // through a successful refresh; the descriptor itself never changes.
-  #grant: string;
-  // Set while blocked: the work the provider held, kept for retry() or export.
-  #recovery: DocumentRecovery | undefined;
   #error: unknown;
-  #waiting = false; // an acknowledgment wait is in progress
-  #scheduled = false; // a settle check is queued
-  #resolveSynced!: () => void;
-  readonly whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
 
   /** Use DocumentSessionStore.acquire to create and own sessions. */
   constructor(
@@ -123,16 +114,31 @@ export class DocumentSession extends EventTarget {
     private readonly remove: () => void,
   ) {
     super();
-    this.#grant = descriptor.grant;
-    this.doc.on("update", this.#schedule);
+    // One provider for the session's whole life. It queues edits while offline,
+    // so blocking, suspending, and retrying are all just connect/disconnect.
+    this.#provider = new ActionCableProvider(this.doc, store.consumer, descriptor.channel, {
+      grant: descriptor.grant,
+      name: descriptor.name,
+      // Ack sequence numbers belong to this session, not a record.
+      session_id: uuidv4(),
+    }, {
+      onError: (error, context) => {
+        if (context === "rejected") this.#rejected(error);
+        else { this.#error = error; this.store.changed(this); }
+      },
+    });
+    this.#provider.awareness.setLocalState(null); // no cursor until an editor sets one
+    this.#provider.onStatusChange(({ status }) => {
+      const up = status === "connected" || status === "synced";
+      if (up && this.#renewal === "spent") this.#renewal = "idle";
+      this.#settle(); // also fires when the pending queue empties
+    });
   }
-  get provider(): ActionCableProvider | undefined { return this.#provider; }
+  get provider(): ActionCableProvider { return this.#provider; }
   get error(): unknown { return this.#error; }
   get attachmentCount(): number { return this.#attachments.size; }
-  get hasPending(): boolean {
-    if (this.#provider) return this.#provider.hasPending;
-    return !!this.#recovery?.pending;
-  }
+  get hasPending(): boolean { return this.#provider.hasPending; }
+  get whenSynced(): Promise<void> { return this.#provider.whenSynced; }
   get state(): DocumentSessionState {
     if (this.#phase !== "open") return this.#phase;
     return this.#attachments.size ? "attached" : "draining";
@@ -149,12 +155,9 @@ export class DocumentSession extends EventTarget {
   }
   /** @internal */
   connect(): void {
-    if (this.#phase !== "open") return;
+    if (this.#phase !== "open" || this.store.suspended) return;
     try {
-      // The provider exists even while suspended so edits queue as pending;
-      // only the subscription waits for resume().
-      this.#provider ??= this.#createProvider();
-      if (!this.store.suspended) this.#provider.connect();
+      this.#provider.connect();
     } catch (error) {
       this.#block(error);
     }
@@ -164,7 +167,7 @@ export class DocumentSession extends EventTarget {
     this.#attachments.delete(attachment);
     if (this.#presenceOwner === attachment || !this.#attachments.size) {
       this.#presenceOwner = undefined;
-      this.#provider?.awareness.setLocalState(null);
+      this.#provider.awareness.setLocalState(null);
     }
     this.#settle();
   }
@@ -173,7 +176,7 @@ export class DocumentSession extends EventTarget {
     if (this.#phase !== "open" || !this.#attachments.has(attachment)) return;
     if (state) this.#presenceOwner = attachment;
     if (this.#presenceOwner === attachment) {
-      this.#provider?.awareness.setLocalState(state);
+      this.#provider.awareness.setLocalState(state);
       if (!state) this.#presenceOwner = undefined;
     }
   }
@@ -183,7 +186,7 @@ export class DocumentSession extends EventTarget {
     return {
       descriptor: this.descriptor,
       update: Y.encodeStateAsUpdate(this.doc),
-      pending: this.#provider ? this.#provider.pendingUpdate : this.#recovery?.pending?.slice() ?? null,
+      pending: this.#provider.pendingUpdate,
     };
   }
   /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
@@ -203,56 +206,27 @@ export class DocumentSession extends EventTarget {
     this.#dispose();
   }
 
-  #createProvider(): ActionCableProvider {
-    const provider = new ActionCableProvider(this.doc, this.store.consumer, this.descriptor.channel, {
-      grant: this.#grant,
-      name: this.descriptor.name,
-      // Ack sequence numbers belong to this provider lifetime, not a record.
-      session_id: uuidv4(),
-    }, {
-      onError: (error, context) => {
-        if (this.#provider !== provider) return;
-        if (context === "rejected") this.#rejected(provider, error);
-        else { this.#error = error; this.store.changed(this); }
-      },
-    });
-    provider.awareness.setLocalState(null);
-    if (this.#recovery?.pending) provider.restorePendingUpdate(this.#recovery.pending);
-    this.#recovery = undefined;
-    provider.onStatusChange(({ status }) => {
-      const up = status === "connected" || status === "synced";
-      if (up && this.#renewal === "spent") this.#renewal = "idle";
-      this.store.changed(this);
-    });
-    void provider.whenSynced.then(() => {
-      if (this.#provider === provider && this.#phase === "open") this.#resolveSynced();
-    });
-    return provider;
-  }
-
   // The server refused the subscription. With a refresh URL and no renewal
   // since the transport last came up, ask for a new grant and resubscribe
   // with it. Otherwise, or if that fails, block.
-  #rejected(provider: ActionCableProvider, error: unknown): void {
+  #rejected(error: unknown): void {
     const refresh = this.descriptor.refresh;
     if (!refresh || this.#renewal !== "idle") { this.#block(error); return; }
     this.#renewal = "fetching";
-    void this.#renew(provider, refresh);
+    void this.#renew(refresh);
   }
-  async #renew(provider: ActionCableProvider, refresh: string): Promise<void> {
+  async #renew(refresh: string): Promise<void> {
     let grant: string;
     try {
       grant = await fetchGrant(refresh);
     } catch (error) {
       this.#renewal = "spent";
-      if (this.#provider === provider) this.#block(error);
+      this.#block(error);
       return;
     }
     this.#renewal = "spent";
-    // The session may have moved on during the fetch: blocked, discarded, or retried with a new provider.
-    if (this.#provider !== provider || this.#phase !== "open") return;
-    this.#grant = grant;
-    provider.renew({ grant });
+    if (this.#phase !== "open") return; // blocked or discarded during the fetch
+    this.#provider.renew({ grant });
     this.store.changed(this);
   }
 
@@ -260,45 +234,25 @@ export class DocumentSession extends EventTarget {
     if (this.#phase !== "open") return;
     this.#phase = "blocked";
     this.#error = error;
-    // Teardown can flush a final editor update. Capture only after it finishes.
+    // Editors detach; a final flush from their teardown lands in the queue,
+    // which the provider keeps until retry() or discard().
     for (const attachment of this.#attachments) attachment.release();
-    this.#recovery = this.exportRecovery();
-    this.#provider?.destroy();
-    this.#provider = undefined;
-    this.#waiting = false;
+    this.#provider.disconnect();
     this.store.changed(this);
   }
-  #schedule = (): void => {
-    if (this.#scheduled) return;
-    this.#scheduled = true;
-    queueMicrotask(() => { this.#scheduled = false; this.#settle(); });
-  };
-  // Close when nothing needs the session any more, or wait for the next
-  // acknowledgment and check again.
+  // Close once nothing needs the session: no editors and nothing unacknowledged.
   #settle(): void {
     if (this.#phase === "closed") return;
-    if (this.#phase === "open" && !this.#attachments.size && !this.hasPending) {
+    if (this.#phase === "open" && !this.#attachments.size && !this.#provider.hasPending) {
       this.#phase = "closed";
       this.#dispose();
       return;
-    }
-    const provider = this.#provider;
-    if (this.#phase === "open" && provider?.hasPending && !this.#waiting) {
-      this.#waiting = true;
-      void provider.whenAcknowledged.then(() => {
-        if (this.#provider !== provider) return;
-        this.#waiting = false;
-        this.#settle(); // Recheck both attachments and edits added after the ack.
-      });
     }
     this.store.changed(this);
   }
   #dispose(): void {
     this.remove();
-    this.#provider?.destroy();
-    this.#provider = undefined;
-    this.#recovery = undefined;
-    this.doc.off("update", this.#schedule);
+    this.#provider.destroy();
     this.doc.destroy();
     this.store.changed(this);
   }

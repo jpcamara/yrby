@@ -45,30 +45,31 @@ test("editor cleanup can flush a final edit before disposal checks the queue", a
   assert.equal(session.doc.isDestroyed, true);
 });
 
-test("reattachment between acknowledgment and disposal preserves the live document", async t => {
+test("a draining session closes on the acknowledgment and a later acquire starts fresh", async t => {
   const { consumer, store } = setup(t);
   const attachment = store.acquire(descriptor), session = attachment.session;
   sync(consumer.created[0]);
   session.doc.getText("content").insert(0, "edit");
   attachment.release();
+  assert.equal(session.state, "draining");
   ack(consumer.created[0]);
+  assert.equal(session.state, "closed");
+  assert.equal(session.doc.isDestroyed, true);
   const reattached = store.acquire(descriptor);
   await tick();
-  assert.equal(reattached.session, session);
-  assert.equal(session.state, "attached");
-  assert.equal(session.doc.isDestroyed, false);
+  assert.notEqual(reattached.session, session);
+  assert.equal(reattached.session.state, "attached");
+  assert.equal(reattached.session.doc.isDestroyed, false);
 });
 
-test("an edit added after ack is retained even if the previous ack wait already resolved", async t => {
+test("an edit added while an attachment is live is retained after the earlier ack", async t => {
   const { consumer, store } = setup(t);
   const attachment = store.acquire(descriptor), session = attachment.session;
   sync(consumer.created[0]);
   session.doc.getText("content").insert(0, "one");
-  attachment.release();
   ack(consumer.created[0]);
-  const another = store.acquire(descriptor);
   session.doc.getText("content").insert(3, "two");
-  another.release();
+  attachment.release();
   await tick();
   assert.equal(session.state, "draining");
   assert.equal(session.hasPending, true);
@@ -113,7 +114,7 @@ test("rejection retains the final editor update and retry uses original authoriz
   await tick();
   assert.equal(attachment.signal.aborted, true);
   assert.equal(session.state, "blocked");
-  assert.equal(session.provider, undefined);
+  assert.equal(session.provider.status, "disconnected");
   assert.equal(session.hasPending, true);
   assert.equal(store.sessions[0], session);
   const copy = session.exportRecovery();
@@ -126,7 +127,7 @@ test("rejection retains the final editor update and retry uses original authoriz
   session.retry();
   const retry = consumer.created.at(-1);
   assert.equal(retry.params.grant, "g");
-  assert.notEqual(retry.params.session_id, consumer.created[0].params.session_id);
+  assert.equal(retry.params.session_id, consumer.created[0].params.session_id, "same queue, same ack route");
   retry.handlers.connected();
   ack(retry);
   await tick();
