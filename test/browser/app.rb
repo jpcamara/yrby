@@ -6,7 +6,8 @@
 ENV["RAILS_ENV"] = "test"
 FRAMEWORK = ENV.fetch("BROWSER_FRAMEWORK", "turbo")
 CLIENT_BUNDLE = FRAMEWORK == "turbolinks" ? "client_turbolinks.js" : "client.js"
-CLIENT_SCRIPT = %(<script type="module" src="/assets/#{CLIENT_BUNDLE}" data-#{FRAMEWORK}-track="reload"></script>).freeze
+CLIENT_SCRIPT = %(<script type="module" src="/assets/#{CLIENT_BUNDLE}" data-#{FRAMEWORK}-track="reload">
+  </script>).freeze
 $stdout.sync = true
 ENV["DATABASE_URL"] ||= "sqlite3:#{File.expand_path("../../tmp/browser.sqlite3", __dir__)}"
 require "bundler/setup"
