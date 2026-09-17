@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 # Local-only browser fixture: real Rails, signed grants, SQLite and ActionCable.
-# Started and stopped by packages/client/browser/run.mjs. Never deploy this app.
+# Started and stopped by packages/client/browser/run.mjs (Turbo) and
+# run_turbolinks.mjs (BROWSER_FRAMEWORK=turbolinks). Never deploy this app.
 ENV["RAILS_ENV"] = "test"
+FRAMEWORK = ENV.fetch("BROWSER_FRAMEWORK", "turbo")
+CLIENT_SCRIPT = %(<script type="module" src="/assets/client#{"_turbolinks" if FRAMEWORK == "turbolinks"}.js" data-#{FRAMEWORK}-track="reload"></script>)
 $stdout.sync = true
 ENV["DATABASE_URL"] ||= "sqlite3:#{File.expand_path("../../tmp/browser.sqlite3", __dir__)}"
 require "bundler/setup"
@@ -109,9 +112,9 @@ class BrowserController < ActionController::Base
       const Socket = window.WebSocket; window.WebSocket = class extends Socket {
         constructor(...args) { super(...args); window.socketCount++; }
       }; }</script>
-      <script type="module" src="/assets/client.js" data-turbo-track="reload"></script>
+      #{CLIENT_SCRIPT}
       </head><body><h1>Collaborative document</h1>
-      <%= collaborative_document_tag @page, :body, id: "body-doc", refresh: "/grant?name=body", data: (params[:permanent].present? ? { turbo_permanent: true } : {}) do %>
+      <%= collaborative_document_tag @page, :body, id: "body-doc", refresh: "/grant?name=body", data: (params[:permanent].present? ? { "#{FRAMEWORK}-permanent" => true } : {}) do %>
         <label>Body <textarea aria-label="Body" disabled></textarea></label>
       <% end %>
       <%# A grant that expires almost at once, so a reconnect has to refresh it. %>
@@ -132,7 +135,7 @@ class BrowserController < ActionController::Base
   def away
     render html: <<~HTML.html_safe
       <!doctype html><html><head><title>Away</title>
-      <script type="module" src="/assets/client.js" data-turbo-track="reload"></script>
+      #{CLIENT_SCRIPT}
       </head><body><h1>Away</h1><a href="/">Editor</a></body></html>
     HTML
   end

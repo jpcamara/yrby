@@ -66,8 +66,9 @@ with pending edits keeps delivering them under its original grant until they
 are acknowledged. A rejection stops the retries and keeps the work in memory
 for recovery. It does not count as an acknowledgment.
 
-Turbo previews are inert and create no document or provider. Cached markup
-contains no CRDT snapshot. Restoring a page from history reattaches to a
+Turbo and Turbolinks 5 are both supported; the element listens for either
+one's lifecycle events. Cached previews are inert and create no document or
+provider. Cached markup contains no CRDT snapshot. Restoring a page from history reattaches to a
 pending session, or loads saved content from Rails. A new grant gets a separate
 session, and the previous session's edits reach it through normal server sync.
 This guarantee holds within a tab. It is not offline storage, and closing or

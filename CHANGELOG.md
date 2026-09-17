@@ -13,6 +13,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   receive an abort signal for cleanup. Clean delayed remounts reload from the
   server; `doc` and `provider` are unavailable before acquisition or during
   retargeting. Turbo no longer serializes CRDT state into cached HTML.
+  Turbolinks 5 gets the same treatment: its before-cache, render, load, and
+  preview signals are honored alongside Turbo's.
 - Managed sessions expose delivery status and hold rejected work for
   `retry()` or `discard()`. Per-session subscription nonces isolate
   acknowledgment sequences. Provider status events carry a `pending` flag.

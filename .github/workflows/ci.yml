@@ -107,6 +107,7 @@ jobs:
           # the runner's preinstalled Chrome.
           export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
           npm run test:browser
+          npm run test:browser:turbolinks
 
       - name: Server log on failure
         if: failure()
