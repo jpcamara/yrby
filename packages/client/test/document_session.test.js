@@ -143,10 +143,14 @@ test("suspension prevents new sessions and navigation from reopening the consume
   const fresh = store.acquire({ ...descriptor, grant: "fresh" });
   assert.equal(consumer.created.length, 1);
   assert.equal(first.session.hasPending, true);
-  assert.equal(fresh.session.provider, undefined);
+  fresh.session.doc.getText("content").insert(0, "typed while suspended");
+  assert.equal(fresh.session.provider.status, "disconnected");
+  fresh.release();
+  assert.equal(fresh.session.state, "draining", "edits made while suspended keep the session alive");
   store.resume();
   assert.equal(consumer.created.length, 3);
   assert.equal(first.session.hasPending, true);
+  assert.equal(fresh.session.hasPending, true);
 });
 
 test("removing an unfocused attachment does not clear the focused editor's presence", t => {

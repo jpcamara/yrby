@@ -146,7 +146,7 @@ try {
   check("outgoing delivery survives while the preview is offline", await evaluate('outgoingPreviewProvider.hasPending && !outgoingPreviewDoc.isDestroyed'));
   await evaluate('releaseFresh(); window.fetch = originalFetch');
   await wait('!document.documentElement.hasAttribute("data-turbo-preview") && document.querySelector("#body-doc") !== previewElement');
-  check("fresh page stays inert during explicit suspension", await evaluate('document.querySelector("#body-doc").inert && !document.querySelector("#body-doc").provider'));
+  check("fresh page stays inert and offline during explicit suspension", await evaluate('document.querySelector("#body-doc").inert && document.querySelector("#body-doc").provider.status === "disconnected"'));
   await evaluate('sessionStore.resume()');
   await wait('!document.documentElement.hasAttribute("data-turbo-preview") && document.querySelector("#body-doc")?.provider?.synced && !document.querySelector("#body-doc").provider.hasPending');
   check("transient previews never allocate a document", await evaluate('previewDoc === undefined && previewElement.doc === undefined && previewElement.provider === undefined'));

@@ -4,7 +4,6 @@ export interface DocumentMount {
   readonly isConnected: boolean;
   activate(): void;
   deactivate(): void;
-  removeAttribute(name: string): void;
 }
 const adapters = new WeakMap<Document, TurboAdapter>();
 
@@ -34,15 +33,15 @@ class TurboAdapter {
   reconcile = (): void => {
     const preview = this.document.documentElement?.hasAttribute("data-turbo-preview");
     for (const mount of this.mounts) {
-      mount.removeAttribute("data-yrby-snapshot");
       if (!mount.isConnected || preview) mount.deactivate();
       else mount.activate();
     }
   };
   #beforeCache = (): void => {
     for (const mount of this.mounts) mount.deactivate();
-    // Allow Turbo's next-turn clone to finish. A canceled/failed navigation
-    // must not leave a still-mounted page permanently unbound.
+    // A canceled or failed navigation fires no render or load event, so
+    // reconcile on our own once Turbo's clone has finished. That takes two
+    // turns, hence the nested timers.
     clearTimeout(this.#timer);
     this.#timer = setTimeout(() => { this.#timer = setTimeout(this.reconcile, 0); }, 0);
   };
