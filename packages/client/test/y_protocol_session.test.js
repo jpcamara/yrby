@@ -399,38 +399,3 @@ test("receive: an awareness payload with trailing bytes inside the blob is rejec
   awareness.destroy();
 });
 
-test("snapshot pending tails survive restore, lost acks and reconnect without echoing saved state", () => {
-  const original = engine();
-  const restored = engine();
-  const receiver = engine();
-  const base = new Y.Doc();
-  base.getText("t").insert(0, "saved content");
-  const saved = Y.encodeStateAsUpdate(base);
-  original.eng.applyRemoteUpdate(saved);
-  receiver.eng.applyRemoteUpdate(saved);
-  assert.equal(original.eng.pendingUpdate, null);
-  original.doc.getText("t").delete(0, 6);
-  original.doc.getText("t").insert(0, "local ");
-  const tail = original.eng.pendingUpdate;
-  const copy = original.eng.pendingUpdate;
-  copy.fill(0);
-  assert.deepEqual(original.eng.pendingUpdate, tail, "snapshot caller cannot mutate the queue");
-  restored.eng.applyRemoteUpdate(Y.encodeStateAsUpdate(original.doc));
-  restored.eng.restorePendingUpdate(tail);
-  assert.equal(restored.eng.hasPending, true, "already-integrated structs still need an ack");
-  restored.eng.onConnect();
-  const frame = restored.sent.find(m => m.id !== undefined);
-  receiver.eng.receive(frame.frame);
-  assert.equal(receiver.doc.getText("t").toString(), "local content");
-  restored.eng.onDisconnect();
-  restored.eng.onConnect();
-  const replay = restored.sent.at(-1);
-  assert.equal(replay.id, frame.id);
-  receiver.eng.receive(replay.frame);
-  assert.equal(receiver.doc.getText("t").toString(), "local content");
-  restored.eng.ack(replay.id);
-  assert.equal(restored.eng.pendingUpdate, null);
-  assert.equal(restored.eng.hasPending, false);
-  for (const item of [original, restored, receiver]) { item.eng.destroy(); item.doc.destroy(); }
-  base.destroy();
-});

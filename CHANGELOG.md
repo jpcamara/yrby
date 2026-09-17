@@ -13,8 +13,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   receive an abort signal for cleanup. Clean delayed remounts reload from the
   server; `doc` and `provider` are unavailable before acquisition or during
   retargeting. Turbo no longer serializes CRDT state into cached HTML.
-- Managed sessions expose suspension, delivery status, and recovery after
-  rejection. Per-provider subscription nonces isolate acknowledgment sequences.
+- Managed sessions expose delivery status and hold rejected work for
+  `retry()` or `discard()`. Per-session subscription nonces isolate
+  acknowledgment sequences. Provider status events carry a `pending` flag.
 - The element accepts a `refresh` attribute. When a subscription is rejected
   and the attribute is set, the session fetches that URL once, expects
   `{ "grant": ... }`, and resubscribes under the new grant with the same
@@ -26,7 +27,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ActionCable providers ignore callbacks from superseded subscriptions, so a
   delayed disconnect or rejection cannot stop a live replacement from delivering
   edits. Synchronous consumer callbacks wait until subscription creation returns.
-  Managed sessions retain distinct provider identifiers to isolate old ACKs.
+  Managed sessions carry distinct subscription identifiers to isolate old ACKs.
 
 ## [0.7.1] - 2026-08-19
 

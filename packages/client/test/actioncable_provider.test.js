@@ -492,28 +492,3 @@ test("bfcache: a non-persisted pageshow (normal load) does not resurrect stale p
   assert.equal(p.awareness.getLocalState(), null, "no restore on a normal load");
 });
 
-test("whenAcknowledged waits for the entire queue across disconnect and partial or invalid acks", async (t) => {
-  const consumer = fakeConsumer();
-  const doc = new Y.Doc();
-  t.after(() => doc.destroy());
-  const provider = makeProvider(t, doc, consumer, { id: "r1" });
-  await provider.whenAcknowledged;
-  provider.connect();
-  consumer.deliverConnected();
-  doc.getText("content").insert(0, "first");
-  let acknowledged = false;
-  const settled = provider.whenAcknowledged.then(() => { acknowledged = true; });
-  const first = consumer.calls.send.filter(m => m.id !== undefined).at(-1);
-  doc.getText("content").insert(5, "second");
-  const last = consumer.calls.send.filter(m => m.id !== undefined).at(-1);
-  assert.notEqual(first.id, last.id);
-  consumer.deliverReceived({ ack: first.id });
-  consumer.deliverReceived({ ack: last.id + 1 });
-  consumer.deliverDisconnected();
-  await Promise.resolve();
-  assert.equal(acknowledged, false);
-  consumer.deliverConnected();
-  consumer.deliverReceived({ ack: last.id });
-  await settled;
-  assert.equal(provider.hasPending, false);
-});

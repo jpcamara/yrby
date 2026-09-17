@@ -117,13 +117,7 @@ test("rejection retains the final editor update and retry uses original authoriz
   assert.equal(session.provider.status, "disconnected");
   assert.equal(session.hasPending, true);
   assert.equal(store.sessions[0], session);
-  const copy = session.exportRecovery();
-  const restored = new Y.Doc();
-  Y.applyUpdate(restored, copy.update);
-  assert.equal(restored.getText("content").toString(), "recover me");
-  restored.destroy();
-  copy.pending.fill(0);
-  assert.notDeepEqual(session.exportRecovery().pending, copy.pending, "recovery is a defensive copy");
+  assert.equal(session.doc.getText("content").toString(), "recover me");
   session.retry();
   const retry = consumer.created.at(-1);
   assert.equal(retry.params.grant, "g");
@@ -132,37 +126,6 @@ test("rejection retains the final editor update and retry uses original authoriz
   ack(retry);
   await tick();
   assert.equal(session.state, "closed");
-});
-
-test("suspension prevents new sessions and navigation from reopening the consumer", async t => {
-  const { consumer, store } = setup(t);
-  const first = store.acquire(descriptor);
-  sync(consumer.created[0]);
-  first.session.doc.getText("content").insert(0, "pending");
-  store.suspend();
-  first.release();
-  const fresh = store.acquire({ ...descriptor, grant: "fresh" });
-  assert.equal(consumer.created.length, 1);
-  assert.equal(first.session.hasPending, true);
-  fresh.session.doc.getText("content").insert(0, "typed while suspended");
-  assert.equal(fresh.session.provider.status, "disconnected");
-  fresh.release();
-  assert.equal(fresh.session.state, "draining", "edits made while suspended keep the session alive");
-  store.resume();
-  assert.equal(consumer.created.length, 3);
-  assert.equal(first.session.hasPending, true);
-  assert.equal(fresh.session.hasPending, true);
-});
-
-test("removing an unfocused attachment does not clear the focused editor's presence", t => {
-  const { store } = setup(t);
-  const first = store.acquire(descriptor), second = store.acquire(descriptor);
-  first.setPresence({ user: "Alice", cursor: 1 });
-  second.setPresence({ user: "Alice", cursor: 2 });
-  first.release();
-  assert.deepEqual(second.session.provider.awareness.getLocalState(), { user: "Alice", cursor: 2 });
-  second.setPresence(null);
-  assert.equal(second.session.provider.awareness.getLocalState(), null);
 });
 
 test("blocked work is observable and only explicit discard removes it", t => {

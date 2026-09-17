@@ -140,46 +140,31 @@ await session.whenSynced;
 attachment.release(); // idempotent; pending work continues delivering
 ```
 
-Multiple views share one local presence identity. Use
-`attachment.setPresence(state)` for the focused editor and
-`attachment.setPresence(null)` when it blurs. Removing an unfocused view will
-not clear another view's presence. A binding can access its attachment through
+Use `attachment.setPresence(state)` for the focused editor and
+`attachment.setPresence(null)` when it blurs. Views of the same session share
+one presence; the last call wins. A binding can access its attachment through
 `yrby:synced`'s `detail.attachment`.
 
 `session.state` is `attached`, `draining`, `blocked`, or `closed`, independent
-of the provider's live transport status. Both sessions and stores emit `change`
-events; a store event carries the changed session in `event.detail`. Observe
-the store to report delivery failures after the originating page disappears.
+of the provider's live transport status. The store emits `change` with the
+changed session in `event.detail`. Observe it to report delivery failures
+after the originating page disappears.
 
 ```js
 store.addEventListener("change", ({ detail: session }) => {
   if (session.state === "blocked") reportDeliveryFailure(session.error, session);
 });
-
-store.suspend(); // explicitly stop managed network activity, retaining work
-store.resume();  // resume this consumer scope, including detached pending work
 ```
 
-To pause managed sessions, suspend the store. Do not rely on the consumer's
-disconnect behavior, which varies by transport. Navigation never reconnects a
-suspended scope. When an application switches accounts, it must suspend or
-unmount the old scope and deal with its retained work. A new consumer does not
-adopt it.
+Sessions keep their queues while the consumer is down and deliver when it
+reconnects. A new consumer has its own store and never adopts another's work.
 
-A blocked session's `exportRecovery()` returns copies of its full Yjs
-`update`, its `pending` tail, and its `descriptor`. `retry()` reconnects with
-the session's current grant, which is the original one or the last one its
-`refresh` URL returned. The application can export those bytes or call
-`discard()`. Cache eviction never discards unsaved work. Recovery is held in
-memory, and that memory grows with the retained work. A grant supplied any
-other way, such as a new element attribute, does not unblock a blocked
-session; it starts a separate one.
-
-Custom persistence integrations can still use `provider.pendingUpdate` and
-`provider.restorePendingUpdate(bytes)`. Restore saved full state through
-`applyRemoteUpdate` first, then restore only the pending tail before connecting.
-`provider.whenAcknowledged` resolves when its queue empties; it remains pending
-if the provider is destroyed before acknowledgment.
+A blocked session keeps its document and pending edits in memory. `retry()`
+reconnects with the session's current grant, which is the original one or the
+last one its `refresh` URL returned; `discard()` drops the work. Cache
+eviction never discards unsaved work. A grant supplied any other way, such as
+a new element attribute, does not unblock a blocked session; it starts a
+separate one.
 
 ## ActionCableProvider (the easy path)
 
