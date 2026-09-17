@@ -183,7 +183,7 @@ export class DocumentSession extends EventTarget {
     return {
       descriptor: this.descriptor,
       update: Y.encodeStateAsUpdate(this.doc),
-      pending: this.#provider?.pendingUpdate ?? this.#recovery?.pending?.slice() ?? null,
+      pending: this.#provider ? this.#provider.pendingUpdate : this.#recovery?.pending?.slice() ?? null,
     };
   }
   /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
