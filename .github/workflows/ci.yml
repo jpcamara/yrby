@@ -177,10 +177,11 @@ jobs:
           bundle install
           bin/rails db:prepare
 
-      # The sudoku rules, and the checker against a cable of its own.
-      - name: Demo sudoku tests
+      # The model boundary uses local HTTP fixtures; the checker joins a real cable.
+      - name: Demo peer tests
         working-directory: examples/actioncable-demo
         run: |
+          bundle exec ruby -Itest test/llm_reviewer_test.rb
           bundle exec ruby -Itest test/sudoku_test.rb
           bundle exec ruby -Itest test/sudoku_peer_test.rb
       - name: Build yrby-client package

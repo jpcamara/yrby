@@ -70,7 +70,7 @@ class LlmReviewer
   PROMPT
 
   # An edit plan for `instruction` over `blocks` (the document's top-level
-  # blocks, in order). Falls back to the stub's plan.
+  # blocks, in order). Model failures are reported to the caller.
   # `only:` is a range of block numbers the request applies to; the plan is
   # asked for and then held to it.
   def edits(instruction, blocks, only: nil)
@@ -282,7 +282,7 @@ class LlmReviewer
 
   # A fresh chat per call, with the standing instructions. The reviewer's own
   # memory goes in the prompt, so no reply history is sent back.
-  # The quick model's chat, or the usual one when none is set or it fails.
+  # The quick model's chat, or the usual one when none is set.
   def fast_chat
     return chat if FAST_MODEL.empty?
 
@@ -319,6 +319,8 @@ class LlmReviewer
       else
         c.openai_api_key = ENV.fetch("FIREWORKS_API_KEY")
         c.openai_api_base = FIREWORKS_BASE
+        # RubyLLM 2 defaults OpenAI to Responses; Fireworks speaks Chat Completions.
+        c.openai_protocol = :chat_completions
       end
     end
   end
