@@ -18,10 +18,9 @@ export interface DocumentDescriptor {
   refresh?: string;
 }
 export type ResolvedDescriptor = Readonly<{ channel: string; grant: string; name: string; refresh?: string }>;
-export type DocumentSessionState = "attached" | "draining" | "blocked" | "closed";
-// "open" covers both attached and draining; whether editors are attached is
-// derived from the attachment set rather than stored.
-type Phase = "open" | "blocked" | "closed";
+// "open" is the normal state, with or without editors attached; see hasPending
+// for whether anything is still being delivered.
+export type DocumentSessionState = "open" | "blocked" | "closed";
 // One grant refresh per rejection. "fetching" while the request is in flight,
 // "spent" once it was used, back to "idle" when the transport comes up again,
 // so a renewed grant that is rejected in turn blocks instead of looping.
@@ -86,7 +85,7 @@ export class DocumentAttachment {
 export class DocumentSession {
   readonly doc = new Y.Doc();
   readonly provider: ActionCableProvider;
-  #phase: Phase = "open";
+  #phase: DocumentSessionState = "open";
   #renewal: Renewal = "idle";
   #attachments = new Set<DocumentAttachment>();
   #error: unknown;
@@ -120,10 +119,7 @@ export class DocumentSession {
   get error(): unknown { return this.#error; }
   get hasPending(): boolean { return this.provider.hasPending; }
   get whenSynced(): Promise<void> { return this.provider.whenSynced; }
-  get state(): DocumentSessionState {
-    if (this.#phase !== "open") return this.#phase;
-    return this.#attachments.size ? "attached" : "draining";
-  }
+  get state(): DocumentSessionState { return this.#phase; }
 
   /** @internal */
   attach(): DocumentAttachment {

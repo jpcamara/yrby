@@ -74,7 +74,7 @@ try {
   await browser("back");
   await wait('document.querySelector("#body-doc")?.doc === savedDoc');
   check("history restore reattaches the pending session without a new socket", await evaluate(
-    'socketCount === socketsBefore && document.querySelector("#body-doc").session.state === "attached" && savedDoc.getText("content").toString() === "pending across Turbolinks"'));
+    'socketCount === socketsBefore && document.querySelector("#body-doc").session.state === "open" && savedDoc.getText("content").toString() === "pending across Turbolinks"'));
   await evaluate("goOnline()");
   await wait('document.querySelector("#body-doc")?.provider?.synced && !document.querySelector("#body-doc").provider.hasPending');
   check("restore delivers the unsent edit", (await state("body")).text === "pending across Turbolinks");
