@@ -146,7 +146,7 @@ Use `attachment.setPresence(state)` for the focused editor and
 one presence; the last call wins. A binding can access its attachment through
 `yrby:synced`'s `detail.attachment`.
 
-`session.state` is `attached`, `draining`, `blocked`, or `closed`, independent
+`session.state` is `open`, `blocked`, or `closed`, independent
 of the provider's live transport status. The store emits `change` with the
 changed session in `event.detail`. Observe it to report delivery failures
 after the originating page disappears.

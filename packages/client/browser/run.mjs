@@ -116,7 +116,7 @@ try {
   await browser(session, "find", "label", "Body", "fill", "network drop recovered");
   await browser(session, "find", "text", "Away", "click");
   await wait("location.pathname === '/away'");
-  check("transport loss preserves detached delivery", await evaluate('networkSession.state === "draining" && networkSession.hasPending'));
+  check("transport loss preserves detached delivery", await evaluate('networkSession.state === "open" && networkSession.hasPending'));
   await browser(session, "back");
   await wait('document.querySelector("#body-doc")?.session === networkSession');
   await evaluate('networkConnection.open = networkOpen; networkConnection.open()');
@@ -220,7 +220,7 @@ try {
   await wait('guardProvider.synced');
   check("late callbacks from a real retired subscription cannot pause or reject the replacement",
     await evaluate(`oldGuardSubscription.disconnected(); oldGuardSubscription.rejected();
-      guardSession.state === "attached" && guardSession.provider === guardProvider && guardProvider.synced`));
+      guardSession.state === "open" && guardSession.provider === guardProvider && guardProvider.synced`));
   await browser(session, "find", "label", "Body", "fill", "guarded reconnect edit");
   await wait('!guardSession.hasPending');
   check("typing after stale callbacks still persists through the live replacement", (await state("body")).text === "guarded reconnect edit");

@@ -19,7 +19,7 @@ test("matching attachments share one document and queue; consumer scopes are iso
   sync(consumer.created[0], "saved");
   await first.session.whenSynced;
   first.release();
-  assert.equal(second.session.state, "attached");
+  assert.equal(second.session.state, "open");
   assert.equal(second.session.doc.getText("content").toString(), "saved");
   const other = setup(t).store.acquire(descriptor);
   assert.notEqual(other.session, second.session);
@@ -36,7 +36,7 @@ test("editor cleanup can flush a final edit before disposal checks the queue", a
   attachment.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "final edit"));
   attachment.release();
   attachment.release();
-  assert.equal(session.state, "draining");
+  assert.equal(session.state, "open");
   assert.equal(session.hasPending, true);
   assert.equal(consumer.created.length, 1, "detach must not replace the provider");
   ack(consumer.created[0]);
@@ -45,20 +45,20 @@ test("editor cleanup can flush a final edit before disposal checks the queue", a
   assert.equal(session.doc.isDestroyed, true);
 });
 
-test("a draining session closes on the acknowledgment and a later acquire starts fresh", async t => {
+test("a session with no editors closes on the acknowledgment and a later acquire starts fresh", async t => {
   const { consumer, store } = setup(t);
   const attachment = store.acquire(descriptor), session = attachment.session;
   sync(consumer.created[0]);
   session.doc.getText("content").insert(0, "edit");
   attachment.release();
-  assert.equal(session.state, "draining");
+  assert.equal(session.state, "open");
   ack(consumer.created[0]);
   assert.equal(session.state, "closed");
   assert.equal(session.doc.isDestroyed, true);
   const reattached = store.acquire(descriptor);
   await tick();
   assert.notEqual(reattached.session, session);
-  assert.equal(reattached.session.state, "attached");
+  assert.equal(reattached.session.state, "open");
   assert.equal(reattached.session.doc.isDestroyed, false);
 });
 
@@ -71,7 +71,7 @@ test("an edit added while an attachment is live is retained after the earlier ac
   session.doc.getText("content").insert(3, "two");
   attachment.release();
   await tick();
-  assert.equal(session.state, "draining");
+  assert.equal(session.state, "open");
   assert.equal(session.hasPending, true);
   ack(consumer.created[0]);
   await tick();
@@ -164,7 +164,7 @@ test("rejection with a refresh URL renews the grant once and resumes the same se
   assert.equal(calls[0].url, "/grant");
   assert.equal(calls[0].init.credentials, "same-origin");
   assert.equal(calls[0].init.headers.Accept, "application/json");
-  assert.equal(session.state, "attached");
+  assert.equal(session.state, "open");
   assert.equal(attachment.signal.aborted, false);
   assert.equal(session.provider, provider, "the same provider resubscribes");
   const renewed = consumer.created.at(-1);
@@ -227,7 +227,7 @@ test("a reconnect after a successful renewal may renew again on the next rejecti
   await tick(); await tick();
   assert.equal(calls.length, 2);
   assert.equal(consumer.created.at(-1).params.grant, "renewed-2");
-  assert.equal(session.state, "attached");
+  assert.equal(session.state, "open");
   assert.equal(attachment.signal.aborted, false);
 });
 
