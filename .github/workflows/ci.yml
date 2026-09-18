@@ -176,6 +176,13 @@ jobs:
         run: |
           bundle install
           bin/rails db:prepare
+
+      # The sudoku rules, and the checker against a cable of its own.
+      - name: Demo sudoku tests
+        working-directory: examples/actioncable-demo
+        run: |
+          bundle exec ruby -Itest test/sudoku_test.rb
+          bundle exec ruby -Itest test/sudoku_peer_test.rb
       - name: Build yrby-client package
         working-directory: packages/client
         run: npm ci && npm run build
@@ -238,6 +245,9 @@ jobs:
           # document, and that a peer's focused cell shows up in the other
           # browser.
           PORT=3777 node frontend/spreadsheet_e2e.mjs
+          # The sudoku page: two browsers and the checker, invited from the
+          # page, flagging a clash and serving a hint through the document.
+          PORT=3777 node frontend/sudoku_e2e.mjs
           kill "$(cat /tmp/puma.pid)" || true
 
       # Re-run the same slice under a multi-process Falcon deployment (2 fiber

@@ -81,6 +81,28 @@ streams its status for as long as it runs (`curl -N -X POST
 localhost:3000/docs/demo/agent`). The page holds that stream with a fetch, so
 leaving the page stops the agent. See `AgentInvite`.
 
+### The sudoku checker
+
+`/docs/demo/sudoku` is a co-op sudoku: a `Y.Map` of digits keyed by cell,
+next to the puzzle the server wrote once (`SudokuPuzzle`). A Ruby process,
+`SudokuPeer`, joins it as a player over the same websocket client and writes
+what it finds back into the document: the clashing cells, the count, and a
+correct digit when someone asks for a hint. The page draws what is in the
+document; nothing else carries the checker's results. "Invite the checker"
+starts it the way the agent's invite does, and it runs on its own too:
+
+```bash
+CABLE_URL=ws://127.0.0.1:3000/cable bin/sudoku-peer demo   # then open /docs/demo/sudoku
+```
+
+The rules and the checker have tests that boot a cable of their own, no
+server or database needed:
+
+```bash
+bundle exec ruby -Itest test/sudoku_test.rb
+bundle exec ruby -Itest test/sudoku_peer_test.rb
+```
+
 ### Using this in your own app
 
 You don't need the demo's build setup. Two things keep an integration

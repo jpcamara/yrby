@@ -13,9 +13,9 @@
 #
 # The peer is a Y::ActionCable::Peer by default: the agent runs inside the
 # web server, follows the cable's pubsub, and records its own edits. Given a
-# Y::ActionCable::Client it runs anywhere, joined over the websocket like a
-# browser, and the server records, acks, and distributes what it writes
-# (see bin/agent-client).
+# cable `url:`, or a Y::ActionCable::Client as the peer, it runs anywhere,
+# joined over the websocket like a browser, and the server records, acks,
+# and distributes what it writes (see bin/agent-client and AgentInvite).
 class ReviewAgent
   include AgentPresence
   include AgentReactions
@@ -31,13 +31,13 @@ class ReviewAgent
   # "@agent" with nothing after it is a request still being typed.
   UNFINISHED = /\A@agent(\s+(take|rewrite\s+this))?\s*\z/i
 
-  def initialize(document_id, reviewer: Reviewer.default, stay: MAX_STAY, peer: nil)
+  def initialize(document_id, reviewer: Reviewer.default, stay: MAX_STAY, peer: nil, url: nil)
     @document_id = document_id
     @reviewer = reviewer
     @stay = stay
     @presence = Y::Awareness.new
     @changes = Queue.new
-    @peer = peer || Y::ActionCable::Peer.new(document_id)
+    @peer = peer || (url ? socket_client(document_id, url) : Y::ActionCable::Peer.new(document_id))
     @list = nil
     @recent_changes = []
   end
@@ -153,6 +153,10 @@ class ReviewAgent
   end
 
   def socket? = @peer.is_a?(Y::ActionCable::Client)
+
+  def socket_client(document_id, url)
+    Y::ActionCable::Client.new(url, channel: "DocumentChannel", params: { id: document_id }, logger: Rails.logger)
+  end
 
   # One diff, on its way to everyone. Over the pubsub the agent records it
   # and broadcasts it, the way the channel does for a browser. Over the
