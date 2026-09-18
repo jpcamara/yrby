@@ -557,6 +557,21 @@ reverse proxy with basic auth.
 
 ## The agent
 
+The Lexxy and Markdown peers share `LlmReviewer`, using RubyLLM 2.0.
+After updating an existing checkout, run `bundle update ruby_llm` in this
+directory. These peers use plain Ruby chats and keep their short memory in
+the reviewer, so no RubyLLM database migration is needed. Fireworks explicitly
+uses the Chat Completions protocol; RubyLLM 2.0's OpenAI default is Responses.
+OpenRouter and Anthropic keep their own providers.
+
+The model integration tests run without credentials or network access. They
+exercise RubyLLM's request builders and streamed text and reasoning parsers
+for all three providers, including edit plans and failures:
+
+```sh
+bundle exec ruby -Itest test/llm_reviewer_test.rb
+```
+
 `POST /docs/:id/agent` starts a Ruby agent on a Lexxy document (see
 `app/lib/review_agent.rb`). It joins over the same `DocumentChannel` as the
 browsers, shows up in the presence roster with its status in its cursor

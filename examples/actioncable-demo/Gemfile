@@ -58,9 +58,9 @@ gem "pg"
 # The demo also runs on SQLite: DATABASE_URL=sqlite3:storage/production.sqlite3
 gem "sqlite3"
 
-# The demo agent reviews a document with a Claude model when ANTHROPIC_API_KEY
-# is set (see app/lib/reviewer.rb); without a key it uses a fixed review.
-gem "ruby_llm", "~> 1.16", require: false
+# The document peers use RubyLLM for Fireworks, OpenRouter, or Anthropic.
+# Without a key they use a fixed review (see app/lib/reviewer.rb).
+gem "ruby_llm", "~> 2.0", require: false
 
 # The Ruby websocket client the out-of-process agent (bin/agent-client) uses.
 gem "async-websocket"
