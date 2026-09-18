@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The sudoku checker in a process of its own, joined to a running demo over
+# the cable's websocket the way a browser joins. The server records, acks,
+# and distributes what it writes; this process touches neither the store
+# nor the pubsub, so it can run anywhere that reaches the cable.
+#
+#   bin/sudoku-peer demo                                # the document /docs/demo/sudoku shows
+#   CABLE_URL=ws://127.0.0.1:9600/cable bin/sudoku-peer demo
+#
+# The checker and the client's socket share one Async reactor: the
+# checker's waits yield to it.
+require_relative "../config/environment"
+
+document_id = "#{ARGV.fetch(0, "demo")}:sudoku"
+url = ENV.fetch("CABLE_URL", "ws://127.0.0.1:3000/cable")
+$stdout.sync = true
+Rails.logger.broadcast_to(ActiveSupport::Logger.new($stdout)) if Rails.logger.respond_to?(:broadcast_to)
+
+Sync { SudokuPeer.new(document_id, url: url, logger: Rails.logger).run }

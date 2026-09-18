@@ -14,6 +14,7 @@
 /public/kanban.js
 /public/forms.js
 /public/spreadsheet.js
+/public/sudoku.js
 .DS_Store
 /config/master.key
 /storage/

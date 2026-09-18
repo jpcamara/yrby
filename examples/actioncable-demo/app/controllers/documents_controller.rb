@@ -2,7 +2,7 @@
 
 class DocumentsController < ApplicationController
   # The audit control endpoint is a test hook (POST without a form token).
-  skip_forgery_protection only: %i[audit_control agent markdown_agent]
+  skip_forgery_protection only: %i[audit_control agent markdown_agent sudoku_checker]
 
   # Start a Ruby agent that joins the document as a live collaborator (see
   # ReviewAgent). It runs in a background thread over the same DocumentChannel
@@ -13,26 +13,30 @@ class DocumentsController < ApplicationController
   # The markdown page's document is a Y.Text under "<id>:markdown".
   def markdown_agent = start_agent(MarkdownAgent, "#{params[:id]}:markdown")
 
+  # The sudoku checker joins over the websocket even from here, as a player
+  # would, on this server's own cable (see SudokuPeer).
+  def sudoku_checker = start_agent(SudokuPeer, "#{params[:id]}:sudoku", url: AgentInvite.cable_url(request))
+
   # One agent per document: a second invite while the first is still there
   # is answered with 409 and nothing starts.
   AGENTS = {} # rubocop:disable Style/MutableConstant -- the registry of running agent threads
   AGENTS_LOCK = Mutex.new
 
-  def start_agent(klass, document_id)
+  def start_agent(klass, document_id, **)
     key = [klass.name, document_id]
     started = AGENTS_LOCK.synchronize do
       next false if AGENTS[key]&.alive?
 
-      AGENTS[key] = agent_thread(klass, document_id, key)
+      AGENTS[key] = agent_thread(klass, document_id, key, **)
       true
     end
     head started ? :no_content : :conflict
   end
 
-  def agent_thread(klass, document_id, key)
+  def agent_thread(klass, document_id, key, **)
     Thread.new do
       Rails.application.executor.wrap do
-        ActiveRecord::Base.connection_pool.with_connection { klass.new(document_id).run }
+        ActiveRecord::Base.connection_pool.with_connection { klass.new(document_id, **).run }
       end
       Rails.logger.info("agent: finished")
     rescue Exception => e # rubocop:disable Lint/RescueException -- a background thread: log whatever ends it
@@ -83,6 +87,13 @@ class DocumentsController < ApplicationController
   # fill } — so two people can write different properties of one cell. Sorting
   # and column order are TanStack Table's, per browser, never shared.
   def spreadsheet = (@document_id = params[:id])
+
+  # Y.Map of digits keyed by cell, next to the puzzle the server writes once
+  # (see SudokuPuzzle) and what the checker writes back (see SudokuPeer).
+  def sudoku
+    @document_id = params[:id]
+    SudokuPuzzle.ensure("#{@document_id}:sudoku")
+  end
 
   # Server-side read of the authoritative document: the raw CRDT state,
   # base64-encoded. Replays the durable store into a fresh Y.Doc state.
