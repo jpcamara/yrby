@@ -560,7 +560,7 @@ write.
 
 ## Demos
 
-Six pages, chosen for breadth of Yjs shape rather than for count:
+Seven pages, chosen for breadth of Yjs shape rather than for count:
 
 | Page | Shape | What it shows |
 |---|---|---|
@@ -569,7 +569,16 @@ Six pages, chosen for breadth of Yjs shape rather than for count:
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges; sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map — the shape canvas tools keep |
 | Kanban | `Y.Array` | A move is one `map.set`, so concurrent moves never conflict |
+| Pixels | `Y.Map` | One key per cell, last write wins; the server renders the canvas as a PNG and replays it from the update log |
 | Code | `Y.Text` | CodeMirror 6 with remote cursors and selections |
+
+The Pixels page is the one place Ruby does more than read. `PixelChannel` is
+`DocumentChannel` with one change: it records through `PixelDocument`, a
+`Y::Document` with compaction off, so `y_document_updates` keeps every paint
+and the room's byte cap bounds the log. `app/lib/pixel_canvas.rb` reads the map
+back, writes an indexed PNG by hand (a header, a palette chunk, a zlib stream),
+and replays the rows in order into the timelapse's frames. No image library
+and no browser in the loop.
 
 ### The Rich text demo is the flagship stack, end to end
 

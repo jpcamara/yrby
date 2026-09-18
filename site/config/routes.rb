@@ -26,6 +26,10 @@ Rails.application.routes.draw do
   get "demos/:demo", to: "demos#new_room", as: :demo
   # The Rich text demo's materialized column (see DemosController#body).
   get "demos/lexxy/:room/body", to: "demos#body", as: :demo_note_body
+  # The pixel canvas's Ruby renders: the canvas as a PNG, and the canvas
+  # replayed from the update log (see PixelsController).
+  get "demos/pixels/:room/canvas.png", to: "pixels#png", as: :pixel_png
+  get "demos/pixels/:room/timelapse", to: "pixels#timelapse", as: :pixel_timelapse
   # Every other demo's server-side read: the document reconstructed in Ruby
   # from stored state (see DemosController#stored).
   get "demos/:demo/:room/stored", to: "demos#stored", as: :demo_stored

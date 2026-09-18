@@ -48,6 +48,13 @@ module Demos
       read: Reader.new(root: "cards", kind: :array)
     ),
     Demo.new(
+      slug: "pixels",
+      title: "Pixels",
+      shape: "Y.Map",
+      blurb: "A shared pixel canvas, one map key per cell. Ruby renders the PNG and replays the update log.",
+      read: Reader.new(root: "pixels", kind: :map)
+    ),
+    Demo.new(
       slug: "codemirror",
       title: "Code",
       shape: "Y.Text",

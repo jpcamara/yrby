@@ -61,6 +61,7 @@ const ENTRIES = [
   "src/spreadsheet.js",  // Y.Array of row Y.Maps, cells nested as Y.Maps
   "src/whiteboard.js",   // Y.Map of shape records
   "src/kanban.js",       // Y.Array of card Y.Maps
+  "src/pixels.js",       // Y.Map of cells
   { entry: "src/document.js", external: ["@rails/actioncable"] },
   "src/codemirror.js",   // Y.Text
 ]

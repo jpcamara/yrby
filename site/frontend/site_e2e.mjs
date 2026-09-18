@@ -11,6 +11,7 @@ import { promisify } from "node:util"
 import { dirname, resolve } from "node:path"
 import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
+import { inflateSync } from "node:zlib"
 
 const pexec = promisify(execFile)
 const here = dirname(fileURLToPath(import.meta.url))
@@ -214,7 +215,70 @@ await ab(A, "press", "Enter")
 check("a card added in one window reaches the other",
   !!(await converge("added card", cardText, (v) => v.includes("card from A"))))
 
+// --- 5) Pixels: a Y.Map of cells, and the canvas rendered again in Ruby -------
+await openBoth(`/demos/pixels/${ROOM}`)
+
+const cellsOf = (s) => js(s, `JSON.stringify([...window.__yrby.pixels.entries()].sort())`)
+// A clicks the canvas holding one color; B paints a cell from its own window
+// holding another. Both maps have to agree on both cells.
+await js(A, `window.__yrby.pickColor(5)`)
+await clickAt(A, "#pixel-canvas")
+await js(B, `window.__yrby.pickColor(12); window.__yrby.paint(3, 4)`)
+const cells = await converge("pixel cells", cellsOf, (v) => {
+  const m = new Map(JSON.parse(v))
+  return m.get("3,4") === 12 && [...m.values()].includes(5)
+})
+check("A's click and B's paint reach both windows", !!cells)
+const clicked = (JSON.parse(cells || "[]").find(([, v]) => v === 5) || [])[0]
+check(`A's click landed on a cell (${clicked})`, !!clicked)
+
+// Presence: two chips, and A's pointer as an outlined cell in B's window.
+const cursorsIn = (s) => js(s, `document.querySelectorAll("#pixel-cursors .pixel-cursor").length`)
+await waitFor("pixel presence lists two people", async () => (await lexxyChips(B)) === 2)
+check("B sees two people in the pixel room", (await lexxyChips(B)) === 2)
+await ab(A, "hover", "#pixel-canvas")
+await waitFor("A's cursor shows in B's window", async () => (await cursorsIn(B)) === 1)
+check("B sees A's cursor over the grid", (await cursorsIn(B)) === 1)
+
+// The PNG endpoint: the same map, rendered by Ruby. Decoded here from the
+// bytes (header, then the inflated scanlines) so the painted cells are read
+// back from the image, not from the page.
+const decodePng = (buf) => {
+  let offset = 8
+  let side = 0
+  const idat = []
+  while (offset < buf.length) {
+    const length = buf.readUInt32BE(offset)
+    const type = buf.toString("ascii", offset + 4, offset + 8)
+    const data = buf.subarray(offset + 8, offset + 8 + length)
+    if (type === "IHDR") side = data.readUInt32BE(0)
+    if (type === "IDAT") idat.push(data)
+    offset += 12 + length
+  }
+  const scanlines = inflateSync(Buffer.concat(idat))
+  const scale = side / 64
+  return { side, indexAt: (x, y) => scanlines[(y * scale * (side + 1)) + 1 + (x * scale)] }
+}
+const [cx, cy] = String(clicked).split(",").map(Number)
+const pngResponse = await fetch(`${BASE}/demos/pixels/${ROOM}/canvas.png`)
+const png = decodePng(Buffer.from(await pngResponse.arrayBuffer()))
+check("the PNG endpoint answers image/png", (pngResponse.headers.get("content-type") || "").startsWith("image/png"))
+check(`the PNG is 512 px square (${png.side})`, png.side === 512)
+check("the PNG carries B's cell at palette index 12", png.indexAt(3, 4) === 12)
+check("the PNG carries A's clicked cell at palette index 5", png.indexAt(cx, cy) === 5)
+
+// The timelapse: the update log replayed in Ruby, blank at the start and
+// matching the live canvas at the end.
+const timelapse = await (await fetch(`${BASE}/demos/pixels/${ROOM}/timelapse`)).json()
+const frameOf = (frame) => decodePng(Buffer.from(frame.png.replace(/^data:image\/png;base64,/, ""), "base64"))
+check(`the timelapse holds the recorded updates (${timelapse.updates})`, timelapse.updates >= 2)
+check("the timelapse has a frame per update plus the blank start", timelapse.frames.length === timelapse.updates + 1)
+const firstFrame = frameOf(timelapse.frames[0])
+const lastFrame = frameOf(timelapse.frames[timelapse.frames.length - 1])
+check("the first frame is blank", firstFrame.indexAt(3, 4) === 0 && firstFrame.indexAt(cx, cy) === 0)
+check("the last frame matches the live canvas", lastFrame.indexAt(3, 4) === 12 && lastFrame.indexAt(cx, cy) === 5)
+
 await ab(A, "close", "--all")
 console.log("")
 if (failures > 0) { console.log(`FAILED: ${failures} check(s) failed`); process.exit(1) }
-console.log("PASS: site demos — lexxy + materialized column, tiptap, room isolation, cell-level merges, kanban")
+console.log("PASS: site demos — lexxy + materialized column, tiptap, room isolation, cell-level merges, kanban, pixels + the Ruby PNG and timelapse")

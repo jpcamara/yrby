@@ -140,7 +140,7 @@ app runs four of them, and CI drives each one in a real Chrome.
 
 The same channel also syncs plain Yjs shapes with no editor: a whiteboard on a
 `Y.Map`, a kanban board on a `Y.Array`, a spreadsheet on a `Y.Array` of nested
-`Y.Map`s. The [demos](/demos) on this site run six live. One of them is a Lexxy
+`Y.Map`s. The [demos](/demos) on this site run seven live. One of them is a Lexxy
 editor on the published
 [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime) stack, where the
 server renders the document into a plain column with `Y::Lexxy` as you type.

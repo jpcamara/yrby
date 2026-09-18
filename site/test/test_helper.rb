@@ -2,6 +2,7 @@ ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
 require "rails/test_help"
 require_relative "support/updates"
+require_relative "support/png_reader"
 
 module ActiveSupport
   class TestCase

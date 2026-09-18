@@ -13,6 +13,7 @@
 /public/spreadsheet.js
 /public/whiteboard.js
 /public/kanban.js
+/public/pixels.js
 /public/codemirror.js
 /public/document.js
 /public/*.js.map

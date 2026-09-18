@@ -37,6 +37,21 @@ module Updates
   ROWS_ARRAY = b64("AQP9ofr4BgAHAQRyb3dzASgA/aH6+AYABGl0ZW0BdwZDaGFpcnMoAP2h+vgGAANxdHkBdwE0AA==") # Y.Array "rows"
   CARDS_ARRAY = b64("AQiMovTdCAAHAQVjYXJkcwEoAIyi9N0IAAJpZAF3ATEoAIyi9N0IAAR0ZXh0AXcORGVzaWduIHRoZSBBUEkoAIyi9N0IAAZjb2x1bW4BdwR0b2Rvh4yi9N0IAAEoAIyi9N0IBAJpZAF3ATIoAIyi9N0IBAR0ZXh0AXcHU2hpcCBpdCgAjKL03QgEBmNvbHVtbgF3BGRvbmUA") # Y.Array "cards"
   PROSEMIRROR_DEFAULT = b64("AQPi5JewCAAHAQdkZWZhdWx0AwlwYXJhZ3JhcGgHAOLkl7AIAAYEAOLkl7AIAQVoZWxsbwA=") # Y.XmlFragment "default"
+
+  # The pixel canvas's Y.Map "pixels". PIXEL_PAINTS is three paints from one
+  # client, one update each: (0,0)=1, then (1,0)=2, then (0,0)=3. PIXEL_MAP is
+  # one full state holding three cells. PIXEL_LATER is one paint, (5,5)=9,
+  # from another client, independent of the rest. PIXEL_MAP_JUNK holds
+  # entries the page never writes (an off-grid key, a malformed key, an index
+  # past the palette, a string, a float, a negative) next to one cell, (2,2)=1.
+  PIXEL_PAINTS = [
+    b64("AQHW3pOrBAAoAQZwaXhlbHMDMCwwAX0BAA=="),
+    b64("AQHW3pOrBAEoAQZwaXhlbHMDMSwwAX0CAA=="),
+    b64("AQHW3pOrBAKo1t6TqwQAAX0DAdbek6sEAQAB")
+  ].freeze
+  PIXEL_MAP = b64("AQOw1LeRDwAoAQZwaXhlbHMDMCwwAX0FKAEGcGl4ZWxzBTYzLDYzAX0MKAEGcGl4ZWxzBTEwLDIwAX0DAA==")
+  PIXEL_LATER = b64("AQGeqrLCDwAoAQZwaXhlbHMDNSw1AX0JAA==")
+  PIXEL_MAP_JUNK = b64("AQe64MetAwAoAQZwaXhlbHMDMiwyAX0BKAEGcGl4ZWxzBDY0LDABfQEoAQZwaXhlbHMDYSxiAX0BKAEGcGl4ZWxzAzAsMAF9ECgBBnBpeGVscwMxLDEBdwNyZWQoAQZwaXhlbHMDMywzAXw/wAAAKAEGcGl4ZWxzAzQsNAF9QQA=")
   # rubocop:enable Layout/LineLength
 
   # A complete awareness frame (client 42, a user and a cursor). Presence is

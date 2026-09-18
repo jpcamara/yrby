@@ -1,0 +1,15 @@
+<p>
+  Shared state is a <code>Y.Map</code> with one key per cell
+  (<code>"x,y"</code>) and a palette index as the value. Pick a color, then
+  click or drag on the canvas, in two windows at once. Painting a cell is one
+  <code>map.set</code>: two people painting different cells merge, and two
+  people painting the same cell keep the last write, which is r/place's rule
+  too. The server records each paint as a row and never looks inside it.
+</p>
+<p>
+  The Ruby side reads the same map back with <code>read_map</code>. The
+  panels under the canvas render it as a PNG in plain Ruby, with no browser
+  or image library, and replay it from <code>y_document_updates</code>. This
+  demo's channel is <code>DocumentChannel</code> with compaction turned off,
+  so that table holds every paint since the room opened.
+</p>

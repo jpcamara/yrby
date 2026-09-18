@@ -449,6 +449,59 @@
   }
 
   /* -------------------------------------------------------------------------
+   * Pixels (#pixels; the palette, the canvas, and the cursors). The canvas
+   * is 64 backing pixels a side, scaled up by CSS with pixelated rendering
+   * so every cell stays a crisp square. The cursors are an overlay placed in
+   * percentages of the stage, so they scale with it.
+   * ---------------------------------------------------------------------- */
+  .palette {
+    @apply mb-3 flex flex-wrap gap-1.5;
+  }
+
+  .swatch {
+    @apply h-7 w-7 cursor-pointer rounded-md border-2 border-zinc-700
+           hover:border-zinc-400;
+  }
+
+  .swatch[aria-pressed="true"] {
+    @apply border-white ring-2 ring-rose-500;
+  }
+
+  .pixel-stage {
+    /* touch-action: none, or a touch drag scrolls the page instead of
+       painting. The border sits here, not on the canvas, so the canvas's
+       own box maps onto the grid exactly. */
+    @apply relative w-full max-w-128 touch-none rounded-lg border
+           border-zinc-800 select-none;
+  }
+
+  #pixel-canvas {
+    @apply block aspect-square w-full cursor-crosshair rounded-md bg-white;
+    image-rendering: pixelated;
+  }
+
+  #pixel-cursors {
+    @apply pointer-events-none absolute inset-0;
+  }
+
+  .pixel-cursor {
+    @apply absolute box-border border-2;
+  }
+
+  .pixel-cursor-name {
+    @apply absolute -top-4 left-0 rounded-sm px-1 py-px text-[0.6rem]
+           leading-tight font-semibold whitespace-nowrap text-zinc-900;
+  }
+
+  /* The server-rendered PNG and the timelapse frames: 64 px images shown
+     four times their size. */
+  .pixel-image {
+    @apply block aspect-square w-full max-w-64 rounded-lg border border-zinc-800
+           bg-white;
+    image-rendering: pixelated;
+  }
+
+  /* -------------------------------------------------------------------------
    * Demo/docs list cards (server-rendered, shared by the home page and the
    * demo index).
    * ---------------------------------------------------------------------- */
