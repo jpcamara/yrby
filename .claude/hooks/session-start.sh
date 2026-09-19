@@ -45,6 +45,16 @@ su postgres -c "psql -tAc \"select 1 from pg_roles where rolname='$(whoami)'\"" 
 redis-cli ping >/dev/null 2>&1 || redis-server --daemonize yes
 log "postgres + redis up"
 
+# --- Rust ------------------------------------------------------------------
+# yrs, the CRDT crate the extension wraps, uses if-let guards — stable since
+# 1.95, and the image pins an older stable, so the build fails on E0658 until
+# the toolchain moves. CI pulls `stable` for the same reason.
+if ! rustc --version | awk '{split($2, v, "."); exit !(v[1] > 1 || (v[1] == 1 && v[2] >= 95))}'; then
+  log "updating rust stable (image ships $(rustc --version | cut -d' ' -f2))"
+  rustup update stable
+fi
+log "rust $(rustc --version)"
+
 # --- Gem + native extension ------------------------------------------------
 cd "$ROOT"
 bundle install
