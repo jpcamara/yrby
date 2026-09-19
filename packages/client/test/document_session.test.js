@@ -11,7 +11,7 @@ function setup(t) {
   return { consumer, store };
 }
 
-test("matching attachments share one document and queue; consumer scopes are isolated", async t => {
+test("matching leases share one document and queue; consumer scopes are isolated", async t => {
   const { consumer, store } = setup(t);
   const first = store.acquire(descriptor), second = store.acquire(descriptor);
   assert.equal(first.session, second.session);
@@ -31,11 +31,11 @@ test("matching attachments share one document and queue; consumer scopes are iso
 
 test("editor cleanup can flush a final edit before disposal checks the queue", async t => {
   const { consumer, store } = setup(t);
-  const attachment = store.acquire(descriptor), session = attachment.session;
+  const lease = store.acquire(descriptor), session = lease.session;
   sync(consumer.created[0]);
-  attachment.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "final edit"));
-  attachment.release();
-  attachment.release();
+  lease.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "final edit"));
+  lease.release();
+  lease.release();
   assert.equal(session.state, "open");
   assert.equal(session.hasPending, true);
   assert.equal(consumer.created.length, 1, "detach must not replace the provider");
@@ -47,10 +47,10 @@ test("editor cleanup can flush a final edit before disposal checks the queue", a
 
 test("a session with no editors closes on the acknowledgment and a later acquire starts fresh", async t => {
   const { consumer, store } = setup(t);
-  const attachment = store.acquire(descriptor), session = attachment.session;
+  const lease = store.acquire(descriptor), session = lease.session;
   sync(consumer.created[0]);
   session.doc.getText("content").insert(0, "edit");
-  attachment.release();
+  lease.release();
   assert.equal(session.state, "open");
   ack(consumer.created[0]);
   assert.equal(session.state, "closed");
@@ -62,14 +62,14 @@ test("a session with no editors closes on the acknowledgment and a later acquire
   assert.equal(reattached.session.doc.isDestroyed, false);
 });
 
-test("an edit added while an attachment is live is retained after the earlier ack", async t => {
+test("an edit added while a lease is live is retained after the earlier ack", async t => {
   const { consumer, store } = setup(t);
-  const attachment = store.acquire(descriptor), session = attachment.session;
+  const lease = store.acquire(descriptor), session = lease.session;
   sync(consumer.created[0]);
   session.doc.getText("content").insert(0, "one");
   ack(consumer.created[0]);
   session.doc.getText("content").insert(3, "two");
-  attachment.release();
+  lease.release();
   await tick();
   assert.equal(session.state, "open");
   assert.equal(session.hasPending, true);
@@ -107,12 +107,12 @@ test("fresh grants and replacement lifetimes use different acknowledgment routes
 
 test("rejection retains the final editor update and retry uses original authorization", async t => {
   const { consumer, store } = setup(t);
-  const attachment = store.acquire(descriptor), session = attachment.session;
+  const lease = store.acquire(descriptor), session = lease.session;
   sync(consumer.created[0]);
-  attachment.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "recover me"));
+  lease.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "recover me"));
   consumer.created[0].handlers.rejected();
   await tick();
-  assert.equal(attachment.signal.aborted, true);
+  assert.equal(lease.signal.aborted, true);
   assert.equal(session.state, "blocked");
   assert.equal(session.provider.status, "disconnected");
   assert.equal(session.hasPending, true);
@@ -132,11 +132,11 @@ test("blocked work is observable and only explicit discard removes it", t => {
   const { consumer, store } = setup(t);
   const states = [];
   store.addEventListener("change", event => states.push(event.detail.state));
-  const attachment = store.acquire(descriptor);
+  const lease = store.acquire(descriptor);
   consumer.created[0].handlers.rejected();
   assert.ok(states.includes("blocked"));
   assert.equal(store.sessions.length, 1);
-  attachment.session.discard();
+  lease.session.discard();
   assert.equal(store.sessions.length, 0);
 });
 
@@ -154,7 +154,7 @@ const refreshing = { ...descriptor, refresh: "/grant" };
 test("rejection with a refresh URL renews the grant once and resumes the same session", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
-  const attachment = store.acquire(refreshing), session = attachment.session, provider = session.provider;
+  const lease = store.acquire(refreshing), session = lease.session, provider = session.provider;
   const first = consumer.created[0];
   sync(first);
   session.doc.getText("content").insert(0, "keep me");
@@ -165,7 +165,7 @@ test("rejection with a refresh URL renews the grant once and resumes the same se
   assert.equal(calls[0].init.credentials, "same-origin");
   assert.equal(calls[0].init.headers.Accept, "application/json");
   assert.equal(session.state, "open");
-  assert.equal(attachment.signal.aborted, false);
+  assert.equal(lease.signal.aborted, false);
   assert.equal(session.provider, provider, "the same provider resubscribes");
   const renewed = consumer.created.at(-1);
   assert.notEqual(renewed, first);
@@ -182,15 +182,15 @@ test("rejection with a refresh URL renews the grant once and resumes the same se
 test("a failed refresh blocks the session with the refresh error", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ error: "forbidden" }, 403));
-  const attachment = store.acquire(refreshing), session = attachment.session;
+  const lease = store.acquire(refreshing), session = lease.session;
   sync(consumer.created[0]);
-  attachment.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "recover me"));
+  lease.signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "recover me"));
   consumer.created[0].handlers.rejected();
   await tick(); await tick();
   assert.equal(calls.length, 1);
   assert.equal(session.state, "blocked");
   assert.match(String(session.error), /403/);
-  assert.equal(attachment.signal.aborted, true);
+  assert.equal(lease.signal.aborted, true);
   assert.equal(session.hasPending, true);
   assert.equal(consumer.created.length, 1, "no resubscription without a grant");
 });
@@ -198,7 +198,7 @@ test("a failed refresh blocks the session with the refresh error", async t => {
 test("a renewed grant that is rejected in turn blocks without fetching again, and retry uses it", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
-  const attachment = store.acquire(refreshing), session = attachment.session;
+  const lease = store.acquire(refreshing), session = lease.session;
   sync(consumer.created[0]);
   consumer.created[0].handlers.rejected();
   await tick(); await tick();
@@ -208,7 +208,7 @@ test("a renewed grant that is rejected in turn blocks without fetching again, an
   await tick(); await tick();
   assert.equal(calls.length, 1, "one renewal per rejection");
   assert.equal(session.state, "blocked");
-  assert.equal(attachment.signal.aborted, true);
+  assert.equal(lease.signal.aborted, true);
   session.retry();
   assert.equal(consumer.created.at(-1).params.grant, "renewed", "retry reconnects with the current grant");
 });
@@ -217,7 +217,7 @@ test("a reconnect after a successful renewal may renew again on the next rejecti
   const { consumer, store } = setup(t);
   let n = 0;
   const calls = stubFetch(t, () => jsonResponse({ grant: `renewed-${++n}` }));
-  const attachment = store.acquire(refreshing), session = attachment.session;
+  const lease = store.acquire(refreshing), session = lease.session;
   sync(consumer.created[0]);
   consumer.created[0].handlers.rejected();
   await tick(); await tick();
@@ -228,17 +228,17 @@ test("a reconnect after a successful renewal may renew again on the next rejecti
   assert.equal(calls.length, 2);
   assert.equal(consumer.created.at(-1).params.grant, "renewed-2");
   assert.equal(session.state, "open");
-  assert.equal(attachment.signal.aborted, false);
+  assert.equal(lease.signal.aborted, false);
 });
 
 test("without a refresh URL a rejection blocks immediately and nothing is fetched", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "unused" }));
-  const attachment = store.acquire(descriptor), session = attachment.session;
+  const lease = store.acquire(descriptor), session = lease.session;
   sync(consumer.created[0]);
   consumer.created[0].handlers.rejected();
   await tick();
   assert.equal(calls.length, 0);
   assert.equal(session.state, "blocked");
-  assert.equal(attachment.signal.aborted, true);
+  assert.equal(lease.signal.aborted, true);
 });

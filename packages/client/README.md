@@ -84,8 +84,8 @@ The element exposes its current `session`, `doc`, and `provider`. They are
 unavailable before a session is acquired and while the element is retargeting,
 and reading a getter never creates a document. `whenSynced` is always a
 promise, even before the consumer is initialized. It resolves after the current
-session's first catch-up, and it never resolves for an abandoned attachment.
-The bubbling `yrby:synced` event fires once per attachment, with
+session's first catch-up, and it never resolves for an abandoned lease.
+The bubbling `yrby:synced` event fires once per lease, with
 `detail.signal` for cleanup. Synced does not mean the connection is online or
 that every edit is acknowledged. Use `provider.synced` and `session.hasPending`
 for those.
@@ -94,7 +94,7 @@ Import failures and subscription rejection emit `yrby:error` with
 `detail.error`; rejection also includes the recoverable `detail.session`.
 A blocked session stays inert. After retrying it, call `element.activate()`
 to attach again, or remount the element. `element.destroy()` releases its
-attachment and prevents automatic binding until it is reinserted; it does not
+lease and prevents automatic binding until it is reinserted; it does not
 discard pending edits.
 
 A `refresh` attribute names a same-origin URL that returns a new grant for
@@ -128,23 +128,23 @@ infer a common record. Different consumers have separate scopes. Each session
 adds an opaque `session_id` subscription parameter to isolate its
 acknowledgments; this parameter never selects or authorizes a server document.
 
-Headless workflows can hold an explicit attachment through their own lifetime:
+Headless workflows can hold an explicit lease through their own lifetime:
 
 ```js
 import { DocumentSessionStore } from "yrby-client";
 
 const store = DocumentSessionStore.for(consumer);
-const attachment = store.acquire({ grant, name: "body" });
-const { session } = attachment;
+const lease = store.acquire({ grant, name: "body" });
+const { session } = lease;
 await session.whenSynced;
-// Work with session.doc; keep attachment until your workflow is finished.
-attachment.release(); // idempotent; pending work continues delivering
+// Work with session.doc; keep lease until your workflow is finished.
+lease.release(); // idempotent; pending work continues delivering
 ```
 
-Use `attachment.setPresence(state)` for the focused editor and
-`attachment.setPresence(null)` when it blurs. Views of the same session share
-one presence; the last call wins. A binding can access its attachment through
-`yrby:synced`'s `detail.attachment`.
+Use `lease.setPresence(state)` for the focused editor and
+`lease.setPresence(null)` when it blurs. Views of the same session share
+one presence; the last call wins. A binding can access its lease through
+`yrby:synced`'s `detail.lease`.
 
 `session.state` is `open`, `blocked`, or `closed`, independent
 of the provider's live transport status. The store emits `change` with the

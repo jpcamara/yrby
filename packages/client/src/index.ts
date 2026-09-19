@@ -21,6 +21,6 @@ export type {
 // Optional base64 helpers for transports that carry frames as strings.
 export { toBase64, fromBase64 } from "./base64.js";
 
-// Document ownership for editor attachments and headless application workflows.
+// Document ownership for editor leases and headless application workflows.
 export { DocumentSessionStore } from "./document_session.js";
-export type { DocumentSession, DocumentAttachment, DocumentDescriptor, DocumentSessionState } from "./document_session.js";
+export type { DocumentSession, DocumentLease, DocumentDescriptor, DocumentSessionState } from "./document_session.js";

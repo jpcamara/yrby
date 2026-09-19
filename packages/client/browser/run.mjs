@@ -184,7 +184,7 @@ try {
     replacement.setAttribute("name", "secret");
     Turbo.renderStreamMessage('<turbo-stream action="replace" method="morph" target="body-doc"><template>' + replacement.outerHTML + '</template></turbo-stream>');`);
   await wait('document.querySelector("#body-doc").getAttribute("name") === "secret" && morphElement.session !== morphSession');
-  check("Turbo morph switches attachments and preserves the original pending queue", await evaluate('document.querySelector("#body-doc") === morphElement && morphSession.hasPending && morphSession.descriptor.grant === originalGrant && morphElement.session === document.querySelector("#secret-doc").session && morphElement.mountCount === mountsBeforeMorph + 1'));
+  check("Turbo morph switches leases and preserves the original pending queue", await evaluate('document.querySelector("#body-doc") === morphElement && morphSession.hasPending && morphSession.descriptor.grant === originalGrant && morphElement.session === document.querySelector("#secret-doc").session && morphElement.mountCount === mountsBeforeMorph + 1'));
   await evaluate('goOnline()');
   await wait('morphSession.state === "closed" && morphElement.provider.synced');
   check("original tail reaches only its original Ruby document", (await state("body")).text === "private body pending" && (await state("secret")).text === "encrypted browser edit");
