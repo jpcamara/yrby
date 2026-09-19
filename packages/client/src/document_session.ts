@@ -38,8 +38,8 @@ export class DocumentSessionStore extends EventTarget {
   constructor(readonly consumer: CableConsumer) { super(); }
   get sessions(): readonly DocumentSession[] { return [...this.#sessions.values()]; }
 
-  /** Attach to the session for this document, creating it on first use. */
-  acquire(input: DocumentDescriptor): DocumentAttachment {
+  /** Acquire a lease on this document session, creating it on first use. */
+  acquire(input: DocumentDescriptor): DocumentLease {
     if (!input.grant || !input.name) throw new Error("A document requires a grant and name");
     // The refresh URL is not part of the identity: matching tuples share a
     // session, and the first acquirer's URL is the one that session renews with.
@@ -63,12 +63,12 @@ export class DocumentSessionStore extends EventTarget {
   }
 }
 
-/** An editor's hold on a session. Release it when the editor goes away. */
-export class DocumentAttachment {
+/** A caller's hold on a session. Release it when the caller is finished. */
+export class DocumentLease {
   #controller = new AbortController();
   #released = false;
   constructor(readonly session: DocumentSession) {}
-  /** Aborts when the attachment ends, including when the session blocks or is discarded. */
+  /** Aborts when the lease ends, including when the session blocks or is discarded. */
   get signal(): AbortSignal { return this.#controller.signal; }
   setPresence(state: Record<string, unknown> | null): void {
     if (!this.#released) this.session.provider.awareness.setLocalState(state);
@@ -87,7 +87,7 @@ export class DocumentSession {
   readonly provider: ActionCableProvider;
   #phase: DocumentSessionState = "open";
   #renewal: Renewal = "idle";
-  #attachments = new Set<DocumentAttachment>();
+  #leases = new Set<DocumentLease>();
   #error: unknown;
 
   /** Use DocumentSessionStore.acquire to create and own sessions. */
@@ -122,17 +122,17 @@ export class DocumentSession {
   get state(): DocumentSessionState { return this.#phase; }
 
   /** @internal */
-  attach(): DocumentAttachment {
-    const attachment = new DocumentAttachment(this);
-    this.#attachments.add(attachment);
+  attach(): DocumentLease {
+    const lease = new DocumentLease(this);
+    this.#leases.add(lease);
     this.#connect();
     this.store.changed(this);
-    return attachment;
+    return lease;
   }
   /** @internal */
-  release(attachment: DocumentAttachment): void {
-    this.#attachments.delete(attachment);
-    if (!this.#attachments.size) this.provider.awareness.setLocalState(null);
+  release(lease: DocumentLease): void {
+    this.#leases.delete(lease);
+    if (!this.#leases.size) this.provider.awareness.setLocalState(null);
     this.#settle();
   }
   /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
@@ -148,7 +148,7 @@ export class DocumentSession {
   discard(): void {
     if (this.#phase === "closed") return;
     this.#phase = "closed";
-    for (const attachment of this.#attachments) attachment.release();
+    for (const lease of this.#leases) lease.release();
     this.#dispose();
   }
 
@@ -189,14 +189,14 @@ export class DocumentSession {
     this.#error = error;
     // Editors detach; a final flush from their teardown lands in the queue,
     // which the provider keeps until retry() or discard().
-    for (const attachment of this.#attachments) attachment.release();
+    for (const lease of this.#leases) lease.release();
     this.provider.disconnect();
     this.store.changed(this);
   }
   // Close once nothing needs the session: no editors and nothing unacknowledged.
   #settle(): void {
     if (this.#phase === "closed") return;
-    if (this.#phase === "open" && !this.#attachments.size && !this.provider.hasPending) {
+    if (this.#phase === "open" && !this.#leases.size && !this.provider.hasPending) {
       this.#phase = "closed";
       this.#dispose();
       return;

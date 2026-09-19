@@ -61,7 +61,7 @@ test("removed elements cannot subscribe after the consumer resolves", async t =>
 test("same-turn DOM moves retain binding and document, clean delayed remounts reconstruct", async t => {
   const { el, consumer, mount, remove } = setup(t);
   await mount(); sync(consumer.created[0], "saved"); await el.whenSynced;
-  const { doc, provider } = el, signal = el.events[0].detail.signal;
+  const { doc, provider } = el, signal = el.events[0].detail.lease.signal;
   remove(); await mount();
   assert.equal(el.doc, doc);
   assert.equal(el.provider, provider);
@@ -155,7 +155,7 @@ test("rejection aborts editor cleanup, reports the recoverable session, and stay
   assert.equal(el.events.at(-1).detail.session, session);
 });
 
-test("a stale failed initialization cannot damage a newer attachment", async t => {
+test("a stale failed initialization cannot damage a newer lease", async t => {
   let reject;
   const consumer = fakeConsumer();
   const { el, mount, remove } = setup(t, undefined, new Promise((_, r) => { reject = r; }));

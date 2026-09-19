@@ -13,7 +13,7 @@ for (const el of document.querySelectorAll("yrby-document")) {
   window.initialReadiness.push(ready instanceof Promise);
   ready.then(() => window.browserEvents.push({ ready: true, hasProvider: !!el.provider, synced: el.provider.synced }));
 }
-document.addEventListener("yrby:synced", ({ target: el, detail: { doc, signal, attachment } }) => {
+document.addEventListener("yrby:synced", ({ target: el, detail: { doc, signal, lease } }) => {
   const input = el.querySelector("textarea");
   if (!input) return;
   el.mountCount = (el.mountCount || 0) + 1;
@@ -26,9 +26,9 @@ document.addEventListener("yrby:synced", ({ target: el, detail: { doc, signal, a
     text.insert(0, input.value);
   }), { signal });
   text.observe(update);
-  const presence = () => attachment.setPresence({ user: { name: "Browser reviewer" } });
+  const presence = () => lease.setPresence({ user: { name: "Browser reviewer" } });
   input.addEventListener("focus", presence, { signal });
-  input.addEventListener("blur", () => attachment.setPresence(null), { signal });
+  input.addEventListener("blur", () => lease.setPresence(null), { signal });
   presence();
   signal.addEventListener("abort", () => {
     el.unmountCount = (el.unmountCount || 0) + 1;

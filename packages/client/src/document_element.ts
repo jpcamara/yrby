@@ -6,7 +6,7 @@
 // element, owns the document and any unacknowledged edits, so nothing is lost
 // when the element goes away.
 import { type CableConsumer } from "./actioncable_provider.js";
-import { DocumentSessionStore, type DocumentAttachment } from "./document_session.js";
+import { DocumentSessionStore, type DocumentLease } from "./document_session.js";
 import { registerDocumentMount } from "./turbo_adapter.js";
 
 // Importable outside a browser (tests, SSR) where HTMLElement is undefined.
@@ -22,7 +22,7 @@ export class YrbyDocumentElement extends Base {
   /** Set before adding elements to use another consumer, such as AnyCable's. */
   static consumer: CableConsumer | Promise<CableConsumer> | undefined;
   static observedAttributes = ["grant", "name", "channel", "refresh"];
-  #attachment: DocumentAttachment | undefined;
+  #lease: DocumentLease | undefined;
   #attaching = false; // waiting for the consumer
   #inDom = false;
   #active = false; // the Turbo adapter says: bind (not a cached preview, connected)
@@ -30,10 +30,10 @@ export class YrbyDocumentElement extends Base {
   #unregister: (() => void) | undefined;
   #resolveSynced!: () => void;
   #whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
-  get session() { return this.#attachment?.session; }
+  get session() { return this.#lease?.session; }
   get doc() { return this.session?.doc; }
   get provider() { return this.session?.provider; }
-  /** Resolves after the current attachment's first catch-up; never for an abandoned one. */
+  /** Resolves after the current lease's first catch-up; never for an abandoned one. */
   get whenSynced(): Promise<void> { return this.#whenSynced; }
 
   connectedCallback(): void {
@@ -59,7 +59,7 @@ export class YrbyDocumentElement extends Base {
   activate(): void { this.#active = true; void this.#attach(); }
   /** @internal */
   deactivate(): void { this.#active = false; this.#release(); }
-  /** Release the editor attachment. Unsaved work remains owned by its session. */
+  /** Release the editor lease. Unsaved work remains owned by its session. */
   destroy(): void {
     this.#inDom = false;
     this.deactivate();
@@ -69,7 +69,7 @@ export class YrbyDocumentElement extends Base {
   }
 
   async #attach(): Promise<void> {
-    if (!this.#active || this.#attaching || this.#attachment) return;
+    if (!this.#active || this.#attaching || this.#lease) return;
     this.#attaching = true;
     this.#holdInert();
     const generation = this.#generation;
@@ -82,21 +82,21 @@ export class YrbyDocumentElement extends Base {
     try {
       const consumer = await (YrbyDocumentElement.consumer ?? defaultConsumer());
       if (generation !== this.#generation) return; // released or retargeted meanwhile
-      const attachment = this.#attachment = DocumentSessionStore.for(consumer).acquire(descriptor);
-      const { session } = attachment;
-      // The session ends the attachment itself when it blocks or is discarded.
-      attachment.signal.addEventListener("abort", () => {
-        if (this.#attachment !== attachment) return;
+      const lease = this.#lease = DocumentSessionStore.for(consumer).acquire(descriptor);
+      const { session } = lease;
+      // The session ends the lease itself when it blocks or is discarded.
+      lease.signal.addEventListener("abort", () => {
+        if (this.#lease !== lease) return;
         this.#release();
         if (session.state === "blocked") this.#error(session.error, session);
       }, { once: true });
-      if (session.state === "blocked") { attachment.release(); return; }
+      if (session.state === "blocked") { lease.release(); return; }
       void session.whenSynced.then(() => {
-        if (this.#attachment !== attachment) return;
+        if (this.#lease !== lease) return;
         this.#restoreInert();
         this.#resolveSynced();
         this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
-          detail: { session, doc: session.doc, provider: session.provider, attachment, signal: attachment.signal } }));
+          detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal } }));
       });
     } catch (error) {
       if (generation === this.#generation) this.#error(error);
@@ -107,11 +107,11 @@ export class YrbyDocumentElement extends Base {
   #release(): void {
     ++this.#generation;
     this.#attaching = false;
-    const attachment = this.#attachment;
-    this.#attachment = undefined;
+    const lease = this.#lease;
+    this.#lease = undefined;
     this.#whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
     this.#holdInert();
-    attachment?.release();
+    lease?.release();
   }
   // Inert until synced, so nobody types into a document that is not live.
   // The application's own inert value is parked in an attribute, which a
@@ -126,7 +126,7 @@ export class YrbyDocumentElement extends Base {
     this.inert = saved === "true";
     this.removeAttribute("data-yrby-inert");
   }
-  #error(error: unknown, session?: DocumentAttachment["session"]): void {
+  #error(error: unknown, session?: DocumentLease["session"]): void {
     this.dispatchEvent(new CustomEvent("yrby:error", { bubbles: true, detail: { error, session } }));
   }
 }
