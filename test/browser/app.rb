@@ -101,6 +101,19 @@ Y::DocumentChannel.authorize_document do |record, name|
   name != "body" || record.body_editor == current_user
 end
 
+# AnyCable rebuilds the channel for each command and restores only declared
+# channel state. This opt-in reproducer drops the ordinary instance variable
+# immediately before receive while retaining authorized_document_key, matching
+# the state split that matters to Y::DocumentChannel.
+if ENV["SIMULATE_ANYCABLE_COMMANDS"] == "1"
+  Y::DocumentChannel.prepend(Module.new do
+    def receive(data)
+      remove_instance_variable(:@record) if instance_variable_defined?(:@record)
+      super
+    end
+  end)
+end
+
 class BrowserController < ActionController::Base
   def show
     # Test-only login and deliberate grant exposure for copied-grant tests.
