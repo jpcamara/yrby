@@ -47,3 +47,9 @@ gem "anycable-rails", "~> 1.6"
 
 # PostgreSQL store (realistic durable store with concurrent commits)
 gem "pg"
+
+# json 3.0 made JSON.parse's options keyword-only, but ActiveSupport::JSON.decode
+# (8.1.3.1, the current release) still passes them positionally — so every
+# Action Cable frame raises ArgumentError at Connection::Base#decode and no
+# WebSocket ever syncs. Pin until Rails ships a fix.
+gem "json", "< 3"
