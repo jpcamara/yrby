@@ -1,0 +1,20 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Opt-in live evaluation over synthetic, labeled changes. Does not call the
+# writing model or edit documents. These labels are examples, not calibration.
+require "bundler/setup"
+require "ruby_llm-typesafe"
+require_relative "../app/lib/jev_shadow"
+
+abort "Set TYPESAFE_API_KEY before running this live evaluation" if ENV.fetch("TYPESAFE_API_KEY", "").empty?
+logger = Logger.new($stdout)
+logger.formatter = ->(_severity, _time, _program, message) { "#{message}\n" }
+cases = JSON.parse(File.read(ARGV.first || File.expand_path("../test/fixtures/jev_cases.json", __dir__)))
+cases.each do |example|
+  puts JSON.generate(case: example.fetch("id"), expected: example.fetch("expected"))
+  observer = JevShadow.new(enabled: true, logger: logger)
+  snapshot = observer.capture(example.fetch("changed"), example.fetch("occupied", []),
+                              example.fetch("blocks"), example.fetch("memory", []))
+  observer.observe(snapshot, llm_edits: nil, llm_ms: nil, llm_status: "not_run")&.join
+end

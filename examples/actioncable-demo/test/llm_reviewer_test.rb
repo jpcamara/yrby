@@ -31,7 +31,8 @@ class LlmReviewerTest < Minitest::Test
     end
   end
 
-  ENV_KEYS = %w[AGENT_PROVIDER AGENT_MODEL FIREWORKS_API_KEY OPENROUTER_API_KEY ANTHROPIC_API_KEY].freeze
+  ENV_KEYS = %w[AGENT_PROVIDER AGENT_MODEL FIREWORKS_API_KEY OPENROUTER_API_KEY ANTHROPIC_API_KEY TYPESAFE_API_KEY
+                AGENT_JEV_SHADOW].freeze
 
   def setup
     @env = ENV_KEYS.to_h { |key| [key, ENV.fetch(key, nil)] }
@@ -188,6 +189,43 @@ class LlmReviewerTest < Minitest::Test
     assert_equal "The owner is already named.", result.note
     assert_empty result.edits
     assert_equal LlmReviewer::QUICK_EFFORT, Wire.requests.last[:body].dig("reasoning", "effort")
+  end
+
+  def test_shadow_observes_the_same_snapshot_without_changing_results_or_explicit_requests
+    use_provider("openrouter")
+    observations = []
+    shadow = Object.new
+    shadow.define_singleton_method(:capture) do |*args|
+      observations << Marshal.load(Marshal.dump(args))
+      "snapshot"
+    end
+    shadow.define_singleton_method(:observe) { |state, **baseline| observations << [state, baseline] }
+    reviewer = LlmReviewer.new(shadow: shadow)
+    reviewer.remember("Earlier contribution")
+    completion('{"note":"Useful addition.","edits":[{"op":"insert_after","block":0,"text":"Name the owner."}]}')
+    result = reviewer.consider([0], [], ["Launch tomorrow."])
+
+    assert_equal "Name the owner.", result.edits.first["text"]
+    assert_equal ["Earlier contribution"], observations.first.last
+    assert_equal 1, observations.last.last[:llm_edits]
+    completion("Sure.")
+
+    reviewer.answer("Why?", "Launch tomorrow.") { |text| assert_equal "Sure.", text }
+    assert_equal 2, observations.size, "explicit answers bypass shadow observation"
+  end
+
+  def test_shadow_records_a_failed_reviewer_without_swallowing_the_error
+    use_provider("openrouter")
+    observations = []
+    shadow = Object.new
+    shadow.define_singleton_method(:capture) { |*| "snapshot" }
+    shadow.define_singleton_method(:observe) { |state, **baseline| observations << [state, baseline] }
+    reviewer = LlmReviewer.new(shadow: shadow)
+    Wire.responses << [401, [JSON.generate(error: { message: "Invalid key" })]]
+
+    assert_raises(LlmReviewer::ModelError) { reviewer.consider([0], [], ["Launch tomorrow."]) }
+    assert_equal "error", observations.last.last[:llm_status]
+    assert_nil observations.last.last[:llm_edits]
   end
 
   def test_api_errors_remain_visible_instead_of_becoming_a_stub_review

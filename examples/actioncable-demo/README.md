@@ -572,6 +572,67 @@ for all three providers, including edit plans and failures:
 bundle exec ruby -Itest test/llm_reviewer_test.rb
 ```
 
+### Jev shadow experiment
+
+The optional `ruby_llm-typesafe` provider observes spontaneous contribution
+checks in both editors. It never gates edits or changes the writing model's
+answer. Explicit `@agent` commands, questions, reviews and drafts bypass it.
+Run `bundle install` after updating the demo.
+
+Store `TYPESAFE_API_KEY=...` in `~/.config/yrby/typesafe.env`, outside this repo,
+and `chmod 600` that file. Load it alongside your writing provider's environment:
+
+```sh
+set -a
+source ~/.config/yrby/typesafe.env
+source ~/.config/yrby/openrouter.env
+set +a
+AGENT_JEV_SHADOW=1 AGENT_PROVIDER=openrouter bin/rails s
+```
+
+Both `AGENT_JEV_SHADOW=1` and a TypeSafe key are required. Restart the server
+when changing these settings. `AGENT_JEV_MODEL` defaults to `jev-latest`; the
+returned model version and rubric `contribution-v1` are recorded for replay.
+The writing provider still needs its own key. Jev cannot generate text.
+
+Before each existing `consider` call, the observer captures eligible changed
+blocks, their immediate neighbors and the reviewer's recent memory. It skips
+more than eight changed blocks or over 24 KB of context. After the writing
+reviewer returns (or fails), one background Jev request compares that same
+snapshot. There is at most one request per reviewer; overlapping checks are
+logged as skipped. Requests use a separate RubyLLM context with a three-second
+HTTP timeout and no retries. They never delay document writes waiting for a
+result, and are best-effort when the process exits.
+
+Rails logs JSON events named `jev_shadow`: snapshot hash, exact model version,
+rubric, choice, probabilities, confidence, input token count, Jev latency,
+writing-reviewer latency and proposed edit count. No passage text, memory,
+model explanation or credential is logged. The context described above is
+sent to TypeSafe. `candidate_skip` means `leave_alone` probability >= 0.95;
+this is only a provisional evaluation threshold and never suppresses work.
+`llm_edits` counts proposed edits, not successfully applied changes or a human
+judgment of usefulness. Low-confidence, failed and skipped observations remain
+visible. No API failure changes the existing reviewer result.
+
+Tests use the real gem's request/response boundary with a local HTTP adapter:
+
+```sh
+bundle exec ruby -Itest test/jev_shadow_test.rb
+```
+
+For an explicit live check over six synthetic, labeled cases:
+
+```sh
+bundle exec ruby bin/jev-shadow-eval
+```
+
+The evaluator reports expected labels alongside the observed probabilities;
+its labels are a starting set, not evidence of calibration. It also accepts a
+JSON fixture path with the same format. Compare missed useful interventions,
+possible avoided calls, latency and human undo/rejection before enabling any
+future gate. Retain labeled inputs locally for replay: the normal logs contain
+hashes rather than the document text needed to reconstruct a case.
+
 `POST /docs/:id/agent` starts a Ruby agent on a Lexxy document (see
 `app/lib/review_agent.rb`). It joins over the same `DocumentChannel` as the
 browsers, shows up in the presence roster with its status in its cursor

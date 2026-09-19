@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "jev_shadow"
+
 # A review from a model through ruby_llm. Whichever key is set is used:
 # Fireworks AI (FIREWORKS_API_KEY), OpenRouter (OPENROUTER_API_KEY, which
 # has free models), or Anthropic (ANTHROPIC_API_KEY). AGENT_PROVIDER picks
@@ -217,7 +219,8 @@ class LlmReviewer
   # A proc that receives the model's reasoning as it streams, for the ledger.
   attr_accessor :on_thinking
 
-  def initialize
+  def initialize(shadow: JevShadow.new)
+    @shadow = shadow
     @memory = []
   end
 
@@ -239,6 +242,8 @@ class LlmReviewer
   # Between requests: given what changed and where people are, a small plan
   # or nothing.
   def consider(changed_blocks, occupied, blocks)
+    snapshot = @shadow.capture(changed_blocks, occupied, blocks, @memory)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     numbered = blocks.each_with_index.map { |b, i| "[#{i}] #{b}" }.join("\n")
     changed = changed_blocks.map { |i| "[#{i}] #{blocks[i]}" }.join("\n")
     reply = ask(format(CONSIDER_PROMPT, changed, occupied.empty? ? "none" : occupied.join(", "), numbered), quick: true)
@@ -249,9 +254,17 @@ class LlmReviewer
     result
   rescue StandardError => e
     failed(e)
+  ensure
+    @shadow.observe(snapshot, llm_edits: result&.edits&.size,
+                              llm_ms: started && consideration_elapsed(started),
+                              llm_status: result ? "ok" : "error")
   end
 
   private
+
+  def consideration_elapsed(started)
+    ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round(1)
+  end
 
   def failed(error)
     raise error if error.is_a?(ModelError)
