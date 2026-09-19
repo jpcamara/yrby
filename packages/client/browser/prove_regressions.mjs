@@ -24,7 +24,11 @@ const ruby = process.env.RUBY_BIN;
 const bundle = process.env.BUNDLE_BIN;
 const serverCommand = ruby || "bundle";
 const serverArgs = ruby
-  ? [bundle, "exec", "ruby", "-Ilib", "test/browser/app.rb"]
+  ? [bundle, "exec", ruby, "-Ilib", "-e", `
+      relocated = ENV.fetch("RUBYLIB").split(File::PATH_SEPARATOR)
+      $LOAD_PATH.replace($LOAD_PATH.reject { |path| relocated.include?(path) } + relocated)
+      load ARGV.fetch(0)
+    `, "test/browser/app.rb"]
   : ["exec", "ruby", "-Ilib", "test/browser/app.rb"];
 
 await mkdir(assets, { recursive: true });
