@@ -182,6 +182,7 @@ jobs:
         working-directory: examples/actioncable-demo
         run: |
           bundle exec ruby -Itest test/llm_reviewer_test.rb
+          bundle exec ruby -Itest test/jev_shadow_test.rb
           bundle exec ruby -Itest test/sudoku_test.rb
           bundle exec ruby -Itest test/sudoku_peer_test.rb
       - name: Build yrby-client package
