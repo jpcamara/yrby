@@ -398,3 +398,4 @@ test("receive: an awareness payload with trailing bytes inside the blob is rejec
   session.destroy();
   awareness.destroy();
 });
+

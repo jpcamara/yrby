@@ -36,6 +36,16 @@
         "types": "./dist/cjs/base64.d.ts",
         "default": "./dist/cjs/base64.js"
       }
+    },
+    "./element": {
+      "import": {
+        "types": "./dist/document_element.d.ts",
+        "default": "./dist/document_element.js"
+      },
+      "require": {
+        "types": "./dist/cjs/document_element.d.ts",
+        "default": "./dist/cjs/document_element.js"
+      }
     }
   },
   "files": [
@@ -47,7 +57,9 @@
     "build": "npm run clean && tsc && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({ type: 'commonjs' }) + '\\n')\"",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build",
-    "test": "npm run build && node --test"
+    "test": "npm run build && node --test",
+    "test:browser": "node browser/run.mjs",
+    "test:browser:turbolinks": "node browser/run_turbolinks.mjs"
   },
   "license": "MIT",
   "author": "JP Camara <jp@jpcamara.com>",
@@ -73,8 +85,9 @@
     "access": "public"
   },
   "peerDependencies": {
-    "yjs": "^13.6.0",
-    "y-protocols": "^1.0.5"
+    "@rails/actioncable": ">= 7.1",
+    "y-protocols": "^1.0.5",
+    "yjs": "^13.6.0"
   },
   "peerDependenciesMeta": {
     "yjs": {
@@ -82,14 +95,23 @@
     },
     "y-protocols": {
       "optional": true
+    },
+    "@rails/actioncable": {
+      "optional": true
     }
   },
   "dependencies": {
     "lib0": "^0.2.117"
   },
   "devDependencies": {
-    "yjs": "^13.6.0",
+    "@anycable/web": "^1.1.1",
+    "@hotwired/turbo": "^8.0.23",
+    "@rails/actioncable": "^8.1.301",
+    "agent-browser": "^0.28.0",
+    "esbuild": "^0.25.12",
+    "turbolinks": "^5.2.0",
+    "typescript": "^5.6.0",
     "y-protocols": "^1.0.5",
-    "typescript": "^5.6.0"
+    "yjs": "^13.6.0"
   }
 }

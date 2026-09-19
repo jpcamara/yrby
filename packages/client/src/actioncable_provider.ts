@@ -9,8 +9,8 @@
 // the server's persistence/ack path.
 //
 // The constructor does not auto-connect: wire up your editor binding first, then
-// call `connect()`. Watch the connection with `onStatusChange(({ status }) => ...)`
-// or the `status` getter. Editors that must not bind before the first sync
+// call `connect()`. Watch the connection with `onStatusChange(({ status, pending }) => ...)`
+// or the `status` and `hasPending` getters. Editors that must not bind before the first sync
 // can `await provider.whenSynced` after connect(). On `disconnect()`/`destroy()`,
 // and on browser `pagehide`, the provider broadcasts a presence removal so peers
 // drop our cursor right away instead of waiting for the awareness timeout.
@@ -28,9 +28,11 @@ import type { Doc } from "yjs";
  */
 export type ProviderStatus = "connecting" | "connected" | "synced" | "disconnected";
 
-/** Payload passed to onStatusChange listeners. */
+/** Payload passed to onStatusChange listeners. Fires when either field changes. */
 export interface StatusEvent {
   status: ProviderStatus;
+  /** True while local edits await the server's acknowledgment. */
+  pending: boolean;
 }
 
 /** The minimal slice of an ActionCable/AnyCable subscription this provider uses. */
@@ -76,7 +78,11 @@ export class ActionCableProvider {
   #subscription: CableSubscription | null = null;
   #onError: (error: unknown, context: string) => void;
   #connected = false;
+  #generation = 0;
+  #destroyed = false;
   #status: ProviderStatus = "disconnected";
+  #pending = false;
+  #onDocUpdate = (): void => this.#refreshStatus(); // a local edit may have made the queue non-empty
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #whenSynced: Promise<void> | null = null;
   // `session.synced` resets on every transport drop (a reconnect
@@ -108,6 +114,8 @@ export class ActionCableProvider {
       onError: this.#onError,
       send: (frame, id) => this.#send(frame, id),
     });
+    // After the session's own listener, so the queue already holds the edit.
+    this.doc.on("update", this.#onDocUpdate);
   }
 
   /** True once the document has caught up with the server (received a SyncStep2). */
@@ -178,15 +186,26 @@ export class ActionCableProvider {
   }
 
   connect(): void {
+    if (this.#destroyed) throw new Error("provider is destroyed");
     if (this.#subscription) return;
     const provider = this;
+    const generation = ++this.#generation;
+    let creating = true;
+    const current = () => generation === provider.#generation && !provider.#destroyed;
+    // A consumer may call back inside create(). Wait until the returned
+    // subscription is installed so the opening handshake has somewhere to send.
+    const run = (callback: () => void) => {
+      if (creating) queueMicrotask(() => { if (current()) callback(); });
+      else if (current()) callback();
+    };
     this.#subscription = this.consumer.subscriptions.create(
       { channel: this.channelName, ...this.channelParams },
       {
-        received(message: CableMessage) {
+        received(message: CableMessage) { run(() => {
           // Reliable-delivery ack: confirm + prune the local queue.
           if (message && message.ack !== undefined) {
             provider.session.ack(message.ack);
+            provider.#refreshStatus(); // the queue may have just emptied
             return;
           }
           const awarenessPayload = message && message.awareness;
@@ -208,26 +227,27 @@ export class ActionCableProvider {
           const reply = provider.session.receive(frame);
           if (reply) provider.#send(reply, undefined); // e.g. SyncStep2 answering a SyncStep1
           provider.#refreshStatus(); // a SyncStep2 may have just flipped us to "synced"
-        },
-        connected() {
+        }); },
+        connected() { run(() => {
           provider.#connected = true;
           provider.session.onConnect(); // handshake + replay the unacked tail
           provider.#refreshStatus();
-        },
-        disconnected() {
+        }); },
+        disconnected() { run(() => {
           provider.#connected = false;
           provider.session.onDisconnect(); // pause retransmits, clear remote presence
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
-        },
-        rejected() {
+        }); },
+        rejected() { run(() => {
           // The channel refused the subscription (auth, missing doc). Surface
           // it and tear down — otherwise the provider sits at "connecting"
           // forever, silently queueing edits. The app decides what's next.
-          provider.#onError(new Error("subscription rejected by the server"), "rejected");
           provider.disconnect();
-        },
+          provider.#onError(new Error("subscription rejected by the server"), "rejected");
+        }); },
       }
     );
+    creating = false;
     this.#installUnloadHandler();
     this.#refreshStatus(); // -> "connecting"
   }
@@ -235,6 +255,10 @@ export class ActionCableProvider {
   disconnect(): void {
     if (!this.#subscription) return;
     const sub = this.#subscription;
+    // Silence the old subscription now, not when a replacement arrives: its
+    // unsubscribe is deferred below, so a frame still on the wire, or a late
+    // rejected/connected, must not reach the session or a replacement.
+    ++this.#generation;
     // Tell peers we're gone while the transport is still live, then pause and
     // detach. Defer the unsubscribe one microtask so the removal frame flushes
     // before the channel tears down.
@@ -251,10 +275,25 @@ export class ActionCableProvider {
     this.#refreshStatus(); // -> "disconnected"
   }
 
+  /**
+   * Resubscribe with updated channel params, such as a renewed grant. The
+   * doc, the delivery queue, awareness, and this provider's ack route all
+   * carry over; only the cable subscription is replaced. A no-op after
+   * destroy().
+   */
+  renew(params: object): void {
+    Object.assign(this.channelParams, params);
+    if (this.#destroyed) return;
+    this.disconnect();
+    this.connect();
+  }
+
   destroy(): void {
     this.disconnect();
+    this.#destroyed = true;
     this.session.destroy();
     this.awareness.destroy(); // stops its reaper timer
+    this.doc.off("update", this.#onDocUpdate);
     this.#statusListeners.clear();
   }
 
@@ -265,11 +304,13 @@ export class ActionCableProvider {
   }
 
   #refreshStatus(): void {
-    const next = this.#computeStatus();
-    if (next === this.#status) return;
-    this.#status = next;
-    if (next === "synced") this.#everSynced = true;
-    for (const listener of this.#statusListeners) listener({ status: next });
+    const status = this.#computeStatus();
+    const pending = this.hasPending;
+    if (status === this.#status && pending === this.#pending) return;
+    this.#status = status;
+    this.#pending = pending;
+    if (status === "synced") this.#everSynced = true;
+    for (const listener of this.#statusListeners) listener({ status, pending });
   }
 
   // Presence teardown/restore around page lifecycle:

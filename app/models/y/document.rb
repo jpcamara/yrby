@@ -81,21 +81,23 @@ class Y::Document < ActiveRecord::Base
       (select(:id).find_by(key: key) || create_or_find_by!(key: key)).append(update)
     end
 
+    # The key for one attribute of one record, such as "post/1/body", built
+    # from the class name, id, and attribute alone: no row is read or
+    # created, so a key exists before the first write and for custom stores
+    # that never have a row. polymorphic_name is what Rails writes to
+    # record_type, so STI subclasses and namespaced models get the same key.
+    def key_for(record, name)
+      "#{record.class.polymorphic_name.underscore}/#{record.id}/#{name}"
+    end
+
     private
 
     def adopt(record, name)
-      document = find_by(key: derived_key(record, name), record_type: nil)
+      document = find_by(key: key_for(record, name), record_type: nil)
       document&.update!(record: record, name: name.to_s)
       document
     rescue ActiveRecord::RecordNotUnique
       find_by(record: record, name: name.to_s) # a racer adopted or created it first
-    end
-
-    def derived_key(record, name)
-      # polymorphic_name is what Rails writes to record_type, so adoption
-      # and assign_default_key derive the same string under any setting of
-      # store_full_class_name.
-      "#{record.class.polymorphic_name.underscore}/#{record.id}/#{name}"
     end
   end
 
