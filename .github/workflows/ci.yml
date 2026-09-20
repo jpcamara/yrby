@@ -183,6 +183,12 @@ jobs:
         run: |
           bundle exec ruby -Itest test/sudoku_test.rb
           bundle exec ruby -Itest test/sudoku_peer_test.rb
+      # The city's rules, and the planner against a cable of its own.
+      - name: Demo city tests
+        working-directory: examples/actioncable-demo
+        run: |
+          bundle exec ruby -Itest test/city_test.rb
+          bundle exec ruby -Itest test/city_planner_test.rb
       - name: Build yrby-client package
         working-directory: packages/client
         run: npm ci && npm run build
@@ -248,6 +254,9 @@ jobs:
           # The sudoku page: two browsers and the checker, invited from the
           # page, flagging a clash and serving a hint through the document.
           PORT=3777 node frontend/sudoku_e2e.mjs
+          # The city page: two browsers paint, the planner builds between
+          # them, one browser goes offline and merges on reconnect.
+          PORT=3777 node frontend/city_e2e.mjs
           kill "$(cat /tmp/puma.pid)" || true
 
       # Re-run the same slice under a multi-process Falcon deployment (2 fiber

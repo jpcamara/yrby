@@ -20,6 +20,11 @@ Rails.application.routes.draw do
   # documents#sudoku_checker under Puma.
   post "docs/:id/sudoku/checker", to: AgentInvite.new(SudokuPeer, action: :sudoku_checker, suffix: ":sudoku"),
                                   as: :document_sudoku_checker
+  get "docs/:id/city", to: "documents#city", as: :document_city
+  # The planner's invite takes the same shape: a stream under Falcon,
+  # documents#city_planner under Puma.
+  post "docs/:id/city/planner", to: AgentInvite.new(CityPlanner, action: :city_planner, suffix: ":city"),
+                                as: :document_city_planner
   get "docs/:id/content", to: "documents#content", as: :document_content
   get "docs/:id/audit", to: "documents#audit", as: :document_audit
   # DEMO/TEST ONLY — never mount in production. One anonymous POST can wipe a

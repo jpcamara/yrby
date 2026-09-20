@@ -15,6 +15,8 @@
 /public/forms.js
 /public/spreadsheet.js
 /public/sudoku.js
+/public/city.js
+/vendor/bundle/
 .DS_Store
 /config/master.key
 /storage/

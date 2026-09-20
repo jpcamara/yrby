@@ -2,7 +2,7 @@
 
 class DocumentsController < ApplicationController
   # The audit control endpoint is a test hook (POST without a form token).
-  skip_forgery_protection only: %i[audit_control agent markdown_agent sudoku_checker]
+  skip_forgery_protection only: %i[audit_control agent markdown_agent sudoku_checker city_planner]
 
   # Start a Ruby agent that joins the document as a live collaborator (see
   # ReviewAgent). It runs in a background thread over the same DocumentChannel
@@ -16,6 +16,9 @@ class DocumentsController < ApplicationController
   # The sudoku checker joins over the websocket even from here, as a player
   # would, on this server's own cable (see SudokuPeer).
   def sudoku_checker = start_agent(SudokuPeer, "#{params[:id]}:sudoku", url: AgentInvite.cable_url(request))
+
+  # The city planner joins the same way (see CityPlanner).
+  def city_planner = start_agent(CityPlanner, "#{params[:id]}:city", url: AgentInvite.cable_url(request))
 
   # One agent per document: a second invite while the first is still there
   # is answered with 409 and nothing starts.
@@ -94,6 +97,10 @@ class DocumentsController < ApplicationController
     @document_id = params[:id]
     SudokuPuzzle.ensure("#{@document_id}:sudoku")
   end
+
+  # Four Y.Maps keyed by cell: the tiles, the signs, who wrote each tile,
+  # and what the planner means to build next (see City and CityPlanner).
+  def city = (@document_id = params[:id])
 
   # Server-side read of the authoritative document: the raw CRDT state,
   # base64-encoded. Replays the durable store into a fresh Y.Doc state.
