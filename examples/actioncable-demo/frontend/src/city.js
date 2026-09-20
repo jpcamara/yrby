@@ -742,14 +742,15 @@ function drawSmoke(vis) {
   }
 }
 // The mayor's names, and anyone's, along the road they name: a sign that
-// asks for nothing is a name; its label runs along the roads beside it.
+// asks for nothing is a name; its label runs along the roads beside it. A
+// sign the mayor read as asking for a name (NAME) is a wish, not a name.
 let labels = null
 function computeLabels() {
   labels = []
   for (const [k, text] of signs.entries()) {
     const cell = parse(k)
     const t = String(text || "").trim()
-    if (!cell || !t || nameAt(live, cell[0], cell[1]) !== "sign" || isInstruction(t) || isInstruction(readings.get(k))) continue
+    if (!cell || !t || nameAt(live, cell[0], cell[1]) !== "sign" || isInstruction(t) || isInstruction(readings.get(k)) || readings.get(k) === "NAME") continue
     const start = [[cell[0], cell[1] - 1], [cell[0] + 1, cell[1]], [cell[0], cell[1] + 1], [cell[0] - 1, cell[1]]].find(([x, y]) => roadAt(live, x, y))
     if (!start) continue
     const seen = new Set([key(...start)]), queue = [start], cells = []
@@ -928,7 +929,9 @@ const sound = {
     g.gain.setValueAtTime(gain, at); g.gain.exponentialRampToValueAtTime(0.0005, at + dur)
     o.connect(g).connect(this.ctx.destination); o.start(at); o.stop(at + dur)
   },
+  log: [], // every sound asked for, played or not, so a test can see the bell ring
   play(kind) {
+    this.log.push(kind)
     if (!this.on || !this.ctx) return
     const t = this.ctx.currentTime
     if (kind === "place") this.tone(880, t, 0.06, "sine", 0.05)

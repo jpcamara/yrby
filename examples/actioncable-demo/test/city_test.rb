@@ -255,6 +255,47 @@ class CityTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- one tes
     assert_equal [["street", [4, 1]]], City.naming_sites(City::Map.parse("##########\n..........\n"))
   end
 
+  def test_a_sign_beside_a_street_is_a_wish_for_its_name
+    map = City::Map.parse(<<~MAP, signs: { "4,2" => "name this street after Ada", "9,4" => "elsewhere" })
+      ..........
+      ##########
+      ....!.....
+      ..........
+      .........!
+    MAP
+
+    assert_equal ["name this street after Ada"], City.naming_wishes(map, [6, 2])
+    assert_empty City.naming_wishes(map, [6, 5]), "a site by no road has no street to wish for"
+    assert_equal [[4, 2, "name this street after Ada"], [9, 4, "elsewhere"]], map.name_signs, "unread, both are names"
+    assert_empty City.naming_sites(map), "and the street is named"
+
+    wished = City::Map.parse(<<~MAP, signs: { "4,2" => "name this street after Ada" }, readings: { "4,2" => "NAME" })
+      ..........
+      ##########
+      ....!.....
+    MAP
+
+    assert wished.wish?(4, 2)
+    assert_empty wished.name_signs, "a wish is not a name"
+    assert_equal [["street", [4, 0]]], City.naming_sites(wished), "so the street still wants one"
+    assert_equal ["name this street after Ada"], City.naming_wishes(wished, [4, 0])
+  end
+
+  def test_a_street_someone_asked_a_name_for_is_named_first
+    map = City::Map.parse(<<~MAP, signs: { "4,7" => "call it Ada Way" }, readings: { "4,7" => "NAME" })
+      ##########
+      ..........
+      ..........
+      ..........
+      ..........
+      ..........
+      ##########
+      ....!.....
+    MAP
+
+    assert_equal [["street", [4, 5]], ["street", [4, 1]]], City.naming_sites(map)
+  end
+
   def test_near_is_within_the_yield_reach
     assert City.near?([[10, 10]], [[13, 13]], 3)
     refute City.near?([[10, 10]], [[14, 10]], 3)

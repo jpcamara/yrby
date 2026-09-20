@@ -122,7 +122,14 @@ class CityPlannerTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- 
     end
 
     def read(text) = (@asked << text) && :park
-    def name(_kind, **) = @names.shift
+
+    # The wishes given with the last name asked for are kept.
+    attr_reader :wishes
+
+    def name(_kind, wishes: [], **)
+      @wishes = wishes
+      @names.shift
+    end
   end
 
   def park_near?(person, cell)
@@ -140,11 +147,14 @@ class CityPlannerTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- 
 
     paint(person, (0..7).map { |x| [x, 10] }, "road")
     paint(person, [[1, 9], [3, 9], [5, 9], [7, 9]], "house_red")
+    place_sign(person, [6, 11], "name it after Ada")
     wait_until(timeout: 15) { read(person, "signs").value?("Elm Street") }
     key = read(person, "signs").key("Elm Street")
 
     assert_equal %w[sign a:mayor], [read(person, "tiles")[key], read(person, "authors")[key]]
     assert_equal 11, City.parse_key(key)[1], "the sign stands on the free side of the road"
+    assert_equal ["name it after Ada"], mayor.wishes, "the sign beside the street went to the mayor as a wish"
+    assert_equal ["trees please", "name it after Ada"], mayor.asked
     idle(seen)
   end
 
