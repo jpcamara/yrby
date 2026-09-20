@@ -17,17 +17,19 @@ class GuestParty
     Guest::Persona.new(name: "Networker", trait: "here to schmooze", color: "#2563eb", home: [975, 250],
                        personality: "loves meeting people and any chance to schmooze"),
     Guest::Persona.new(name: "Introvert", trait: "seeks quiet corners", color: "#7c3aed", home: [975, 90],
-                       personality: "avoids crowds and small talk and seeks quiet corners"),
+                       personality: "avoids crowds and small talk; seeks quiet corners, " \
+                                    "but will sit through a good talk"),
     Guest::Persona.new(name: "Rubyist", trait: "anything Ruby or Rails", color: "#dc2626", home: [24, 268],
                        personality: "gets excited about anything Ruby or Rails"),
     Guest::Persona.new(name: "Night Owl", trait: "loud, late, dancing", color: "#0f766e", home: [975, 380],
                        personality: "loves music, dancing, and anything loud and late"),
-    Guest::Persona.new(name: "Cat Person", trait: "will leave for a cat", color: "#db2777", home: [24, 460],
-                       personality: "will abandon any conversation for a cat"),
+    Guest::Persona.new(name: "Pixel Nerd", trait: "lives for pixel art", color: "#db2777", home: [24, 460],
+                       personality: "lives for pixel art and retro games"),
     Guest::Persona.new(name: "Coffee Snob", trait: "judges the beans", color: "#92400e", home: [600, 460],
                        personality: "only cares about good coffee and judges the beans"),
-    Guest::Persona.new(name: "Lurker", trait: "stays out of everything", color: "#059669", home: [975, 460],
-                       personality: "stays out of everything unless something is genuinely irresistible")
+    Guest::Persona.new(name: "Lurker", trait: "lurks, unless it's irresistible", color: "#059669", home: [975, 460],
+                       personality: "stays out of everything unless something is genuinely irresistible, " \
+                                    "and a conference full of interesting people is")
   ].freeze
 
   # What every guest knows about places a sign may name: place => plain
@@ -36,7 +38,9 @@ class GuestParty
   # question as what_you_know. Nothing is written on the sign.
   BRIEFING = {
     "SF Ruby Conf" => "Nov 10-12 at SFJAZZ in San Francisco, three days of Ruby and Rails talks, " \
-                      "keynote by Garry Tan, hosted by Evil Martians, hallway track, espresso bar, snacks between talks"
+                      "keynote by Garry Tan, hosted by Evil Martians, hallway track, espresso bar, " \
+                      "snacks between talks, evening party with music, a quiet lounge, " \
+                      "8-bit theme with a pixel-art attendee world"
   }.freeze
 
   RUNNING = {} # rubocop:disable Style/MutableConstant -- the parties running in this process, by room

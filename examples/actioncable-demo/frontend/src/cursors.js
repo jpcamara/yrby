@@ -14,7 +14,7 @@ const W = 1000, H = 560, SIGN_W = 180, SIGN_H = 100
 const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia", "Alan"]
 const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8", "#e879f9", "#f472b6"]
 // The guests' slots around a sign, in the order the party seats them.
-const RING = ["Snack Goblin", "Networker", "Introvert", "Rubyist", "Night Owl", "Cat Person", "Coffee Snob", "Lurker"]
+const RING = ["Snack Goblin", "Networker", "Introvert", "Rubyist", "Night Owl", "Pixel Nerd", "Coffee Snob", "Lurker"]
 const SAY_FOR = 3000    // ms a move stays labeled on a guest's chip
 const PULSE_FOR = 400   // ms a chip pulses when its guest was asked and stayed
 const CHIP_H = 36       // a guest chip: name and trait
