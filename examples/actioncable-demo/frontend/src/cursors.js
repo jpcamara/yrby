@@ -16,8 +16,9 @@ const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8"
 // The guests' slots around a sign, in the order the party seats them.
 const RING = ["Snack Goblin", "Networker", "Introvert", "Rubyist", "Night Owl", "Cat Person", "Coffee Snob", "Lurker"]
 const GLIDE = 0.2       // seconds; the time constant of a cursor's glide, ~0.8 s to settle
-const SAY_FOR = 3500    // ms a decision stays on a guest's chip
-const CHIP_H = 40       // a guest chip: name and trait
+const SAY_FOR = 3000    // ms a move stays labeled on a guest's chip
+const PULSE_FOR = 400   // ms a chip pulses when its guest was asked and stayed
+const CHIP_H = 36       // a guest chip: name and trait
 const ROUND_GAP = 1500  // ms of quiet that ends a round of decisions
 const pick = (a) => a[Math.floor(Math.random() * a.length)]
 const $ = (id) => document.getElementById(id)
@@ -175,7 +176,7 @@ function placeFor(state, at) {
 
 const ARROW = '<svg class="arrow" width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 20 L7 15.5 L10.5 23.5 L14 22 L10.5 14 L17.5 14 Z" fill="var(--c)" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>'
 const cursors = new Map() // awareness clientID -> { el, pos }
-const guestSeen = new Map() // guest name -> { at, seenAt } of the decision last shown
+const guestSeen = new Map() // guest name -> the decision last noticed: { at, where, seenAt, moved }
 const rounds = { n: 0, lastActivity: 0, ms: [], known: new Map() } // known: guest name -> decision.at last counted
 
 function cursorEl(id, s) {
@@ -190,17 +191,23 @@ function cursorEl(id, s) {
   return c
 }
 
-function sayFor(s, now) {
-  if (s.status === "deciding") return "…"
+// A guest that walked somewhere gets a label for a while: where, and how
+// sure. One that was asked and stayed gets a pulse of its chip instead. A
+// round that moves nobody shows nothing but the HUD.
+function sayFor(s, chipEl, now) {
   if (s.status === "confused") return "?"
   const d = s.decision
   if (!d) return null
   const seen = guestSeen.get(s.user.name)
-  if (!seen || seen.at !== d.at) guestSeen.set(s.user.name, { at: d.at, seenAt: now })
-  if (now - guestSeen.get(s.user.name).seenAt > SAY_FOR) return null
-  const text = String(signs.get(d.sign)?.get("text") ?? "(gone)").toUpperCase()
-  const where = d.sign === "stay" ? "stays" : `→ ${text.length > 18 ? `${text.slice(0, 17)}…` : text}`
-  return `${where} · ${Number(d.p).toFixed(2)} · ${Math.round(d.ms)}ms`
+  if (!seen || seen.at !== d.at) {
+    const moved = !seen || seen.where !== s.at
+    guestSeen.set(s.user.name, { at: d.at, where: s.at, seenAt: now, moved })
+    if (!moved) { chipEl.classList.remove("pulse"); void chipEl.offsetWidth; chipEl.classList.add("pulse"); setTimeout(() => chipEl.classList.remove("pulse"), PULSE_FOR) }
+  }
+  const noticed = guestSeen.get(s.user.name)
+  if (!noticed.moved || now - noticed.seenAt > SAY_FOR) return null
+  const text = String(signs.get(s.at)?.get("text") ?? "(gone)").toUpperCase()
+  return `→ ${text.length > 20 ? `${text.slice(0, 19)}…` : text} · ${Number(d.p).toFixed(2)}`
 }
 
 // Decision labels live on a layer above every cursor, so no chip can hide
@@ -210,8 +217,9 @@ function sayFor(s, now) {
 // below its chip instead, and may step down twice the same way; after that
 // it may sit beside its chip, to the right, then the left. If nothing is
 // free, the label drops its milliseconds and tries the same spots once
-// more; then it takes the first spot that covers no chip or card, or else
-// the spot beside its chip. Positions are in board units.
+// more, without its probability; then it takes the first spot that covers
+// no chip or card, or else the spot beside its chip. Positions are in
+// board units.
 const LABEL_GAP = 3
 const labels = new Map() // guest name -> element
 const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
@@ -236,8 +244,8 @@ function layoutLabels(wanted, blocks) {
     if (el.textContent !== text) el.textContent = text
     let spots = spotsFor(el, chip, flip, blocks)
     let spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
-    if (!spot && / · \d+ms$/.test(text)) {
-      el.textContent = text.replace(/ · \d+ms$/, "")
+    if (!spot && / · \d\.\d\d$/.test(text)) {
+      el.textContent = text.replace(/ · \d\.\d\d$/, "")
       spots = spotsFor(el, chip, flip, blocks)
       spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
     }
@@ -294,9 +302,10 @@ function frame(now) {
       c.el.classList.toggle("flip", flip)
       c.el.classList.toggle("up", up)
       c.el.querySelector(".trait").textContent = s.trait || ""
-      const chip = chipBox(c.pos, c.el.querySelector(".chip"), flip, up)
+      const chipEl = c.el.querySelector(".chip")
+      const chip = chipBox(c.pos, chipEl, flip, up)
       chips.push(chip)
-      const say = sayFor(s, now)
+      const say = sayFor(s, chipEl, now)
       if (say != null) wanted.push({ name: s.user.name, text: say, chip, flip })
     } else {
       x = s.cursor.x; y = s.cursor.y
@@ -382,7 +391,7 @@ provider.onStatusChange(renderParty)
 // re-fire on reconnects, so a cleared board stays cleared). Fixed ids, so
 // two first opens seed the same three signs rather than six.
 provider.whenSynced.then(() => {
-  if (signs.size === 0) ydoc.transact(() => { addSign(220, 120, "FREE PIZZA", "s1"); addSign(600, 100, "QUIET ROOM", "s2"); addSign(380, 340, "RUBY 4.0 RELEASE PARTY", "s3") })
+  if (signs.size === 0) ydoc.transact(() => { addSign(220, 120, "FREE PIZZA", "s1"); addSign(600, 100, "QUIET ROOM", "s2"); addSign(380, 340, "RUBY 4.0 PARTY", "s3") })
   renderParty()
 })
 renderSigns(); renderParty()
