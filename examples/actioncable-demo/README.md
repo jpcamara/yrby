@@ -124,10 +124,12 @@ red diamond, its name, and its trait. The two roles:
   texts as the options, plus "stay". The answer is a sign id with a probability
   for every option, in about half a second. Jev generates no text.
 
-What every guest knows is one short briefing, `GuestParty::BRIEFING`: plain
-facts about places a sign may name, the same for all eight, sent with every
-question as `what_you_know`. A sign that names a real place then means
-something to each guest. Personas and the rest of the prompt stay as they are.
+What every guest knows is one short briefing, `GuestParty::BRIEFING`: place
+name to plain facts, the same for all eight. When a sign's text is a known
+place's name (trimmed, any case), that sign's option carries the facts: "The
+sign says: SF RUBY CONF. What you know about it: ...". Other signs are offered
+plain. The briefing also goes with every question as `what_you_know`. Nothing
+is written on the sign. Personas and the rest of the prompt stay as they are.
 
 The guest sets `at` from the answer and every browser glides its cursor to
 that sign. Dragging a sign moves the guests standing at it with no model

@@ -41,10 +41,13 @@ class GuestPartyTest < Minitest::Test
   end
 
   def test_every_guest_knows_the_same_facts
-    assert_kind_of String, GuestParty::BRIEFING
+    assert_kind_of Hash, GuestParty::BRIEFING
     assert_predicate GuestParty::BRIEFING, :frozen?
-    refute_empty GuestParty::BRIEFING
-    assert_includes GuestParty::BRIEFING, "SF Ruby Conf"
+    assert_includes GuestParty::BRIEFING.keys, "SF Ruby Conf"
+    GuestParty::BRIEFING.each do |place, facts|
+      refute_empty place.strip
+      refute_empty facts.strip
+    end
   end
 
   def test_eight_guests_arrive_together_and_leave_together

@@ -30,10 +30,14 @@ class GuestParty
                        personality: "stays out of everything unless something is genuinely irresistible")
   ].freeze
 
-  # What every guest knows about the places a sign may name: plain facts,
-  # the same for all eight, sent with every question as what_you_know.
-  BRIEFING = "SF Ruby Conf: Nov 10-12 at SFJAZZ in San Francisco, three days of Ruby and Rails talks, " \
-             "keynote by Garry Tan, hosted by Evil Martians, hallway track, espresso bar, snacks between talks"
+  # What every guest knows about places a sign may name: place => plain
+  # facts, the same for all eight. A sign that is a place's name (trimmed,
+  # any case) is offered with the facts; the briefing also goes with every
+  # question as what_you_know. Nothing is written on the sign.
+  BRIEFING = {
+    "SF Ruby Conf" => "Nov 10-12 at SFJAZZ in San Francisco, three days of Ruby and Rails talks, " \
+                      "keynote by Garry Tan, hosted by Evil Martians, hallway track, espresso bar, snacks between talks"
+  }.freeze
 
   RUNNING = {} # rubocop:disable Style/MutableConstant -- the parties running in this process, by room
   RUNNING_LOCK = Mutex.new
