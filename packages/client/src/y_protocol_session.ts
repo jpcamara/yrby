@@ -119,7 +119,7 @@ export class YProtocolSession {
     this.#delivery.resume();
   }
 
-  /** The transport is down: keep the queue, stop retransmits, forget peers' presence. Our own state is untouched. */
+  /** The transport is down: keep the queue, stop retransmits, forget peers' presence. */
   pause(): void {
     this.#synced = false;
     this.#delivery.pause();
