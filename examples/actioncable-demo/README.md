@@ -120,6 +120,13 @@ starts it the way the checker's invite does, and it runs on its own too:
 CABLE_URL=ws://127.0.0.1:3000/cable bin/city-planner demo   # then open /docs/demo/city
 ```
 
+With a model key set (the review agent's: `FIREWORKS_API_KEY`,
+`OPENROUTER_API_KEY`, or `ANTHROPIC_API_KEY`) there is a mayor too,
+`CityMayor`: a sign the rules do not understand is read into one of the
+instructions they do, and the reading goes into the document beside the sign
+(`readings`); streets and neighbourhoods get name signs as the town grows.
+Without a key there is no mayor and nothing else changes.
+
 "Go offline" drops the page's subscription and nothing else: edits keep
 landing in the local doc and the provider's outbox, and they replay on
 "Reconnect", where the handshake also brings in what everyone else did. The

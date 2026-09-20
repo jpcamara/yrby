@@ -8,6 +8,7 @@
 require "minitest/autorun"
 require "y"
 require_relative "../app/lib/city"
+require_relative "../app/lib/city_mayor"
 require_relative "../app/lib/city_planner"
 
 module CityFixture

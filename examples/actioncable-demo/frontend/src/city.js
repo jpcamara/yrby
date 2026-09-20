@@ -1,6 +1,7 @@
 // Opaque-state demo: a town everyone builds, with a Ruby planner in it.
-// Shared state is four Y.Maps keyed by cell ("x,y"): the tiles, the signs'
-// text, who wrote each tile, and the cells the planner has claimed. A paint
+// Shared state is five Y.Maps keyed by cell ("x,y"): the tiles, the signs'
+// text, who wrote each tile, the cells the planner has claimed, and what
+// the mayor read a sign as when the text was not an instruction. A paint
 // is one map.set, so paints to different cells merge and the same cell is
 // last-writer-wins. Where everyone stands travels in awareness, not the
 // document. The planner (CityPlanner) joins as a peer over the same
@@ -47,6 +48,7 @@ const tiles = ydoc.getMap("tiles")
 const signs = ydoc.getMap("signs")
 const authors = ydoc.getMap("authors")
 const claims = ydoc.getMap("claims")
+const readings = ydoc.getMap("readings")
 const consumer = createConsumer()
 const provider = new ActionCableProvider(ydoc, consumer, "DocumentChannel", { id: documentId })
 const awareness = provider.awareness
@@ -176,7 +178,8 @@ function renderTags() {
     el.className = "sign-text"
     el.style.left = `${((cell[0] + 0.5) / W) * 100}%`
     el.style.top = `${(cell[1] / H) * 100}%`
-    el.textContent = String(text).slice(0, 14)
+    const reading = readings.get(k)
+    el.textContent = String(text).slice(0, 14) + (reading && reading !== "none" ? ` → ${reading}` : "")
     els.push(el)
   }
   tags.replaceChildren(...els)
@@ -207,8 +210,8 @@ function paint(x, y, name = tool) {
     flush = null
     ydoc.transact(() => {
       for (const [k, name] of pending) {
-        if (name === "erase") { if (tiles.has(k)) { tiles.delete(k); authors.delete(k); signs.delete(k) } }
-        else if (tiles.get(k) !== name) { tiles.set(k, name); authors.set(k, `h:${user.name}`); signs.delete(k) }
+        if (name === "erase") { if (tiles.has(k)) { tiles.delete(k); authors.delete(k); signs.delete(k); readings.delete(k) } }
+        else if (tiles.get(k) !== name) { tiles.set(k, name); authors.set(k, `h:${user.name}`); signs.delete(k); readings.delete(k) }
       }
     })
     pending.clear()
@@ -223,6 +226,7 @@ function placeSign(x, y, text) {
     tiles.set(k, "sign")
     authors.set(k, `h:${user.name}`)
     signs.set(k, text.trim())
+    readings.delete(k) // a new text is read afresh
   })
 }
 
@@ -379,6 +383,7 @@ timelapse.addEventListener("toggle", () => {
 // Everything on screen comes from the document and the presence.
 tiles.observe((event) => { if (!replaying) for (const k of event.keysChanged) drawAround(k); renderOverlay(); renderStatus() })
 signs.observe(renderTags)
+readings.observe(renderTags)
 authors.observe(() => { if (attribution) renderOverlay() })
 claims.observe(renderOverlay)
 awareness.on("change", () => { renderOverlay(); renderPresence() })
@@ -388,5 +393,5 @@ provider.onStatusChange(() => { renderStatus(); if (provider.status === "synced"
 setTool(tool)
 renderPresence()
 renderStatus()
-window.__yrb = { provider, ydoc, tiles, signs, authors, claims, user, paint, placeSign, moveTo, setTool, goOffline, reconnect, toggleAttribution, get pos() { return pos } }
+window.__yrb = { provider, ydoc, tiles, signs, authors, claims, readings, user, paint, placeSign, moveTo, setTool, goOffline, reconnect, toggleAttribution, get pos() { return pos } }
 provider.connect()
