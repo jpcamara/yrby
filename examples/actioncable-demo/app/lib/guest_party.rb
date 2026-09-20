@@ -8,22 +8,24 @@ require_relative "guest"
 #
 #   GuestParty.new("demo:cursors", url: "ws://127.0.0.1:3000/cable").run
 class GuestParty
+  # Homes are spots along the board's edges, clear of the seeded signs and
+  # of the slots around them, so guests at the wall stand apart.
   PERSONAS = [
-    Guest::Persona.new(name: "Snack Goblin", trait: "lives for free food", color: "#d97706", home: [60, 60],
+    Guest::Persona.new(name: "Snack Goblin", trait: "lives for free food", color: "#d97706", home: [20, 96],
                        personality: "lives for free food and will cross any room for a snack"),
-    Guest::Persona.new(name: "Networker", trait: "here to schmooze", color: "#2563eb", home: [500, 40],
+    Guest::Persona.new(name: "Networker", trait: "here to schmooze", color: "#2563eb", home: [985, 250],
                        personality: "loves meeting people and any chance to schmooze"),
-    Guest::Persona.new(name: "Introvert", trait: "seeks quiet corners", color: "#7c3aed", home: [940, 60],
+    Guest::Persona.new(name: "Introvert", trait: "seeks quiet corners", color: "#7c3aed", home: [985, 90],
                        personality: "avoids crowds and small talk and seeks quiet corners"),
-    Guest::Persona.new(name: "Rubyist", trait: "anything Ruby or Rails", color: "#dc2626", home: [60, 300],
+    Guest::Persona.new(name: "Rubyist", trait: "anything Ruby or Rails", color: "#dc2626", home: [20, 268],
                        personality: "gets excited about anything Ruby or Rails"),
-    Guest::Persona.new(name: "Night Owl", trait: "loud, late, dancing", color: "#0f766e", home: [940, 300],
+    Guest::Persona.new(name: "Night Owl", trait: "loud, late, dancing", color: "#0f766e", home: [985, 380],
                        personality: "loves music, dancing, and anything loud and late"),
-    Guest::Persona.new(name: "Cat Person", trait: "will leave for a cat", color: "#db2777", home: [60, 470],
+    Guest::Persona.new(name: "Cat Person", trait: "will leave for a cat", color: "#db2777", home: [20, 490],
                        personality: "will abandon any conversation for a cat"),
-    Guest::Persona.new(name: "Coffee Snob", trait: "judges the beans", color: "#92400e", home: [500, 480],
+    Guest::Persona.new(name: "Coffee Snob", trait: "judges the beans", color: "#92400e", home: [640, 490],
                        personality: "only cares about good coffee and judges the beans"),
-    Guest::Persona.new(name: "Lurker", trait: "stays out of everything", color: "#059669", home: [940, 470],
+    Guest::Persona.new(name: "Lurker", trait: "stays out of everything", color: "#059669", home: [985, 490],
                        personality: "stays out of everything unless something is genuinely irresistible")
   ].freeze
 

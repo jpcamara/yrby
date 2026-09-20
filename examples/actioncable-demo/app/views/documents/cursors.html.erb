@@ -18,24 +18,34 @@
  .sign .x{position:absolute;top:2px;right:6px;border:0;background:transparent;color:#92400e;font:14px/1 system-ui;cursor:pointer;opacity:0}
  .sign:hover .x{opacity:.8}
  #cursors{position:absolute;inset:0;pointer-events:none}
- .cursor{position:absolute;left:0;top:0;will-change:transform;pointer-events:none;white-space:nowrap}
+ .cursor{position:absolute;left:0;top:0;width:22px;height:26px;will-change:transform;pointer-events:none;white-space:nowrap}
  .cursor .arrow{display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
- .cursor .chip{position:absolute;left:14px;top:20px;display:flex;flex-direction:column;background:var(--c);color:#fff;border-radius:6px;padding:3px 8px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+ .cursor .tag{position:absolute;left:14px;top:20px}
+ .cursor .chip{display:flex;flex-direction:column;background:var(--c);color:#fff;border-radius:6px;padding:3px 8px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
  .cursor .name{font:700 14px/1.2 system-ui}
- .cursor .trait{font:13px/1.2 system-ui;opacity:.92}
+ .cursor .trait{font:14px/1.2 system-ui;opacity:.92}
  .cursor.guest .name::before{content:"";display:inline-block;width:8px;height:8px;background:#ef4444;transform:rotate(45deg);margin-right:7px;vertical-align:1px;outline:1.5px solid #fff}
- .cursor .say{position:absolute;left:14px;top:-26px;background:#111827;color:#fff;font:600 13px/1.2 system-ui;padding:3px 8px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+ .cursor .say{position:absolute;left:0;bottom:100%;margin-bottom:3px;background:#111827;color:#fff;font:700 13px/1.2 system-ui;padding:3px 8px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
  .cursor .say[hidden]{display:none}
- .cursor.flip .chip,.cursor.flip .say{left:auto;right:14px}
+ .cursor.flip .tag{left:auto;right:14px}
+ .cursor.flip .say{left:auto;right:0}
  .cursor.flip .arrow{transform:scaleX(-1)}
+ .cursor.up .tag{top:auto;bottom:calc(100% + 4px)}
  #foot{position:absolute;right:12px;bottom:8px;font:12px/1.2 system-ui;color:#6b7280;pointer-events:none}
+ /* ?stage=1: the board fills the window for a recording; only the title,
+    the roster, the HUD, the board, and the footer stay. */
+ body.stage .editors,body.stage #lead,body.stage .row{display:none}
+ body.stage .demo.cursors{max-width:none;margin:6px 12px}
+ body.stage h1{font-size:22px;margin:0 0 4px}
+ body.stage #status,body.stage #hud{margin:0 0 4px;font-size:14px}
+ body.stage #board{margin:4px auto 0;max-width:none}
 </style>
 <% end %>
 <div class="demo cursors">
   <header>
     <h1>Cursors with opinions</h1>
     <%= render "nav" %>
-    <p>
+    <p id="lead">
       Opaque state is a <code>Y.Map</code> of signs (x, y, text). Double-click to post a
       sign, drag to move it, type to change what it says, in two windows. Eight guests are
       Ruby processes' peers on the same document: their cursors are their presence, sent over
