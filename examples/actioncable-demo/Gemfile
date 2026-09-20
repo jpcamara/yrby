@@ -62,6 +62,10 @@ gem "sqlite3"
 # Without a key they use a fixed review (see app/lib/reviewer.rb).
 gem "ruby_llm", "~> 2.0", require: false
 gem "ruby_llm-typesafe", "~> 0.1.0", require: false
+# On a Falcon reactor the guests' Jev calls go through async-http: one
+# persistent connection per host, HTTP/2 when the server offers it, no
+# threads (see GuestMind).
+gem "async-http-faraday", require: false
 
 # The Ruby websocket client the out-of-process agent (bin/agent-client) uses.
 gem "async-websocket"

@@ -142,9 +142,11 @@ STORE_KIND=file bundle exec falcon serve --bind http://127.0.0.1:3000 --count 1
 ```
 
 `AGENT_JEV_MODEL` defaults to `jev-latest`. Use one worker: the one-party-
-per-room guard is process-local. Under Falcon the inviting page holds a
-streaming request and leaving it sends the guests home; Puma runs the party
-in a thread. **Send guests home** works from any browser: it sets
+per-room guard is process-local. Under Falcon the guests and their Jev calls
+are Async tasks on the reactor, no threads; under Puma each guest is a thread
+and its Jev call another. Under Falcon the inviting page holds a streaming
+request and leaving it sends the guests home; Puma runs the party in a
+thread. **Send guests home** works from any browser: it sets
 `party.enabled` to false in the document and every guest leaves. Guests also
 leave after two hours, or once no person has been in the room for two
 minutes. The party runs outside the server too:

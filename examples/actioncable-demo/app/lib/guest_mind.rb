@@ -3,11 +3,20 @@
 require "json"
 require "logger"
 require "ruby_llm-typesafe"
+require "async/http/faraday"
 
 # A guest's opinion: one typed choice from Jev, TypeSafe's decision model.
 # The persona goes in the instructions, the live sign texts are the options,
 # and the answer is a sign id or "stay" with a probability for each option.
 # Jev generates no text. Nothing here logs sign text, a reply, or a key.
+#
+# One mind serves a whole party, so its connection is shared: built once,
+# with its own key and timeout, and a fresh chat per call so nothing is
+# remembered between rounds. On an Async reactor the requests go through
+# async-http, which keeps one connection per host (HTTP/2 when offered),
+# so eight guests asking at once pay for one DNS lookup and one handshake,
+# not eight in a row on the one thread. Elsewhere each request opens its
+# own connection, in its own thread.
 class GuestMind
   STAY = "stay"
   MAX_TEXT = 80
@@ -27,6 +36,7 @@ class GuestMind
   def initialize(model: ENV.fetch("AGENT_JEV_MODEL", "jev-latest"), logger: nil)
     @model = model
     @logger = logger
+    @lock = Mutex.new
   end
 
   # Load what a first call would load, so eight first calls at once do not
@@ -85,17 +95,25 @@ class GuestMind
                   signs: signs.map { |id, text| { id: id, says: text } })
   end
 
-  # A fresh context per call: a separate key and timeout from any writing
-  # model, and nothing remembered between rounds.
+  # A fresh chat per call on the shared context: nothing remembered between
+  # rounds, one connection kept.
   def chat
-    context = RubyLLM.context do |config|
-      config.typesafe_api_key = ENV.fetch("TYPESAFE_API_KEY")
-      config.typesafe_api_base = "https://api.typesafe.ai"
-      config.request_timeout = TIMEOUT
-      config.max_retries = 0
-      config.logger = Logger.new(File::NULL)
-    end
     context.chat(model: @model, provider: :typesafe, assume_model_exists: true)
+  end
+
+  # A separate key and timeout from any writing model. Built where it is
+  # first needed, so a reactor gets the async adapter.
+  def context
+    @lock.synchronize do
+      @context ||= RubyLLM.context do |config|
+        config.typesafe_api_key = ENV.fetch("TYPESAFE_API_KEY")
+        config.typesafe_api_base = "https://api.typesafe.ai"
+        config.request_timeout = TIMEOUT
+        config.max_retries = 0
+        config.logger = Logger.new(File::NULL)
+        config.faraday_adapter = :async_http if Async::Task.current? && config.faraday_adapter == :net_http
+      end
+    end
   end
 
   # Probabilities come rounded to two places, so over many options their
