@@ -149,6 +149,18 @@ class GuestTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- assert
     wait_until { @peer.state["at"] == "s2" }
   end
 
+  def test_the_briefing_goes_with_every_question
+    asked = start(briefing: "The quiet room has soft chairs.")
+
+    assert_equal "The quiet room has soft chairs.", asked[:briefing]
+    @mind.responses << decision("s1")
+    wait_until { @peer.state["at"] == "s1" }
+    @peer.retext("s2", "LOUD ROOM")
+
+    assert_equal "The quiet room has soft chairs.", take_call[:briefing]
+    @mind.responses << decision("stay")
+  end
+
   def test_a_blank_sign_is_not_a_sign
     @peer.sign("s3", "   ")
     asked = start

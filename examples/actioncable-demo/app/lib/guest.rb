@@ -34,10 +34,11 @@ class Guest # rubocop:disable Metrics/ClassLength -- one peer's whole life in on
   SIGNS = "signs" # id => { x, y, text }
   PARTY = "party" # enabled => true | false
 
-  def initialize(document_id, persona, url: nil, peer: nil, mind: nil, quiet: QUIET, # rubocop:disable Metrics/ParameterLists -- the peer, the mind, and the timings
-                 min_interval: MIN_INTERVAL, stay: MAX_STAY, logger: nil)
+  def initialize(document_id, persona, url: nil, peer: nil, mind: nil, quiet: QUIET, # rubocop:disable Metrics/ParameterLists -- the peer, the mind, the briefing, and the timings
+                 min_interval: MIN_INTERVAL, stay: MAX_STAY, briefing: "", logger: nil)
     @document_id = document_id
     @persona = persona
+    @briefing = briefing
     @logger = logger || Logger.new($stderr)
     @peer = peer || Y::ActionCable::Client.new(url, channel: "DocumentChannel", params: { id: document_id },
                                                     root: nil, logger: @logger)
@@ -170,8 +171,9 @@ class Guest # rubocop:disable Metrics/ClassLength -- one peer's whole life in on
     show("deciding")
     persona = @persona
     at = @at
+    briefing = @briefing
     ask = lambda do
-      decision = @mind.call(persona: persona, signs: current, current: at)
+      decision = @mind.call(persona: persona, signs: current, current: at, briefing: briefing)
       @events << [:result, current, decision, nil]
     rescue StandardError => e
       @events << [:result, current, nil, e]

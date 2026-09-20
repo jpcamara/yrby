@@ -25,7 +25,7 @@ const AB = process.env.AB_BIN || resolve(here, "node_modules/.bin/agent-browser"
 const BASE = process.env.BASE || `http://127.0.0.1:${process.env.PORT || 3779}`
 const room = process.env.ROOM || `cursors-${`${Date.now()}`.slice(-6)}`
 const LIVE = process.env.LIVE_GUESTS === "1" || !!process.env.TYPESAFE_API_KEY
-const SIGN_TEXTS = ["FREE PIZZA", "QUIET ROOM", "SF RUBY CONF", "CAT CAFE", "MANDATORY NETWORKING"]
+const SIGN_TEXTS = ["FREE PIZZA", "QUIET ROOM", "RUBY 4.0 PARTY", "CAT CAFE", "MANDATORY NETWORKING", "SF RUBY CONF"]
 const sessions = [`cursors-${process.pid}-a`, `cursors-${process.pid}-b`]
 const [a, b] = sessions
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
