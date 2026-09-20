@@ -33,7 +33,7 @@ class GuestParty
   # What every guest knows about the places a sign may name: plain facts,
   # the same for all eight, sent with every question as what_you_know.
   BRIEFING = "SF Ruby Conf: Nov 10-12 at SFJAZZ in San Francisco, three days of Ruby and Rails talks, " \
-             "keynote by Garry Tan, hosted by Evil Martians, hallway track"
+             "keynote by Garry Tan, hosted by Evil Martians, hallway track, espresso bar, snacks between talks"
 
   RUNNING = {} # rubocop:disable Style/MutableConstant -- the parties running in this process, by room
   RUNNING_LOCK = Mutex.new
