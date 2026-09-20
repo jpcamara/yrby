@@ -15,7 +15,6 @@ const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia"
 const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8", "#e879f9", "#f472b6"]
 // The guests' slots around a sign, in the order the party seats them.
 const RING = ["Snack Goblin", "Networker", "Introvert", "Rubyist", "Night Owl", "Cat Person", "Coffee Snob", "Lurker"]
-const GLIDE = 0.2       // seconds; the time constant of a cursor's glide, ~0.8 s to settle
 const SAY_FOR = 3000    // ms a move stays labeled on a guest's chip
 const PULSE_FOR = 400   // ms a chip pulses when its guest was asked and stayed
 const CHIP_H = 36       // a guest chip: name and trait
@@ -127,13 +126,12 @@ stage.addEventListener("pointerleave", () => awareness.setLocalStateField("curso
 
 // Where a guest stands. At a sign: one of the slots on the card's perimeter,
 // outside its bounds, so no chip covers the card or another guest at it.
-// Slots go to the guests at that sign in the party's order: top, left,
-// bottom, right, then the same again one step further out. Chips stay in
-// the card's own column (top and bottom slots) or row (left and right), so
-// a neighboring card's crowd has its own room. A slot whose chip would
-// leave the board comes last. The cursor's tip sits on the perimeter; the
-// chip sits beside it, away from the card. At the wall: the guest's home
-// spot, chip toward the board.
+// Slots are top, left, bottom, right, then the same four one step further
+// out, with each chip in the card's own column or row. A card's slots are
+// a map that persists: a guest arriving takes the lowest free slot, a
+// guest leaving frees its own, and nobody else moves. The map resets when
+// the card's crowd is empty or the card is gone. At the wall: the guest's
+// home spot, chip toward the board.
 const CHIP_W = 176
 const order = (name) => { const i = RING.indexOf(name); return i >= 0 ? i : 8 + [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 8, 0) }
 function chipRect({ x, y, o }) {
@@ -144,40 +142,48 @@ function chipRect({ x, y, o }) {
 const onBoard = (r) => r.left >= -12 && r.right <= W + 12 && r.top >= -12 && r.bottom <= H + 12
 function slots(x, y) {
   const w = SIGN_W, h = SIGN_H, g = 6, step = CHIP_H + 4, below = h + g + 24 // room for the label under the card
-  const ring = [
+  return [
     { x: x + 10, y: y - 30, o: "ur" },            // top: chip above, over the card's top
     { x: x - g, y: y + h / 2 - 10, o: "l" },      // left: chip to the left
     { x: x + 10, y: y + below, o: "r" },          // bottom: chip below, under the card
     { x: x + w + g, y: y + h / 2 - 10, o: "r" },  // right: chip to the right
-  ]
-  const outer = [
     { x: x + 10, y: y - 30 - step, o: "ur" },
     { x: x - g, y: y + h / 2 - 10 - step, o: "l" },
     { x: x + 10, y: y + below + step, o: "r" },
     { x: x + w + g, y: y + h / 2 - 10 - step, o: "r" },
   ]
-  const all = [...ring, ...outer]
-  return [...all.filter((p) => onBoard(chipRect(p))), ...all.filter((p) => !onBoard(chipRect(p)))]
 }
-// Which guests stand at which sign, in slot order.
-function crowds(states) {
+const seats = new Map() // sign id -> Map(guest name -> slot index)
+// Give every guest at a sign a seat: newcomers take the lowest free slot
+// whose chip is on the board (in party order when several come at once).
+function seat(states) {
   const at = new Map()
   for (const s of states) if (s?.guest && s.at && signs.has(s.at)) (at.get(s.at) || at.set(s.at, []).get(s.at)).push(s.user.name)
-  for (const names of at.values()) names.sort((a, b) => order(a) - order(b))
-  return at
+  for (const id of [...seats.keys()]) if (!at.has(id)) seats.delete(id)
+  for (const [id, names] of at) {
+    const map = seats.get(id) || seats.set(id, new Map()).get(id)
+    for (const name of [...map.keys()]) if (!names.includes(name)) map.delete(name)
+    const m = signs.get(id), all = slots(m.get("x"), m.get("y"))
+    for (const name of names.filter((n) => !map.has(n)).sort((a, b) => order(a) - order(b))) {
+      const taken = new Set(map.values())
+      let index = all.findIndex((p, i) => !taken.has(i) && onBoard(chipRect(p)))
+      if (index < 0) index = all.findIndex((_, i) => !taken.has(i))
+      map.set(name, index < 0 ? all.length - 1 : index)
+    }
+  }
 }
-function placeFor(state, at) {
+// A guest's destination: where, and which card (or the wall) it belongs to.
+function placeFor(state) {
   const m = state.at ? signs.get(state.at) : null
-  if (!m) { const [hx, hy] = state.home || [W / 2, H / 2]; return { x: hx, y: hy, o: hx + 14 + CHIP_W > W ? "l" : "r" } }
-  const names = at.get(state.at) || []
-  const i = Math.max(0, names.indexOf(state.user.name))
-  const all = slots(m.get("x"), m.get("y"))
-  return all[Math.min(i, all.length - 1)]
+  if (!m) { const [hx, hy] = state.home || [W / 2, H / 2]; return { x: hx, y: hy, o: hx + 14 + CHIP_W > W ? "l" : "r", dest: "wall" } }
+  const index = seats.get(state.at)?.get(state.user.name) ?? 0
+  return { ...slots(m.get("x"), m.get("y"))[index], dest: state.at }
 }
 
 const ARROW = '<svg class="arrow" width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 20 L7 15.5 L10.5 23.5 L14 22 L10.5 14 L17.5 14 Z" fill="var(--c)" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>'
-const cursors = new Map() // awareness clientID -> { el, pos }
-const guestSeen = new Map() // guest name -> the decision last noticed: { at, where, seenAt, moved }
+const cursors = new Map() // awareness clientID -> { el, pos, trip, dest, place, arrived }
+const guestSeen = new Map() // guest name -> the decision last noticed: { at, where, moved }
+const pendingLabels = new Map() // guest name -> a label waiting for the chip to arrive
 const rounds = { n: 0, lastActivity: 0, ms: [], known: new Map() } // known: guest name -> decision.at last counted
 
 function cursorEl(id, s) {
@@ -187,45 +193,68 @@ function cursorEl(id, s) {
   el.className = s.guest ? "cursor guest" : "cursor human"
   el.innerHTML = `${ARROW}<div class="tag"><div class="chip"><span class="name"></span>${s.guest ? '<span class="trait"></span>' : ""}</div></div>`
   layer.appendChild(el)
-  c = { el, pos: s.guest ? [s.home?.[0] ?? W / 2, s.home?.[1] ?? H / 2] : null }
+  c = { el, pos: s.guest ? [s.home?.[0] ?? W / 2, s.home?.[1] ?? H / 2] : null, trip: null, dest: null, place: null, arrived: false }
   cursors.set(id, c)
   return c
 }
 
-// A guest that walked somewhere gets a label for a while: where, and how
-// sure. One that was asked and stayed gets a pulse of its chip instead. A
-// round that moves nobody shows nothing but the HUD.
-function sayFor(s, chipEl, now) {
-  if (s.status === "confused") return "?"
-  const d = s.decision
-  if (!d) return null
-  const seen = guestSeen.get(s.user.name)
-  if (!seen || seen.at !== d.at) {
-    const moved = !seen || seen.where !== s.at
-    guestSeen.set(s.user.name, { at: d.at, where: s.at, seenAt: now, moved })
-    if (!moved) { chipEl.classList.remove("pulse"); void chipEl.offsetWidth; chipEl.classList.add("pulse"); setTimeout(() => chipEl.classList.remove("pulse"), PULSE_FOR) }
+// A trip: a fixed-length ease-in-out from where the chip is to its seat,
+// starting a moment later for each guest down the party's order, so a
+// burst of departures fans out. The chip's side is set once, from the
+// destination. A new destination mid-trip starts a new trip from wherever
+// the chip is; the same destination moving (a card being dragged) keeps
+// the trip, aimed at the live seat; a chip at rest on a card follows it.
+const TRIP = 900, FAN = 40, FAN_MAX = 300
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
+function move(c, s, place, now) {
+  const to = [place.x, place.y]
+  const same = c.dest === place.dest
+  if (c.trip && same) {
+    c.trip.to = to // the card moved under a chip on its way: aim at the live seat
+  } else if (!c.trip && same && c.arrived) {
+    c.pos = to // at rest on a moving card: follow it
+  } else if (!same || !c.arrived || Math.hypot(to[0] - c.pos[0], to[1] - c.pos[1]) > 0.5) {
+    c.trip = { from: [...c.pos], to, start: now + Math.min(FAN_MAX, order(s.user.name) * FAN) }
+    c.arrived = false
   }
-  const noticed = guestSeen.get(s.user.name)
-  if (!noticed.moved || now - noticed.seenAt > SAY_FOR) return null
-  const text = String(signs.get(s.at)?.get("text") ?? "(gone)").toUpperCase()
-  return `→ ${text.length > 20 ? `${text.slice(0, 19)}…` : text} · ${Number(d.p).toFixed(2)}`
+  c.dest = place.dest
+  c.place = place
+  if (c.trip) {
+    const t = Math.min(1, Math.max(0, (now - c.trip.start) / TRIP)), k = ease(t)
+    c.pos = [c.trip.from[0] + (c.trip.to[0] - c.trip.from[0]) * k, c.trip.from[1] + (c.trip.to[1] - c.trip.from[1]) * k]
+    if (t >= 1) { c.trip = null; c.arrived = true; return true }
+  }
+  return false
+}
+
+// A guest that walked somewhere gets a label when it arrives: where, and
+// how sure. One that was asked and stayed gets a pulse of its chip when
+// the answer lands. A round that moves nobody shows nothing but the HUD.
+function notice(s, chipEl) {
+  const d = s.decision
+  if (!d) return
+  const seen = guestSeen.get(s.user.name)
+  if (seen && seen.at === d.at) return
+  const moved = seen ? seen.where !== s.at : !!s.at
+  guestSeen.set(s.user.name, { at: d.at, where: s.at, moved })
+  if (moved && s.at) pendingLabels.set(s.user.name, { p: Number(d.p) })
+  else { chipEl.classList.remove("pulse"); void chipEl.offsetWidth; chipEl.classList.add("pulse"); setTimeout(() => chipEl.classList.remove("pulse"), PULSE_FOR) }
 }
 
 // Decision labels live on a layer above every cursor, so no chip can hide
-// one. A label sits directly above its own chip. When that spot is taken by
-// another label it climbs, a label height at a time, up to two; when a
-// climb would leave the board or land on a chip or a card it goes directly
-// below its chip instead, and may step down twice the same way; after that
-// it may sit beside its chip, to the right, then the left. If nothing is
-// free, the label drops its milliseconds and tries the same spots once
-// more, without its probability; then it takes the first spot that covers
-// no chip or card, or else the spot beside its chip. Positions are in
-// board units.
+// one. A label is placed once, when its chip arrives, against the settled
+// layout: directly above its own chip; when another label has that spot
+// it climbs, a label height at a time, up to two; when a climb would
+// leave the board or land on a chip or a card it goes directly below its
+// chip instead, and may step down twice the same way; after that it may
+// sit beside its chip, to the right, then the left. If nothing is free it
+// drops its probability and tries once more; then it takes the first spot
+// that covers no chip or card, or else the spot beside its chip. From then
+// on it rides with its chip. Positions are in board units.
 const LABEL_GAP = 3
-const labels = new Map() // guest name -> element
+const labels = new Map() // guest name -> { el, dx, dy, until }
 const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
 const onBoardRect = (r) => r.left >= -4 && r.right <= W + 4 && r.top >= 0 && r.bottom <= H
-// The spots a label may take, in order, none of them on a chip or a card.
 function spotsFor(el, chip, flip, blocks) {
   const w = el.offsetWidth, h = el.offsetHeight
   const left = flip ? chip.right - w : chip.left
@@ -237,24 +266,29 @@ function spotsFor(el, chip, flip, blocks) {
   for (const r of [at(chip.right + LABEL_GAP, chip.top), at(chip.left - LABEL_GAP - w, chip.top)]) if (free(r)) spots.push(r)
   return spots
 }
-function layoutLabels(wanted, blocks) {
-  const placed = []
-  for (const { name, text, chip, flip } of wanted.sort((a, b) => a.chip.top - b.chip.top)) {
-    let el = labels.get(name)
-    if (!el) { el = document.createElement("div"); el.className = "label"; labelLayer.appendChild(el); labels.set(name, el) }
-    if (el.textContent !== text) el.textContent = text
-    let spots = spotsFor(el, chip, flip, blocks)
-    let spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
-    if (!spot && / · \d\.\d\d$/.test(text)) {
-      el.textContent = text.replace(/ · \d\.\d\d$/, "")
-      spots = spotsFor(el, chip, flip, blocks)
-      spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
-    }
-    if (!spot) { const w = el.offsetWidth, h = el.offsetHeight; spot = spots[0] || { left: chip.right + LABEL_GAP, top: chip.top, right: chip.right + LABEL_GAP + w, bottom: chip.top + h } }
-    el.style.transform = `translate(${Math.round(spot.left)}px, ${Math.round(spot.top)}px)`
-    placed.push(spot)
+function placeLabel(name, text, chip, flip, blocks, now) {
+  let entry = labels.get(name)
+  if (!entry) { const el = document.createElement("div"); el.className = "label"; labelLayer.appendChild(el); entry = { el }; labels.set(name, entry) }
+  const el = entry.el
+  el.textContent = text
+  const placed = [...labels.values()].filter((l) => l !== entry && l.rect).map((l) => l.rect)
+  let spots = spotsFor(el, chip, flip, blocks)
+  let spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
+  if (!spot && / · \d\.\d\d$/.test(text)) {
+    el.textContent = text.replace(/ · \d\.\d\d$/, "")
+    spots = spotsFor(el, chip, flip, blocks)
+    spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
   }
-  for (const [name, el] of labels) if (!wanted.some((l) => l.name === name)) { el.remove(); labels.delete(name) }
+  if (!spot) { const w = el.offsetWidth, h = el.offsetHeight; spot = spots[0] || { left: chip.right + LABEL_GAP, top: chip.top, right: chip.right + LABEL_GAP + w, bottom: chip.top + h } }
+  Object.assign(entry, { dx: spot.left - chip.left, dy: spot.top - chip.top, rect: spot, until: now + SAY_FOR })
+}
+function rideLabels(now) {
+  for (const [name, l] of labels) {
+    if (now > l.until || !l.chip) { l.el.remove(); labels.delete(name); continue }
+    const left = l.chip.left + l.dx, top = l.chip.top + l.dy
+    l.rect = { left, top, right: left + l.el.offsetWidth, bottom: top + l.el.offsetHeight }
+    l.el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`
+  }
 }
 
 // A chip's box in board units, from the cursor's tip and the chip's size.
@@ -280,14 +314,11 @@ function noteRound(states, now) {
   hudEl.hidden = false
 }
 
-let last = performance.now()
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000); last = now
-  const k = 1 - Math.exp(-dt / GLIDE)
   const states = [...awareness.getStates().entries()]
-  const at = crowds(states.map(([, s]) => s))
+  seat(states.map(([, s]) => s))
   const live = new Set()
-  const chips = [], wanted = []
+  const chips = [], arrivals = []
   for (const [id, s] of states) {
     if (!s?.user) continue
     if (!s.guest && !s.cursor) continue
@@ -295,19 +326,20 @@ function frame(now) {
     const c = cursorEl(id, s)
     let x, y
     if (s.guest) {
-      const place = placeFor(s, at)
-      c.pos[0] += (place.x - c.pos[0]) * k; c.pos[1] += (place.y - c.pos[1]) * k
-      if (Math.abs(place.x - c.pos[0]) < 0.2 && Math.abs(place.y - c.pos[1]) < 0.2) { c.pos[0] = place.x; c.pos[1] = place.y }
+      const chipEl = c.el.querySelector(".chip")
+      notice(s, chipEl)
+      const place = placeFor(s)
+      const arrived = move(c, s, place, now)
       ;[x, y] = c.pos
-      const flip = place.o.endsWith("l"), up = place.o.startsWith("u")
+      const flip = c.place.o.endsWith("l"), up = c.place.o.startsWith("u")
       c.el.classList.toggle("flip", flip)
       c.el.classList.toggle("up", up)
       c.el.querySelector(".trait").textContent = s.trait || ""
-      const chipEl = c.el.querySelector(".chip")
       const chip = chipBox(c.pos, chipEl, flip, up)
       chips.push(chip)
-      const say = sayFor(s, chipEl, now)
-      if (say != null) wanted.push({ name: s.user.name, text: say, chip, flip })
+      const label = labels.get(s.user.name)
+      if (label) label.chip = chip
+      if (arrived && pendingLabels.has(s.user.name)) arrivals.push({ s, chip, flip })
     } else {
       x = s.cursor.x; y = s.cursor.y
       // A hand dragging a card keeps its chip below the card, off the title.
@@ -321,8 +353,18 @@ function frame(now) {
     c.el.style.transform = `translate(${x}px, ${y}px)`
   }
   for (const [id, c] of cursors) if (!live.has(id)) { c.el.remove(); cursors.delete(id) }
-  const cards = [...signs.values()].map((m) => ({ left: m.get("x"), top: m.get("y"), right: m.get("x") + SIGN_W, bottom: m.get("y") + SIGN_H }))
-  layoutLabels(wanted, [...chips, ...cards])
+  for (const name of [...labels.keys()]) if (!states.some(([, s]) => s?.guest && s.user.name === name)) { labels.get(name).el.remove(); labels.delete(name) }
+  if (arrivals.length) {
+    const cards = [...signs.values()].map((m) => ({ left: m.get("x"), top: m.get("y"), right: m.get("x") + SIGN_W, bottom: m.get("y") + SIGN_H }))
+    for (const { s, chip, flip } of arrivals.sort((a, b) => a.chip.top - b.chip.top)) {
+      const { p } = pendingLabels.get(s.user.name)
+      pendingLabels.delete(s.user.name)
+      const text = String(signs.get(s.at)?.get("text") ?? "(gone)").toUpperCase()
+      placeLabel(s.user.name, `→ ${text.length > 20 ? `${text.slice(0, 19)}…` : text} · ${p.toFixed(2)}`, chip, flip, [...chips, ...cards], now)
+      labels.get(s.user.name).chip = chip
+    }
+  }
+  rideLabels(now)
   noteRound(states.map(([, s]) => s), now)
   requestAnimationFrame(frame)
 }
@@ -382,7 +424,7 @@ homeEl.addEventListener("click", () => {
 window.__yrb = {
   provider, ydoc, signs, party, user, addSign, scale: shown,
   guests: () => guestStates().map((s) => ({ name: s.user.name, trait: s.trait, at: s.at, status: s.status, decision: s.decision })),
-  guestTarget: (name) => { const s = guestStates().find((g) => g.user.name === name); if (!s) return null; const p = placeFor(s, crowds(guestStates())); return [Math.round(p.x), Math.round(p.y)] },
+  guestTarget: (name) => { const s = guestStates().find((g) => g.user.name === name); if (!s) return null; seat(guestStates()); const p = placeFor(s); return [Math.round(p.x), Math.round(p.y)] },
 }
 
 awareness.on("update", renderParty)
