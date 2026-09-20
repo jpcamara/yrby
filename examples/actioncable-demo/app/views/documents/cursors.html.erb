@@ -34,7 +34,7 @@
  /* Decision labels: a layer of their own above every cursor, so no chip can hide one. */
  #labels{position:absolute;inset:0;pointer-events:none;z-index:5}
  .label{position:absolute;left:0;top:0;white-space:nowrap;will-change:transform;background:#111827;color:#fff;font:700 13px/1.2 system-ui;padding:3px 8px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
- #foot{position:absolute;right:12px;bottom:8px;font:12px/1.2 system-ui;color:#6b7280;pointer-events:none}
+ #foot{margin:6px 2px 0;text-align:right;font:12px/1.2 system-ui;color:#6b7280}
  /* ?stage=1: the board fills the window for a recording; only the title,
     the roster, the HUD, the board, and the footer stay. */
  body.stage .editors,body.stage #lead,body.stage .row{display:none}
@@ -42,6 +42,7 @@
  body.stage h1{font-size:22px;margin:0 0 4px}
  body.stage #status,body.stage #hud{margin:0 0 4px;font-size:14px}
  body.stage #board{margin:4px auto 0;max-width:none}
+ body.stage #foot{margin:4px auto 0;max-width:none}
 </style>
 <% end %>
 <div class="demo cursors">
@@ -68,8 +69,8 @@
     <div id="stage">
       <div id="cursors"></div>
       <div id="labels"></div>
-      <div id="foot">Jev picks the sign · yrby shares the board and the cursors</div>
     </div>
   </div>
+  <p id="foot">Jev picks the sign · yrby shares the board and the cursors</p>
 </div>
 <script src="/cursors.js" defer></script>
