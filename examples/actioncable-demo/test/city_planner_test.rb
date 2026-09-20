@@ -76,10 +76,10 @@ class CityPlannerTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- 
   # A person joined, with everyone's presence mirrored in `seen`, and the
   # planner there and idle. Presence is not replayed on a join, so the
   # person says theirs once the planner is in.
-  def join
+  def join(mayor: nil)
     seen = Y::Awareness.new
     person = client.on_awareness { |frame| seen.apply_update(frame) }.subscribe
-    @planner = CityPlanner.new(@key, peer: client, logger: Logger.new(File::NULL))
+    @planner = CityPlanner.new(@key, peer: client, logger: Logger.new(File::NULL), mayor: mayor)
     @thread = Thread.new { @planner.run }
     wait_until { planner_state(seen) }
     person.send_awareness(Y::Awareness.new.set_local_state(JSON.generate(user: { name: "Ada", color: "#f00" },
@@ -174,6 +174,42 @@ class CityPlannerTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- 
     end
 
     assert_equal "a:planner", read(person, "authors")["6,6"]
+    idle(seen)
+  end
+
+  # A stand-in mayor: reads every unknown sign as a park, names things in order.
+  class StubMayor
+    attr_reader :asked
+
+    def initialize
+      @asked = []
+      @names = ["Elm Street", "Old Town"]
+    end
+
+    def read(text) = (@asked << text) && :park
+    def name(_kind, **) = @names.shift
+  end
+
+  def park_near?(person, cell)
+    read(person, "tiles").any? { |k, t| t == "park" && City.distance(City.parse_key(k), cell) <= City::SIGN_REACH }
+  end
+
+  def test_the_mayor_reads_a_sign_it_does_not_know_and_names_a_neighbourhood
+    mayor = StubMayor.new
+    person, seen = join(mayor: mayor)
+
+    place_sign(person, [30, 30], "trees please")
+    wait_until(timeout: 15) { read(person, "readings")["30,30"] == "PARK" && park_near?(person, [30, 30]) }
+
+    assert_equal ["trees please"], mayor.asked
+
+    paint(person, (0..7).map { |x| [x, 10] }, "road")
+    paint(person, [[1, 9], [3, 9], [5, 9], [7, 9]], "house_red")
+    wait_until(timeout: 15) { read(person, "signs").value?("Elm Street") }
+    key = read(person, "signs").key("Elm Street")
+
+    assert_equal %w[sign a:mayor], [read(person, "tiles")[key], read(person, "authors")[key]]
+    assert_equal 11, City.parse_key(key)[1], "the sign stands on the free side of the road"
     idle(seen)
   end
 

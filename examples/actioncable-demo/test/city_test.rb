@@ -216,6 +216,40 @@ class CityTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- one tes
     assert(detour.positions.none? { |cell| cell == [3, 0] })
   end
 
+  def test_a_reading_makes_a_sign_an_instruction_and_a_plain_sign_is_a_name
+    map = City::Map.parse("!...!\n", signs: { "0,0" => "trees please", "4,0" => "Elm Street" },
+                                     readings: { "0,0" => "PARK", "4,0" => "none" })
+
+    assert_equal :park, map.instruction_at(0, 0)
+    assert_nil map.instruction_at(4, 0)
+    assert_equal [[4, 0, "Elm Street"]], map.name_signs
+    assert_equal "planting a park", City.next_plan(map).goal
+  end
+
+  def test_a_neighbourhood_or_a_long_street_without_a_name_sign_gets_a_site_for_one
+    town = City::Map.parse(<<~MAP)
+      .H.H.H.H..
+      ##########
+      ..........
+    MAP
+
+    kind, (x, y) = City.naming_sites(town).first
+
+    assert_equal "district", kind
+    assert_equal 2, y, "on the free side of the road"
+    assert_includes 3..4, x, "near the middle of the houses"
+
+    named = City::Map.parse(<<~MAP, signs: { "4,2" => "Elm Street" })
+      .H.H.H.H..
+      ##########
+      ....!.....
+    MAP
+
+    assert_empty City.naming_sites(named)
+    assert_empty City.naming_sites(City::Map.parse("#####\n")), "a short road is not a street"
+    assert_equal [["street", [4, 1]]], City.naming_sites(City::Map.parse("##########\n..........\n"))
+  end
+
   def test_near_is_within_the_yield_reach
     assert City.near?([[10, 10]], [[13, 13]], 3)
     refute City.near?([[10, 10]], [[14, 10]], 3)

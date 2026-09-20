@@ -18,10 +18,16 @@ require "y/action_cable/client"
 # that plan alone for a while, and moves on. Cells where a person overrode
 # its work are left alone for a while too.
 #
+# With a model key set there is a mayor too (CityMayor): a sign the rules
+# do not understand is read into one of the instructions they do, and the
+# reading goes into the document beside the sign; streets and
+# neighbourhoods get name signs as the town grows. Without a key, neither.
+#
 #   CityPlanner.new("demo:city", url: "ws://127.0.0.1:3000/cable").run
 #
-# `peer:` takes a Y::ActionCable::Client already made. The planner runs in
-# whatever calls `run`: a thread, a script, or a task under Falcon.
+# `peer:` takes a Y::ActionCable::Client already made; `mayor:` a CityMayor,
+# or nil for none. The planner runs in whatever calls `run`: a thread, a
+# script, or a task under Falcon.
 class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole life, in one place
   IDENTITY = { name: "Planner", color: "#e38628" }.freeze
   AUTHOR = "a:planner"
@@ -36,19 +42,25 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
   MEMORY = 60      # seconds a cell is left alone after a person overrode the planner there
   COOLDOWN = 30    # seconds before a plan the planner yielded on is tried again
   PAUSE = 1.2      # seconds the "yielding" status stays up
+  NAME_EVERY = 20  # seconds between one name and the next
+  ASK_AGAIN = 60   # seconds before a question the mayor could not answer is asked again
 
-  # The document: four maps keyed "x,y". People and the planner write the
-  # first three; only the planner writes the last.
-  TILES = "tiles"     # cell => tile name (City::TILES); absent is grass
-  SIGNS = "signs"     # cell => a sign's text
-  AUTHORS = "authors" # cell => "h:<name>" or AUTHOR, written with the tile
-  CLAIMS = "claims"   # cell => "planner" while the planner means to build there
+  # The document: five maps keyed "x,y". People and the planner write the
+  # first three; only the planner writes the last two.
+  TILES = "tiles"       # cell => tile name (City::TILES); absent is grass
+  SIGNS = "signs"       # cell => a sign's text
+  AUTHORS = "authors"   # cell => "h:<name>" or AUTHOR, written with the tile
+  CLAIMS = "claims"     # cell => "planner" while the planner means to build there
+  READINGS = "readings" # cell => what the mayor read a sign as, or "none"
 
-  def initialize(document_id, url: nil, peer: nil, stay: MAX_STAY, logger: nil)
+  def initialize(document_id, url: nil, peer: nil, stay: MAX_STAY, logger: nil, mayor: :default) # rubocop:disable Metrics/ParameterLists -- the peer, the stay, and the mayor
     @document_id = document_id
     @logger = logger || Logger.new($stderr)
     @peer = peer || Y::ActionCable::Client.new(url, channel: "DocumentChannel", params: { id: document_id },
                                                     root: nil, logger: @logger)
+    @mayor = mayor == :default ? CityMayor.default : mayor
+    @asked = {}   # sign text => when the mayor was last asked about it
+    @named_at = 0 # when the mayor last named something
     @stay = stay
     @presence = Y::Awareness.new
     @others = Y::Awareness.new
@@ -112,17 +124,73 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
     end
   end
 
-  # Build plan after plan until nothing is left to do. Returns :stop if
-  # told to leave meanwhile.
+  # Build plan after plan until nothing is left to do, then, with a mayor,
+  # give one thing a name. Returns :stop if told to leave meanwhile.
   def work
     loop do
       note_writes
-      map = City::Map.from(read(TILES), read(SIGNS))
+      map = City::Map.from(read(TILES), read(SIGNS), read(READINGS))
+      map = read_signs(map)
       plan = City.plans(map, avoid).find { |candidate| !skipped?(candidate) }
-      return show("idle") unless plan
+      break unless plan
 
       return :stop if build(plan) == :stop
     end
+    name_something
+    show("idle")
+  end
+
+  # Ask the mayor about signs the rules do not understand, one question per
+  # sign text, and put the reading in the document beside the sign. The
+  # mayor's own name signs are not questions. A sign the mayor could not
+  # read is asked about again later; the map comes back with the readings
+  # in it.
+  def read_signs(map)
+    return map unless @mayor
+
+    readings = unread_signs(map).filter_map do |x, y, text|
+      @asked[text] = now
+      show("reading a sign")
+      meaning = @mayor.read(text)
+      @logger.info("mayor: read #{text.inspect} as #{meaning || "nothing"}")
+      [City.key(x, y), meaning ? meaning.to_s.upcase.tr("_", " ") : "none"]
+    end
+    return map if readings.empty?
+
+    @peer.send_update(doc.diff { |d| readings.each { |key, meaning| d.get_map(READINGS)[key] = meaning } })
+    City::Map.from(read(TILES), read(SIGNS), read(READINGS))
+  end
+
+  def unread_signs(map)
+    map.signs_at.select do |x, y, text|
+      !map.instruction_at(x, y) && !own?(@authors[City.key(x, y)]) && stale?(map, [x, y], text)
+    end
+  end
+
+  # A sign needs reading when it has no reading yet, or the mayor answered
+  # "none" a while ago and could be asked again.
+  def stale?(map, cell, text)
+    reading = map.readings[City.key(*cell)]
+    return true unless reading
+    return false unless reading == "none"
+
+    now - @asked.fetch(text, 0) > ASK_AGAIN
+  end
+
+  # With a mayor, one name at a time: a sign beside a street or a
+  # neighbourhood that has none, with the mayor's name on it.
+  def name_something
+    return unless @mayor && now - @named_at > NAME_EVERY
+
+    map = City::Map.from(read(TILES), read(SIGNS), read(READINGS))
+    kind, site = City.naming_sites(map, City.blocked(map, avoid)).first
+    return unless site
+
+    @named_at = now
+    show("naming a #{kind}")
+    name = @mayor.name(kind, taken: map.signs.values) or return
+    @logger.info("mayor: named the #{kind} at #{site.join(",")} #{name.inspect}")
+    lay(site, City::SIGN, author: CityMayor::AUTHOR, text: name)
   end
 
   # Claim the cells, walk to the first, lay them one per tick, and let the
@@ -160,17 +228,19 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
     @peer.send_update(doc.diff { |d| keys.each { |key| d.get_map(CLAIMS).delete(key) } })
   end
 
-  # One tile, its author, and the claim it fills, in one update.
-  def lay(cell, tile)
+  # One tile, its author, and the claim it fills, in one update. A sign
+  # carries its text too.
+  def lay(cell, tile, author: AUTHOR, text: nil)
     key = City.key(*cell)
     update = doc.diff do |d|
       tile ? d.get_map(TILES)[key] = tile : d.get_map(TILES).delete(key)
-      tile ? d.get_map(AUTHORS)[key] = AUTHOR : d.get_map(AUTHORS).delete(key)
+      tile ? d.get_map(AUTHORS)[key] = author : d.get_map(AUTHORS).delete(key)
+      d.get_map(SIGNS)[key] = text if text
       d.get_map(CLAIMS).delete(key)
     end
     @peer.send_update(update)
     tile ? @tiles[key] = tile : @tiles.delete(key)
-    tile ? @authors[key] = AUTHOR : @authors.delete(key)
+    tile ? @authors[key] = author : @authors.delete(key)
     @pos = cell
     show(@status)
   end
@@ -221,14 +291,15 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
   def note_writes
     tiles = read(TILES)
     authors = read(AUTHORS)
-    changed = (tiles.keys | @tiles.keys).select { |key| tiles[key] != @tiles[key] && authors[key] != AUTHOR }
-    changed.each { |key| @touched[City.parse_key(key)] = now if @authors[key] == AUTHOR }
+    changed = (tiles.keys | @tiles.keys).select { |key| tiles[key] != @tiles[key] && !own?(authors[key]) }
+    changed.each { |key| @touched[City.parse_key(key)] = now if own?(@authors[key]) }
     @tiles = tiles
     @authors = authors
     changed.filter_map { |key| City.parse_key(key)&.then { |cell| [cell, name_of(authors[key])] } }
   end
 
   def name_of(author) = author.to_s.delete_prefix("h:").then { |name| name.empty? ? "someone" : name }
+  def own?(author) = [AUTHOR, CityMayor::AUTHOR].include?(author)
 
   def avoid
     @touched.delete_if { |_, at| now - at > MEMORY }

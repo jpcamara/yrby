@@ -60,29 +60,33 @@ module City
   LEGEND = { "." => nil, "#" => ROAD, "~" => WATER, "=" => BRIDGE, "H" => HOUSES[0], "S" => SHOP, "P" => PARK,
              "!" => SIGN }.freeze
 
-  # The tiles and the signs, as hashes keyed "x,y". Anything the page could
-  # not have written is dropped on the way in.
-  Map = Data.define(:tiles, :signs) do
-    def self.empty = new({}, {})
+  # The tiles, the signs, and the mayor's readings of signs the rules do not
+  # understand, as hashes keyed "x,y". Anything the page could not have
+  # written is dropped on the way in.
+  Map = Data.define(:tiles, :signs, :readings) do
+    def self.empty = new({}, {}, {})
 
-    def self.from(tiles, signs)
+    def self.from(tiles, signs, readings = {})
       kept = tiles.select { |k, v| City.parse_key(k) && TILES.include?(v) }
       texts = signs.select { |k, v| City.parse_key(k) && v.is_a?(String) }
-      new(kept.freeze, texts.freeze)
+      read = readings.select { |k, v| City.parse_key(k) && v.is_a?(String) }
+      new(kept.freeze, texts.freeze, read.freeze)
     end
 
     # From rows of characters, for tests: "." grass, "#" road, "~" water,
     # "=" bridge, "H" house, "S" shop, "P" park, "!" sign. Signs get their
-    # text from `signs`, keyed "x,y".
-    def self.parse(text, signs: {})
+    # text from `signs`, keyed "x,y", and readings from `readings`.
+    def self.parse(text, signs: {}, readings: {})
       tiles = {}
       text.lines.map(&:chomp).each_with_index do |row, y|
         row.chars.each_with_index { |ch, x| tiles[City.key(x, y)] = LEGEND.fetch(ch) if LEGEND.fetch(ch) }
       end
-      from(tiles, signs)
+      from(tiles, signs, readings)
     end
 
-    def initialize(tiles:, signs:) = super(tiles: tiles.freeze, signs: signs.freeze)
+    def initialize(tiles:, signs:, readings: {})
+      super(tiles: tiles.freeze, signs: signs.freeze, readings: readings.freeze)
+    end
 
     def [](x, y) = tiles[City.key(x, y)]
     def in?(x, y) = x.between?(0, WIDTH - 1) && y.between?(0, HEIGHT - 1)
@@ -93,6 +97,16 @@ module City
     def houses = cells_with(HOUSES)
     def roads = cells_with([ROAD, BRIDGE])
     def signs_at = signs.filter_map { |k, text| City.parse_key(k)&.then { |x, y| [x, y, text] } }
+
+    # What the sign at a cell asks for: what its text says, else what the
+    # mayor read into it.
+    def instruction_at(x, y)
+      City.instruction(signs[City.key(x, y)]) || City.instruction(readings[City.key(x, y)])
+    end
+
+    # Signs that only name something: no instruction in the text or read
+    # into it.
+    def name_signs = signs_at.reject { |x, y, _| instruction_at(x, y) }
 
     def cells_with(kinds)
       tiles.filter_map { |k, tile| City.parse_key(k) if kinds.include?(tile) }.sort
@@ -114,14 +128,14 @@ module City
     def with(cells)
       changed = tiles.dup
       cells.each { |x, y, tile| tile ? changed[City.key(x, y)] = tile : changed.delete(City.key(x, y)) }
-      Map.new(changed, signs)
+      Map.new(changed, signs, readings)
     end
   end
 
   # The cells a planner must leave alone: within reach of a NO BUILD sign,
   # and whatever `avoid` names, such as cells people wrote to just now.
   def self.blocked(map, avoid = [])
-    zones = map.signs_at.select { |_, _, text| instruction(text) == :no_build }
+    zones = map.signs_at.select { |x, y, _| map.instruction_at(x, y) == :no_build }
     Set.new(avoid) | zones.flat_map { |x, y, _| map.around(x, y, NO_BUILD_REACH) }
   end
 
@@ -264,8 +278,8 @@ module City
   # What signs ask for, in reading order. A sign whose wish is already true
   # asks for nothing more.
   def self.sign_plans(map, blocked)
-    map.signs_at.sort_by { |x, y, _| [y, x] }.filter_map do |x, y, text|
-      case instruction(text)
+    map.signs_at.sort_by { |x, y, _| [y, x] }.filter_map do |x, y, _|
+      case map.instruction_at(x, y)
       when :park then place_plan(map, [x, y], PARK, "planting a park", blocked)
       when :shop then place_plan(map, [x, y], SHOP, "opening a shop", blocked)
       when :road then road_plan(map, [x, y], blocked, "laying road") unless map.touches_road?(x, y)
@@ -310,6 +324,35 @@ module City
     x, y = sign
     cells = map.around(x, y, SIGN_REACH).select { |c| CLEARABLE.include?(map[*c]) }.map { |cx, cy| [cx, cy, nil] }
     Plan.new("clearing", cells) if cells.any?
+  end
+
+  # --- names ---------------------------------------------------------------
+
+  NAME_ROAD = 8    # road cells before a road is a street worth naming
+  NAME_HOUSES = 4  # houses on a road network before it is a neighbourhood
+
+  # Where a name is missing: each road network with NAME_HOUSES houses, or
+  # NAME_ROAD cells, that has no name sign beside it, as [kind, site], the
+  # site a free cell by the road nearest the middle of what it names, and
+  # not up against a house when there is room. A sign anyone placed counts
+  # as its name.
+  def self.naming_sites(map, blocked = Set.new)
+    named = Set.new(map.name_signs.flat_map { |x, y, _| map.neighbors(x, y) })
+    districts(map).filter_map do |roads, houses|
+      next if roads.any? { |cell| named.include?(cell) }
+
+      kind = naming_kind(roads, houses) or next
+      site = roadside(map, roads, blocked).min_by do |c|
+        [map.neighbors(*c).any? { |n| map.house?(*n) } ? 1 : 0, distance_sum(c, kind == "district" ? houses : roads)]
+      end
+      [kind, site] if site
+    end
+  end
+
+  def self.naming_kind(roads, houses)
+    if houses.size >= NAME_HOUSES then "district"
+    elsif roads.size >= NAME_ROAD then "street"
+    end
   end
 
   # Shortest paths over grass and water, water costing WATER_COST per
