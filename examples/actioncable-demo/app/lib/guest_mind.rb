@@ -10,20 +10,31 @@ require "async/http/faraday"
 # and the answer is a sign id or "stay" with a probability for each option.
 # Jev generates no text. Nothing here logs sign text, a reply, or a key.
 #
-# One mind serves a whole party, so its connection is shared: built once,
-# with its own key and timeout, and a fresh chat per call so nothing is
-# remembered between rounds. On an Async reactor the requests go through
-# async-http, which keeps one connection per host (HTTP/2 when offered),
-# so eight guests asking at once pay for one DNS lookup and one handshake,
-# not eight in a row on the one thread. Elsewhere each request opens its
-# own connection, in its own thread.
+# One mind serves a whole party: one context, built once with its own key
+# and timeout, and a fresh chat per call so nothing is remembered between
+# rounds. RubyLLM opens a connection per chat, so on an Async reactor the
+# requests go through async-http with one pool of persistent clients
+# shared by every chat: one connection per host (HTTP/2 when offered),
+# one lookup and one handshake for the whole party, and a question costs
+# the server's time and little else. Elsewhere each request opens its own
+# connection, in its own thread.
 class GuestMind
   STAY = "stay"
+  API_BASE = "https://api.typesafe.ai"
   MAX_TEXT = 80
   OPTION_ID = /\A[A-Za-z0-9_.-]+\z/ # what the schema accepts as a choice id
   TIMEOUT = 3
 
   Decision = Data.define(:choice, :probabilities, :confidence, :ms, :model)
+
+  # async-http for Faraday, with the clients shared across every instance:
+  # RubyLLM makes an adapter per chat, and each would otherwise keep a pool
+  # of its own and connect anew.
+  class SharedAdapter < Async::HTTP::Faraday::Adapter
+    POOL = Async::HTTP::Faraday::PersistentClients.new
+
+    def initialize(app, **) = super(app, clients: ->(**, &) { POOL }, **)
+  end
 
   # Any failure. Its message is the failing error's class name, never its
   # text: a provider error can quote the request.
@@ -40,9 +51,13 @@ class GuestMind
   end
 
   # Load what a first call would load, so eight first calls at once do not
-  # each pay for it, and none of it counts as the model's time.
+  # each pay for it, and none of it counts as the model's time. On a
+  # reactor that includes the connection: one request to the API's root
+  # (no model, no charge) opens it, so even the party's first round rides a
+  # warm connection.
   def warm
     chat
+    open_connection if Async::Task.current? && context.config.faraday_adapter == SharedAdapter
     nil
   end
 
@@ -107,11 +122,11 @@ class GuestMind
     @lock.synchronize do
       @context ||= RubyLLM.context do |config|
         config.typesafe_api_key = ENV.fetch("TYPESAFE_API_KEY")
-        config.typesafe_api_base = "https://api.typesafe.ai"
+        config.typesafe_api_base = API_BASE
         config.request_timeout = TIMEOUT
         config.max_retries = 0
         config.logger = Logger.new(File::NULL)
-        config.faraday_adapter = :async_http if Async::Task.current? && config.faraday_adapter == :net_http
+        config.faraday_adapter = SharedAdapter if Async::Task.current? && config.faraday_adapter == :net_http
       end
     end
   end
@@ -127,6 +142,13 @@ class GuestMind
     end
 
     answer
+  end
+
+  def open_connection
+    endpoint = Async::HTTP::Endpoint.parse(API_BASE)
+    SharedAdapter::POOL.with_client(endpoint) { |client| client.get(endpoint.path).finish }
+  rescue StandardError => e
+    @logger&.warn(JSON.generate(event: "guest_mind", status: "warm_error", error_class: e.class.name))
   end
 
   def probability?(value) = value.is_a?(Numeric) && value.finite? && value.between?(0, 1)
