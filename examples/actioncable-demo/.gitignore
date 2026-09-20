@@ -15,6 +15,7 @@
 /public/forms.js
 /public/spreadsheet.js
 /public/sudoku.js
+/public/cursors.js
 .DS_Store
 /config/master.key
 /storage/

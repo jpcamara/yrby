@@ -1,0 +1,61 @@
+<% content_for :head do %>
+<style>
+ .demo.cursors{margin:1.5rem auto;max-width:1000px}
+ .row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.5rem 0}
+ .row button{border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font:13px system-ui;padding:5px 12px}
+ .row button[disabled]{opacity:.6;cursor:default}
+ #invite-status{font-size:13px;color:#b91c1c}
+ #hud{font:13px/1.4 system-ui;color:#374151;min-height:1.3em;margin:.2rem 0 .6rem}
+ #hud[hidden]{display:none}
+ #board{position:relative;width:100%;max-width:1000px;touch-action:none;user-select:none}
+ #stage{position:absolute;left:0;top:0;width:1000px;height:560px;transform-origin:0 0;border:1px solid #ddd;border-radius:10px;box-sizing:border-box;background:
+   linear-gradient(#f3f4f6 1px,transparent 1px) 0 0/25px 25px,
+   linear-gradient(90deg,#f3f4f6 1px,transparent 1px) 0 0/25px 25px,#fafafa}
+ .sign{position:absolute;width:180px;height:100px;box-sizing:border-box;border-radius:8px;background:#fde68a;box-shadow:0 3px 8px rgba(0,0,0,.18);cursor:grab;padding:8px 10px}
+ .sign:active{cursor:grabbing}
+ .sign textarea{width:100%;height:100%;border:0;background:transparent;resize:none;outline:none;font:700 17px/1.2 system-ui;text-transform:uppercase;color:#1f2937;text-align:center;padding-top:14px;box-sizing:border-box;overflow:hidden}
+ .sign textarea::placeholder{color:#a16207;font-weight:600}
+ .sign .x{position:absolute;top:2px;right:6px;border:0;background:transparent;color:#92400e;font:14px/1 system-ui;cursor:pointer;opacity:0}
+ .sign:hover .x{opacity:.8}
+ #cursors{position:absolute;inset:0;pointer-events:none}
+ .cursor{position:absolute;left:0;top:0;will-change:transform;pointer-events:none;white-space:nowrap}
+ .cursor .arrow{display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+ .cursor .chip{position:absolute;left:14px;top:20px;display:flex;flex-direction:column;background:var(--c);color:#fff;border-radius:6px;padding:3px 8px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+ .cursor .name{font:700 14px/1.2 system-ui}
+ .cursor .trait{font:13px/1.2 system-ui;opacity:.92}
+ .cursor.guest .name::before{content:"";display:inline-block;width:8px;height:8px;background:#ef4444;transform:rotate(45deg);margin-right:7px;vertical-align:1px;outline:1.5px solid #fff}
+ .cursor .say{position:absolute;left:14px;top:-26px;background:#111827;color:#fff;font:600 13px/1.2 system-ui;padding:3px 8px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+ .cursor .say[hidden]{display:none}
+ .cursor.flip .chip,.cursor.flip .say{left:auto;right:14px}
+ .cursor.flip .arrow{transform:scaleX(-1)}
+ #foot{position:absolute;right:12px;bottom:8px;font:12px/1.2 system-ui;color:#6b7280;pointer-events:none}
+</style>
+<% end %>
+<div class="demo cursors">
+  <header>
+    <h1>Cursors with opinions</h1>
+    <%= render "nav" %>
+    <p>
+      Opaque state is a <code>Y.Map</code> of signs (x, y, text). Double-click to post a
+      sign, drag to move it, type to change what it says, in two windows. Eight guests are
+      Ruby processes' peers on the same document: their cursors are their presence, sent over
+      the websocket the browsers use. Whenever a sign's text changes, each guest asks Jev,
+      TypeSafe's decision model, which sign to walk to, with its own personality as the
+      instructions and the live sign texts as the options. Jev picks which; yrby syncs where.
+    </p>
+    <p id="status" class="status">connecting…</p>
+  </header>
+  <div class="row">
+    <button type="button" id="invite" data-url="<%= document_cursor_guests_path(@document_id) %>">Invite 8 Ruby guests</button>
+    <button type="button" id="home" hidden>Send guests home</button>
+    <span id="invite-status"></span>
+  </div>
+  <p id="hud" hidden></p>
+  <div id="board" data-document-id="<%= @document_id %>:cursors">
+    <div id="stage">
+      <div id="cursors"></div>
+      <div id="foot">Jev picks the sign · yrby shares the board and the cursors</div>
+    </div>
+  </div>
+</div>
+<script src="/cursors.js" defer></script>

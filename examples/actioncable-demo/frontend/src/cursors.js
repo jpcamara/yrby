@@ -1,0 +1,272 @@
+// Opaque-state demo: cursors with opinions.
+// Shared state is a Y.Map of signs (id -> Y.Map{ x, y, text }) and a Y.Map of
+// party controls ({ enabled }). People's cursors are their awareness, as on
+// any multiplayer page. The guests are Ruby processes' peers on the same
+// document (see app/lib/guest.rb): their presence carries a name, a color, a
+// trait, the sign they stand at, and their last decision. This page draws
+// what is in the document and the presence, and glides each guest to the
+// sign its presence names. Jev picks which sign; yrby carries where it is.
+import * as Y from "yjs"
+import { createConsumer } from "@rails/actioncable"
+import { ActionCableProvider } from "yrby-client"
+
+const W = 1000, H = 560, SIGN_W = 180, SIGN_H = 100
+const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia", "Alan"]
+const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8", "#e879f9", "#f472b6"]
+// The guests' slots around a sign, in the order the party seats them.
+const RING = ["Snack Goblin", "Networker", "Introvert", "Rubyist", "Night Owl", "Cat Person", "Coffee Snob", "Lurker"]
+const GLIDE = 0.16      // seconds; the time constant of a cursor's glide, ~0.6 s to settle
+const SAY_FOR = 3000    // ms a decision stays on a guest's chip
+const ROUND_GAP = 1500  // ms of quiet that ends a round of decisions
+const pick = (a) => a[Math.floor(Math.random() * a.length)]
+const $ = (id) => document.getElementById(id)
+const params = new URLSearchParams(location.search)
+const user = { name: (params.get("as") || "").trim().slice(0, 24) || pick(NAMES), color: pick(COLORS) }
+
+const board = $("board"), stage = $("stage"), layer = $("cursors")
+const statusEl = $("status"), hudEl = $("hud"), inviteEl = $("invite"), homeEl = $("home"), inviteStatus = $("invite-status")
+const documentId = board.dataset.documentId
+
+const ydoc = new Y.Doc()
+const signs = ydoc.getMap("signs")
+const party = ydoc.getMap("party")
+const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChannel", { id: documentId })
+const awareness = provider.awareness
+awareness.setLocalStateField("user", user)
+
+// The board is 1000x560 in document coordinates and scales down to fit.
+// Pointer math uses the stage's rendered size, so it holds under any zoom.
+function fit() {
+  const scale = Math.min(1, board.clientWidth / W)
+  stage.style.transform = `scale(${scale})`
+  board.style.height = `${Math.round(H * scale)}px`
+}
+new ResizeObserver(fit).observe(board)
+fit()
+const shown = () => stage.getBoundingClientRect().width / W // viewport px per board unit
+const toBoard = (e) => { const r = stage.getBoundingClientRect(), k = r.width / W; return [(e.clientX - r.left) / k, (e.clientY - r.top) / k] }
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+
+// Signs. Ids are what the guests choose between, so they stay plain.
+function addSign(x, y, text = "", id = `s${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`) {
+  const m = new Y.Map()
+  m.set("x", Math.round(clamp(x, 0, W - SIGN_W))); m.set("y", Math.round(clamp(y, 0, H - SIGN_H))); m.set("text", text)
+  signs.set(id, m)
+  return id
+}
+stage.addEventListener("dblclick", (e) => {
+  if (e.target !== stage && e.target !== layer) return
+  const [x, y] = toBoard(e)
+  const id = addSign(x - SIGN_W / 2, y - SIGN_H / 2)
+  els.get(id)?._ta.focus()
+})
+
+function makeDraggable(el, m) {
+  el.addEventListener("pointerdown", (e) => {
+    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "BUTTON") return
+    el.setPointerCapture(e.pointerId)
+    const sx = e.clientX, sy = e.clientY, ox = m.get("x"), oy = m.get("y"), k = shown()
+    const onMove = (ev) => ydoc.transact(() => {
+      m.set("x", Math.round(clamp(ox + (ev.clientX - sx) / k, 0, W - SIGN_W)))
+      m.set("y", Math.round(clamp(oy + (ev.clientY - sy) / k, 0, H - SIGN_H)))
+    })
+    const onUp = () => { el.removeEventListener("pointermove", onMove); el.removeEventListener("pointerup", onUp) }
+    el.addEventListener("pointermove", onMove)
+    el.addEventListener("pointerup", onUp)
+  })
+}
+
+const els = new Map()
+function renderSigns() {
+  for (const [id, el] of els) if (!signs.has(id)) { el.remove(); els.delete(id) }
+  signs.forEach((m, id) => {
+    let el = els.get(id)
+    if (!el) {
+      el = document.createElement("div"); el.className = "sign"; el.dataset.id = id
+      const ta = document.createElement("textarea")
+      ta.placeholder = "what does the sign say?"
+      ta.addEventListener("input", () => m.set("text", ta.value))
+      ta.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ta.blur() } })
+      const x = document.createElement("button"); x.type = "button"; x.className = "x"; x.textContent = "×"; x.title = "Take the sign down"
+      x.addEventListener("click", () => signs.delete(id))
+      el.append(ta, x); el._ta = ta
+      makeDraggable(el, m)
+      stage.insertBefore(el, layer); els.set(id, el)
+    }
+    el.style.left = `${m.get("x")}px`
+    el.style.top = `${m.get("y")}px`
+    const t = m.get("text") ?? ""
+    if (el._ta.value !== t && document.activeElement !== el._ta) el._ta.value = t
+  })
+}
+signs.observeDeep(renderSigns)
+
+// This person's cursor, in board coordinates, for everyone else's page.
+let lastSent = 0
+stage.addEventListener("pointermove", (e) => {
+  const t = performance.now()
+  if (t - lastSent < 40) return
+  lastSent = t
+  const [x, y] = toBoard(e)
+  awareness.setLocalStateField("cursor", { x: Math.round(x), y: Math.round(y) })
+})
+stage.addEventListener("pointerleave", () => awareness.setLocalStateField("cursor", null))
+
+// Where a guest stands: a slot around the sign it is at, or its home spot.
+const slot = (name) => { const i = RING.indexOf(name); return i >= 0 ? i : [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 8, 0) }
+function targetFor(state) {
+  const m = state.at ? signs.get(state.at) : null
+  if (!m) return state.home ? [state.home[0], state.home[1]] : [W / 2, H / 2]
+  const a = -Math.PI / 2 + (slot(state.user?.name || "") * Math.PI) / 4
+  return [m.get("x") + SIGN_W / 2 + (SIGN_W / 2 + 30) * Math.cos(a), m.get("y") + SIGN_H / 2 + (SIGN_H / 2 + 28) * Math.sin(a)]
+}
+const flips = (name) => Math.cos(-Math.PI / 2 + (slot(name) * Math.PI) / 4) < -0.3
+
+const ARROW = '<svg class="arrow" width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 20 L7 15.5 L10.5 23.5 L14 22 L10.5 14 L17.5 14 Z" fill="var(--c)" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>'
+const cursors = new Map() // awareness clientID -> { el, pos, name }
+const guestSeen = new Map() // guest name -> { at, seenAt } of the decision last shown
+const rounds = { n: 0, lastActivity: 0, ms: [], known: new Map() } // known: guest name -> decision.at last counted
+
+function cursorEl(id, s) {
+  let c = cursors.get(id)
+  if (c) return c
+  const el = document.createElement("div")
+  el.className = s.guest ? "cursor guest" : "cursor human"
+  el.innerHTML = `${ARROW}<div class="chip"><span class="name"></span>${s.guest ? '<span class="trait"></span>' : ""}</div>${s.guest ? '<div class="say" hidden></div>' : ""}`
+  layer.appendChild(el)
+  c = { el, pos: s.guest ? targetFor({ ...s, at: null }) : null, name: s.user?.name }
+  cursors.set(id, c)
+  return c
+}
+
+function sayFor(s, now) {
+  if (s.status === "deciding") return "…"
+  if (s.status === "confused") return "?"
+  const d = s.decision
+  if (!d) return null
+  const seen = guestSeen.get(s.user.name)
+  if (!seen || seen.at !== d.at) guestSeen.set(s.user.name, { at: d.at, seenAt: now })
+  if (now - guestSeen.get(s.user.name).seenAt > SAY_FOR) return null
+  const where = d.sign === "stay" ? "stays" : `→ ${String(signs.get(d.sign)?.get("text") ?? "(gone)").toUpperCase().slice(0, 26)}`
+  return `${where} · ${Number(d.p).toFixed(2)} · ${Math.round(d.ms)}ms`
+}
+
+// Rounds: decisions that land close together are one round. The HUD shows
+// the latency spread as the answers arrive.
+function noteRound(states, now) {
+  const guests = states.filter((s) => s?.guest)
+  if (!guests.length) { hudEl.hidden = true; return }
+  const deciding = guests.some((s) => s.status === "deciding")
+  const landed = guests.filter((s) => s.decision && rounds.known.get(s.user.name) !== s.decision.at)
+  if ((deciding || landed.length) && now - rounds.lastActivity > ROUND_GAP) { rounds.n++; rounds.ms = [] }
+  if (deciding || landed.length) rounds.lastActivity = now
+  for (const s of landed) { rounds.known.set(s.user.name, s.decision.at); rounds.ms.push(Number(s.decision.ms)) }
+  const spread = rounds.ms.length ? `${Math.round(Math.min(...rounds.ms))}–${Math.round(Math.max(...rounds.ms))} ms` : "…"
+  hudEl.textContent = rounds.n ? `round ${rounds.n} · ${guests.length} guests asked Jev · ${spread}` : `${guests.length} guests arriving`
+  hudEl.hidden = false
+}
+
+let last = performance.now()
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now
+  const k = 1 - Math.exp(-dt / GLIDE)
+  const states = [...awareness.getStates().entries()]
+  const live = new Set()
+  for (const [id, s] of states) {
+    if (!s?.user) continue
+    if (!s.guest && !s.cursor) continue
+    live.add(id)
+    const c = cursorEl(id, s)
+    let x, y
+    if (s.guest) {
+      const [tx, ty] = targetFor(s)
+      c.pos[0] += (tx - c.pos[0]) * k; c.pos[1] += (ty - c.pos[1]) * k
+      if (Math.abs(tx - c.pos[0]) < 0.2 && Math.abs(ty - c.pos[1]) < 0.2) { c.pos[0] = tx; c.pos[1] = ty }
+      ;[x, y] = c.pos
+      c.el.classList.toggle("flip", !!s.at && flips(s.user.name))
+      c.el.querySelector(".trait").textContent = s.trait || ""
+      const say = sayFor(s, now), sayEl = c.el.querySelector(".say")
+      sayEl.hidden = say == null
+      if (say != null) sayEl.textContent = say
+    } else {
+      x = s.cursor.x; y = s.cursor.y
+    }
+    c.el.style.setProperty("--c", s.user.color || "#111")
+    c.el.querySelector(".name").textContent = s.user.name + (id === awareness.clientID ? " (you)" : "")
+    c.el.style.transform = `translate(${x}px, ${y}px)`
+  }
+  for (const [id, c] of cursors) if (!live.has(id)) { c.el.remove(); cursors.delete(id) }
+  noteRound(states.map(([, s]) => s), now)
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
+
+// The invite. Presence, not the response, says the guests are here.
+let inviteController = null
+const guestStates = () => [...awareness.getStates().values()].filter((s) => s?.guest)
+function renderParty() {
+  // The document says the party is over: drop the stream that held it,
+  // whichever browser said so.
+  if (party.get("enabled") === false && inviteController) { inviteController.abort(); inviteController = null }
+  const guests = guestStates()
+  const model = guests.map((s) => s.decision?.model).find(Boolean)
+  const here = guests.length > 0
+  inviteEl.textContent = here ? `Guests are here · ${model || "jev"}` : inviteController ? "Inviting…" : "Invite 8 Ruby guests"
+  inviteEl.disabled = here || !!inviteController || !provider.synced
+  homeEl.hidden = !here && !inviteController
+  const people = [...awareness.getStates().values()].filter((s) => s?.user && !s.guest).length
+  statusEl.textContent = `${provider.synced ? "synced" : "connecting"} as ${user.name} · ${documentId.replace(/:cursors$/, "")} · ${people} ${people === 1 ? "person" : "people"}${here ? ` · ${guests.length} guests` : ""}`
+}
+inviteEl.addEventListener("click", async () => {
+  if (inviteController || guestStates().length) return
+  inviteStatus.textContent = ""
+  party.set("enabled", true)
+  const controller = new AbortController()
+  inviteController = controller
+  renderParty()
+  try {
+    const response = await fetch(inviteEl.dataset.url, {
+      method: "POST",
+      headers: { Accept: "text/event-stream", "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]')?.content || "" },
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      let message = `The guests could not come (${response.status}).`
+      try { message = (await response.json()).error || message } catch { /* not JSON */ }
+      throw new Error(message)
+    }
+    // Under Falcon the stream is the party's lifetime: it runs as long as this
+    // page holds it open. Puma answers 204 and runs the party in a thread.
+    const reader = response.body?.getReader()
+    if (reader) { try { while (!(await reader.read()).done) { /* hold */ } } finally { reader.releaseLock() } }
+  } catch (error) {
+    if (error.name !== "AbortError") inviteStatus.textContent = error.message
+  } finally {
+    if (inviteController === controller) inviteController = null
+    renderParty()
+  }
+})
+homeEl.addEventListener("click", () => {
+  party.set("enabled", false)
+  renderParty()
+})
+
+window.__yrb = {
+  provider, ydoc, signs, party, user, addSign, scale: shown,
+  guests: () => guestStates().map((s) => ({ name: s.user.name, trait: s.trait, at: s.at, status: s.status, decision: s.decision })),
+  guestTarget: (name) => { const s = guestStates().find((g) => g.user.name === name); return s ? targetFor(s).map(Math.round) : null },
+}
+
+awareness.on("update", renderParty)
+party.observe(renderParty)
+provider.onStatusChange(renderParty)
+// Seed the starter signs only on the FIRST catch-up (whenSynced doesn't
+// re-fire on reconnects, so a cleared board stays cleared). Fixed ids, so
+// two first opens seed the same three signs rather than six.
+provider.whenSynced.then(() => {
+  if (signs.size === 0) ydoc.transact(() => { addSign(220, 120, "FREE PIZZA", "s1"); addSign(600, 100, "QUIET ROOM", "s2"); addSign(380, 340, "RUBY 4.0 RELEASE PARTY", "s3") })
+  renderParty()
+})
+renderSigns(); renderParty()
+provider.connect()
