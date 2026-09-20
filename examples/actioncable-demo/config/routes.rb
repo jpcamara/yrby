@@ -20,6 +20,10 @@ Rails.application.routes.draw do
   # documents#sudoku_checker under Puma.
   post "docs/:id/sudoku/checker", to: AgentInvite.new(SudokuPeer, action: :sudoku_checker, suffix: ":sudoku"),
                                   as: :document_sudoku_checker
+  get "docs/:id/cursors", to: "documents#cursors", as: :document_cursors
+  # The guests' invite: the agent's shape again, behind the checks that can
+  # be answered at once (no key, a party already here).
+  post "docs/:id/cursors/guests", to: GuestPartyInvite.new, as: :document_cursor_guests
   get "docs/:id/content", to: "documents#content", as: :document_content
   get "docs/:id/audit", to: "documents#audit", as: :document_audit
   # DEMO/TEST ONLY — never mount in production. One anonymous POST can wipe a

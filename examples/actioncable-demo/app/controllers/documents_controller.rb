@@ -2,7 +2,7 @@
 
 class DocumentsController < ApplicationController
   # The audit control endpoint is a test hook (POST without a form token).
-  skip_forgery_protection only: %i[audit_control agent markdown_agent sudoku_checker]
+  skip_forgery_protection only: %i[audit_control agent markdown_agent sudoku_checker cursor_guests]
 
   # Start a Ruby agent that joins the document as a live collaborator (see
   # ReviewAgent). It runs in a background thread over the same DocumentChannel
@@ -16,6 +16,10 @@ class DocumentsController < ApplicationController
   # The sudoku checker joins over the websocket even from here, as a player
   # would, on this server's own cable (see SudokuPeer).
   def sudoku_checker = start_agent(SudokuPeer, "#{params[:id]}:sudoku", url: AgentInvite.cable_url(request))
+
+  # The eight guests join the cursors document the same way, each a peer of
+  # its own on this server's cable (see GuestParty).
+  def cursor_guests = start_agent(GuestParty, "#{params[:id]}:cursors", url: AgentInvite.cable_url(request))
 
   # One agent per document: a second invite while the first is still there
   # is answered with 409 and nothing starts.
@@ -94,6 +98,11 @@ class DocumentsController < ApplicationController
     @document_id = params[:id]
     SudokuPuzzle.ensure("#{@document_id}:sudoku")
   end
+
+  # Y.Map of signs (id => Y.Map{ x, y, text }) next to a Y.Map of party
+  # controls. The guests are Ruby peers whose presence the page draws as
+  # cursors (see Guest, GuestParty).
+  def cursors = (@document_id = params[:id])
 
   # Server-side read of the authoritative document: the raw CRDT state,
   # base64-encoded. Replays the durable store into a fresh Y.Doc state.
