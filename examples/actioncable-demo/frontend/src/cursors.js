@@ -203,10 +203,10 @@ function sayFor(s, now) {
 }
 
 // Labels stay above their own chip; one that would cover another label,
-// or another guest's chip, is pushed up a label height at a time.
+// or anyone's chip, is pushed up a label height at a time.
 function spreadLabels() {
   const shown = [...layer.querySelectorAll(".say:not([hidden])")]
-  const taken = [...layer.querySelectorAll(".guest .chip")].map((el) => el.getBoundingClientRect())
+  const taken = [...layer.querySelectorAll(".chip")].map((el) => el.getBoundingClientRect())
   for (const el of shown.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)) {
     el.style.transform = ""
     const r = el.getBoundingClientRect()
