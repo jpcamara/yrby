@@ -25,7 +25,7 @@ const params = new URLSearchParams(location.search)
 const user = { name: (params.get("as") || "").trim().slice(0, 24) || pick(NAMES), color: pick(COLORS) }
 if (params.get("stage") === "1") document.body.classList.add("stage") // a recording: the board fills the window
 
-const board = $("board"), stage = $("stage"), layer = $("cursors")
+const board = $("board"), stage = $("stage"), layer = $("cursors"), labelLayer = $("labels")
 const statusEl = $("status"), hudEl = $("hud"), inviteEl = $("invite"), homeEl = $("home"), inviteStatus = $("invite-status")
 const documentId = board.dataset.documentId
 
@@ -75,12 +75,13 @@ function makeDraggable(el, m) {
   el.addEventListener("pointerdown", (e) => {
     if (e.target.tagName === "TEXTAREA" || e.target.tagName === "BUTTON") return
     el.setPointerCapture(e.pointerId)
+    awareness.setLocalStateField("dragging", el.dataset.id) // the hand's chip moves off the card meanwhile
     const sx = e.clientX, sy = e.clientY, ox = m.get("x"), oy = m.get("y"), k = shown()
     const onMove = (ev) => ydoc.transact(() => {
       m.set("x", Math.round(clamp(ox + (ev.clientX - sx) / k, 0, W - SIGN_W)))
       m.set("y", Math.round(clamp(oy + (ev.clientY - sy) / k, 0, H - SIGN_H)))
     })
-    const onUp = () => { el.removeEventListener("pointermove", onMove); el.removeEventListener("pointerup", onUp) }
+    const onUp = () => { el.removeEventListener("pointermove", onMove); el.removeEventListener("pointerup", onUp); awareness.setLocalStateField("dragging", null) }
     el.addEventListener("pointermove", onMove)
     el.addEventListener("pointerup", onUp)
   })
@@ -182,7 +183,7 @@ function cursorEl(id, s) {
   if (c) return c
   const el = document.createElement("div")
   el.className = s.guest ? "cursor guest" : "cursor human"
-  el.innerHTML = `${ARROW}<div class="tag">${s.guest ? '<div class="say" hidden></div>' : ""}<div class="chip"><span class="name"></span>${s.guest ? '<span class="trait"></span>' : ""}</div></div>`
+  el.innerHTML = `${ARROW}<div class="tag"><div class="chip"><span class="name"></span>${s.guest ? '<span class="trait"></span>' : ""}</div></div>`
   layer.appendChild(el)
   c = { el, pos: s.guest ? [s.home?.[0] ?? W / 2, s.home?.[1] ?? H / 2] : null }
   cursors.set(id, c)
@@ -202,20 +203,57 @@ function sayFor(s, now) {
   return `${where} · ${Number(d.p).toFixed(2)} · ${Math.round(d.ms)}ms`
 }
 
-// Labels stay above their own chip; one that would cover another label,
-// or anyone's chip, is pushed up a label height at a time.
-function spreadLabels() {
-  const shown = [...layer.querySelectorAll(".say:not([hidden])")]
-  const taken = [...layer.querySelectorAll(".chip")].map((el) => el.getBoundingClientRect())
-  for (const el of shown.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)) {
-    el.style.transform = ""
-    const r = el.getBoundingClientRect()
-    let lift = 0
-    const hits = () => taken.some((t) => r.left < t.right && r.right > t.left && r.top - lift < t.bottom && r.bottom - lift > t.top)
-    while (hits() && lift < 6 * r.height) lift += r.height + 3
-    if (lift) el.style.transform = `translateY(${-lift}px)`
-    taken.push({ left: r.left, right: r.right, top: r.top - lift, bottom: r.bottom - lift })
+// Decision labels live on a layer above every cursor, so no chip can hide
+// one. A label sits directly above its own chip. When that spot is taken by
+// another label it climbs, a label height at a time, up to two; when a
+// climb would leave the board or land on a chip or a card it goes directly
+// below its chip instead, and may step down twice the same way; after that
+// it may sit beside its chip, to the right, then the left. If nothing is
+// free, the label drops its milliseconds and tries the same spots once
+// more; then it takes the first spot that covers no chip or card, or else
+// the spot beside its chip. Positions are in board units.
+const LABEL_GAP = 3
+const labels = new Map() // guest name -> element
+const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+const onBoardRect = (r) => r.left >= -4 && r.right <= W + 4 && r.top >= 0 && r.bottom <= H
+// The spots a label may take, in order, none of them on a chip or a card.
+function spotsFor(el, chip, flip, blocks) {
+  const w = el.offsetWidth, h = el.offsetHeight
+  const left = flip ? chip.right - w : chip.left
+  const at = (l, t) => ({ left: l, top: t, right: l + w, bottom: t + h })
+  const free = (r) => onBoardRect(r) && !blocks.some((b) => overlaps(r, b))
+  const spots = []
+  for (let i = 0; i < 3; i++) { const r = at(left, chip.top - LABEL_GAP - h - i * (h + LABEL_GAP)); if (!free(r)) break; spots.push(r) }
+  for (let i = 0; i < 3; i++) { const r = at(left, chip.bottom + LABEL_GAP + i * (h + LABEL_GAP)); if (!free(r)) break; spots.push(r) }
+  for (const r of [at(chip.right + LABEL_GAP, chip.top), at(chip.left - LABEL_GAP - w, chip.top)]) if (free(r)) spots.push(r)
+  return spots
+}
+function layoutLabels(wanted, blocks) {
+  const placed = []
+  for (const { name, text, chip, flip } of wanted.sort((a, b) => a.chip.top - b.chip.top)) {
+    let el = labels.get(name)
+    if (!el) { el = document.createElement("div"); el.className = "label"; labelLayer.appendChild(el); labels.set(name, el) }
+    if (el.textContent !== text) el.textContent = text
+    let spots = spotsFor(el, chip, flip, blocks)
+    let spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
+    if (!spot && / · \d+ms$/.test(text)) {
+      el.textContent = text.replace(/ · \d+ms$/, "")
+      spots = spotsFor(el, chip, flip, blocks)
+      spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
+    }
+    if (!spot) { const w = el.offsetWidth, h = el.offsetHeight; spot = spots[0] || { left: chip.right + LABEL_GAP, top: chip.top, right: chip.right + LABEL_GAP + w, bottom: chip.top + h } }
+    el.style.transform = `translate(${Math.round(spot.left)}px, ${Math.round(spot.top)}px)`
+    placed.push(spot)
   }
+  for (const [name, el] of labels) if (!wanted.some((l) => l.name === name)) { el.remove(); labels.delete(name) }
+}
+
+// A chip's box in board units, from the cursor's tip and the chip's size.
+function chipBox(pos, chipEl, flip, up, top = 20) {
+  const w = chipEl.offsetWidth, h = chipEl.offsetHeight
+  const left = flip ? pos[0] - 14 - w : pos[0] + 14
+  const y = up ? pos[1] - 4 - h : pos[1] + top
+  return { left, top: y, right: left + w, bottom: y + h }
 }
 
 // Rounds: decisions that land close together are one round. The HUD shows
@@ -240,7 +278,7 @@ function frame(now) {
   const states = [...awareness.getStates().entries()]
   const at = crowds(states.map(([, s]) => s))
   const live = new Set()
-  let labels = false
+  const chips = [], wanted = []
   for (const [id, s] of states) {
     if (!s?.user) continue
     if (!s.guest && !s.cursor) continue
@@ -252,21 +290,29 @@ function frame(now) {
       c.pos[0] += (place.x - c.pos[0]) * k; c.pos[1] += (place.y - c.pos[1]) * k
       if (Math.abs(place.x - c.pos[0]) < 0.2 && Math.abs(place.y - c.pos[1]) < 0.2) { c.pos[0] = place.x; c.pos[1] = place.y }
       ;[x, y] = c.pos
-      c.el.classList.toggle("flip", place.o.endsWith("l"))
-      c.el.classList.toggle("up", place.o.startsWith("u"))
+      const flip = place.o.endsWith("l"), up = place.o.startsWith("u")
+      c.el.classList.toggle("flip", flip)
+      c.el.classList.toggle("up", up)
       c.el.querySelector(".trait").textContent = s.trait || ""
-      const say = sayFor(s, now), sayEl = c.el.querySelector(".say")
-      sayEl.hidden = say == null
-      if (say != null) { sayEl.textContent = say; labels = true }
+      const chip = chipBox(c.pos, c.el.querySelector(".chip"), flip, up)
+      chips.push(chip)
+      const say = sayFor(s, now)
+      if (say != null) wanted.push({ name: s.user.name, text: say, chip, flip })
     } else {
       x = s.cursor.x; y = s.cursor.y
+      // A hand dragging a card keeps its chip below the card, off the title.
+      const held = s.dragging && signs.get(s.dragging)
+      const top = held ? held.get("y") + SIGN_H + 6 - y : 20
+      c.el.querySelector(".tag").style.top = held ? `${top}px` : ""
+      chips.push(chipBox([x, y], c.el.querySelector(".chip"), false, false, top))
     }
     c.el.style.setProperty("--c", s.user.color || "#111")
     c.el.querySelector(".name").textContent = s.user.name + (id === awareness.clientID ? " (you)" : "")
     c.el.style.transform = `translate(${x}px, ${y}px)`
   }
   for (const [id, c] of cursors) if (!live.has(id)) { c.el.remove(); cursors.delete(id) }
-  if (labels) spreadLabels()
+  const cards = [...signs.values()].map((m) => ({ left: m.get("x"), top: m.get("y"), right: m.get("x") + SIGN_W, bottom: m.get("y") + SIGN_H }))
+  layoutLabels(wanted, [...chips, ...cards])
   noteRound(states.map(([, s]) => s), now)
   requestAnimationFrame(frame)
 }

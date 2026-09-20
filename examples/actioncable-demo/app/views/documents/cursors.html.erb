@@ -25,12 +25,12 @@
  .cursor .name{font:700 14px/1.2 system-ui}
  .cursor .trait{font:14px/1.2 system-ui;opacity:.92}
  .cursor.guest .name::before{content:"";display:inline-block;width:8px;height:8px;background:#ef4444;transform:rotate(45deg);margin-right:7px;vertical-align:1px;outline:1.5px solid #fff}
- .cursor .say{position:absolute;left:0;bottom:100%;margin-bottom:3px;background:#111827;color:#fff;font:700 13px/1.2 system-ui;padding:3px 8px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
- .cursor .say[hidden]{display:none}
  .cursor.flip .tag{left:auto;right:14px}
- .cursor.flip .say{left:auto;right:0}
  .cursor.flip .arrow{transform:scaleX(-1)}
  .cursor.up .tag{top:auto;bottom:calc(100% + 4px)}
+ /* Decision labels: a layer of their own above every cursor, so no chip can hide one. */
+ #labels{position:absolute;inset:0;pointer-events:none;z-index:5}
+ .label{position:absolute;left:0;top:0;white-space:nowrap;will-change:transform;background:#111827;color:#fff;font:700 13px/1.2 system-ui;padding:3px 8px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
  #foot{position:absolute;right:12px;bottom:8px;font:12px/1.2 system-ui;color:#6b7280;pointer-events:none}
  /* ?stage=1: the board fills the window for a recording; only the title,
     the roster, the HUD, the board, and the footer stay. */
@@ -64,6 +64,7 @@
   <div id="board" data-document-id="<%= @document_id %>:cursors">
     <div id="stage">
       <div id="cursors"></div>
+      <div id="labels"></div>
       <div id="foot">Jev picks the sign · yrby shares the board and the cursors</div>
     </div>
   </div>
