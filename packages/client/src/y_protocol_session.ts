@@ -4,10 +4,10 @@
 // Awareness); it works in raw Uint8Array frames and leaves the transport to the
 // caller: base64, the { update, id } / { ack } envelope, and a socket.
 //
-// Call onConnect() when the transport connects, onDisconnect() when it drops,
-// ack(id) on an { ack } envelope, and receive(frame) for an inbound frame (it
-// returns a reply to send, or null). Local doc and awareness edits send
-// themselves via the "update" events.
+// Call resume() when the transport connects, pause() when it drops,
+// acknowledge(id) on an { ack } envelope, and receive(frame) for an inbound
+// frame (it returns a reply to send, or null). Local doc and awareness edits
+// send themselves via the "update" events.
 import { Doc, mergeUpdates, applyUpdate } from "yjs";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
@@ -62,14 +62,8 @@ export class YProtocolSession {
   #onAwarenessUpdate?: (change: AwarenessChange, origin: unknown) => void;
 
   constructor(doc: Doc, opts: YProtocolSessionOptions) {
-    const {
-      send,
-      awareness = null,
-      resendInterval,
-      onError,
-      setInterval: setIntervalFn,
-      clearInterval: clearIntervalFn,
-    } = opts ?? ({} as YProtocolSessionOptions);
+    const { send, awareness = null, resendInterval, onError, setInterval: setTimer, clearInterval: clearTimer } =
+      opts ?? ({} as YProtocolSessionOptions);
     if (!doc) throw new TypeError("YProtocolSession requires a Y.Doc");
     if (typeof send !== "function") throw new TypeError("YProtocolSession requires a send(frame, id) function");
 
@@ -82,8 +76,8 @@ export class YProtocolSession {
       merge: mergeUpdates,
       send: (update, id) => this.#send(this.#frameUpdate(update), id),
       resendInterval,
-      setInterval: setIntervalFn,
-      clearInterval: clearIntervalFn,
+      setInterval: setTimer,
+      clearInterval: clearTimer,
     });
 
     this.#onDocUpdate = (update: Uint8Array, origin: unknown) => {
@@ -95,7 +89,7 @@ export class YProtocolSession {
     if (this.awareness) {
       this.#onAwarenessUpdate = ({ added, updated, removed }: AwarenessChange, origin: unknown) => {
         // Only broadcast our own presence changes. Updates applied from a peer,
-        // and our own remote-cleanup in onDisconnect, carry origin === this;
+        // and our own remote-cleanup in pause(), carry origin === this;
         // re-sending those would echo presence and broadcast tombstones for
         // other clients' cursors.
         if (origin === this) return;
@@ -116,19 +110,19 @@ export class YProtocolSession {
     return this.#delivery.hasPending;
   }
 
-  /** Transport connected: send the opening handshake and replay the unacked tail. */
-  onConnect(): void {
+  /** The transport is up: send the opening handshake, re-announce presence, replay the unacked tail. */
+  resume(): void {
     this.#send(this.#frameSyncStep1(), undefined);
     if (this.awareness && this.awareness.getLocalState() !== null) {
       this.#send(this.#frameAwareness([this.doc.clientID]), undefined);
     }
-    this.#delivery.onConnect();
+    this.#delivery.resume();
   }
 
-  /** Transport dropped: pause retransmits (queue kept) and clear remote presence. */
-  onDisconnect(): void {
+  /** The transport is down: keep the queue, stop retransmits, forget remote presence. */
+  pause(): void {
     this.#synced = false;
-    this.#delivery.onDisconnect();
+    this.#delivery.pause();
     if (this.awareness) {
       const remote = [...this.awareness.getStates().keys()].filter((c) => c !== this.doc.clientID);
       if (remote.length) removeAwarenessStates(this.awareness, remote, this);
@@ -148,8 +142,8 @@ export class YProtocolSession {
   }
 
   /** A reliable-delivery `{ ack: id }` envelope arrived. */
-  ack(id: number): void {
-    this.#delivery.onAck(id);
+  acknowledge(id: number): void {
+    this.#delivery.acknowledge(id);
   }
 
   /**
@@ -162,7 +156,7 @@ export class YProtocolSession {
    * keystroke becomes an outbound frame), so a bare `Y.applyUpdate(doc, update)`
    * would look like a local edit and get echoed back on the next connect. Going
    * through here applies under the session's own origin, which the outbound
-   * filter skips. Safe to call before `onConnect()`: the state folds into the
+   * filter skips. Safe to call before `resume()`: the state folds into the
    * SyncStep1 handshake instead of being re-sent.
    */
   applyRemoteUpdate(update: Uint8Array): void {

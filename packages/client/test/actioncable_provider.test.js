@@ -572,3 +572,29 @@ test("disconnect() removes both page lifecycle handlers", (t) => {
   p.connect();
   assert.ok(listeners.has("pagehide") && listeners.has("pageshow"), "reconnect installs them again");
 });
+
+test("a status listener that throws is reported via onError and does not stop later listeners or messages", (t) => {
+  const c = fakeConsumer();
+  const errors = [];
+  const p = makeProvider(t, new Y.Doc(), c, { id: "ls1" }, { onError: (error, context) => errors.push({ error, context }) });
+  const seen = [];
+  p.onStatusChange(() => { throw new Error("listener bug"); });
+  p.onStatusChange((event) => seen.push(event.status));
+  p.connect();
+  c.deliverConnected();
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+  assert.deepEqual(seen, ["connecting", "connected", "synced"], "the second listener still hears every change");
+  assert.equal(errors.length, 3);
+  assert.equal(errors[0].context, "listener");
+  assert.match(String(errors[0].error), /listener bug/);
+  assert.equal(p.synced, true, "the cable callback that fired the listener completed");
+});
+
+test("destroy() is idempotent", (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "d2" });
+  p.connect();
+  p.destroy();
+  assert.doesNotThrow(() => p.destroy());
+  assert.equal(p.status, "disconnected");
+});

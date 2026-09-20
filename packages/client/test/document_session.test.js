@@ -242,3 +242,29 @@ test("without a refresh URL a rejection blocks immediately and nothing is fetche
   assert.equal(session.state, "blocked");
   assert.equal(lease.signal.aborted, true);
 });
+
+test("a refresh request carries a timeout signal so a silent endpoint cannot hold the session offline", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  store.acquire(refreshing);
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  assert.ok(calls[0].init.signal instanceof AbortSignal, "fetch is given an abort signal");
+  assert.equal(calls[0].init.signal.aborted, false);
+});
+
+test("a consumer that throws while resubscribing with a renewed grant blocks the session", async t => {
+  const { consumer, store } = setup(t);
+  stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const lease = store.acquire(refreshing), session = lease.session;
+  sync(consumer.created[0]);
+  const create = consumer.subscriptions.create;
+  consumer.subscriptions.create = () => { throw new Error("socket gone"); };
+  t.after(() => { consumer.subscriptions.create = create; });
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  assert.equal(session.state, "blocked");
+  assert.match(String(session.error), /socket gone/);
+  assert.equal(lease.signal.aborted, true);
+});

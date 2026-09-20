@@ -104,9 +104,9 @@ cable reconnects. The session fetches the URL with the browser's session
 cookies, resubscribes with the new grant, and keeps its document, its pending
 edits, and its acknowledgment route. The application decides whether to issue
 a grant, so the request is a fresh permission check. Nothing is fetched ahead
-of time. One renewal is tried per rejection: if the refresh fails, or the
-renewed grant is rejected as well, the session blocks as it would without the
-attribute. The attribute is read when the session is acquired, and changing
+of time. One renewal is tried per rejection: if the refresh fails, does not
+answer within 15 seconds, or the renewed grant is rejected as well, the
+session blocks as it would without the attribute. The attribute is read when the session is acquired, and changing
 it later does not rebind the editor.
 
 Install `@rails/actioncable`, `yjs`, and `y-protocols` for the default element.
@@ -261,10 +261,10 @@ const session = new YProtocolSession(doc, {
 });
 
 // wire your transport's callbacks:
-subscription.connected    = () => session.onConnect();      // handshake + replay
-subscription.disconnected = () => session.onDisconnect();   // pause + clear presence
+subscription.connected    = () => session.resume();         // handshake + replay
+subscription.disconnected = () => session.pause();          // keep the queue, clear presence
 subscription.received = (msg) => {
-  if (msg.ack !== undefined) return session.ack(msg.ack);   // reliable ack envelope
+  if (msg.ack !== undefined) return session.acknowledge(msg.ack); // reliable ack envelope
   const reply = session.receive(fromBase64(msg.update));     // decode + apply
   if (reply) subscription.send({ update: toBase64(reply) });     // e.g. answer a SyncStep1
 };
@@ -291,10 +291,10 @@ const rs = new ReliableSync({
   merge: Y.mergeUpdates,
 });
 
-rs.enqueue(update);  // a local document update
-rs.onAck(id);        // an { ack: id } arrived
-rs.onConnect();      // (re)connected — replay the tail, resume retransmits
-rs.onDisconnect();   // dropped — keep the queue, pause
+rs.enqueue(update);   // a local document update
+rs.acknowledge(id);   // an { ack: id } arrived
+rs.resume();          // (re)connected: replay the tail, keep retransmitting
+rs.pause();           // dropped: keep the queue, stop retransmitting
 ```
 
 Pending updates are retained and replayed until the server acknowledges them.

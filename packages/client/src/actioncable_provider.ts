@@ -184,7 +184,7 @@ export class ActionCableProvider {
         received(message: CableMessage) { run(() => {
           // Reliable-delivery ack: confirm + prune the local queue.
           if (message && message.ack !== undefined) {
-            provider.session.ack(message.ack);
+            provider.session.acknowledge(message.ack);
             provider.#refreshStatus(); // the queue may have just emptied
             return;
           }
@@ -210,12 +210,12 @@ export class ActionCableProvider {
         }); },
         connected() { run(() => {
           provider.#connected = true;
-          provider.session.onConnect(); // handshake + replay the unacked tail
+          provider.session.resume(); // handshake + replay the unacked tail
           provider.#refreshStatus();
         }); },
         disconnected() { run(() => {
           provider.#connected = false;
-          provider.session.onDisconnect(); // pause retransmits, clear remote presence
+          provider.session.pause(); // keep the queue, clear remote presence
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
         }); },
         rejected() { run(() => {
@@ -244,7 +244,7 @@ export class ActionCableProvider {
     // detach. Defer the unsubscribe one microtask so the removal frame flushes
     // before the channel tears down.
     this.session.removeLocalAwareness();
-    this.session.onDisconnect();
+    this.session.pause();
     this.#connected = false;
     this.#subscription = null;
     this.#unwatchPage();
@@ -270,6 +270,7 @@ export class ActionCableProvider {
   }
 
   destroy(): void {
+    if (this.#destroyed) return;
     this.disconnect();
     this.#destroyed = true;
     this.session.destroy();
@@ -290,7 +291,16 @@ export class ActionCableProvider {
     if (status === this.#last.status && pending === this.#last.pending) return;
     this.#last = { status, pending };
     if (status === "synced") this.#resolveSynced();
-    for (const listener of this.#statusListeners) listener({ status, pending });
+    // A listener that throws is an application bug, not a transport failure:
+    // report it and keep going, so one bad listener cannot stop the others or
+    // break the cable callback that triggered the refresh.
+    for (const listener of this.#statusListeners) {
+      try {
+        listener({ status, pending });
+      } catch (error) {
+        this.#onError(error, "listener");
+      }
+    }
   }
 
   // Presence around the page lifecycle. `pagehide` removes our cursor while
