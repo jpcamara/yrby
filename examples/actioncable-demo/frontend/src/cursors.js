@@ -251,47 +251,68 @@ function notice(s, chipEl) {
 
 // Decision labels live on a layer above every cursor, so no chip can hide
 // one. A label is placed once, when its chip arrives, against the settled
-// layout: directly above its own chip; when another label has that spot
-// it climbs, a label height at a time, up to two; when a climb would
-// leave the board or land on a chip or a card it goes directly below its
-// chip instead, and may step down twice the same way; after that it may
-// sit beside its chip, to the right, then the left. If nothing is free it
-// drops its probability and tries once more; if still nothing is free it
-// takes the first spot that covers no chip or card, and failing even that
-// it shows no label: the chip's arrival shows the move. From then on it
-// rides with its chip. Positions are in board units.
+// layout plus every seat of its card, filled or not, so a later arrival
+// never lands under it. It goes to the outward side of its seat first:
+// above for a top seat, below for a bottom seat, beside for a side seat;
+// then the other sides. Above and below it may climb or step a label
+// height at a time, up to two, until a spot would leave the board or land
+// on a chip, a card, or a seat. If nothing is free it drops its
+// probability and tries once more; if still nothing is free it takes the
+// first spot that covers nothing, and failing even that it shows no
+// label: the chip's arrival shows the move. From then on it rides with
+// its chip; if some other chip still lands under it (another crowd's, a
+// wall home's), it is placed once more against the layout of that moment.
+// Positions are in board units.
 const LABEL_GAP = 3
 const labels = new Map() // guest name -> { el, dx, dy, until }
 const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
 const onBoardRect = (r) => r.left >= -4 && r.right <= W + 4 && r.top >= 0 && r.bottom <= H
-function spotsFor(el, chip, flip, blocks) {
+function spotsFor(el, chip, flip, blocks, side) {
   const w = el.offsetWidth, h = el.offsetHeight
   const left = flip ? chip.right - w : chip.left
   const at = (l, t) => ({ left: l, top: t, right: l + w, bottom: t + h })
   const free = (r) => onBoardRect(r) && !blocks.some((b) => overlaps(r, b))
-  const spots = []
-  for (let i = 0; i < 3; i++) { const r = at(left, chip.top - LABEL_GAP - h - i * (h + LABEL_GAP)); if (!free(r)) break; spots.push(r) }
-  for (let i = 0; i < 3; i++) { const r = at(left, chip.bottom + LABEL_GAP + i * (h + LABEL_GAP)); if (!free(r)) break; spots.push(r) }
-  for (const r of [at(chip.right + LABEL_GAP, chip.top), at(chip.left - LABEL_GAP - w, chip.top)]) if (free(r)) spots.push(r)
-  return spots
+  const above = [], below = []
+  for (let i = 0; i < 3; i++) { const r = at(left, chip.top - LABEL_GAP - h - i * (h + LABEL_GAP)); if (!free(r)) break; above.push(r) }
+  for (let i = 0; i < 3; i++) { const r = at(left, chip.bottom + LABEL_GAP + i * (h + LABEL_GAP)); if (!free(r)) break; below.push(r) }
+  const beside = (r) => (free(r) ? [r] : [])
+  const right = beside(at(chip.right + LABEL_GAP, chip.top)), leftOf = beside(at(chip.left - LABEL_GAP - w, chip.top))
+  if (side === "bottom") return [...below, ...above, ...right, ...leftOf]
+  if (side === "left") return [...leftOf, ...above, ...below, ...right]
+  if (side === "right") return [...right, ...above, ...below, ...leftOf]
+  return [...above, ...below, ...right, ...leftOf]
 }
-function placeLabel(name, text, chip, flip, blocks, now) {
+// Every seat a card deals, up to eight, as chip boxes: where a later
+// arrival can land.
+function seatBlocks(id) {
+  const m = signs.get(id)
+  if (!m) return []
+  const all = slots(m.get("x"), m.get("y")), on = all.filter((p) => onBoard(chipRect(p)))
+  return (on.length >= 8 ? on.slice(0, 8) : all.slice(0, 8)).map(chipRect)
+}
+// Which side of its card a seat is on.
+function seatSide(id, name) {
+  const index = seats.get(id)?.get(name) ?? 0
+  return [1, 5].includes(index) ? "left" : [3, 7].includes(index) ? "right" : [2, 6, 9, 11].includes(index) ? "bottom" : "top"
+}
+function placeLabel(name, text, chip, flip, blocks, now, side, until = now + SAY_FOR) {
   let entry = labels.get(name)
   if (!entry) { const el = document.createElement("div"); el.className = "label"; labelLayer.appendChild(el); entry = { el }; labels.set(name, entry) }
   const el = entry.el
   el.textContent = text
   const placed = [...labels.values()].filter((l) => l !== entry && l.rect).map((l) => l.rect)
-  let spots = spotsFor(el, chip, flip, blocks)
+  let spots = spotsFor(el, chip, flip, blocks, side)
   let spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
   if (!spot && / · \d\.\d\d$/.test(text)) {
     el.textContent = text.replace(/ · \d\.\d\d$/, "")
-    spots = spotsFor(el, chip, flip, blocks)
+    spots = spotsFor(el, chip, flip, blocks, side)
     spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
   }
   if (!spot) spot = spots[0]
   if (!spot) { el.remove(); labels.delete(name); return }
-  Object.assign(entry, { dx: spot.left - chip.left, dy: spot.top - chip.top, rect: spot, until: now + SAY_FOR })
+  Object.assign(entry, { text, flip, side, dx: spot.left - chip.left, dy: spot.top - chip.top, rect: spot, until })
 }
+let lastChips = [] // every chip box of the last frame, for the label check
 function rideLabels(now) {
   for (const [name, l] of labels) {
     if (now > l.until || !l.chip) { l.el.remove(); labels.delete(name); continue }
@@ -372,12 +393,20 @@ function frame(now) {
       const { p } = pendingLabels.get(s.user.name)
       pendingLabels.delete(s.user.name)
       const text = String(signs.get(s.at)?.get("text") ?? "(gone)").toUpperCase()
-      placeLabel(s.user.name, `→ ${text.length > 20 ? `${text.slice(0, 19)}…` : text} · ${p.toFixed(2)}`, chip, flip, [...chips, ...cards], now)
+      placeLabel(s.user.name, `→ ${text.length > 20 ? `${text.slice(0, 19)}…` : text} · ${p.toFixed(2)}`, chip, flip, [...chips, ...cards, ...seatBlocks(s.at)], now, seatSide(s.at, s.user.name))
       const placed = labels.get(s.user.name)
-      if (placed) placed.chip = chip
+      if (placed) Object.assign(placed, { chip, at: s.at })
     }
   }
   rideLabels(now)
+  lastChips = chips
+  // A chip from elsewhere under a label: the label is placed again, once.
+  for (const [name, l] of labels) {
+    if (l.replaced || !l.rect || !l.chip || !chips.some((c) => c !== l.chip && overlaps(c, l.rect))) continue
+    l.replaced = true
+    const cards = [...signs.values()].map((m) => ({ left: m.get("x"), top: m.get("y"), right: m.get("x") + SIGN_W, bottom: m.get("y") + SIGN_H }))
+    placeLabel(name, l.text, l.chip, l.flip, [...chips, ...cards, ...seatBlocks(l.at)], now, l.side, l.until)
+  }
   noteRound(states.map(([, s]) => s), now)
   requestAnimationFrame(frame)
 }
@@ -437,6 +466,7 @@ homeEl.addEventListener("click", () => {
 window.__yrb = {
   provider, ydoc, signs, party, user, addSign, scale: shown,
   guests: () => guestStates().map((s) => ({ name: s.user.name, trait: s.trait, at: s.at, status: s.status, decision: s.decision })),
+  labelOverlaps: () => [...labels.entries()].filter(([, l]) => l.rect && lastChips.some((c) => c !== l.chip && overlaps(c, l.rect))).map(([name]) => name),
   guestTarget: (name) => { const s = guestStates().find((g) => g.user.name === name); if (!s) return null; seat(guestStates()); const p = placeFor(s); return [Math.round(p.x), Math.round(p.y)] },
 }
 
