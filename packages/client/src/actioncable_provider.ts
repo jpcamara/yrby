@@ -77,22 +77,32 @@ export class ActionCableProvider {
   readonly session: YProtocolSession;
   #subscription: CableSubscription | null = null;
   #onError: (error: unknown, context: string) => void;
-  #connected = false;
-  #generation = 0;
+  #connected = false; // transport up, per the cable's own callbacks
+  #generation = 0; // bumped whenever a subscription is retired, so its late callbacks go quiet
   #destroyed = false;
-  #status: ProviderStatus = "disconnected";
-  #pending = false;
-  #onDocUpdate = (): void => this.#refreshStatus(); // a local edit may have made the queue non-empty
+  // The last event listeners saw. A refresh notifies only when something differs.
+  #last: StatusEvent = { status: "disconnected", pending: false };
   #statusListeners = new Set<(event: StatusEvent) => void>();
-  #whenSynced: Promise<void> | null = null;
-  // `session.synced` resets on every transport drop (a reconnect
-  // re-handshakes). Whether the first catch-up has ever happened is tracked
-  // separately here, so `whenSynced` does not depend on when it is first
-  // read.
-  #everSynced = false;
-  #onUnload: (() => void) | null = null;
-  #onRestore: ((event: PageTransitionEvent) => void) | null = null;
-  #stashedPresence: Record<string, unknown> | null = null;
+  #resolveSynced!: () => void;
+  #onDocUpdate = (): void => this.#refreshStatus(); // a local edit may have made the queue non-empty
+  #page: { hide: () => void; show: (event: PageTransitionEvent) => void } | null = null;
+
+  /**
+   * Resolves once the document has first caught up with the server. Most
+   * editor bindings seed an empty document when they mount, so binding
+   * before the server's state arrives makes each client insert its own
+   * top-level node. Create the editor after this resolves:
+   *
+   *   provider.connect();
+   *   await provider.whenSynced;
+   *   // now hand the doc to the editor binding
+   *
+   * It settles on the first catch-up and stays settled across later
+   * reconnects, even while `synced` is false during a re-handshake; use
+   * `onStatusChange` to track the live connection. If the provider is
+   * destroyed before the first sync, it never settles.
+   */
+  readonly whenSynced = new Promise<void>((resolve) => { this.#resolveSynced = resolve; });
 
   constructor(
     doc: Doc,
@@ -123,36 +133,6 @@ export class ActionCableProvider {
     return this.session.synced;
   }
 
-  /**
-   * Resolves once the document has first caught up with the server. Most
-   * editor bindings seed an empty document when they mount, so binding
-   * before the server's state arrives makes each client insert its own
-   * top-level node. Create the editor after this resolves:
-   *
-   *   provider.connect();
-   *   await provider.whenSynced;
-   *   // now hand the doc to the editor binding
-   *
-   * Resolves immediately if the first catch-up has already happened, even
-   * while the transport is down (`synced` is false during a reconnect;
-   * whether the doc has ever synced does not change). It stays resolved
-   * across later reconnects; use `onStatusChange` to track the live
-   * connection. If the provider is destroyed before the first sync, the
-   * promise never settles.
-   */
-  get whenSynced(): Promise<void> {
-    this.#whenSynced ??= this.#everSynced
-      ? Promise.resolve()
-      : new Promise((resolve) => {
-          const off = this.onStatusChange(({ status }) => {
-            if (status !== "synced") return;
-            off();
-            resolve();
-          });
-        });
-    return this.#whenSynced;
-  }
-
   /** True while there are unacknowledged local document updates in flight. */
   get hasPending(): boolean {
     return this.session.hasPending;
@@ -176,7 +156,7 @@ export class ActionCableProvider {
 
   /** Current connection status. See {@link ProviderStatus}. */
   get status(): ProviderStatus {
-    return this.#status;
+    return this.#last.status;
   }
 
   /** Subscribe to status changes. Returns an unsubscribe function. */
@@ -239,16 +219,17 @@ export class ActionCableProvider {
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
         }); },
         rejected() { run(() => {
-          // The channel refused the subscription (auth, missing doc). Surface
-          // it and tear down — otherwise the provider sits at "connecting"
-          // forever, silently queueing edits. The app decides what's next.
+          // The channel refused the subscription (auth, missing doc). Tear down
+          // first, then report: the handler may build a replacement, and it
+          // must not be the one we tear down. Left alone, the provider would
+          // sit at "connecting" forever, silently queueing edits.
           provider.disconnect();
           provider.#onError(new Error("subscription rejected by the server"), "rejected");
         }); },
       }
     );
     creating = false;
-    this.#installUnloadHandler();
+    this.#watchPage();
     this.#refreshStatus(); // -> "connecting"
   }
 
@@ -266,7 +247,7 @@ export class ActionCableProvider {
     this.session.onDisconnect();
     this.#connected = false;
     this.#subscription = null;
-    this.#removeUnloadHandler();
+    this.#unwatchPage();
     // Universal teardown: both @rails/actioncable and @anycable/web subscriptions
     // expose unsubscribe() (Rails' just calls consumer.subscriptions.remove(this)
     // internally). @anycable has NO consumer.subscriptions.remove, so calling that
@@ -282,8 +263,8 @@ export class ActionCableProvider {
    * destroy().
    */
   renew(params: object): void {
-    Object.assign(this.channelParams, params);
     if (this.#destroyed) return;
+    Object.assign(this.channelParams, params);
     this.disconnect();
     this.connect();
   }
@@ -306,46 +287,40 @@ export class ActionCableProvider {
   #refreshStatus(): void {
     const status = this.#computeStatus();
     const pending = this.hasPending;
-    if (status === this.#status && pending === this.#pending) return;
-    this.#status = status;
-    this.#pending = pending;
-    if (status === "synced") this.#everSynced = true;
+    if (status === this.#last.status && pending === this.#last.pending) return;
+    this.#last = { status, pending };
+    if (status === "synced") this.#resolveSynced();
     for (const listener of this.#statusListeners) listener({ status, pending });
   }
 
-  // Presence teardown/restore around page lifecycle:
-  // - `pagehide`: remove local presence while the socket is still live so peers
-  //   drop our cursor now (bfcache-safe; the awareness timeout is the backstop).
-  // - `pageshow` with `persisted`: the user came BACK (bfcache restore), so put
-  //   their presence back — editors set awareness once at setup, so without
-  //   this they'd rejoin as a ghost with no cursor.
-  #installUnloadHandler(): void {
-    if (typeof window === "undefined" || this.#onUnload) return;
-    this.#onUnload = () => {
-      this.#stashedPresence = this.awareness.getLocalState();
-      this.session.removeLocalAwareness();
+  // Presence around the page lifecycle. `pagehide` removes our cursor while
+  // the socket is still live, so peers drop it now rather than after the
+  // awareness timeout. A `pageshow` with `persisted` is a bfcache return, so
+  // the cursor goes back; editor bindings set awareness once at setup, and
+  // without this the returning user would be a ghost.
+  #watchPage(): void {
+    if (typeof window === "undefined" || this.#page) return;
+    let stashed: Record<string, unknown> | null = null;
+    this.#page = {
+      hide: () => {
+        stashed = this.awareness.getLocalState();
+        this.session.removeLocalAwareness();
+      },
+      show: (event) => {
+        if (!event.persisted || !stashed) return;
+        if (this.awareness.getLocalState() === null) this.awareness.setLocalState(stashed);
+        stashed = null;
+      },
     };
-    this.#onRestore = (event: PageTransitionEvent) => {
-      if (!event.persisted || !this.#stashedPresence) return;
-      if (this.awareness.getLocalState() === null) {
-        this.awareness.setLocalState(this.#stashedPresence);
-      }
-      this.#stashedPresence = null;
-    };
-    window.addEventListener("pagehide", this.#onUnload);
-    window.addEventListener("pageshow", this.#onRestore);
+    window.addEventListener("pagehide", this.#page.hide);
+    window.addEventListener("pageshow", this.#page.show);
   }
 
-  #removeUnloadHandler(): void {
-    if (typeof window === "undefined") return;
-    if (this.#onUnload) {
-      window.removeEventListener("pagehide", this.#onUnload);
-      this.#onUnload = null;
-    }
-    if (this.#onRestore) {
-      window.removeEventListener("pageshow", this.#onRestore);
-      this.#onRestore = null;
-    }
+  #unwatchPage(): void {
+    if (!this.#page || typeof window === "undefined") return;
+    window.removeEventListener("pagehide", this.#page.hide);
+    window.removeEventListener("pageshow", this.#page.show);
+    this.#page = null;
   }
 
   // Send one raw protocol frame over the cable. Awareness frames are whispered
