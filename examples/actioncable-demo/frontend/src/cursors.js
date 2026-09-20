@@ -109,6 +109,8 @@ function renderSigns() {
     el.style.top = `${m.get("y")}px`
     const t = m.get("text") ?? ""
     if (el._ta.value !== t && document.activeElement !== el._ta) el._ta.value = t
+    el.classList.toggle("long", t.length > 22) // a longer sign takes a smaller face, so it still fits the card
+    el.classList.toggle("longer", t.length > 44)
   })
 }
 signs.observeDeep(renderSigns)
