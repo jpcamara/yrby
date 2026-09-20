@@ -215,7 +215,7 @@ export class ActionCableProvider {
         }); },
         disconnected() { run(() => {
           provider.#connected = false;
-          provider.session.pause(); // keep the queue, clear remote presence
+          provider.session.pause(); // keep the queue; forget peers' cursors (ours stays; nothing can be sent now)
           provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
         }); },
         rejected() { run(() => {
