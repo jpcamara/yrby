@@ -25,7 +25,7 @@ const AB = process.env.AB_BIN || resolve(here, "node_modules/.bin/agent-browser"
 const BASE = process.env.BASE || `http://127.0.0.1:${process.env.PORT || 3779}`
 const room = process.env.ROOM || `cursors-${`${Date.now()}`.slice(-6)}`
 const LIVE = process.env.LIVE_GUESTS === "1" || !!process.env.TYPESAFE_API_KEY
-const SIGN_TEXTS = ["FREE PIZZA", "QUIET ROOM", "RUBY 4.0 PARTY", "CAT CAFE", "MANDATORY NETWORKING", "SF RUBY CONF"]
+const SIGN_TEXTS = ["FREE PIZZA", "QUIET ROOM", "KARAOKE", "CAT CAFE", "PIZZA IS GONE", "SF RUBY CONF"]
 const sessions = [`cursors-${process.pid}-a`, `cursors-${process.pid}-b`]
 const [a, b] = sessions
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -127,10 +127,10 @@ try {
     const was = Object.fromEntries(states.map((g) => [g.name, { at: g.at, decidedAt: g.decision.at }]))
     ab(a, "click", "[data-id=s1] textarea")
     evaluate(a, "document.querySelector('[data-id=s1] textarea').select()")
-    ab(a, "keyboard", "type", "MANDATORY NETWORKING")
-    await waitFor(b, "window.__yrb.signs.get('s1').get('text') === 'MANDATORY NETWORKING'", "the rename in b")
+    ab(a, "keyboard", "type", "PIZZA IS GONE")
+    await waitFor(b, "window.__yrb.signs.get('s1').get('text') === 'PIZZA IS GONE'", "the rename in b")
     await waitFor(b, `window.__yrb.guests().some(g => g.decision && g.decision.at > ${Math.max(...states.map((g) => g.decision.at))})`, "a new round after the rename", 4_000)
-    check("renaming FREE PIZZA to MANDATORY NETWORKING starts a new round within 4 s", true)
+    check("renaming FREE PIZZA to PIZZA IS GONE starts a new round within 4 s", true)
     await waitFor(b, `window.__yrb.guests().every(g => g.status === 'settled' || g.status === 'confused')`, "the round settles", 6_000)
     states = guests(b)
     const fresh = states.filter((g) => g.decision && g.decision.at > was[g.name].decidedAt)

@@ -82,10 +82,10 @@ class GuestTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- assert
     @mind.responses << decision("s1")
     wait_until { @peer.state["at"] == "s1" }
     @peer.retext("s2", "MANDATORY")
-    @peer.retext("s2", "MANDATORY NETWORKING")
+    @peer.retext("s2", "KARAOKE")
     asked = take_call
 
-    assert_equal [["s1", "FREE PIZZA"], ["s2", "MANDATORY NETWORKING"]], asked[:signs]
+    assert_equal [["s1", "FREE PIZZA"], ["s2", "KARAOKE"]], asked[:signs]
     assert_equal "s1", asked[:current]
     @mind.responses << decision("s2")
     wait_until { @peer.state["at"] == "s2" }

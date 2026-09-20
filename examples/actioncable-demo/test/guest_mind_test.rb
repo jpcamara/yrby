@@ -29,7 +29,7 @@ class GuestMindTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- as
 
   PERSONA = Guest::Persona.new(name: "Snack Goblin", trait: "lives for free food", color: "#d97706", home: [60, 60],
                                personality: "lives for free food and will cross any room for a snack")
-  SIGNS = [["s1", "FREE PIZZA"], ["s2", "QUIET ROOM"], ["s3", "RUBY 4.0 RELEASE PARTY"]].freeze
+  SIGNS = [["s1", "FREE PIZZA"], ["s2", "QUIET ROOM"], ["s3", "KARAOKE"]].freeze
 
   def setup
     @env = %w[TYPESAFE_API_KEY AGENT_JEV_MODEL].to_h { |k| [k, ENV.fetch(k, nil)] }
@@ -68,7 +68,7 @@ class GuestMindTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- as
     assert_equal "choice", question["type"]
     assert_equal %w[s1 s2 s3 stay], question["criteria"].keys
     assert_equal "The sign says: FREE PIZZA", question["criteria"]["s1"]
-    assert_equal "The sign says: RUBY 4.0 RELEASE PARTY", question["criteria"]["s3"]
+    assert_equal "The sign says: KARAOKE", question["criteria"]["s3"]
     assert_equal "Stay where you are (currently at: QUIET ROOM)", question["criteria"]["stay"]
     assert_includes question["instructions"], "You are Snack Goblin, a guest at a party."
     assert_includes question["instructions"], "Personality: lives for free food and will cross any room for a snack."
