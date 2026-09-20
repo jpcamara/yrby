@@ -89,11 +89,14 @@ try {
   check("a sign posted in a shows up in b with its text", texts(a) === texts(b))
 
   // A drag in a moves the sign in b: the position lives in the document. The
-  // board scales to fit, so a viewport pixel is 1/scale of a board unit.
+  // board scales to fit, so a viewport pixel is 1/scale of a board unit. The
+  // sign is dragged toward the middle of the board, where the page has no
+  // edge to hold it back.
   const scale = evaluate(a, "window.__yrb.scale()")
   const before = evaluate(a, "[window.__yrb.signs.get('s2').get('x'), window.__yrb.signs.get('s2').get('y')]")
-  drag(a, "s2", -120, 80)
-  const [ex, ey] = [Math.round(before[0] - 120 / scale), Math.round(before[1] + 80 / scale)]
+  const [dx, dy] = [before[0] < 400 ? 120 : -120, before[1] < 230 ? 80 : -80]
+  drag(a, "s2", dx, dy)
+  const [ex, ey] = [Math.round(before[0] + dx / scale), Math.round(before[1] + dy / scale)]
   await waitFor(b, `Math.abs(window.__yrb.signs.get('s2').get('x') - ${ex}) <= 1 && Math.abs(window.__yrb.signs.get('s2').get('y') - ${ey}) <= 1`, "the drag in b")
   check("a sign dragged in a moves in b by the same amount", true)
 
@@ -147,8 +150,9 @@ try {
     const targets = Object.fromEntries(names.map((n) => [n, evaluate(b, `window.__yrb.guestTarget('${n}')`)]))
     const newest = Math.max(...states.map((g) => g.decision?.at || 0))
     const at = evaluate(a, `[window.__yrb.signs.get('${signId}').get('x'), window.__yrb.signs.get('${signId}').get('y')]`)
-    drag(a, signId, 90, -60)
-    const [mx, my] = [Math.round(at[0] + 90 / scale) - at[0], Math.round(at[1] - 60 / scale) - at[1]]
+    const [cdx, cdy] = [at[0] < 400 ? 90 : -90, at[1] < 230 ? 60 : -60] // toward the middle: no edge holds the sign back
+    drag(a, signId, cdx, cdy)
+    const [mx, my] = [Math.round(at[0] + cdx / scale) - at[0], Math.round(at[1] + cdy / scale) - at[1]]
     await waitFor(b, `Math.abs(window.__yrb.guestTarget('${names[0]}')[0] - ${targets[names[0]][0] + mx}) <= 1`, "the crowd's target follows the sign")
     check("dragging a sign moves its guests' targets by the same amount in the other browser", names.every((n) => { const t = evaluate(b, `window.__yrb.guestTarget('${n}')`); return Math.abs(t[0] - (targets[n][0] + mx)) <= 1 && Math.abs(t[1] - (targets[n][1] + my)) <= 1 }))
     await sleep(1500)
