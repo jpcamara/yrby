@@ -1,0 +1,28 @@
+{
+  "size": 16,
+  "frames": {
+    "grass": 0,
+    "grass_flowers": 1,
+    "grass_sparkle": 2,
+    "road": 3,
+    "road_edge_up": 4,
+    "road_edge_right": 5,
+    "road_edge_down": 6,
+    "road_edge_left": 7,
+    "water": 8,
+    "bridge_h": 9,
+    "bridge_v": 10,
+    "house_red": 11,
+    "house_blue": 12,
+    "house_orange": 13,
+    "shop": 14,
+    "park": 15,
+    "sign": 16,
+    "marker": 17,
+    "person_red": 18,
+    "person_blue": 19,
+    "person_green": 20,
+    "person_yellow": 21,
+    "planner": 22
+  }
+}

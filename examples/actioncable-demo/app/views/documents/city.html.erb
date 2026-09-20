@@ -1,0 +1,79 @@
+<% content_for :head do %>
+<style>
+ .demo{margin:1rem;max-width:1200px}
+ #presence{margin:.4rem 0;min-height:1.5rem}.chip{color:#fff;padding:2px 8px;border-radius:999px;font-size:12px;margin-right:4px;display:inline-block;margin-bottom:3px}
+ .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.5rem 0}
+ .row button,.row form button{border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font:13px system-ui;padding:5px 10px;min-height:32px}
+ .row button[disabled],.row form button[disabled]{opacity:.55;cursor:default}
+ .row button[aria-pressed=true]{background:#1f2937;color:#fff;border-color:#1f2937}
+ #palette{display:flex;gap:4px;flex-wrap:wrap;margin:.5rem 0}
+ #palette button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 6px;border:2px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font:11px system-ui;min-width:52px}
+ #palette button canvas{width:32px;height:32px;image-rendering:pixelated}
+ #palette button[aria-pressed=true]{border-color:#1f2937;background:#f3f4f6}
+ #stage{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;background:#84c669;border:2px solid #3f2631;border-radius:4px;overflow:hidden;line-height:0}
+ #stage canvas{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;display:block}
+ #stage #map{position:relative}
+ #tags{position:absolute;inset:0;pointer-events:none;line-height:1}
+ .tag{position:absolute;transform:translate(-50%,-100%);font:bold 10px system-ui;color:#fff;padding:1px 4px;border-radius:3px;white-space:nowrap}
+ .tag.me{outline:1px solid #fff}
+ .sign-text{position:absolute;transform:translate(-50%,-115%);font:bold 9px system-ui;color:#3f2631;background:#fff8e1;border:1px solid #bd6c4a;padding:1px 3px;border-radius:2px;white-space:nowrap}
+ #status{font-size:.9rem;color:#374151}
+ #status.offline{color:#b91c1c;font-weight:600}
+ .legend{font-size:.85rem;color:#374151}.legend i{display:inline-block;width:12px;height:12px;vertical-align:-2px;margin-right:3px;border-radius:2px}
+ details.panel{margin:.75rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:.4rem .75rem}
+ details.panel summary{cursor:pointer;font-weight:600;font-size:.9rem}
+ #timelapse-scrub{flex:1;min-width:160px}
+ .copy{font-size:.92rem;line-height:1.45}
+ code{background:#f3f4f6;padding:0 3px;border-radius:3px}
+ @media (max-width:640px){.demo{margin:.5rem}.copy{display:none}h1{font-size:1.3rem;margin:.3rem 0}}
+</style>
+<% end %>
+<div class="demo">
+  <header>
+    <h1>The city</h1>
+    <%= render "nav" %>
+    <p class="copy">
+      A town on a 48 by 48 grid. Everyone paints tiles from their phone, and a
+      Ruby planner lives in the town and builds what is missing. Each cell is one
+      key in a <code>Y.Map</code>. Paints to different cells merge. Two paints to
+      the same cell keep the last one.
+    </p>
+    <p class="copy">
+      The planner (<code>CityPlanner</code>) joins over the same websocket as a
+      browser. It marks where it will build, walks there, and lays one tile at a
+      time, writing the tile and its author together. Paint near its markers and
+      it stops and moves on. A sign that says <code>PARK</code>, <code>SHOP</code>,
+      <code>ROAD</code>, <code>BRIDGE</code>, <code>NO BUILD</code>, or
+      <code>CLEAR</code> is an instruction. Go offline, keep painting, reconnect:
+      your tiles and everyone else's merge.
+    </p>
+    <div id="presence"></div>
+    <p id="status">connecting…</p>
+  </header>
+  <div class="row">
+    <button type="button" id="offline">Go offline</button>
+    <button type="button" id="attribution" aria-pressed="false">Show who built what</button>
+    <%= button_to "Invite the planner", document_city_planner_path(@document_id), class: "invite-planner", form: { style: "display:inline" } %>
+    <span class="legend" id="legend" hidden><i style="background:#2563eb"></i>people <i style="background:#e38628"></i>planner</span>
+  </div>
+  <div id="palette" role="toolbar" aria-label="tiles"></div>
+  <div id="stage" data-document-id="<%= @document_id %>:city">
+    <canvas id="map" width="768" height="768" aria-label="the town"></canvas>
+    <canvas id="overlay" width="768" height="768" aria-hidden="true"></canvas>
+    <div id="tags" aria-hidden="true"></div>
+  </div>
+  <details class="panel" id="timelapse" data-url="<%= document_audit_path("#{@document_id}:city") %>">
+    <summary>Timelapse, replayed from the update log</summary>
+    <p class="copy">
+      Every change the server recorded, applied in order to a fresh <code>Y.Doc</code>
+      in this page, with a frame along the way. Nothing kept the history separately.
+    </p>
+    <div class="row">
+      <button type="button" id="timelapse-play">Play</button>
+      <input id="timelapse-scrub" type="range" min="0" max="0" value="0" aria-label="timelapse position">
+      <button type="button" id="timelapse-refresh">Refresh</button>
+      <span id="timelapse-caption"></span>
+    </div>
+  </details>
+</div>
+<script src="/city.js" defer></script>

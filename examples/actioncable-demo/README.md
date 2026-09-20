@@ -103,6 +103,39 @@ bundle exec ruby -Itest test/sudoku_test.rb
 bundle exec ruby -Itest test/sudoku_peer_test.rb
 ```
 
+### The city planner
+
+`/docs/demo/city` is a town everyone builds: four `Y.Map`s keyed by cell
+hold the tiles, the signs' text, who wrote each tile, and the cells the
+planner has claimed. A Ruby process, `CityPlanner`, joins as a peer over the
+same websocket client and builds what the rules in `City` say is missing:
+roads to houses, bridges over water, a shop for a district of ten houses, a
+park for a crowded block, and what a sign asks for (`PARK`, `SHOP`, `ROAD`,
+`BRIDGE`, `NO BUILD`, `CLEAR`). It claims cells in the document before it
+builds on them, lays one tile per tick with the tile and its author in one
+update, and stops when someone writes near its claims. "Invite the planner"
+starts it the way the checker's invite does, and it runs on its own too:
+
+```bash
+CABLE_URL=ws://127.0.0.1:3000/cable bin/city-planner demo   # then open /docs/demo/city
+```
+
+"Go offline" drops the page's subscription and nothing else: edits keep
+landing in the local doc and the provider's outbox, and they replay on
+"Reconnect", where the handshake also brings in what everyone else did. The
+timelapse panel replays the update log the store already keeps. The tile
+sheet is built by `frontend/tiles/make_tiles.mjs` from Kenney's CC0 Tiny
+Town plus a few tiles drawn there (see `frontend/tiles/SOURCES.md`).
+
+The rules and the planner have tests that boot a cable of their own, and
+the page has a two-browser check:
+
+```bash
+bundle exec ruby -Itest test/city_test.rb
+bundle exec ruby -Itest test/city_planner_test.rb
+PORT=9600 node frontend/city_e2e.mjs   # against a server on 9600 with STORE_KIND=file
+```
+
 ### Using this in your own app
 
 You don't need the demo's build setup. Two things keep an integration
