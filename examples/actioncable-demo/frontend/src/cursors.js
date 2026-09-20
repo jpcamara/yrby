@@ -352,9 +352,11 @@ function frame(now) {
       if (arrived && pendingLabels.has(s.user.name)) arrivals.push({ s, chip, flip })
     } else {
       x = s.cursor.x; y = s.cursor.y
-      // A hand dragging a card keeps its chip below the card, off the title.
+      // A hand dragging a card keeps its chip off the title: below the card,
+      // or above it when the card is at the board's bottom edge.
       const held = s.dragging && signs.get(s.dragging)
-      const top = held ? held.get("y") + SIGN_H + 6 - y : 20
+      const chipH = c.el.querySelector(".chip").offsetHeight || 22
+      const top = held ? (held.get("y") + SIGN_H + 6 + chipH <= H ? held.get("y") + SIGN_H + 6 - y : held.get("y") - 6 - chipH - y) : 20
       c.el.querySelector(".tag").style.top = held ? `${top}px` : ""
       chips.push(chipBox([x, y], c.el.querySelector(".chip"), false, false, top))
     }
