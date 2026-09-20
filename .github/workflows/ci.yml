@@ -189,6 +189,7 @@ jobs:
         run: |
           bundle exec ruby -Itest test/city_test.rb
           bundle exec ruby -Itest test/city_planner_test.rb
+          bundle exec ruby -Itest test/city_life_test.rb
       - name: Build yrby-client package
         working-directory: packages/client
         run: npm ci && npm run build
@@ -255,7 +256,8 @@ jobs:
           # page, flagging a clash and serving a hint through the document.
           PORT=3777 node frontend/sudoku_e2e.mjs
           # The city page: two browsers paint, the planner builds between
-          # them, one browser goes offline and merges on reconnect.
+          # them, the townsfolk walk in both, one browser goes offline and
+          # merges on reconnect.
           PORT=3777 node frontend/city_e2e.mjs
           kill "$(cat /tmp/puma.pid)" || true
 

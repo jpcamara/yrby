@@ -45,13 +45,14 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
   NAME_EVERY = 20  # seconds between one name and the next
   ASK_AGAIN = 60   # seconds before a question the mayor could not answer is asked again
 
-  # The document: five maps keyed "x,y". People and the planner write the
-  # first three; only the planner writes the last two.
+  # The document: five maps keyed "x,y", and one of metadata. People and the
+  # planner write the first three; only the planner writes the next two.
   TILES = "tiles"       # cell => tile name (City::TILES); absent is grass
   SIGNS = "signs"       # cell => a sign's text
   AUTHORS = "authors"   # cell => "h:<name>" or AUTHOR, written with the tile
   CLAIMS = "claims"     # cell => "planner" while the planner means to build there
   READINGS = "readings" # cell => what the mayor read a sign as, or "none"
+  META = "meta"         # "seed" => the terrain's seed, written by the first page to sync
 
   def initialize(document_id, url: nil, peer: nil, stay: MAX_STAY, logger: nil, mayor: :default) # rubocop:disable Metrics/ParameterLists -- the peer, the stay, and the mayor
     @document_id = document_id
@@ -129,8 +130,7 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
   def work
     loop do
       note_writes
-      map = City::Map.from(read(TILES), read(SIGNS), read(READINGS))
-      map = read_signs(map)
+      map = read_signs(read_map)
       plan = City.plans(map, avoid).find { |candidate| !skipped?(candidate) }
       break unless plan
 
@@ -158,7 +158,7 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
     return map if readings.empty?
 
     @peer.send_update(doc.diff { |d| readings.each { |key, meaning| d.get_map(READINGS)[key] = meaning } })
-    City::Map.from(read(TILES), read(SIGNS), read(READINGS))
+    read_map
   end
 
   def unread_signs(map)
@@ -182,7 +182,7 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
   def name_something
     return unless @mayor && now - @named_at > NAME_EVERY
 
-    map = City::Map.from(read(TILES), read(SIGNS), read(READINGS))
+    map = read_map
     kind, site = City.naming_sites(map, City.blocked(map, avoid)).first
     return unless site
 
@@ -307,6 +307,10 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
   end
 
   def read(name) = JSON.parse(doc.read_map(name) || "{}")
+
+  # The map as the rules see it: the tiles, the signs, the readings, and the
+  # land under them.
+  def read_map = City::Map.from(read(TILES), read(SIGNS), read(READINGS), seed: read(META)["seed"])
 
   # Presence in the shape the page gives every visitor, plus the status and
   # a mark that says which one is the planner.

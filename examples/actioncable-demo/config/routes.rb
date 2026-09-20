@@ -25,6 +25,9 @@ Rails.application.routes.draw do
   # documents#city_planner under Puma.
   post "docs/:id/city/planner", to: AgentInvite.new(CityPlanner, action: :city_planner, suffix: ":city"),
                                 as: :document_city_planner
+  # The townsfolk (CityLife) are invited the same way.
+  post "docs/:id/city/life", to: AgentInvite.new(CityLife, action: :city_life, suffix: ":city"),
+                             as: :document_city_life
   get "docs/:id/content", to: "documents#content", as: :document_content
   get "docs/:id/audit", to: "documents#audit", as: :document_audit
   # DEMO/TEST ONLY — never mount in production. One anonymous POST can wipe a
