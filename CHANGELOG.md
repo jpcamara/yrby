@@ -24,6 +24,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   document and pending edits. A failed fetch or a second rejection blocks the
   session as before. Nothing renews on a timer.
 
+- `YProtocolSession` and `ReliableSync` name their transport hooks as
+  commands: `resume()`, `pause()`, and `acknowledge(id)` replace `onConnect()`,
+  `onDisconnect()`, and `ack()`/`onAck()`; `ReliableSync#retransmit()` replaces
+  `onTick()`. Only `onStatusChange` keeps the `on` prefix, and it is the only
+  one that registers a listener. `ReliableSync#pending` is read-only.
+- A grant refresh request times out after 15 seconds and blocks the session
+  instead of leaving it offline indefinitely. A consumer that throws while
+  resubscribing with a renewed grant blocks the session rather than surfacing
+  as an unhandled rejection.
+- A status listener that throws is reported through `onError` and does not
+  stop other listeners or the cable callback that fired it.
+
 ### Fixed
 
 - ActionCable providers ignore callbacks from superseded subscriptions, so a

@@ -25,6 +25,9 @@ export type DocumentSessionState = "open" | "blocked" | "closed";
 // "spent" once it was used, back to "idle" when the transport comes up again,
 // so a renewed grant that is rejected in turn blocks instead of looping.
 type Renewal = "idle" | "fetching" | "spent";
+// A refresh request that never answers would leave the session offline with
+// its editors attached and no way forward. After this long it blocks instead.
+const REFRESH_TIMEOUT_MS = 15_000;
 const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
 
 /** The sessions of one consumer. Emits "change" with the session in `detail`. */
@@ -180,7 +183,12 @@ export class DocumentSession {
     }
     this.#renewal = "spent";
     if (this.#phase !== "open") return; // blocked or discarded during the fetch
-    this.provider.renew({ grant });
+    try {
+      this.provider.renew({ grant });
+    } catch (error) {
+      this.#block(error); // the consumer refused to create the subscription
+      return;
+    }
     this.store.changed(this);
   }
   #block(error: unknown): void {
@@ -213,7 +221,11 @@ export class DocumentSession {
 
 /** Ask the application for a new grant. Resolves to the grant or throws. */
 async function fetchGrant(url: string): Promise<string> {
-  const response = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
+  });
   if (!response.ok) throw new Error(`grant refresh failed: ${response.status}`);
   const body: unknown = await response.json();
   const grant = (body as { grant?: unknown } | null)?.grant;

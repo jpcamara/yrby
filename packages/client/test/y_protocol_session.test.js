@@ -42,7 +42,7 @@ test("requires a doc and a send function", () => {
 
 test("onConnect emits a SyncStep1 handshake frame", () => {
   const { eng, sent } = engine();
-  eng.onConnect();
+  eng.resume();
   assert.equal(sent.length, 1);
   assert.equal(frameType(sent[0].frame), MSG.Sync, "handshake is a Sync message");
   assert.equal(sent[0].id, undefined, "handshake carries no reliable id");
@@ -50,7 +50,7 @@ test("onConnect emits a SyncStep1 handshake frame", () => {
 
 test("a local edit is framed as a Sync update and tagged with a reliable id", () => {
   const { doc, eng, sent } = engine();
-  eng.onConnect();
+  eng.resume();
   const before = sent.length;
   doc.getText("t").insert(0, "hi");
   const frame = sent.at(-1);
@@ -62,10 +62,10 @@ test("a local edit is framed as a Sync update and tagged with a reliable id", ()
 
 test("an ack drains the pending queue", () => {
   const { doc, eng, sent } = engine();
-  eng.onConnect();
+  eng.resume();
   doc.getText("t").insert(0, "hi");
   const { id } = sent.at(-1);
-  eng.ack(id);
+  eng.acknowledge(id);
   assert.equal(eng.hasPending, false);
 });
 
@@ -83,7 +83,7 @@ test("applyRemoteUpdate seeds the doc without re-sending it as a local edit", ()
 
   // On connect, only the SyncStep1 handshake goes out, never a reliable
   // { update, id } frame echoing the bootstrap state back to the server.
-  eng.onConnect();
+  eng.resume();
   assert.equal(sent.length, 1, "only the handshake was sent");
   assert.equal(frameType(sent[0].frame), MSG.Sync, "and it's the SyncStep1 handshake");
   assert.equal(sent[0].id, undefined, "the handshake carries no reliable id");
@@ -112,7 +112,7 @@ test("synced flips true after a SyncStep2 arrives", () => {
   peer.getText("t").insert(0, "x");
   // SyncStep1 -> reply is our step2; feeding the peer a step1 makes IT produce a
   // step2 for us. Simulate the server's SyncStep2 by replying to our step1.
-  eng.onConnect(); // sends our SyncStep1 (ignored here)
+  eng.resume(); // sends our SyncStep1 (ignored here)
   const serverReplyToOurStep1 = eng.receive(syncStep1Frame(peer)); // step1 in, step2 out is to peer
   // The server's SyncStep2 *to us*: build it from the peer answering our step vector.
   const e = encoding.createEncoder();
@@ -133,7 +133,7 @@ test("two engines converge end-to-end through a relay", () => {
     ...noTimers,
     send: (frame, id) => {
       const reply = b.receive(frame);
-      if (id !== undefined) a.ack(id);
+      if (id !== undefined) a.acknowledge(id);
       if (reply) a.receive(reply);
     },
   });
@@ -141,13 +141,13 @@ test("two engines converge end-to-end through a relay", () => {
     ...noTimers,
     send: (frame, id) => {
       const reply = a.receive(frame);
-      if (id !== undefined) b.ack(id);
+      if (id !== undefined) b.acknowledge(id);
       if (reply) b.receive(reply);
     },
   });
 
-  a.onConnect();
-  b.onConnect();
+  a.resume();
+  b.resume();
   docA.getText("t").insert(0, "from A ");
   docB.getText("t").insert(0, "from B ");
 
@@ -167,7 +167,7 @@ test("presence frames as Awareness, doc updates as Sync (the first byte identifi
     ...noTimers,
     send: (frame) => types.push(frameType(frame)),
   });
-  eng.onConnect();
+  eng.resume();
   doc.getText("t").insert(0, "hi"); // document update
   awA.setLocalStateField("user", "alice"); // presence
 
