@@ -111,7 +111,7 @@ says. Every person's cursor is their awareness, drawn as an arrow with a
 name, on every page.
 
 **Invite 8 Ruby guests** starts `GuestParty`: eight `Guest` peers, one per
-persona (Snack Goblin, Networker, Introvert, Rubyist, Night Owl, Cat Person,
+persona (Snack Goblin, Networker, Introvert, Rubyist, Night Owl, Pixel Nerd,
 Coffee Snob, Lurker), each a `Y::ActionCable::Client` on the same document
 over the websocket the browsers use. A guest's presence is a cursor with a
 red diamond, its name, and its trait. The two roles:
