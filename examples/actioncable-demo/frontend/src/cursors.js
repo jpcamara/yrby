@@ -127,7 +127,9 @@ stage.addEventListener("pointerleave", () => awareness.setLocalStateField("curso
 // Where a guest stands. At a sign: one of the slots on the card's perimeter,
 // outside its bounds, so no chip covers the card or another guest at it.
 // Slots are top, left, bottom, right, then the same four one step further
-// out, with each chip in the card's own column or row. A card's slots are
+// out, then two more steps above and below, with each chip in the card's
+// own column or row; a card near an edge seats its crowd in a stack on the
+// side that has room. A card's slots are
 // a map that persists: a guest arriving takes the lowest free slot, a
 // guest leaving frees its own, and nobody else moves. The map resets when
 // the card's crowd is empty or the card is gone. At the wall: the guest's
@@ -151,6 +153,10 @@ function slots(x, y) {
     { x: x - g, y: y + h / 2 - 10 - step, o: "l" },
     { x: x + 10, y: y + below + step, o: "r" },
     { x: x + w + g, y: y + h / 2 - 10 - step, o: "r" },
+    { x: x + 10, y: y - 30 - 2 * step, o: "ur" },
+    { x: x + 10, y: y + below + 2 * step, o: "r" },
+    { x: x + 10, y: y - 30 - 3 * step, o: "ur" },
+    { x: x + 10, y: y + below + 3 * step, o: "r" },
   ]
 }
 const seats = new Map() // sign id -> Map(guest name -> slot index)
@@ -248,9 +254,10 @@ function notice(s, chipEl) {
 // leave the board or land on a chip or a card it goes directly below its
 // chip instead, and may step down twice the same way; after that it may
 // sit beside its chip, to the right, then the left. If nothing is free it
-// drops its probability and tries once more; then it takes the first spot
-// that covers no chip or card, or else the spot beside its chip. From then
-// on it rides with its chip. Positions are in board units.
+// drops its probability and tries once more; if still nothing is free it
+// takes the first spot that covers no chip or card, and failing even that
+// it shows no label: the chip's arrival shows the move. From then on it
+// rides with its chip. Positions are in board units.
 const LABEL_GAP = 3
 const labels = new Map() // guest name -> { el, dx, dy, until }
 const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
@@ -279,7 +286,8 @@ function placeLabel(name, text, chip, flip, blocks, now) {
     spots = spotsFor(el, chip, flip, blocks)
     spot = spots.find((r) => !placed.some((p) => overlaps(r, p)))
   }
-  if (!spot) { const w = el.offsetWidth, h = el.offsetHeight; spot = spots[0] || { left: chip.right + LABEL_GAP, top: chip.top, right: chip.right + LABEL_GAP + w, bottom: chip.top + h } }
+  if (!spot) spot = spots[0]
+  if (!spot) { el.remove(); labels.delete(name); return }
   Object.assign(entry, { dx: spot.left - chip.left, dy: spot.top - chip.top, rect: spot, until: now + SAY_FOR })
 }
 function rideLabels(now) {
@@ -361,7 +369,8 @@ function frame(now) {
       pendingLabels.delete(s.user.name)
       const text = String(signs.get(s.at)?.get("text") ?? "(gone)").toUpperCase()
       placeLabel(s.user.name, `→ ${text.length > 20 ? `${text.slice(0, 19)}…` : text} · ${p.toFixed(2)}`, chip, flip, [...chips, ...cards], now)
-      labels.get(s.user.name).chip = chip
+      const placed = labels.get(s.user.name)
+      if (placed) placed.chip = chip
     }
   }
   rideLabels(now)
