@@ -447,7 +447,7 @@ provider.onStatusChange(renderParty)
 // re-fire on reconnects, so a cleared board stays cleared). Fixed ids, so
 // two first opens seed the same three signs rather than six.
 provider.whenSynced.then(() => {
-  if (signs.size === 0) ydoc.transact(() => { addSign(220, 120, "FREE PIZZA", "s1"); addSign(600, 100, "QUIET ROOM", "s2"); addSign(380, 340, "KARAOKE", "s3") })
+  if (signs.size === 0) ydoc.transact(() => { addSign(800, 70, "FREE PIZZA", "s1"); addSign(0, 130, "QUIET ROOM", "s2"); addSign(400, 70, "KARAOKE", "s3") })
   renderParty()
 })
 renderSigns(); renderParty()
