@@ -103,43 +103,70 @@ bundle exec ruby -Itest test/sudoku_test.rb
 bundle exec ruby -Itest test/sudoku_peer_test.rb
 ```
 
-### The city planner
+### The city
 
-`/docs/demo/city` is a town everyone builds: four `Y.Map`s keyed by cell
-hold the tiles, the signs' text, who wrote each tile, and the cells the
-planner has claimed. A Ruby process, `CityPlanner`, joins as a peer over the
-same websocket client and builds what the rules in `City` say is missing:
-roads to houses, bridges over water, a shop for a district of ten houses, a
-park for a crowded block, and what a sign asks for (`PARK`, `SHOP`, `ROAD`,
-`BRIDGE`, `NO BUILD`, `CLEAR`). It claims cells in the document before it
-builds on them, lays one tile per tick with the tile and its author in one
-update, and stops when someone writes near its claims. "Invite the planner"
-starts it the way the checker's invite does, and it runs on its own too:
+`/docs/demo/city` is a town everyone builds, on a 96 by 96 grid with a bay
+along the east edge and hills, both drawn from one seed the first page to
+sync writes into a `meta` map. Six `Y.Map`s keyed by cell hold the tiles,
+the signs' text, who wrote each tile, the cells the planner has claimed,
+what the mayor read each sign as, and that seed. A building wider than a
+cell is one key at its top-left cell, `victorian_teal@2x2`, and covers the
+rest; erasing any covered cell takes the whole building out. The page
+autotiles roads, water, paths, plazas, and fences from their neighbours,
+shades the hills in bands with terrace ledges, and draws the town into an
+offscreen canvas that a camera pans and zooms over (drag, pinch, scroll, a
+minimap, "follow the planner", "jump to me").
+
+A Ruby process, `CityPlanner`, joins as a peer over the same websocket
+client and builds what the rules in `City` say is missing: roads to
+houses, bridges over water, cable car track up a steep step, a shop for a
+district of ten houses, a park for a crowded block, and what a sign asks
+for (`PARK`, `SHOP`, `ROAD`, `BRIDGE`, `NO BUILD`, `CLEAR`). It claims cells
+in the document before it builds on them, lays one tile per tick with the
+tile and its author in one update, and stops when someone writes near its
+claims. "Invite the planner" starts it the way the checker's invite does,
+and it runs on its own too:
 
 ```bash
 CABLE_URL=ws://127.0.0.1:3000/cable bin/city-planner demo   # then open /docs/demo/city
+CABLE_URL=ws://127.0.0.1:3000/cable bin/city-life demo      # and the townsfolk
 ```
+
+A second peer, `CityLife`, is the life of the town, and it lives in its
+awareness state alone: a dozen or two pedestrians who route over the roads
+(and stop at the shops and the parks, and stroll the grass before there are
+roads), a few cars, a cable car once there is track, gulls and boats over
+the bay, which chimneys are smoking, and the time of day, twice a second.
+The page eases everyone between ticks, draws their speech bubbles, tints
+the town through the day with pools of light at the lamps, and never
+writes a footstep into the document. Your own character walks with the
+arrow keys or a tap, hops on space or a double tap, says something from
+the box, and waves at a neighbour who stands beside it for two seconds.
 
 With a model key set (the review agent's: `FIREWORKS_API_KEY`,
 `OPENROUTER_API_KEY`, or `ANTHROPIC_API_KEY`) there is a mayor too,
 `CityMayor`: a sign the rules do not understand is read into one of the
 instructions they do, and the reading goes into the document beside the sign
-(`readings`); streets and neighbourhoods get name signs as the town grows.
-Without a key there is no mayor and nothing else changes.
+(`readings`); streets and neighbourhoods get name signs as the town grows,
+and the page draws a name along the road it stands by. Without a key there
+is no mayor and nothing else changes.
 
 "Go offline" drops the page's subscription and nothing else: edits keep
-landing in the local doc and the provider's outbox, and they replay on
-"Reconnect", where the handshake also brings in what everyone else did. The
-timelapse panel replays the update log the store already keeps. The tile
+landing in the local doc and the provider's outbox, with a badge counting
+them, and they replay on "Reconnect", where the handshake also brings in
+what everyone else did; the tiles that came from the other side flash. The
+timelapse panel replays the update log the store already keeps. The sound
+toggle (off by default) adds four small synthesised sounds. The sprite
 sheet is built by `frontend/tiles/make_tiles.mjs` from Kenney's CC0 Tiny
-Town plus a few tiles drawn there (see `frontend/tiles/SOURCES.md`).
+Town plus what is drawn there (see `frontend/tiles/SOURCES.md`).
 
-The rules and the planner have tests that boot a cable of their own, and
-the page has a two-browser check:
+The rules, the planner, and the townsfolk have tests that boot a cable of
+their own, and the page has a two-browser check:
 
 ```bash
 bundle exec ruby -Itest test/city_test.rb
 bundle exec ruby -Itest test/city_planner_test.rb
+bundle exec ruby -Itest test/city_life_test.rb
 PORT=9600 node frontend/city_e2e.mjs   # against a server on 9600 with STORE_KIND=file
 ```
 

@@ -2,7 +2,7 @@
 
 class DocumentsController < ApplicationController
   # The audit control endpoint is a test hook (POST without a form token).
-  skip_forgery_protection only: %i[audit_control agent markdown_agent sudoku_checker city_planner]
+  skip_forgery_protection only: %i[audit_control agent markdown_agent sudoku_checker city_planner city_life]
 
   # Start a Ruby agent that joins the document as a live collaborator (see
   # ReviewAgent). It runs in a background thread over the same DocumentChannel
@@ -19,6 +19,9 @@ class DocumentsController < ApplicationController
 
   # The city planner joins the same way (see CityPlanner).
   def city_planner = start_agent(CityPlanner, "#{params[:id]}:city", url: AgentInvite.cable_url(request))
+
+  # The townsfolk too (see CityLife).
+  def city_life = start_agent(CityLife, "#{params[:id]}:city", url: AgentInvite.cable_url(request))
 
   # One agent per document: a second invite while the first is still there
   # is answered with 409 and nothing starts.
@@ -98,8 +101,9 @@ class DocumentsController < ApplicationController
     SudokuPuzzle.ensure("#{@document_id}:sudoku")
   end
 
-  # Four Y.Maps keyed by cell: the tiles, the signs, who wrote each tile,
-  # and what the planner means to build next (see City and CityPlanner).
+  # Y.Maps keyed by cell: the tiles, the signs, who wrote each tile, what
+  # the planner means to build next, and what the mayor read a sign as,
+  # plus one for the terrain's seed (see City, CityPlanner, and CityLife).
   def city = (@document_id = params[:id])
 
   # Server-side read of the authoritative document: the raw CRDT state,

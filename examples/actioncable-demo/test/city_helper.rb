@@ -5,11 +5,13 @@
 #
 #   bundle exec ruby -Itest test/city_test.rb
 #   bundle exec ruby -Itest test/city_planner_test.rb
+#   bundle exec ruby -Itest test/city_life_test.rb
 require "minitest/autorun"
 require "y"
 require_relative "../app/lib/city"
 require_relative "../app/lib/city_mayor"
 require_relative "../app/lib/city_planner"
+require_relative "../app/lib/city_life"
 
 module CityFixture
   # A road across the middle, two houses on it, one off it.
