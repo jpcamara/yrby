@@ -492,3 +492,83 @@ test("bfcache: a non-persisted pageshow (normal load) does not resurrect stale p
   assert.equal(p.awareness.getLocalState(), null, "no restore on a normal load");
 });
 
+
+test("whenSynced never settles when the provider is destroyed before the first sync", async (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "ws5" });
+  let settled = false;
+  void p.whenSynced.then(() => { settled = true; });
+  p.connect();
+  c.deliverConnected();
+  p.destroy();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  assert.equal(settled, false, "destroyed before SyncStep2: the promise must stay pending, not resolve or reject");
+});
+
+test("status listeners hear one event per change, including a pending flip with the same status", (t) => {
+  const c = fakeConsumer();
+  const doc = new Y.Doc();
+  const p = makeProvider(t, doc, c, { id: "ev1" });
+  const seen = [];
+  p.onStatusChange((event) => seen.push(`${event.status}:${event.pending}`));
+  p.connect();
+  c.deliverConnected();
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+  assert.deepEqual(seen, ["connecting:false", "connected:false", "synced:false"]);
+  doc.getText("t").insert(0, "a"); // queue becomes non-empty: same status, pending flips
+  doc.getText("t").insert(1, "b"); // still pending: no second event
+  assert.deepEqual(seen.slice(3), ["synced:true"]);
+  const id = c.calls.send.filter((m) => m.id !== undefined).at(-1).id;
+  c.deliverReceived({ ack: id });
+  assert.deepEqual(seen.slice(4), ["synced:false"], "the ack that empties the queue is announced once");
+  assert.equal(p.status, "synced");
+});
+
+test("renew after destroy is a no-op that leaves the channel params untouched", (t) => {
+  const c = fakeConsumer();
+  const params = { id: "rn1", grant: "old" };
+  const p = makeProvider(t, new Y.Doc(), c, params);
+  p.connect();
+  p.destroy();
+  p.renew({ grant: "new" });
+  assert.equal(params.grant, "old");
+  assert.equal(p.status, "disconnected");
+});
+
+test("renew keeps the queue and awareness and replays pending edits on the new subscription", (t) => {
+  const c = fakeConsumer({ withWhisper: true });
+  const doc = new Y.Doc();
+  const p = makeProvider(t, doc, c, { id: "rn2", grant: "old" });
+  p.connect();
+  c.deliverConnected();
+  c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+  p.awareness.setLocalStateField("user", "dana");
+  const awareness = p.awareness;
+  doc.getText("t").insert(0, "queued");
+  const sentBefore = c.calls.send.filter((m) => m.id !== undefined).length;
+  c.deliverDisconnected();
+  p.renew({ grant: "new" });
+  assert.equal(p.awareness, awareness, "same awareness instance");
+  assert.equal(p.hasPending, true, "queue survives the resubscribe");
+  assert.equal(p.channelParams.grant, "new");
+  c.deliverConnected(); // the replacement subscription comes up
+  const replayed = c.calls.send.filter((m) => m.id !== undefined).length;
+  assert.ok(replayed > sentBefore, "the unacked tail was replayed on the new subscription");
+});
+
+test("disconnect() removes both page lifecycle handlers", (t) => {
+  const listeners = new Map();
+  globalThis.window = {
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    removeEventListener: (name, fn) => { if (listeners.get(name) === fn) listeners.delete(name); },
+  };
+  t.after(() => { delete globalThis.window; });
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "pg1" });
+  p.connect();
+  assert.ok(listeners.has("pagehide") && listeners.has("pageshow"));
+  p.disconnect();
+  assert.equal(listeners.size, 0, "no page handlers left behind");
+  p.connect();
+  assert.ok(listeners.has("pagehide") && listeners.has("pageshow"), "reconnect installs them again");
+});
