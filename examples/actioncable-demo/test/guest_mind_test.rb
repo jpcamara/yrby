@@ -78,6 +78,25 @@ class GuestMindTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- as
     assert_equal(%w[s1 s2 s3], request[:body].dig("state", "signs").map { |s| s["id"] })
   end
 
+  def test_the_briefing_is_what_the_guest_knows_in_the_state_and_the_instructions
+    @mind.call(persona: PERSONA, signs: SIGNS, current: nil, briefing: "The quiet room has soft chairs.")
+
+    assert_equal "The quiet room has soft chairs.", request[:body].dig("state", "what_you_know")
+    assert_includes question["instructions"], "what_you_know describes places a sign may name."
+    refute_includes @log.string, "soft chairs"
+  end
+
+  def test_an_empty_briefing_adds_nothing
+    @mind.call(persona: PERSONA, signs: SIGNS, current: nil, briefing: "  ")
+
+    refute request[:body]["state"].key?("what_you_know")
+    refute_includes question["instructions"], "what_you_know"
+    Wire.requests.clear
+    @mind.call(persona: PERSONA, signs: SIGNS, current: nil)
+
+    refute request[:body]["state"].key?("what_you_know")
+  end
+
   def test_at_the_wall_when_nowhere_yet_or_the_sign_is_gone
     @mind.call(persona: PERSONA, signs: SIGNS, current: nil)
 

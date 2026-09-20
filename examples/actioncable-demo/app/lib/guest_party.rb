@@ -30,6 +30,11 @@ class GuestParty
                        personality: "stays out of everything unless something is genuinely irresistible")
   ].freeze
 
+  # What every guest knows about the places a sign may name: plain facts,
+  # the same for all eight, sent with every question as what_you_know.
+  BRIEFING = "SF Ruby Conf: Nov 10-12 at SFJAZZ in San Francisco, three days of Ruby and Rails talks, " \
+             "keynote by Garry Tan, hosted by Evil Martians, hallway track"
+
   RUNNING = {} # rubocop:disable Style/MutableConstant -- the parties running in this process, by room
   RUNNING_LOCK = Mutex.new
 
@@ -62,7 +67,7 @@ class GuestParty
     mind = @mind || GuestMind.new(logger: @logger).tap(&:warm) # one mind, stateless between calls
     @guests = PERSONAS.map do |persona|
       Guest.new(@document_id, persona, url: @url, peer: @peers&.call(persona), mind: mind, logger: @logger,
-                                       **@options)
+                                       briefing: BRIEFING, **@options)
     end
     host
     true
