@@ -15,13 +15,15 @@ const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia"
 const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8", "#e879f9", "#f472b6"]
 // The guests' slots around a sign, in the order the party seats them.
 const RING = ["Snack Goblin", "Networker", "Introvert", "Rubyist", "Night Owl", "Cat Person", "Coffee Snob", "Lurker"]
-const GLIDE = 0.16      // seconds; the time constant of a cursor's glide, ~0.6 s to settle
-const SAY_FOR = 3000    // ms a decision stays on a guest's chip
+const GLIDE = 0.2       // seconds; the time constant of a cursor's glide, ~0.8 s to settle
+const SAY_FOR = 3500    // ms a decision stays on a guest's chip
+const CHIP_H = 40       // a guest chip: name and trait
 const ROUND_GAP = 1500  // ms of quiet that ends a round of decisions
 const pick = (a) => a[Math.floor(Math.random() * a.length)]
 const $ = (id) => document.getElementById(id)
 const params = new URLSearchParams(location.search)
 const user = { name: (params.get("as") || "").trim().slice(0, 24) || pick(NAMES), color: pick(COLORS) }
+if (params.get("stage") === "1") document.body.classList.add("stage") // a recording: the board fills the window
 
 const board = $("board"), stage = $("stage"), layer = $("cursors")
 const statusEl = $("status"), hudEl = $("hud"), inviteEl = $("invite"), homeEl = $("home"), inviteStatus = $("invite-status")
@@ -34,14 +36,22 @@ const provider = new ActionCableProvider(ydoc, createConsumer(), "DocumentChanne
 const awareness = provider.awareness
 awareness.setLocalStateField("user", user)
 
-// The board is 1000x560 in document coordinates and scales down to fit.
-// Pointer math uses the stage's rendered size, so it holds under any zoom.
+// The board is 1000x560 in document coordinates and scales down to fit; on
+// a stage it scales up to fill what is left of the window. Pointer math
+// uses the stage's rendered size, so it holds under any zoom.
 function fit() {
-  const scale = Math.min(1, board.clientWidth / W)
+  const byWidth = (board.parentElement.clientWidth - 2) / W
+  let scale = Math.min(1, byWidth)
+  if (document.body.classList.contains("stage")) {
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    scale = Math.min(byWidth, (window.innerHeight / zoom - board.offsetTop - 10) / H)
+    board.style.width = `${Math.floor(W * scale)}px`
+  }
   stage.style.transform = `scale(${scale})`
   board.style.height = `${Math.round(H * scale)}px`
 }
-new ResizeObserver(fit).observe(board)
+new ResizeObserver(fit).observe(board.parentElement)
+window.addEventListener("resize", fit)
 fit()
 const shown = () => stage.getBoundingClientRect().width / W // viewport px per board unit
 const toBoard = (e) => { const r = stage.getBoundingClientRect(), k = r.width / W; return [(e.clientX - r.left) / k, (e.clientY - r.top) / k] }
@@ -112,18 +122,58 @@ stage.addEventListener("pointermove", (e) => {
 })
 stage.addEventListener("pointerleave", () => awareness.setLocalStateField("cursor", null))
 
-// Where a guest stands: a slot around the sign it is at, or its home spot.
-const slot = (name) => { const i = RING.indexOf(name); return i >= 0 ? i : [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 8, 0) }
-function targetFor(state) {
-  const m = state.at ? signs.get(state.at) : null
-  if (!m) return state.home ? [state.home[0], state.home[1]] : [W / 2, H / 2]
-  const a = -Math.PI / 2 + (slot(state.user?.name || "") * Math.PI) / 4
-  return [m.get("x") + SIGN_W / 2 + (SIGN_W / 2 + 30) * Math.cos(a), m.get("y") + SIGN_H / 2 + (SIGN_H / 2 + 28) * Math.sin(a)]
+// Where a guest stands. At a sign: one of the slots on the card's perimeter,
+// outside its bounds, so no chip covers the card or another guest at it.
+// Slots go to the guests at that sign in the party's order: top, left,
+// bottom, right, then the same again one step further out. Chips stay in
+// the card's own column (top and bottom slots) or row (left and right), so
+// a neighboring card's crowd has its own room. A slot whose chip would
+// leave the board comes last. The cursor's tip sits on the perimeter; the
+// chip sits beside it, away from the card. At the wall: the guest's home
+// spot, chip toward the board.
+const CHIP_W = 176
+const order = (name) => { const i = RING.indexOf(name); return i >= 0 ? i : 8 + [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 8, 0) }
+function chipRect({ x, y, o }) {
+  const left = o.endsWith("l") ? x - 14 - CHIP_W : x + 14
+  const top = o.startsWith("u") ? y - 4 - CHIP_H : y + 20
+  return { left, top, right: left + CHIP_W, bottom: top + CHIP_H }
 }
-const flips = (name) => Math.cos(-Math.PI / 2 + (slot(name) * Math.PI) / 4) < -0.3
+const onBoard = (r) => r.left >= -12 && r.right <= W + 12 && r.top >= -12 && r.bottom <= H + 12
+function slots(x, y) {
+  const w = SIGN_W, h = SIGN_H, g = 6, step = CHIP_H + 4, below = h + g + 24 // room for the label under the card
+  const ring = [
+    { x: x + 10, y: y - 30, o: "ur" },            // top: chip above, over the card's top
+    { x: x - g, y: y + h / 2 - 10, o: "l" },      // left: chip to the left
+    { x: x + 10, y: y + below, o: "r" },          // bottom: chip below, under the card
+    { x: x + w + g, y: y + h / 2 - 10, o: "r" },  // right: chip to the right
+  ]
+  const outer = [
+    { x: x + 10, y: y - 30 - step, o: "ur" },
+    { x: x - g, y: y + h / 2 - 10 - step, o: "l" },
+    { x: x + 10, y: y + below + step, o: "r" },
+    { x: x + w + g, y: y + h / 2 - 10 - step, o: "r" },
+  ]
+  const all = [...ring, ...outer]
+  return [...all.filter((p) => onBoard(chipRect(p))), ...all.filter((p) => !onBoard(chipRect(p)))]
+}
+// Which guests stand at which sign, in slot order.
+function crowds(states) {
+  const at = new Map()
+  for (const s of states) if (s?.guest && s.at && signs.has(s.at)) (at.get(s.at) || at.set(s.at, []).get(s.at)).push(s.user.name)
+  for (const names of at.values()) names.sort((a, b) => order(a) - order(b))
+  return at
+}
+function placeFor(state, at) {
+  const m = state.at ? signs.get(state.at) : null
+  if (!m) { const [hx, hy] = state.home || [W / 2, H / 2]; return { x: hx, y: hy, o: hx > W / 2 ? "l" : "r" } }
+  const names = at.get(state.at) || []
+  const i = Math.max(0, names.indexOf(state.user.name))
+  const all = slots(m.get("x"), m.get("y"))
+  return all[Math.min(i, all.length - 1)]
+}
 
 const ARROW = '<svg class="arrow" width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 20 L7 15.5 L10.5 23.5 L14 22 L10.5 14 L17.5 14 Z" fill="var(--c)" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>'
-const cursors = new Map() // awareness clientID -> { el, pos, name }
+const cursors = new Map() // awareness clientID -> { el, pos }
 const guestSeen = new Map() // guest name -> { at, seenAt } of the decision last shown
 const rounds = { n: 0, lastActivity: 0, ms: [], known: new Map() } // known: guest name -> decision.at last counted
 
@@ -132,9 +182,9 @@ function cursorEl(id, s) {
   if (c) return c
   const el = document.createElement("div")
   el.className = s.guest ? "cursor guest" : "cursor human"
-  el.innerHTML = `${ARROW}<div class="chip"><span class="name"></span>${s.guest ? '<span class="trait"></span>' : ""}</div>${s.guest ? '<div class="say" hidden></div>' : ""}`
+  el.innerHTML = `${ARROW}<div class="tag">${s.guest ? '<div class="say" hidden></div>' : ""}<div class="chip"><span class="name"></span>${s.guest ? '<span class="trait"></span>' : ""}</div></div>`
   layer.appendChild(el)
-  c = { el, pos: s.guest ? targetFor({ ...s, at: null }) : null, name: s.user?.name }
+  c = { el, pos: s.guest ? [s.home?.[0] ?? W / 2, s.home?.[1] ?? H / 2] : null }
   cursors.set(id, c)
   return c
 }
@@ -147,8 +197,25 @@ function sayFor(s, now) {
   const seen = guestSeen.get(s.user.name)
   if (!seen || seen.at !== d.at) guestSeen.set(s.user.name, { at: d.at, seenAt: now })
   if (now - guestSeen.get(s.user.name).seenAt > SAY_FOR) return null
-  const where = d.sign === "stay" ? "stays" : `→ ${String(signs.get(d.sign)?.get("text") ?? "(gone)").toUpperCase().slice(0, 26)}`
+  const text = String(signs.get(d.sign)?.get("text") ?? "(gone)").toUpperCase()
+  const where = d.sign === "stay" ? "stays" : `→ ${text.length > 18 ? `${text.slice(0, 17)}…` : text}`
   return `${where} · ${Number(d.p).toFixed(2)} · ${Math.round(d.ms)}ms`
+}
+
+// Labels stay above their own chip; one that would cover another is
+// pushed up a label height at a time.
+function spreadLabels() {
+  const shown = [...layer.querySelectorAll(".say:not([hidden])")]
+  const taken = []
+  for (const el of shown.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)) {
+    el.style.transform = ""
+    const r = el.getBoundingClientRect()
+    let lift = 0
+    const hits = () => taken.some((t) => r.left < t.right && r.right > t.left && r.top - lift < t.bottom && r.bottom - lift > t.top)
+    while (hits() && lift < 6 * r.height) lift += r.height + 3
+    if (lift) el.style.transform = `translateY(${-lift}px)`
+    taken.push({ left: r.left, right: r.right, top: r.top - lift, bottom: r.bottom - lift })
+  }
 }
 
 // Rounds: decisions that land close together are one round. The HUD shows
@@ -171,7 +238,9 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now
   const k = 1 - Math.exp(-dt / GLIDE)
   const states = [...awareness.getStates().entries()]
+  const at = crowds(states.map(([, s]) => s))
   const live = new Set()
+  let labels = false
   for (const [id, s] of states) {
     if (!s?.user) continue
     if (!s.guest && !s.cursor) continue
@@ -179,15 +248,16 @@ function frame(now) {
     const c = cursorEl(id, s)
     let x, y
     if (s.guest) {
-      const [tx, ty] = targetFor(s)
-      c.pos[0] += (tx - c.pos[0]) * k; c.pos[1] += (ty - c.pos[1]) * k
-      if (Math.abs(tx - c.pos[0]) < 0.2 && Math.abs(ty - c.pos[1]) < 0.2) { c.pos[0] = tx; c.pos[1] = ty }
+      const place = placeFor(s, at)
+      c.pos[0] += (place.x - c.pos[0]) * k; c.pos[1] += (place.y - c.pos[1]) * k
+      if (Math.abs(place.x - c.pos[0]) < 0.2 && Math.abs(place.y - c.pos[1]) < 0.2) { c.pos[0] = place.x; c.pos[1] = place.y }
       ;[x, y] = c.pos
-      c.el.classList.toggle("flip", !!s.at && flips(s.user.name))
+      c.el.classList.toggle("flip", place.o.endsWith("l"))
+      c.el.classList.toggle("up", place.o.startsWith("u"))
       c.el.querySelector(".trait").textContent = s.trait || ""
       const say = sayFor(s, now), sayEl = c.el.querySelector(".say")
       sayEl.hidden = say == null
-      if (say != null) sayEl.textContent = say
+      if (say != null) { sayEl.textContent = say; labels = true }
     } else {
       x = s.cursor.x; y = s.cursor.y
     }
@@ -196,6 +266,7 @@ function frame(now) {
     c.el.style.transform = `translate(${x}px, ${y}px)`
   }
   for (const [id, c] of cursors) if (!live.has(id)) { c.el.remove(); cursors.delete(id) }
+  if (labels) spreadLabels()
   noteRound(states.map(([, s]) => s), now)
   requestAnimationFrame(frame)
 }
@@ -255,7 +326,7 @@ homeEl.addEventListener("click", () => {
 window.__yrb = {
   provider, ydoc, signs, party, user, addSign, scale: shown,
   guests: () => guestStates().map((s) => ({ name: s.user.name, trait: s.trait, at: s.at, status: s.status, decision: s.decision })),
-  guestTarget: (name) => { const s = guestStates().find((g) => g.user.name === name); return s ? targetFor(s).map(Math.round) : null },
+  guestTarget: (name) => { const s = guestStates().find((g) => g.user.name === name); if (!s) return null; const p = placeFor(s, crowds(guestStates())); return [Math.round(p.x), Math.round(p.y)] },
 }
 
 awareness.on("update", renderParty)
