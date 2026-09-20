@@ -9,9 +9,8 @@ require_relative "guest"
 #   GuestParty.new("demo:cursors", url: "ws://127.0.0.1:3000/cable").run
 class GuestParty
   # Homes are spots along the board's edges, a chip's height clear of the
-  # edge, clear of the seeded signs and of the slots around them, and out
-  # of the open quadrant a crowd needs, so guests at the wall stand apart
-  # and leave the floor free.
+  # edge, clear of the seeded signs and of the slots around them, so guests
+  # at the wall stand apart.
   PERSONAS = [
     Guest::Persona.new(name: "Snack Goblin", trait: "lives for free food", color: "#d97706", home: [24, 96],
                        personality: "lives for free food and will cross any room for a snack"),
@@ -37,12 +36,20 @@ class GuestParty
   # facts, the same for all eight. A sign that is a place's name (trimmed,
   # any case) is offered with the facts; the briefing also goes with every
   # question as what_you_know. Nothing is written on the sign.
+  # AGENT_GUEST_BRIEFING_FILE names a JSON file of the same shape to use
+  # instead, for trying other facts without changing this.
   BRIEFING = {
     "SF Ruby Conf" => "Nov 10-12 at SFJAZZ in San Francisco, three days of Ruby and Rails talks, " \
-                      "keynote by Garry Tan, hosted by Evil Martians, hallway track, espresso bar, " \
-                      "snacks between talks, evening party with music, a quiet lounge, " \
+                      "keynote by Garry Tan, hosted by Evil Martians, hallway track, " \
                       "8-bit theme with a pixel-art attendee world"
   }.freeze
+
+  # BRIEFING, or the file AGENT_GUEST_BRIEFING_FILE names (JSON, place =>
+  # facts), read when a party starts.
+  def self.briefing
+    path = ENV.fetch("AGENT_GUEST_BRIEFING_FILE", "")
+    path.empty? ? BRIEFING : JSON.parse(File.read(path))
+  end
 
   RUNNING = {} # rubocop:disable Style/MutableConstant -- the parties running in this process, by room
   RUNNING_LOCK = Mutex.new
@@ -74,9 +81,10 @@ class GuestParty
     return false unless acquired
 
     mind = @mind || GuestMind.new(logger: @logger).tap(&:warm) # one mind, stateless between calls
+    briefing = self.class.briefing
     @guests = PERSONAS.map do |persona|
       Guest.new(@document_id, persona, url: @url, peer: @peers&.call(persona), mind: mind, logger: @logger,
-                                       briefing: BRIEFING, **@options)
+                                       briefing: briefing, **@options)
     end
     host
     true

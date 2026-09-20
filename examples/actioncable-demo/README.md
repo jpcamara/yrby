@@ -130,6 +130,8 @@ place's name (trimmed, any case), that sign's option carries the facts: "The
 sign says: SF RUBY CONF. What you know about it: ...". Other signs are offered
 plain. The briefing also goes with every question as `what_you_know`. Nothing
 is written on the sign. Personas and the rest of the prompt stay as they are.
+Set `AGENT_GUEST_BRIEFING_FILE` to a JSON file of the same shape to use other
+facts without changing the code; it is read when a party starts.
 
 The guest sets `at` from the answer and every browser glides its cursor to
 that sign. Dragging a sign moves the guests standing at it with no model
