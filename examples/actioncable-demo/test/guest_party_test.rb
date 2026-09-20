@@ -57,6 +57,22 @@ class GuestPartyTest < Minitest::Test
     refute GuestParty.running?(@room)
   end
 
+  # Under a reactor every guest is a child task; the party adds no threads.
+  def test_on_a_reactor_the_guests_are_tasks
+    require "async"
+    threads = Thread.list.size
+    @thread = Thread.new { Sync { @party.run } }
+    wait_until { @peers.size == 8 && @peers.values.all? { |peer| peer.state&.fetch("status", nil) == "settled" } }
+
+    assert_equal threads + 1, Thread.list.size, "only the reactor's own thread"
+    @party.stop
+    @thread.join(3)
+
+    refute_predicate @thread, :alive?
+    assert(@peers.values.all?(&:unsubscribed))
+    refute GuestParty.running?(@room)
+  end
+
   def test_one_party_per_room
     @thread = Thread.new { @party.run }
     wait_until { @peers.size == 8 }

@@ -13,11 +13,13 @@ require_relative "guest_mind"
 # walk to and updates `at`. Moving a sign changes nothing it decides on:
 # the pages glide the guest along with the sign.
 #
-# The mind runs in a thread of its own; this loop keeps the presence fresh
-# meanwhile. A decision made against signs that changed while it was out
-# is dropped and asked again. The guest leaves when told to, when the
-# party is over (`party.enabled == false`), after `stay`, or once no
-# person has been here for a while.
+# The mind runs off this loop: as a child task when the guest runs on an
+# Async reactor (Falcon, a script under Sync), as a thread otherwise
+# (Puma). Either way the loop keeps the presence fresh meanwhile, and the
+# answer comes back through the same queue. A decision made against signs
+# that changed while it was out is dropped and asked again. The guest
+# leaves when told to, when the party is over (`party.enabled == false`),
+# after `stay`, or once no person has been here for a while.
 class Guest # rubocop:disable Metrics/ClassLength -- one peer's whole life in one place
   Persona = Data.define(:name, :trait, :personality, :color, :home)
 
@@ -64,8 +66,7 @@ class Guest # rubocop:disable Metrics/ClassLength -- one peer's whole life in on
     show("arriving")
     watch
   ensure
-    @worker&.kill
-    @worker&.join(0.5)
+    cancel
     begin
       @peer.send_awareness(@presence.clear_local_state) if @joined
     ensure
@@ -169,13 +170,27 @@ class Guest # rubocop:disable Metrics/ClassLength -- one peer's whole life in on
     show("deciding")
     persona = @persona
     at = @at
-    @worker = Thread.new do
-      Thread.current[:agent_purpose] = "guest:#{@document_id}"
+    ask = lambda do
       decision = @mind.call(persona: persona, signs: current, current: at)
       @events << [:result, current, decision, nil]
     rescue StandardError => e
       @events << [:result, current, nil, e]
     end
+    @worker = Async::Task.current? ? Async::Task.current.async { ask.call } : Thread.new(&ask)
+  end
+
+  # Whatever the mind is doing, it is done. An answer still in flight would
+  # only be dropped, so its request is cut short rather than waited for.
+  def cancel
+    return unless @worker
+
+    if @worker.is_a?(Thread)
+      @worker.kill
+      @worker.join(0.5)
+    else
+      @worker.stop unless @worker.finished?
+    end
+    @worker = nil
   end
 
   def result(asked, decision, error)

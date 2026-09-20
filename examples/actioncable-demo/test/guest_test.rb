@@ -236,6 +236,42 @@ class GuestTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- assert
     @mind.responses << decision("stay")
   end
 
+  # On a reactor the mind is a task, not a thread: nothing new appears in
+  # Thread.list while the question is out, the loop keeps yielding, and the
+  # answer still lands.
+  def test_on_a_reactor_the_mind_is_a_task_not_a_thread
+    require "async"
+    @guest = Guest.new("room:cursors", PERSONA, peer: @peer, mind: @mind, quiet: 0.04, min_interval: 0.05,
+                                                logger: Logger.new(@log))
+    @thread = Thread.new { Sync { @guest.run } }
+    take_call
+    threads = Thread.list.size
+    sleep 0.2
+
+    assert_equal threads, Thread.list.size, "a question in flight must not add a thread"
+    @peer.person(Y::Awareness.new(7).set_local_state(JSON.generate(user: { name: "Ada" }, cursor: { x: 1, y: 2 })))
+    wait_until { @guest.send(:people_here) == [7] }
+    @mind.responses << decision("s2")
+    wait_until { @peer.state["at"] == "s2" }
+
+    assert_equal "settled", @peer.state["status"]
+    assert_equal threads, Thread.list.size
+  end
+
+  def test_on_a_reactor_stop_cuts_a_question_short
+    require "async"
+    @guest = Guest.new("room:cursors", PERSONA, peer: @peer, mind: @mind, quiet: 0.04, min_interval: 0.05,
+                                                logger: Logger.new(@log))
+    @thread = Thread.new { Sync { @guest.run } }
+    take_call
+    @guest.stop
+    @thread.join(2)
+
+    refute_predicate @thread, :alive?
+    assert @peer.unsubscribed
+    assert_empty @peer.presence.states.values.compact
+  end
+
   def test_only_people_keep_the_room_open
     start
     @mind.responses << decision("s1")
