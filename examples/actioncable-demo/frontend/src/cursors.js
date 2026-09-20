@@ -165,7 +165,7 @@ function crowds(states) {
 }
 function placeFor(state, at) {
   const m = state.at ? signs.get(state.at) : null
-  if (!m) { const [hx, hy] = state.home || [W / 2, H / 2]; return { x: hx, y: hy, o: hx > W / 2 ? "l" : "r" } }
+  if (!m) { const [hx, hy] = state.home || [W / 2, H / 2]; return { x: hx, y: hy, o: hx + 14 + CHIP_W > W ? "l" : "r" } }
   const names = at.get(state.at) || []
   const i = Math.max(0, names.indexOf(state.user.name))
   const all = slots(m.get("x"), m.get("y"))
@@ -202,11 +202,11 @@ function sayFor(s, now) {
   return `${where} · ${Number(d.p).toFixed(2)} · ${Math.round(d.ms)}ms`
 }
 
-// Labels stay above their own chip; one that would cover another is
-// pushed up a label height at a time.
+// Labels stay above their own chip; one that would cover another label,
+// or another guest's chip, is pushed up a label height at a time.
 function spreadLabels() {
   const shown = [...layer.querySelectorAll(".say:not([hidden])")]
-  const taken = []
+  const taken = [...layer.querySelectorAll(".guest .chip")].map((el) => el.getBoundingClientRect())
   for (const el of shown.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)) {
     el.style.transform = ""
     const r = el.getBoundingClientRect()
