@@ -66,7 +66,7 @@ module GuestFixture
 
     def model = "test/jev"
 
-    def call(persona:, signs:, current:, briefing: "")
+    def call(persona:, signs:, current:, briefing: {})
       @calls << { persona: persona, signs: signs, current: current, briefing: briefing }
       response = @responses.pop
       raise response if response.is_a?(Exception)

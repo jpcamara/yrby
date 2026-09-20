@@ -78,19 +78,29 @@ class GuestMindTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- as
     assert_equal(%w[s1 s2 s3], request[:body].dig("state", "signs").map { |s| s["id"] })
   end
 
-  def test_the_briefing_is_what_the_guest_knows_in_the_state_and_the_instructions
-    @mind.call(persona: PERSONA, signs: SIGNS, current: nil, briefing: "The quiet room has soft chairs.")
+  def test_a_sign_that_names_a_known_place_is_offered_with_its_facts
+    signs = SIGNS + [["s4", "  sf ruby conf "], ["s5", "SF RUBY CONF AFTERPARTY"]]
+    briefing = { "SF Ruby Conf" => "three days of Ruby talks", " Quiet Room " => " soft chairs " }
+    answer("s4", %w[s1 s2 s3 s4 s5 stay])
+    @mind.call(persona: PERSONA, signs: signs, current: nil, briefing: briefing)
 
-    assert_equal "The quiet room has soft chairs.", request[:body].dig("state", "what_you_know")
-    assert_includes question["instructions"], "what_you_know describes places a sign may name."
+    assert_equal "The sign says: sf ruby conf. What you know about it: three days of Ruby talks",
+                 question["criteria"]["s4"]
+    assert_equal "The sign says: QUIET ROOM. What you know about it: soft chairs", question["criteria"]["s2"]
+    assert_equal "The sign says: FREE PIZZA", question["criteria"]["s1"]
+    assert_equal "The sign says: SF RUBY CONF AFTERPARTY", question["criteria"]["s5"]
+    assert_equal({ "SF Ruby Conf" => "three days of Ruby talks", "Quiet Room" => "soft chairs" },
+                 request[:body].dig("state", "what_you_know"))
+    assert_includes question["instructions"], "When you know a place a sign names, use what you know about it."
     refute_includes @log.string, "soft chairs"
   end
 
   def test_an_empty_briefing_adds_nothing
-    @mind.call(persona: PERSONA, signs: SIGNS, current: nil, briefing: "  ")
+    @mind.call(persona: PERSONA, signs: SIGNS, current: nil, briefing: { " " => "soft chairs", "Quiet Room" => "  " })
 
     refute request[:body]["state"].key?("what_you_know")
-    refute_includes question["instructions"], "what_you_know"
+    refute_includes question["instructions"], "what you know"
+    assert_equal "The sign says: QUIET ROOM", question["criteria"]["s2"]
     Wire.requests.clear
     @mind.call(persona: PERSONA, signs: SIGNS, current: nil)
 

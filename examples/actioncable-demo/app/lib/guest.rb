@@ -35,7 +35,7 @@ class Guest # rubocop:disable Metrics/ClassLength -- one peer's whole life in on
   PARTY = "party" # enabled => true | false
 
   def initialize(document_id, persona, url: nil, peer: nil, mind: nil, quiet: QUIET, # rubocop:disable Metrics/ParameterLists -- the peer, the mind, the briefing, and the timings
-                 min_interval: MIN_INTERVAL, stay: MAX_STAY, briefing: "", logger: nil)
+                 min_interval: MIN_INTERVAL, stay: MAX_STAY, briefing: {}, logger: nil)
     @document_id = document_id
     @persona = persona
     @briefing = briefing
