@@ -11,10 +11,17 @@
 // the log. Asserts on the shared Yjs maps at window.__yrb, and takes a
 // screenshot at each beat.
 //
+// With LIVE_MAYOR=1, against a server with a model key, the mayor is
+// checked with the real model too: a sign in free words is read into a
+// shop, a street is named after the sign beside it with the bell, and a
+// person painting over the mayor's chosen site mid-build makes the planner
+// yield. Skipped otherwise, so the check runs without a key.
+//
 //   PORT=9600 STORE_KIND=file bin/rails s -p 9600         # server
 //   node frontend/city_e2e.mjs                            # invites the planner and the townsfolk from the page
 //   PLANNER=process ROOM=x node frontend/city_e2e.mjs     # peers already running: bin/city-planner x, bin/city-life x
 //   FRAMES=/tmp/frames node frontend/city_e2e.mjs         # also saves frames of the planner at work
+//   LIVE_MAYOR=1 node frontend/city_e2e.mjs               # the mayor beats too, against a server with a key
 import { execFileSync } from "node:child_process"
 import { mkdirSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -25,6 +32,7 @@ const BASE = process.env.BASE || `http://127.0.0.1:${process.env.PORT || 9600}`
 const AB = process.env.AB_BIN || resolve(here, "node_modules/.bin/agent-browser")
 const ROOM = process.env.ROOM || `city-${`${Date.now()}`.slice(-6)}`
 const INVITE = (process.env.PLANNER || "invite") === "invite"
+const LIVE_MAYOR = process.env.LIVE_MAYOR === "1"
 const SHOTS = process.env.SHOTS || "/tmp"
 const FRAMES = process.env.FRAMES
 const [A, B] = [`${process.env.SESSION || "ci"}-a`, `${process.env.SESSION || "ci"}-b`] // agent-browser sessions
@@ -145,6 +153,57 @@ check("the document holds no footsteps", /\btrue\b/.test(evalIn(B, "[...window._
 evalIn(B, "window.__yrb.camera.zoomAt(2.5, 0, 0); window.__yrb.camera.centerOn(14, 20)")
 await sleep(1200)
 shot(B, "5-life")
+
+// --- the mayor, with a real model --------------------------------------------
+// Only with LIVE_MAYOR=1: the server needs a model key. Three beats: a
+// sign in free words becomes a shop; a street with a wish beside it gets
+// its name from the mayor, with the bell; a person paints over the site
+// the mayor chose while the planner is on its way, and it yields.
+if (LIVE_MAYOR) {
+  const near = (k, r, test) => `[...window.__yrb.tiles.entries()].some(([k, v]) => { const [x, y] = k.split(',').map(Number); const [sx, sy] = '${k}'.split(',').map(Number); return Math.abs(x - sx) <= ${r} && Math.abs(y - sy) <= ${r} && (${test}) })`
+  const t0 = Date.now()
+  evalIn(A, "for (let x = 60; x < 66; x++) for (let y = 61; y < 66; y++) window.__yrb.paint(x, y, 'water'); for (let x = 50; x < 60; x++) window.__yrb.paint(x, 62, 'road')")
+  evalIn(B, "window.__yrb.placeSign(58, 60, 'a cozy bookshop by the water')")
+  check("live: the mayor reads a sign in free words as SHOP", await waitEval(A, "window.__yrb.readings.get('58,60') === 'SHOP'", "reading", 30000))
+  console.log(`  read in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
+  check("live: the planner opens a shop beside the sign", await waitEval(B, near("58,60", 4, "v === 'shop@2x2' && window.__yrb.authors.get(k) === 'a:planner'"), "shop", 45000))
+
+  // A street of ten with four houses on it, and a sign asking for a name.
+  evalIn(A, "for (let x = 70; x < 80; x++) window.__yrb.paint(x, 70, 'road'); for (const x of [71, 73, 75, 77]) window.__yrb.paint(x, 69, 'house_red')")
+  evalIn(B, "window.__yrb.placeSign(74, 71, 'name this street after Ada')")
+  check("live: the mayor reads the naming sign", await waitEval(A, "['NAME', 'ROAD', 'none'].includes(window.__yrb.readings.get('74,71'))", "naming sign read", 30000))
+  const reading = evalIn(A, "window.__yrb.readings.get('74,71')").trim().replace(/"/g, "")
+  console.log(`  the naming sign read as ${reading}`)
+  if (reading === "none") {
+    // The model took the sign for a name: it labels the street itself, cut to a label's length.
+    check("live: the sign's own text labels the street", await waitEval(A, "window.__yrb.labels.some(l => l.text === 'name this street after Ada'.slice(0, 24))", "label"))
+  } else {
+    const mayorSign = near("74,71", 4, "v === 'sign' && window.__yrb.authors.get(k) === 'a:mayor' && window.__yrb.signs.get(k)")
+    check("live: the mayor names the street with a sign of its own", await waitEval(B, mayorSign, "mayor's name", 75000))
+    const name = evalIn(B, "[...window.__yrb.signs.entries()].find(([k]) => window.__yrb.authors.get(k) === 'a:mayor' && Math.abs(k.split(',')[0] - 74) <= 4 && Math.abs(k.split(',')[1] - 71) <= 4)?.[1]").trim().replace(/"/g, "")
+    console.log(`  the mayor named it ${JSON.stringify(name)} (${/ada/i.test(name) ? "after Ada, as asked" : "not after Ada"})`)
+    check("live: the name runs along the road as a label", await waitEval(B, `window.__yrb.labels.some(l => l.text === ${JSON.stringify(name)})`, "street label"))
+    check("live: the bell rings for the mayor's sign", await waitEval(B, "window.__yrb.sound.log.includes('bell')", "bell"))
+  }
+  ab(B, "set", "viewport", "1100", "900", "2")
+  evalIn(B, "window.__yrb.camera.zoomAt(2.5, 0, 0); window.__yrb.camera.centerOn(75, 69); document.getElementById('stage').scrollIntoView({ block: 'start' }); window.scrollBy(0, -4)")
+  await sleep(1200)
+  ab(B, "screenshot", `${SHOTS}/city-8-mayor.png`)
+  ab(B, "set", "viewport", "1100", "1300")
+
+  // Far from where the planner stands, another shop; the moment it claims
+  // the site, a paints over it, and the planner yields.
+  evalIn(B, "window.__yrb.placeSign(10, 84, 'somewhere to buy fresh bread')")
+  check("live: the mayor reads the second sign as SHOP", await waitEval(A, "window.__yrb.readings.get('10,84') === 'SHOP'", "second reading", 30000))
+  check("live: the planner claims the site", await waitEval(A, "[...window.__yrb.claims.keys()].some(k => Math.abs(k.split(',')[0] - 10) <= 4 && Math.abs(k.split(',')[1] - 84) <= 4)", "claim", 20000))
+  const claimedKey = evalIn(A, "[...window.__yrb.claims.keys()].find(k => Math.abs(k.split(',')[0] - 10) <= 4 && Math.abs(k.split(',')[1] - 84) <= 4)").trim().replace(/"/g, "")
+  evalIn(A, `window.__yrb.paint(${claimedKey}, 'flowers')`)
+  check("live: the planner yields to the person who painted over its site", await waitEval(B, `${states}.some(x => x?.planner && /^yielding to /.test(x.status))`, "yield", 15000))
+  check("live: the claims are released", await waitEval(B, "window.__yrb.claims.size === 0", "claims released"))
+  check("live: the person's flowers stay on the site", await waitEval(B, `${tile(claimedKey)} === 'flowers'`, "flowers"))
+  check("live: no shop was built over them", !/\btrue\b/.test(evalIn(B, `${tile(claimedKey)} === 'shop@2x2'`)))
+  evalIn(B, "window.__yrb.camera.zoomAt(2.5, 0, 0); window.__yrb.camera.centerOn(14, 20)")
+}
 
 // --- offline, then reconnect ------------------------------------------------
 evalIn(A, "window.__yrb.goOffline()")

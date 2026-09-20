@@ -288,8 +288,11 @@ module City # rubocop:disable Metrics/ModuleLength -- the rules of the town, in 
     end
 
     # Signs that only name something: no instruction in the text or read
-    # into it.
-    def name_signs = signs_at.reject { |x, y, _| instruction_at(x, y) }
+    # into it, and not a request for a name either.
+    def name_signs = signs_at.reject { |x, y, _| instruction_at(x, y) || wish?(x, y) }
+
+    # A sign the mayor read as asking for a particular name.
+    def wish?(x, y) = readings[City.key(x, y)] == "NAME"
 
     def cells_with(kinds)
       tiles.filter_map { |k, v| City.parse_key(k) if kinds.include?(City.parse_tile(v)&.first) }.sort
@@ -558,10 +561,10 @@ module City # rubocop:disable Metrics/ModuleLength -- the rules of the town, in 
   # NAME_ROAD cells, that has no name sign beside it, as [kind, site], the
   # site a free cell by the road nearest the middle of what it names, and
   # not up against a house when there is room. A sign anyone placed counts
-  # as its name.
+  # as its name. A network someone asked a name for comes first.
   def self.naming_sites(map, blocked = Set.new)
     named = Set.new(map.name_signs.flat_map { |x, y, _| map.neighbors(x, y) })
-    districts(map).filter_map do |roads, houses|
+    sites = districts(map).filter_map do |roads, houses|
       next if roads.any? { |cell| named.include?(cell) }
 
       kind = naming_kind(roads, houses) or next
@@ -570,12 +573,25 @@ module City # rubocop:disable Metrics/ModuleLength -- the rules of the town, in 
       end
       [kind, site] if site
     end
+    wished_first(map, sites)
+  end
+
+  def self.wished_first(map, sites)
+    sites.sort_by.with_index { |(_, site), i| [naming_wishes(map, site).any? ? 0 : 1, i] }
   end
 
   def self.naming_kind(roads, houses)
     if houses.size >= NAME_HOUSES then "district"
     elsif roads.size >= NAME_ROAD then "street"
     end
+  end
+
+  # What the signs beside the road network a site names say, as their
+  # texts: a sign that asks for a particular name is a wish the mayor
+  # takes into account.
+  def self.naming_wishes(map, site)
+    network = components(map.roads).find { |roads| map.neighbors(*site).any? { |c| roads.include?(c) } } or return []
+    map.signs_at.select { |x, y, _| map.neighbors(x, y).any? { |c| network.include?(c) } }.map(&:last)
   end
 
   # Shortest paths over grass and water, water costing WATER_COST per

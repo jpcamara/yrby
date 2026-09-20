@@ -146,8 +146,10 @@ the box, and waves at a neighbour who stands beside it for two seconds.
 With a model key set (the review agent's: `FIREWORKS_API_KEY`,
 `OPENROUTER_API_KEY`, or `ANTHROPIC_API_KEY`) there is a mayor too,
 `CityMayor`: a sign the rules do not understand is read into one of the
-instructions they do, and the reading goes into the document beside the sign
+instructions they do, or into `NAME` for one that asks for a street to be
+called something, and the reading goes into the document beside the sign
 (`readings`); streets and neighbourhoods get name signs as the town grows,
+a street someone asked a name for first and with the wish in the question,
 and the page draws a name along the road it stands by. Without a key there
 is no mayor and nothing else changes.
 
@@ -168,7 +170,13 @@ bundle exec ruby -Itest test/city_test.rb
 bundle exec ruby -Itest test/city_planner_test.rb
 bundle exec ruby -Itest test/city_life_test.rb
 PORT=9600 node frontend/city_e2e.mjs   # against a server on 9600 with STORE_KIND=file
+LIVE_MAYOR=1 PORT=9600 node frontend/city_e2e.mjs   # the mayor too, against a server with a model key
 ```
+
+The mayor asks its questions on a RubyLLM context of its own, in the
+system role (Fireworks' GLM chat template expects it; the OpenAI provider
+would send the developer role otherwise), with low reasoning effort: about
+half a second a question.
 
 ### Using this in your own app
 

@@ -106,7 +106,9 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
     while now - started < @stay
       case @changes.pop(timeout: KEEP_ALIVE)
       when :stop then return leave("told to")
-      when nil then show(@status)
+      when nil
+        show(@status)
+        return leave("told to") if name_due? && work == :stop
       else
         return leave("told to") if settle == :stop || work == :stop
       end
@@ -177,6 +179,16 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
     now - @asked.fetch(text, 0) > ASK_AGAIN
   end
 
+  # A name is due when the mayor may name again and a street or a
+  # neighbourhood still has none: the quiet after the last edit must not
+  # leave it nameless until someone paints.
+  def name_due?
+    return false unless @mayor && now - @named_at > NAME_EVERY
+
+    map = read_map
+    City.naming_sites(map, City.blocked(map, avoid)).any?
+  end
+
   # With a mayor, one name at a time: a sign beside a street or a
   # neighbourhood that has none, with the mayor's name on it.
   def name_something
@@ -188,7 +200,7 @@ class CityPlanner # rubocop:disable Metrics/ClassLength -- the planner's whole l
 
     @named_at = now
     show("naming a #{kind}")
-    name = @mayor.name(kind, taken: map.signs.values) or return
+    name = @mayor.name(kind, taken: map.name_signs.map(&:last), wishes: City.naming_wishes(map, site)) or return
     @logger.info("mayor: named the #{kind} at #{site.join(",")} #{name.inspect}")
     lay(site, City::SIGN, author: CityMayor::AUTHOR, text: name)
   end
