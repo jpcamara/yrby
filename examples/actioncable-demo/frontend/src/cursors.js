@@ -45,7 +45,8 @@ function fit() {
   let scale = Math.min(1, byWidth)
   if (document.body.classList.contains("stage")) {
     const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
-    scale = Math.min(byWidth, (window.innerHeight / zoom - board.offsetTop - 10) / H)
+    const foot = $("foot")?.offsetHeight || 0
+    scale = Math.min(byWidth, (window.innerHeight / zoom - board.offsetTop - foot - 16) / H)
     board.style.width = `${Math.floor(W * scale)}px`
   }
   stage.style.transform = `scale(${scale})`
