@@ -1,0 +1,15 @@
+{
+  "name": "pixel-bay-ruby-wasm-experiment",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.mjs"
+  },
+  "dependencies": {
+    "@ruby/3.4-wasm-wasi": "2.10.1",
+    "@ruby/wasm-wasi": "2.10.1",
+    "ywasm": "0.28.0",
+    "@rails/actioncable": "8.1.300",
+    "yrby-wasm-client": "file:../../../../../packages/wasm-client"
+  }
+}

@@ -17,6 +17,22 @@ class DocumentsController < ApplicationController
   # would, on this server's own cable (see SudokuPeer).
   def sudoku_checker = start_agent(SudokuPeer, "#{params[:id]}:sudoku", url: AgentInvite.cable_url(request))
 
+  # The pixel artist uses the same socket peer under Puma and Falcon.
+  def pixel_artist
+    start_agent(PixelArtist, "#{params[:id]}:pixels", url: AgentInvite.cable_url(request),
+                stop_version: request.headers["X-Pixel-Stop-Version"].to_s)
+  end
+
+  def pixels
+    @document_id = params[:id]
+    PixelScene.ensure("#{@document_id}:pixels")
+  end
+
+  # Optional browser Ruby experiment, sharing the existing pixel document.
+  def pixels_wasm
+    pixels
+  end
+
   # One agent per document: a second invite while the first is still there
   # is answered with 409 and nothing starts.
   AGENTS = {} # rubocop:disable Style/MutableConstant -- the registry of running agent threads
