@@ -185,6 +185,9 @@ jobs:
           bundle exec ruby -Itest test/jev_shadow_test.rb
           bundle exec ruby -Itest test/sudoku_test.rb
           bundle exec ruby -Itest test/sudoku_peer_test.rb
+          bundle exec ruby -Itest test/guest_mind_test.rb
+          bundle exec ruby -Itest test/guest_test.rb
+          bundle exec ruby -Itest test/guest_party_test.rb
       - name: Build yrby-client package
         working-directory: packages/client
         run: npm ci && npm run build
@@ -250,6 +253,10 @@ jobs:
           # The sudoku page: two browsers and the checker, invited from the
           # page, flagging a clash and serving a hint through the document.
           PORT=3777 node frontend/sudoku_e2e.mjs
+          # The cursors page: two browsers sharing signs and cursors. The
+          # eight guests need a TypeSafe key on the server, which CI has
+          # not; without one the script checks the board and skips them.
+          PORT=3777 node frontend/cursors_e2e.mjs
           kill "$(cat /tmp/puma.pid)" || true
 
       # Re-run the same slice under a multi-process Falcon deployment (2 fiber
@@ -263,6 +270,7 @@ jobs:
         run: |
           SERVER=falcon WORKERS=2 PORT=3778 SERVER_PIDFILE=/tmp/falcon.pid frontend/boot_server.sh
           PORT=3778 frontend/e2e_suite.sh
+          PORT=3778 node frontend/cursors_e2e.mjs
           kill "$(cat /tmp/falcon.pid)" || true
 
       # Two independent server processes (different ports) sharing documents

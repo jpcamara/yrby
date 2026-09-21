@@ -103,6 +103,87 @@ bundle exec ruby -Itest test/sudoku_test.rb
 bundle exec ruby -Itest test/sudoku_peer_test.rb
 ```
 
+### Cursors with opinions
+
+`/docs/demo/cursors` is a board of signs: a `Y.Map` of sign records (x, y,
+text). Double-click to post a sign, drag to move it, type to change what it
+says. Every person's cursor is their awareness, drawn as an arrow with a
+name, on every page.
+
+**Invite 8 Ruby guests** starts `GuestParty`: eight `Guest` peers, one per
+persona (Snack Goblin, Networker, Introvert, Rubyist, Night Owl, Pixel Nerd,
+Coffee Snob, Lurker), each a `Y::ActionCable::Client` on the same document
+over the websocket the browsers use. A guest's presence is a cursor with a
+red diamond, its name, and its trait. The two roles:
+
+- **yrby** shares the board and the cursors: the signs, where they are, and
+  each guest's presence (`at: <sign id>`, its status, its last decision).
+- **Jev**, TypeSafe's typed-decision model, picks the sign. Whenever a sign's
+  text changes, or a sign is posted or taken down, each guest asks one choice
+  question (`GuestMind`): its personality in the instructions, the live sign
+  texts as the options, plus "stay". The answer is a sign id with a probability
+  for every option, in about half a second. Jev generates no text.
+
+What every guest knows is one short briefing, `GuestParty::BRIEFING`: place
+name to plain facts, the same for all eight. When a sign's text is a known
+place's name (trimmed, any case), that sign's option carries the facts: "The
+sign says: SF RUBY CONF. What you know about it: ...". Other signs are offered
+plain. The briefing also goes with every question as `what_you_know`. Nothing
+is written on the sign. Personas and the rest of the prompt stay as they are.
+Set `AGENT_GUEST_BRIEFING_FILE` to a JSON file of the same shape to use other
+facts without changing the code; it is read when a party starts.
+
+The guest sets `at` from the answer and every browser glides its cursor to
+that sign. Dragging a sign moves the guests standing at it with no model
+call: the position is in the document. An answer made against signs that
+changed while it was out is dropped and asked again. Edits inside 350 ms are
+one question; two questions are at least a second apart. The chip shows
+"…" while a guest decides and its answer, probability, and latency for three
+seconds after. The line above the board shows each round's latency spread.
+
+Configure a server-side `TYPESAFE_API_KEY`. Keep it in
+`~/.config/yrby/typesafe.env` outside the repo, and load it before starting
+the server; no writing model is needed:
+
+```bash
+set -a; source ~/.config/yrby/typesafe.env; set +a
+STORE_KIND=file bundle exec falcon serve --bind http://127.0.0.1:3000 --count 1
+```
+
+`AGENT_JEV_MODEL` defaults to `jev-latest`. Use one worker: the one-party-
+per-room guard is process-local. Under Falcon the guests and their Jev calls
+are Async tasks on the reactor, no threads; under Puma each guest is a thread
+and its Jev call another. Under Falcon the inviting page holds a streaming
+request and leaving it sends the guests home; Puma runs the party in a
+thread. **Send guests home** works from any browser: it sets
+`party.enabled` to false in the document and every guest leaves. Guests also
+leave after two hours, or once no person has been in the room for two
+minutes. The party runs outside the server too:
+
+```bash
+bin/cursor-guests demo ws://127.0.0.1:3000/cable   # then open /docs/demo/cursors
+```
+
+Rails logs one JSON line per decision (`guest_decision`): the guest, the
+room, the choice, its probability, the confidence, the latency, and the
+model version. No sign text, and no key, is logged; a provider error is
+logged by class only.
+
+```bash
+# The guest, the mind at the gem's request boundary, and the party. No server.
+bundle exec ruby -Itest test/guest_test.rb
+bundle exec ruby -Itest test/guest_mind_test.rb
+bundle exec ruby -Itest test/guest_party_test.rb
+
+# Two real Chrome browsers: signs, cursors, then the guests with real Jev calls.
+cd frontend
+TYPESAFE_API_KEY=... BASE=http://127.0.0.1:3000 npm run test:cursors
+```
+
+The e2e checks the guests only when it sees `TYPESAFE_API_KEY` (or
+`LIVE_GUESTS=1`); it checks the board either way. `SERVER_LOG=<path>` also
+checks the server's decision lines for sign text.
+
 ### Using this in your own app
 
 You don't need the demo's build setup. Two things keep an integration
