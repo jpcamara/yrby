@@ -193,6 +193,30 @@ try {
   await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
   await wait('!morphElement.provider.hasPending');
 
+  // Retarget while detached, then reinsert in the same turn. The old queue
+  // must keep its destination even though the element already names another.
+  await evaluate(`window.moveSession = morphElement.session;
+    window.moveMounts = morphElement.mountCount;
+    goOffline();`);
+  await wait('!moveSession.provider.synced');
+  await browser(session, "find", "label", "Body", "fill", "pending through detached retarget");
+  await evaluate(`const parent = morphElement.parentNode;
+    morphElement.remove();
+    morphElement.setAttribute("grant", document.querySelector("#secret-doc").getAttribute("grant"));
+    morphElement.setAttribute("name", "secret");
+    parent.append(morphElement);`);
+  await wait('morphElement.session === document.querySelector("#secret-doc").session');
+  check("detached retarget replaces the editor and retains its original pending queue", await evaluate(
+    'morphElement.session !== moveSession && moveSession.hasPending && morphElement.mountCount === moveMounts + 1 && morphElement.doc.getText("content").toString() === "encrypted browser edit"'));
+  await evaluate('goOnline()');
+  await wait('moveSession.state === "closed" && morphElement.provider.synced');
+  check("detached retarget delivers pending text only to its original document",
+    (await state("body")).text === "pending through detached retarget" && (await state("secret")).text === "encrypted browser edit");
+  await evaluate('morphElement.setAttribute("grant", originalGrant); morphElement.setAttribute("name", "body")');
+  await wait('morphElement.provider?.synced && morphElement.doc.getText("content").toString() === "pending through detached retarget"');
+  await browser(session, "find", "label", "Body", "fill", "pending across Turbo");
+  await wait('!morphElement.provider.hasPending');
+
   // A before-cache event can leave the current page in place (canceled visit).
   await evaluate('window.beforeCancelMounts = morphElement.mountCount; document.dispatchEvent(new Event("turbo:before-cache"))');
   await wait('morphElement.provider?.synced && morphElement.mountCount === beforeCancelMounts + 1');

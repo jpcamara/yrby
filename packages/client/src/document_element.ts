@@ -23,10 +23,9 @@ export class YrbyDocumentElement extends Base {
   static consumer: CableConsumer | Promise<CableConsumer> | undefined;
   static observedAttributes = ["grant", "name", "channel", "refresh"];
   #lease: DocumentLease | undefined;
-  #attaching = false; // waiting for the consumer
+  #pending: object | undefined; // identifies the current consumer wait
   #inDom = false;
   #active = false; // the Turbo adapter says: bind (not a cached preview, connected)
-  #generation = 0; // bumped on every release so stale async work stands down
   #unregister: (() => void) | undefined;
   #resolveSynced!: () => void;
   #whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
@@ -39,6 +38,7 @@ export class YrbyDocumentElement extends Base {
   connectedCallback(): void {
     this.#inDom = true;
     this.#unregister ??= registerDocumentMount(this);
+    this.#reconcile();
   }
   disconnectedCallback(): void {
     this.#inDom = false;
@@ -46,19 +46,18 @@ export class YrbyDocumentElement extends Base {
     queueMicrotask(() => { if (!this.#inDom) this.destroy(); });
   }
   attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
-    if (oldValue === newValue || !this.#inDom) return;
+    if (oldValue === newValue) return;
     // The refresh URL is read when the session is acquired and is not part of
     // its identity, so changing it does not rebind the editor.
     if (name === "refresh") return;
     this.#release();
-    const generation = this.#generation;
-    queueMicrotask(() => { if (generation === this.#generation) void this.#attach(); });
+    queueMicrotask(() => this.#reconcile());
   }
 
   /** @internal Called by the Turbo adapter. */
-  activate(): void { this.#active = true; void this.#attach(); }
+  activate(): void { this.#active = true; this.#reconcile(); }
   /** @internal */
-  deactivate(): void { this.#active = false; this.#release(); }
+  deactivate(): void { this.#active = false; this.#reconcile(); }
   /** Release the editor lease. Unsaved work remains owned by its session. */
   destroy(): void {
     this.#inDom = false;
@@ -68,11 +67,14 @@ export class YrbyDocumentElement extends Base {
     unregister?.();
   }
 
+  #reconcile(): void {
+    if (!this.#inDom || !this.#active) this.#release();
+    else if (!this.#pending && !this.#lease) void this.#attach();
+  }
+
   async #attach(): Promise<void> {
-    if (!this.#active || this.#attaching || this.#lease) return;
-    this.#attaching = true;
+    const pending = this.#pending = {};
     this.#holdInert();
-    const generation = this.#generation;
     const descriptor = {
       channel: this.getAttribute("channel") || undefined,
       grant: this.getAttribute("grant") || "",
@@ -81,7 +83,8 @@ export class YrbyDocumentElement extends Base {
     };
     try {
       const consumer = await (YrbyDocumentElement.consumer ?? defaultConsumer());
-      if (generation !== this.#generation) return; // released or retargeted meanwhile
+      // Removal is deferred for same-turn moves, so check DOM membership too.
+      if (this.#pending !== pending || !this.#inDom) return;
       const lease = this.#lease = DocumentSessionStore.for(consumer).acquire(descriptor);
       const { session } = lease;
       // The session ends the lease itself when it blocks or is discarded.
@@ -92,24 +95,28 @@ export class YrbyDocumentElement extends Base {
       }, { once: true });
       if (session.state === "blocked") { lease.release(); return; }
       void session.whenSynced.then(() => {
-        if (this.#lease !== lease) return;
+        if (this.#lease !== lease || !this.#inDom) return;
         this.#restoreInert();
         this.#resolveSynced();
         this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
           detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal } }));
       });
     } catch (error) {
-      if (generation === this.#generation) this.#error(error);
+      if (this.#pending === pending && this.#inDom) this.#error(error);
     } finally {
-      if (generation === this.#generation) this.#attaching = false;
+      if (this.#pending === pending) {
+        if (!this.#inDom) this.#release();
+        else this.#pending = undefined;
+      }
     }
   }
   #release(): void {
-    ++this.#generation;
-    this.#attaching = false;
+    if (this.#pending || this.#lease) {
+      this.#whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
+    }
+    this.#pending = undefined;
     const lease = this.#lease;
     this.#lease = undefined;
-    this.#whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
     this.#holdInert();
     lease?.release();
   }
