@@ -1,0 +1,36 @@
+{
+  "name": "yrby-wasm-client",
+  "version": "0.1.0-experimental",
+  "private": true,
+  "type": "module",
+  "description": "Experimental Ruby/Yrs WASM browser client for yrby. The supported browser client remains yrby-client.",
+  "exports": {
+    ".": {
+      "types": "./src/client.d.ts",
+      "default": "./src/client.js"
+    },
+    "./ruby-host": {
+      "types": "./src/ruby-host.d.ts",
+      "default": "./src/ruby-host.js"
+    },
+    "./ruby": "./ruby/yrby_wasm.rb",
+    "./build": {
+      "types": "./build.d.mts",
+      "default": "./build.mjs"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "yrby-client": "file:../client",
+    "lib0": "^0.2.117"
+  },
+  "devDependencies": {
+    "ywasm": "0.28.0",
+    "yjs": "^13.6.0",
+    "y-protocols": "^1.0.5"
+  },
+  "license": "MIT",
+  "types": "./src/client.d.ts"
+}

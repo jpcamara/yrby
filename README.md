@@ -25,6 +25,11 @@ Rhino Editor, and CodeMirror. The same channel also syncs Yjs shapes with no
 editor at all: a whiteboard on a `Y.Map`, a kanban board on a `Y.Array`, a
 form filled in together. ([Editors](#editors))
 
+An optional [Ruby/WASM client experiment](packages/wasm-client/README.md) runs
+browser Ruby over Yrs, with shared maps, text, arrays, presence and reliable
+sync. [Pixel Bay](examples/actioncable-demo/README.md#optional-experiment-reusable-rubywasm-browser-client)
+is its first complete demo. `yrby-client` remains the first-class browser path.
+
 In Ruby, the documents are readable and writable without a browser.
 `Doc#read_text`, `Doc#read_map`, and `Doc#read_array` rebuild the contents for
 search, validation, and exports. `Doc#get_map`, `Doc#get_array`, and
