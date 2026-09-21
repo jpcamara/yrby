@@ -108,6 +108,20 @@ jobs:
           export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
           npm run test:browser
           npm run test:browser:turbolinks
+          npm run test:browser:collaboration
+
+      - name: Browser collaboration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-collaboration
+          path: |
+            tmp/browser-collaboration/*/*/result.json
+            tmp/browser-collaboration/*/*/failure.json
+            tmp/browser-collaboration/*/*/*.png
+            tmp/browser-collaboration/*/*/server.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Server log on failure
         if: failure()

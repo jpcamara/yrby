@@ -59,7 +59,8 @@
     "prepack": "npm run build",
     "test": "npm run build && node --test",
     "test:browser": "node browser/run.mjs",
-    "test:browser:turbolinks": "node browser/run_turbolinks.mjs"
+    "test:browser:turbolinks": "node browser/run_turbolinks.mjs",
+    "test:browser:collaboration": "node browser/run_collaboration.mjs"
   },
   "license": "MIT",
   "author": "JP Camara <jp@jpcamara.com>",

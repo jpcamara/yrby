@@ -40,6 +40,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interrupt its presence removal or leave the awareness timer running. A throwing
   error handler falls back to console reporting.
 
+- A four-browser regression matrix combines Turbo and Turbolinks navigation
+  with concurrent typing through the ActionCable and AnyCable JavaScript clients.
+  It covers delayed acknowledgments, offline history restore, cached previews,
+  fresh-reader persistence, and cleanup after application callbacks throw.
+
 ### Fixed
 
 - ActionCable providers ignore callbacks from superseded subscriptions, so a
