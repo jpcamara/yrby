@@ -101,6 +101,7 @@ const ENTRIES = [
   // Y.Array of row Y.Maps whose cells are nested Y.Maps; TanStack Table (headless)
   // holds the sorting/column order, which stays out of the document.
   { entry: "src/spreadsheet.js", name: "spreadsheet.js" },
+  { entry: "src/pixels.js", name: "pixels.js" },             // Y.Map pixel mural, painted by a Ruby peer
   { entry: "src/sudoku.js", name: "sudoku.js" },             // Y.Map of cells, checked by a Ruby peer
 ]
 

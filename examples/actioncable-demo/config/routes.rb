@@ -11,6 +11,9 @@ Rails.application.routes.draw do
   get "docs/:id/codemirror", to: "documents#codemirror", as: :document_codemirror
   get "docs/:id/markdown", to: "documents#markdown", as: :document_markdown
   post "docs/:id/markdown_agent", to: "documents#markdown_agent", as: :document_markdown_agent
+  get "docs/:id/pixels", to: "documents#pixels", as: :document_pixels
+  get "docs/:id/pixels/ruby", to: "documents#pixels_wasm", as: :document_pixels_wasm
+  post "docs/:id/pixels/artist", to: PixelArtistInvite.new, as: :document_pixels_artist
   get "docs/:id/whiteboard", to: "documents#whiteboard", as: :document_whiteboard
   get "docs/:id/kanban", to: "documents#kanban", as: :document_kanban
   get "docs/:id/forms", to: "documents#forms", as: :document_forms
