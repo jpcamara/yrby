@@ -202,3 +202,75 @@ test("resendInterval is forwarded to setInterval", () => {
   h.rs.enqueue(u(1));
   assert.equal(h.intervalMs(), 2500);
 });
+
+
+test("pausing from a replay send cannot leave a retransmission timer running", () => {
+  const h = harness({ send: () => h.rs.pause() });
+  h.rs.enqueue(u(1));
+  h.rs.resume();
+  assert.equal(h.rs.hasPending, true);
+  assert.equal(h.hasTimer(), false);
+});
+
+test("a queued tick from an earlier sending state cannot retransmit a later queue", () => {
+  const callbacks = [];
+  const h = harness({ setInterval: fn => { callbacks.push(fn); return callbacks.length; }, clearInterval() {} });
+  h.rs.enqueue(u(1)); h.rs.resume();
+  const oldTick = callbacks[0];
+  h.rs.pause(); h.rs.enqueue(u(2)); h.rs.resume();
+  const sent = h.sent.length;
+  oldTick();
+  assert.equal(h.sent.length, sent);
+  callbacks.at(-1)();
+  assert.equal(h.sent.length, sent + 1);
+  h.rs.destroy();
+});
+
+test("destruction from merge cannot send or resurrect the merged tail", () => {
+  const h = harness({ merge: () => { h.rs.destroy(); return u(9); } });
+  h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
+  assert.doesNotThrow(() => h.rs.resume());
+  h.rs.resume(); h.rs.enqueue(u(3)); h.rs.retransmit();
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+});
+
+test("a timer that ticks before returning its handle is canceled when its send pauses delivery", () => {
+  const active = new Set();
+  const h = harness({
+    send: () => h.rs.pause(),
+    setInterval: fn => { active.add(1); fn(); return 1; },
+    clearInterval: handle => active.delete(handle),
+  });
+  h.rs.enqueue(u(1)); h.rs.resume();
+  assert.equal(active.size, 0);
+  assert.equal(h.rs.hasPending, true);
+});
+
+test("synchronous acknowledgment during replay leaves no timer behind", () => {
+  const h = harness({ send: (_update, id) => h.rs.acknowledge(id) });
+  h.rs.enqueue(u(1)); h.rs.resume();
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+  h.rs.destroy(); h.rs.resume(); h.rs.pause(); h.rs.enqueue(u(2));
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+});
+
+
+test("a failed timer installation can be retried without losing pending work", () => {
+  let attempts = 0, active = false;
+  const h = harness({
+    setInterval: () => { if (++attempts === 1) throw new Error("timer unavailable"); active = true; return 1; },
+    clearInterval: () => { active = false; },
+  });
+  h.rs.enqueue(u(1));
+  assert.throws(() => h.rs.resume(), /timer unavailable/);
+  assert.equal(h.rs.hasPending, true);
+  h.rs.resume();
+  assert.equal(attempts, 2);
+  assert.equal(active, true);
+  h.rs.destroy();
+  assert.equal(active, false);
+});

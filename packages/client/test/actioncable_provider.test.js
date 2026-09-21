@@ -9,7 +9,7 @@ import { ActionCableProvider, MessageType, fromBase64, toBase64 } from "../dist/
 // client-to-client whisper method so tests can verify awareness uses it without
 // routing document updates through it.
 function fakeConsumer({ withWhisper } = { withWhisper: false }) {
-  const calls = { send: [], whisper: [], removed: 0 };
+  const calls = { send: [], whisper: [], removed: 0, subscriptions: [] };
   let sub = null;
   const consumer = {
     calls,
@@ -29,6 +29,7 @@ function fakeConsumer({ withWhisper } = { withWhisper: false }) {
           },
           ...mixin,
         };
+        calls.subscriptions.push(sub);
         if (withWhisper) sub.whisper = (data) => calls.whisper.push(data);
         return sub;
       },
@@ -597,4 +598,156 @@ test("destroy() is idempotent", (t) => {
   p.destroy();
   assert.doesNotThrow(() => p.destroy());
   assert.equal(p.status, "disconnected");
+});
+
+
+for (const action of ["disconnect", "destroy"]) {
+  test(`${action} during subscription creation retires the returned subscription`, async t => {
+    const c = fakeConsumer();
+    const p = makeProvider(t, new Y.Doc(), c);
+    const create = c.subscriptions.create;
+    c.subscriptions.create = (params, mixin) => {
+      const sub = create(params, mixin);
+      mixin.connected();
+      p[action]();
+      return sub;
+    };
+    p.connect();
+    await Promise.resolve();
+    assert.equal(p.status, "disconnected");
+    assert.equal(c.calls.removed, 1);
+    assert.equal(c.calls.send.length, 0);
+    if (action === "destroy") assert.throws(() => p.connect(), /destroyed/);
+    else {
+      c.subscriptions.create = create;
+      p.connect(); c.deliverConnected();
+      assert.equal(p.status, "connected");
+    }
+  });
+}
+
+test("a nested connect during subscription creation does not allocate another subscription", t => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c);
+  const create = c.subscriptions.create;
+  let creates = 0;
+  c.subscriptions.create = (params, mixin) => {
+    if (++creates === 1) p.connect();
+    return create(params, mixin);
+  };
+  p.connect();
+  assert.equal(creates, 1);
+  c.deliverConnected();
+  assert.equal(p.status, "connected");
+});
+
+test("destroy is terminal before its status listeners can reconnect", async t => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c);
+  p.connect(); c.deliverConnected();
+  let failure;
+  p.onStatusChange(({ status }) => {
+    if (status === "disconnected") {
+      try { p.connect(); } catch (error) { failure = error; }
+    }
+  });
+  p.destroy(); await Promise.resolve();
+  assert.match(String(failure), /destroyed/);
+  assert.equal(c.calls.subscriptions.length, 1);
+  assert.equal(c.calls.removed, 1);
+  assert.equal(p.status, "disconnected");
+});
+
+test("a status listener's reconnect supersedes the older notification for remaining listeners", t => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c);
+  const seen = [];
+  p.onStatusChange(({ status }) => {
+    if (status === "connected") { p.disconnect(); p.connect(); }
+  });
+  p.onStatusChange(({ status }) => seen.push(status));
+  p.connect(); c.deliverConnected();
+  assert.deepEqual(seen, ["connecting", "disconnected", "connecting"]);
+  assert.equal(seen.at(-1), p.status);
+});
+
+test("destruction during presence removal finishes one teardown", async t => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c);
+  p.connect(); c.deliverConnected();
+  p.awareness.on("update", () => {
+    if (p.awareness.getLocalState() === null) p.destroy();
+  });
+  p.disconnect(); await Promise.resolve();
+  assert.equal(c.calls.removed, 1);
+  assert.equal(p.status, "disconnected");
+  assert.throws(() => p.connect(), /destroyed/);
+});
+
+test("a new connection started during an old sync frame waits for its own catch-up", async t => {
+  const c = fakeConsumer(), doc = new Y.Doc(), peer = new Y.Doc();
+  t.after(() => { doc.destroy(); peer.destroy(); });
+  const p = makeProvider(t, doc, c);
+  p.connect(); c.deliverConnected();
+  let ready = false;
+  p.whenSynced.then(() => { ready = true; });
+  doc.once("update", () => { p.renew({ grant: "new" }); c.deliverConnected(); });
+  peer.getText("t").insert(0, "server state");
+  c.deliverReceived(syncStep2Envelope(peer));
+  await Promise.resolve();
+  assert.equal(p.synced, false);
+  assert.equal(p.status, "connected");
+  assert.equal(ready, false);
+  c.deliverReceived(syncStep2Envelope(peer));
+  await p.whenSynced;
+  assert.equal(p.synced, true);
+});
+
+test("callbacks queued by a throwing subscription factory do not start the protocol", async t => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c);
+  const create = c.subscriptions.create;
+  const resume = p.session.resume.bind(p.session);
+  let resumed = 0;
+  p.session.resume = () => { resumed++; resume(); };
+  c.subscriptions.create = (_params, mixin) => { mixin.connected(); throw new Error("unavailable"); };
+  assert.throws(() => p.connect(), /unavailable/);
+  await Promise.resolve();
+  assert.equal(resumed, 0);
+  assert.equal(p.status, "disconnected");
+  c.subscriptions.create = create;
+  p.connect(); c.deliverConnected();
+  assert.equal(resumed, 1);
+});
+
+
+test("a rejected send promise from a retired subscription cannot report against its replacement", async t => {
+  const c = fakeConsumer(), errors = [];
+  const p = makeProvider(t, new Y.Doc(), c, {}, { onError: error => errors.push(error) });
+  p.connect();
+  let reject;
+  c.calls.subscriptions[0].send = () => new Promise((_, fail) => { reject = fail; });
+  c.deliverConnected();
+  p.disconnect(); p.connect(); c.deliverConnected();
+  reject(new Error("old send"));
+  await Promise.resolve();
+  assert.equal(errors.length, 0);
+  assert.equal(p.status, "connected");
+});
+
+test("a retired page handler cannot restore presence into a replacement connection", t => {
+  const handlers = new Map();
+  globalThis.window = {
+    addEventListener: (name, fn) => handlers.set(name, fn),
+    removeEventListener: (name, fn) => { if (handlers.get(name) === fn) handlers.delete(name); },
+  };
+  t.after(() => { delete globalThis.window; });
+  const c = fakeConsumer(), p = makeProvider(t, new Y.Doc(), c);
+  p.connect(); c.deliverConnected();
+  p.awareness.setLocalState({ user: "old" });
+  handlers.get("pagehide")();
+  const oldShow = handlers.get("pageshow");
+  p.disconnect(); p.connect(); c.deliverConnected();
+  oldShow({ persisted: true });
+  assert.equal(p.awareness.getLocalState(), null);
 });
