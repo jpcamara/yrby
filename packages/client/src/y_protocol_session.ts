@@ -48,6 +48,15 @@ export interface YProtocolSessionOptions {
   clearInterval?: (handle: TimerHandle) => void;
 }
 
+// A cycle identifies one handshake lifetime, including its eventual catch-up.
+// Resume and pause replace it, so an interrupted receive cannot sync a later cycle.
+type ProtocolState =
+  | { phase: "unsynced" | "synced"; cycle: object }
+  | { phase: "destroyed" };
+type ProtocolEvent =
+  | { type: "resume" | "pause" | "destroy" }
+  | { type: "catchUp"; cycle: object };
+
 type AwarenessChange = { added: number[]; updated: number[]; removed: number[] };
 
 export class YProtocolSession {
@@ -56,7 +65,7 @@ export class YProtocolSession {
 
   #send: YProtocolSessionOptions["send"];
   #onError: (error: unknown, context: string) => void;
-  #synced = false;
+  #state: ProtocolState = { phase: "unsynced", cycle: {} };
   #delivery: ReliableSync;
   #onDocUpdate: (update: Uint8Array, origin: unknown) => void;
   #onAwarenessUpdate?: (change: AwarenessChange, origin: unknown) => void;
@@ -92,7 +101,7 @@ export class YProtocolSession {
         // and our own remote-cleanup in pause(), carry origin === this;
         // re-sending those would echo presence and broadcast tombstones for
         // other clients' cursors.
-        if (origin === this) return;
+        if (origin === this || this.#state.phase === "destroyed") return;
         const changed = added.concat(updated, removed);
         this.#send(this.#frameAwareness(changed), undefined); // fire-and-forget
       };
@@ -102,7 +111,7 @@ export class YProtocolSession {
 
   /** True once we've received the server's SyncStep2 (the document is caught up). */
   get synced(): boolean {
-    return this.#synced;
+    return this.#state.phase === "synced";
   }
 
   /** True while there are unacknowledged local document updates in flight. */
@@ -112,22 +121,19 @@ export class YProtocolSession {
 
   /** The transport is up: send the opening handshake, re-announce presence, replay the unacked tail. */
   resume(): void {
+    const state = this.#transition({ type: "resume" });
+    if (!state || state.phase === "destroyed") return;
+    const { cycle } = state;
     this.#send(this.#frameSyncStep1(), undefined);
+    if (!this.#current(cycle)) return;
     if (this.awareness && this.awareness.getLocalState() !== null) {
       this.#send(this.#frameAwareness([this.doc.clientID]), undefined);
     }
-    this.#delivery.resume();
+    if (this.#current(cycle)) this.#delivery.resume();
   }
 
   /** The transport is down: keep the queue, stop retransmits, forget peers' presence. */
-  pause(): void {
-    this.#synced = false;
-    this.#delivery.pause();
-    if (this.awareness) {
-      const remote = [...this.awareness.getStates().keys()].filter((c) => c !== this.doc.clientID);
-      if (remote.length) removeAwarenessStates(this.awareness, remote, this);
-    }
-  }
+  pause(): void { this.#transition({ type: "pause" }); }
 
   /**
    * Broadcast that our local presence is gone (sets local state to null, which
@@ -136,7 +142,7 @@ export class YProtocolSession {
    * waiting for the awareness timeout. A no-op when there's no local state.
    */
   removeLocalAwareness(): void {
-    if (this.awareness && this.awareness.getLocalState() !== null) {
+    if (this.#state.phase !== "destroyed" && this.awareness && this.awareness.getLocalState() !== null) {
       this.awareness.setLocalState(null); // fires "update" -> sends the removal frame
     }
   }
@@ -160,7 +166,7 @@ export class YProtocolSession {
    * SyncStep1 handshake instead of being re-sent.
    */
   applyRemoteUpdate(update: Uint8Array): void {
-    applyUpdate(this.doc, update, this);
+    if (this.#state.phase !== "destroyed") applyUpdate(this.doc, update, this);
   }
 
   /**
@@ -169,6 +175,8 @@ export class YProtocolSession {
    * SyncStep1), or null if there's nothing to send.
    */
   receive(frame: Uint8Array): Uint8Array | null {
+    if (this.#state.phase === "destroyed") return null;
+    const { cycle } = this.#state;
     // A malformed/truncated frame must never take down the transport callback:
     // decode + apply defensively, drop the frame on error, keep the session live.
     try {
@@ -182,7 +190,7 @@ export class YProtocolSession {
         case MessageType.Sync: {
           encoding.writeVarUint(encoder, MessageType.Sync);
           const syncType = readSyncMessage(decoder, encoder, this.doc, this);
-          if (!this.#synced && syncType === messageYjsSyncStep2) this.#synced = true;
+          if (syncType === messageYjsSyncStep2) this.#transition({ type: "catchUp", cycle });
           break;
         }
         case MessageType.Awareness:
@@ -191,18 +199,45 @@ export class YProtocolSession {
         default:
           return null; // a y-protocols type yrby doesn't speak (auth, query-awareness): ignore
       }
-      return encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
+      return this.#current(cycle) && encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
     } catch (error) {
-      this.#onError(error, "receive");
+      if (this.#current(cycle)) this.#onError(error, "receive");
       return null;
     }
   }
 
   /** Detach doc/awareness listeners and stop retransmits. */
-  destroy(): void {
-    this.doc.off("update", this.#onDocUpdate);
-    if (this.awareness && this.#onAwarenessUpdate) this.awareness.off("update", this.#onAwarenessUpdate);
-    this.#delivery.destroy();
+  destroy(): void { this.#transition({ type: "destroy" }); }
+
+  #current(cycle: object): boolean {
+    return this.#state.phase !== "destroyed" && this.#state.cycle === cycle;
+  }
+  #transition(event: ProtocolEvent): ProtocolState | undefined {
+    const current = this.#state;
+    if (current.phase === "destroyed") return;
+    let next: ProtocolState;
+    switch (event.type) {
+      case "catchUp":
+        if (current.cycle !== event.cycle) return;
+        next = { phase: "synced", cycle: current.cycle };
+        break;
+      case "resume":
+      case "pause": next = { phase: "unsynced", cycle: {} }; break;
+      case "destroy": next = { phase: "destroyed" }; break;
+    }
+    this.#state = next;
+    if (event.type === "pause") {
+      this.#delivery.pause();
+      if (this.awareness) {
+        const remote = [...this.awareness.getStates().keys()].filter((c) => c !== this.doc.clientID);
+        if (remote.length) removeAwarenessStates(this.awareness, remote, this);
+      }
+    } else if (event.type === "destroy") {
+      this.doc.off("update", this.#onDocUpdate);
+      if (this.awareness && this.#onAwarenessUpdate) this.awareness.off("update", this.#onAwarenessUpdate);
+      this.#delivery.destroy();
+    }
+    return next;
   }
 
   #frameSyncStep1(): Uint8Array {

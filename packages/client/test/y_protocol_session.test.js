@@ -399,3 +399,54 @@ test("receive: an awareness payload with trailing bytes inside the blob is rejec
   awareness.destroy();
 });
 
+
+
+function step2Frame(peer) {
+  const e = encoding.createEncoder();
+  encoding.writeVarUint(e, MSG.Sync);
+  writeSyncStep2FromPeer(e, peer);
+  return encoding.toUint8Array(e);
+}
+
+test("destroy is terminal for sync, received frames, bootstrap updates, and sends", () => {
+  const { doc, eng, sent } = engine();
+  const peer = new Y.Doc();
+  eng.resume(); eng.receive(step2Frame(peer));
+  assert.equal(eng.synced, true);
+  eng.destroy();
+  const count = sent.length;
+  peer.getText("t").insert(0, "late");
+  eng.resume(); eng.pause(); eng.applyRemoteUpdate(Y.encodeStateAsUpdate(peer));
+  assert.equal(eng.receive(step2Frame(peer)), null);
+  assert.equal(eng.receive(syncStep1Frame(peer)), null);
+  assert.equal(doc.getText("t").toString(), "");
+  assert.equal(eng.synced, false);
+  assert.equal(sent.length, count);
+  doc.destroy(); peer.destroy();
+});
+
+for (const action of ["pause", "destroy"]) {
+  test(`${action} during the opening handshake cannot resume delivery afterwards`, () => {
+    const frames = [];
+    const { doc, eng } = engine({ send: (frame, id) => { frames.push({ frame, id }); eng[action](); } });
+    eng.resume();
+    doc.getText("t").insert(0, "offline");
+    assert.equal(frames.length, 1);
+    assert.equal(frames[0].id, undefined);
+    assert.equal(eng.synced, false);
+    eng.destroy(); doc.destroy();
+  });
+}
+
+test("a catch-up interrupted by a new handshake cannot sync that new cycle", () => {
+  const { doc, eng } = engine();
+  const peer = new Y.Doc();
+  peer.getText("t").insert(0, "remote");
+  eng.resume();
+  doc.once("update", () => { eng.pause(); eng.resume(); });
+  eng.receive(step2Frame(peer));
+  assert.equal(eng.synced, false);
+  eng.receive(step2Frame(peer));
+  assert.equal(eng.synced, true);
+  eng.destroy(); doc.destroy(); peer.destroy();
+});

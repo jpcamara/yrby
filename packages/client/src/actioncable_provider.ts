@@ -68,6 +68,20 @@ interface CableMessage {
   ack?: number;
 }
 
+type Opening = { phase: "subscribing" };
+type Connection = { opening: Opening; subscription: CableSubscription };
+type StopReason = "disconnect" | "reject" | "destroy";
+type ProviderState =
+  | { phase: "disconnected" | "destroyed" }
+  | Opening
+  | { phase: "connecting" | "connected"; connection: Connection }
+  | { phase: "stopping"; connection: Connection; reason: StopReason };
+type ProviderEvent =
+  | { type: "open" | "disconnect" | "destroy" }
+  | { type: "installed"; opening: Opening; subscription: CableSubscription }
+  | { type: "failed"; opening: Opening }
+  | { type: "connected" | "lost" | "rejected" | "stopped"; connection: Connection };
+
 export class ActionCableProvider {
   readonly doc: Doc;
   readonly consumer: CableConsumer;
@@ -75,11 +89,8 @@ export class ActionCableProvider {
   readonly channelParams: object;
   readonly awareness: Awareness;
   readonly session: YProtocolSession;
-  #subscription: CableSubscription | null = null;
+  #state: ProviderState = { phase: "disconnected" };
   #onError: (error: unknown, context: string) => void;
-  #connected = false; // transport up, per the cable's own callbacks
-  #generation = 0; // bumped whenever a subscription is retired, so its late callbacks go quiet
-  #destroyed = false;
   // The last event listeners saw. A refresh notifies only when something differs.
   #last: StatusEvent = { status: "disconnected", pending: false };
   #statusListeners = new Set<(event: StatusEvent) => void>();
@@ -156,7 +167,7 @@ export class ActionCableProvider {
 
   /** Current connection status. See {@link ProviderStatus}. */
   get status(): ProviderStatus {
-    return this.#last.status;
+    return this.#computeStatus();
   }
 
   /** Subscribe to status changes. Returns an unsubscribe function. */
@@ -166,95 +177,38 @@ export class ActionCableProvider {
   }
 
   connect(): void {
-    if (this.#destroyed) throw new Error("provider is destroyed");
-    if (this.#subscription) return;
-    const provider = this;
-    const generation = ++this.#generation;
-    let creating = true;
-    const current = () => generation === provider.#generation && !provider.#destroyed;
-    // A consumer may call back inside create(). Wait until the returned
-    // subscription is installed so the opening handshake has somewhere to send.
-    const run = (callback: () => void) => {
-      if (creating) queueMicrotask(() => { if (current()) callback(); });
-      else if (current()) callback();
+    const opening = this.#transition({ type: "open" });
+    if (!opening || opening.phase !== "subscribing") return;
+    const run = (callback: (connection: Connection) => void) => {
+      const invoke = () => {
+        const state = this.#state;
+        if ((state.phase === "connecting" || state.phase === "connected") && state.connection.opening === opening) {
+          callback(state.connection);
+        }
+      };
+      // Synchronous create callbacks wait for the subscription to be installed.
+      if (this.#state === opening) queueMicrotask(invoke);
+      else invoke();
     };
-    this.#subscription = this.consumer.subscriptions.create(
-      { channel: this.channelName, ...this.channelParams },
-      {
-        received(message: CableMessage) { run(() => {
-          // Reliable-delivery ack: confirm + prune the local queue.
-          if (message && message.ack !== undefined) {
-            provider.session.acknowledge(message.ack);
-            provider.#refreshStatus(); // the queue may have just emptied
-            return;
-          }
-          const awarenessPayload = message && message.awareness;
-          const payload = message && (awarenessPayload ?? message.update);
-          if (typeof payload !== "string") return;
-          // Guard base64 decode too: a malformed envelope must not throw into
-          // the cable callback (session.receive is itself defensive).
-          let frame: Uint8Array;
-          try {
-            frame = fromBase64(payload);
-          } catch (error) {
-            provider.#onError(error, "received");
-            return;
-          }
-          if (awarenessPayload !== undefined && frame[0] !== MessageType.Awareness) {
-            provider.#onError(new Error("awareness envelope carried a non-awareness frame"), "received");
-            return;
-          }
-          const reply = provider.session.receive(frame);
-          if (reply) provider.#send(reply, undefined); // e.g. SyncStep2 answering a SyncStep1
-          provider.#refreshStatus(); // a SyncStep2 may have just flipped us to "synced"
-        }); },
-        connected() { run(() => {
-          provider.#connected = true;
-          provider.session.resume(); // handshake + replay the unacked tail
-          provider.#refreshStatus();
-        }); },
-        disconnected() { run(() => {
-          provider.#connected = false;
-          provider.session.pause(); // keep the queue, forget peers' cursors
-          provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
-        }); },
-        rejected() { run(() => {
-          // The channel refused the subscription (auth, missing doc). Tear down
-          // first, then report: the handler may build a replacement, and it
-          // must not be the one we tear down. Left alone, the provider would
-          // sit at "connecting" forever, silently queueing edits.
-          provider.disconnect();
-          provider.#onError(new Error("subscription rejected by the server"), "rejected");
-        }); },
-      }
-    );
-    creating = false;
-    this.#watchPage();
-    this.#refreshStatus(); // -> "connecting"
+    let subscription: CableSubscription;
+    try {
+      subscription = this.consumer.subscriptions.create(
+        { channel: this.channelName, ...this.channelParams },
+        {
+          received: (message: CableMessage) => run(connection => this.#receive(message, connection)),
+          connected: () => run(connection => this.#transition({ type: "connected", connection })),
+          disconnected: () => run(connection => this.#transition({ type: "lost", connection })),
+          rejected: () => run(connection => this.#transition({ type: "rejected", connection })),
+        }
+      );
+    } catch (error) {
+      if (this.#transition({ type: "failed", opening })) throw error;
+      return;
+    }
+    this.#transition({ type: "installed", opening, subscription });
   }
 
-  disconnect(): void {
-    if (!this.#subscription) return;
-    const sub = this.#subscription;
-    // Silence the old subscription now, not when a replacement arrives: its
-    // unsubscribe is deferred below, so a frame still on the wire, or a late
-    // rejected/connected, must not reach the session or a replacement.
-    ++this.#generation;
-    // Tell peers we're gone while the transport is still live, then pause and
-    // detach. Defer the unsubscribe one microtask so the removal frame flushes
-    // before the channel tears down.
-    this.session.removeLocalAwareness();
-    this.session.pause();
-    this.#connected = false;
-    this.#subscription = null;
-    this.#unwatchPage();
-    // Universal teardown: both @rails/actioncable and @anycable/web subscriptions
-    // expose unsubscribe() (Rails' just calls consumer.subscriptions.remove(this)
-    // internally). @anycable has NO consumer.subscriptions.remove, so calling that
-    // would throw there.
-    queueMicrotask(() => sub.unsubscribe?.());
-    this.#refreshStatus(); // -> "disconnected"
-  }
+  disconnect(): void { this.#transition({ type: "disconnect" }); }
 
   /**
    * Resubscribe with updated channel params, such as a renewed grant. The
@@ -263,38 +217,139 @@ export class ActionCableProvider {
    * destroy().
    */
   renew(params: object): void {
-    if (this.#destroyed) return;
+    if (this.#state.phase === "destroyed" || (this.#state.phase === "stopping" && this.#state.reason === "destroy")) return;
     Object.assign(this.channelParams, params);
     this.disconnect();
     this.connect();
   }
 
-  destroy(): void {
-    if (this.#destroyed) return;
-    this.disconnect();
-    this.#destroyed = true;
-    this.session.destroy();
-    this.awareness.destroy(); // stops its reaper timer
-    this.doc.off("update", this.#onDocUpdate);
-    this.#statusListeners.clear();
+  destroy(): void { this.#transition({ type: "destroy" }); }
+
+  #transition(event: ProviderEvent): ProviderState | undefined {
+    const current = this.#state;
+    let next: ProviderState;
+    switch (event.type) {
+      case "open":
+        if (current.phase === "destroyed" || (current.phase === "stopping" && current.reason === "destroy")) {
+          throw new Error("provider is destroyed");
+        }
+        if (current.phase !== "disconnected") return;
+        next = { phase: "subscribing" };
+        break;
+      case "installed":
+        if (current !== event.opening) {
+          queueMicrotask(() => event.subscription.unsubscribe?.());
+          return;
+        }
+        next = { phase: "connecting", connection: { opening: event.opening, subscription: event.subscription } };
+        break;
+      case "failed":
+        if (current !== event.opening) return;
+        next = { phase: "disconnected" };
+        break;
+      case "connected":
+      case "lost":
+      case "rejected":
+        if (!(current.phase === "connecting" || current.phase === "connected") || current.connection !== event.connection) return;
+        if (event.type === "connected" && current.phase === "connected") return;
+        next = event.type === "rejected"
+          ? { phase: "stopping", connection: current.connection, reason: "reject" }
+          : { phase: event.type === "connected" ? "connected" : "connecting", connection: current.connection };
+        break;
+      case "disconnect":
+      case "destroy":
+        if (current.phase === "destroyed") return;
+        if (current.phase === "stopping") {
+          if (event.type !== "destroy" || current.reason === "destroy") return;
+          next = { ...current, reason: "destroy" };
+        } else if ("connection" in current) {
+          next = { phase: "stopping", connection: current.connection, reason: event.type };
+        } else {
+          if (event.type === "disconnect" && current.phase === "disconnected") return;
+          next = { phase: event.type === "destroy" ? "destroyed" : "disconnected" };
+        }
+        break;
+      case "stopped":
+        if (current.phase !== "stopping" || current.connection !== event.connection) return;
+        next = { phase: current.reason === "destroy" ? "destroyed" : "disconnected" };
+        break;
+    }
+    this.#state = next;
+    if (next.phase === "subscribing") return next;
+    if (next.phase === "stopping") {
+      if (current.phase === "stopping") return next; // destruction supersedes an in-progress disconnect
+      this.#unwatchPage();
+      // Retired callbacks are already silent, but the old subscription can
+      // still send the presence removal before its deferred unsubscribe.
+      this.session.removeLocalAwareness();
+      this.session.pause();
+      queueMicrotask(() => next.connection.subscription.unsubscribe?.());
+      this.#transition({ type: "stopped", connection: next.connection });
+      return next;
+    }
+    if (next.phase === "destroyed") {
+      this.session.destroy();
+      this.awareness.destroy();
+      this.doc.off("update", this.#onDocUpdate);
+    } else if (event.type === "installed") this.#watchPage();
+    else if (event.type === "connected") this.session.resume();
+    else if (event.type === "lost") this.session.pause();
+    else if (current.phase === "stopping" && current.reason === "reject") {
+      this.#onError(new Error("subscription rejected by the server"), "rejected");
+    }
+    this.#refreshStatus();
+    if (next.phase === "destroyed") this.#statusListeners.clear();
+    return next;
+  }
+
+  #receive(message: CableMessage, connection: Connection): void {
+    if (message && message.ack !== undefined) {
+      this.session.acknowledge(message.ack);
+      this.#refreshStatus();
+      return;
+    }
+    const awarenessPayload = message && message.awareness;
+    const payload = message && (awarenessPayload ?? message.update);
+    if (typeof payload !== "string") return;
+    let frame: Uint8Array;
+    try {
+      frame = fromBase64(payload);
+    } catch (error) {
+      this.#onError(error, "received");
+      return;
+    }
+    if (awarenessPayload !== undefined && frame[0] !== MessageType.Awareness) {
+      this.#onError(new Error("awareness envelope carried a non-awareness frame"), "received");
+      return;
+    }
+    const reply = this.session.receive(frame);
+    const state = this.#state;
+    if (reply && (state.phase === "connecting" || state.phase === "connected") && state.connection === connection) {
+      this.#send(reply, undefined);
+    }
+    this.#refreshStatus();
   }
 
   #computeStatus(): ProviderStatus {
-    if (!this.#subscription) return "disconnected";
-    if (!this.#connected) return "connecting";
-    return this.session.synced ? "synced" : "connected";
+    switch (this.#state.phase) {
+      case "subscribing":
+      case "connecting": return "connecting";
+      case "connected": return this.session.synced ? "synced" : "connected";
+      default: return "disconnected";
+    }
   }
 
   #refreshStatus(): void {
     const status = this.#computeStatus();
     const pending = this.hasPending;
     if (status === this.#last.status && pending === this.#last.pending) return;
-    this.#last = { status, pending };
+    const event = this.#last = { status, pending };
     if (status === "synced") this.#resolveSynced();
     // A listener that throws is an application bug, not a transport failure:
     // report it and keep going, so one bad listener cannot stop the others or
     // break the cable callback that triggered the refresh.
     for (const listener of this.#statusListeners) {
+      if (this.#last !== event) break; // a listener caused a newer transition
       try {
         listener({ status, pending });
       } catch (error) {
@@ -311,13 +366,14 @@ export class ActionCableProvider {
   #watchPage(): void {
     if (typeof window === "undefined" || this.#page) return;
     let stashed: Record<string, unknown> | null = null;
-    this.#page = {
-      hide: () => {
+    const page = this.#page = {
+      hide: (): void => {
+        if (this.#page !== page) return;
         stashed = this.awareness.getLocalState();
         this.session.removeLocalAwareness();
       },
-      show: (event) => {
-        if (!event.persisted || !stashed) return;
+      show: (event: PageTransitionEvent): void => {
+        if (this.#page !== page || !event.persisted || !stashed) return;
         if (this.awareness.getLocalState() === null) this.awareness.setLocalState(stashed);
         stashed = null;
       },
@@ -328,9 +384,10 @@ export class ActionCableProvider {
 
   #unwatchPage(): void {
     if (!this.#page || typeof window === "undefined") return;
-    window.removeEventListener("pagehide", this.#page.hide);
-    window.removeEventListener("pageshow", this.#page.show);
+    const page = this.#page;
     this.#page = null;
+    window.removeEventListener("pagehide", page.hide);
+    window.removeEventListener("pageshow", page.show);
   }
 
   // Send one raw protocol frame over the cable. Awareness frames are whispered
@@ -339,8 +396,10 @@ export class ActionCableProvider {
   // server can ack. A no-op while disconnected: reliable frames stay queued in
   // the session and flush on the next connect().
   #send(frame: Uint8Array, id: number | undefined): void {
-    const sub = this.#subscription;
-    if (!sub) return;
+    const state = this.#state;
+    if (!("connection" in state)) return;
+    if (state.phase === "stopping" && frame[0] !== MessageType.Awareness) return;
+    const sub = state.connection.subscription;
     const update = toBase64(frame);
     const isAwareness = frame[0] === MessageType.Awareness;
     // Route transport failures (sync throws, or @anycable/web's rejected
@@ -349,21 +408,26 @@ export class ActionCableProvider {
     // until acked, and awareness is best-effort anyway.
     try {
       if (isAwareness && typeof sub.whisper === "function") {
-        this.#observe(sub.whisper({ awareness: update }));
+        this.#observe(sub.whisper({ awareness: update }), state.connection);
         return;
       }
       const payload = id === undefined ? { update } : { update, id };
-      this.#observe(sub.send(payload));
+      this.#observe(sub.send(payload), state.connection);
     } catch (error) {
-      this.#onError(error, "send");
+      if ("connection" in this.#state && this.#state.connection === state.connection) this.#onError(error, "send");
     }
   }
 
   // Attach a rejection handler when a transport returns a promise, so failures
   // surface via onError instead of as unhandled rejections.
-  #observe(result: unknown): void {
+  #observe(result: unknown, connection: Connection): void {
     if (result instanceof Promise) {
-      result.catch((error) => this.#onError(error, "send"));
+      result.catch(error => {
+        const state = this.#state;
+        if ((state.phase === "connecting" || state.phase === "connected") && state.connection === connection) {
+          this.#onError(error, "send");
+        }
+      });
     }
   }
 }

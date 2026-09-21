@@ -78,17 +78,15 @@ export class DocumentSessionStore extends EventTarget {
 /** A caller's hold on a session. Release it when the caller is finished. */
 export class DocumentLease {
   #controller = new AbortController();
-  #released = false;
   constructor(readonly session: DocumentSession) {}
   /** Aborts when the lease ends, including when the session blocks or is discarded. */
   get signal(): AbortSignal { return this.#controller.signal; }
   setPresence(state: Record<string, unknown> | null): void {
-    if (!this.#released) this.session.provider.awareness.setLocalState(state);
+    if (!this.signal.aborted) this.session.provider.awareness.setLocalState(state);
   }
   /** Editor cleanup runs synchronously before the final pending-work check. */
   release(): void {
-    if (this.#released) return;
-    this.#released = true;
+    if (this.signal.aborted) return;
     this.#controller.abort();
     this.session.release(this);
   }
