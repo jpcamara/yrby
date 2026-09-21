@@ -77,9 +77,9 @@ export class ReliableSync {
     this.#clearInterval = clearTimer ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
   }
 
-  /** Unacknowledged local updates, oldest first. The queue changes only through enqueue and acknowledge. */
+  /** A snapshot of unacknowledged local updates, oldest first. Editing it does not change the queue. */
   get pending(): readonly Pending[] {
-    return this.#pending;
+    return this.#pending.map(({ seq, update }) => ({ seq, update: update.slice() }));
   }
 
   /** True while there are unacknowledged local updates. */
@@ -90,7 +90,7 @@ export class ReliableSync {
   /** Queue a local update and, while connected, send the tail. Ignored after destroy(). */
   enqueue(update: Uint8Array): void {
     if (this.#state.phase === "destroyed") return;
-    this.#pending.push({ seq: this.#nextSeq++, update });
+    this.#pending.push({ seq: this.#nextSeq++, update: new Uint8Array(update) });
     this.#tail = undefined;
     this.#transition("queueChanged");
     this.#flush();

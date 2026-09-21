@@ -126,8 +126,12 @@ export class ActionCableProvider {
     this.consumer = consumer;
     this.channelName = channelName;
     this.channelParams = channelParams;
-    this.awareness = new Awareness(doc);
-    this.#onError = opts.onError ?? ((error, context) => console.warn(`[yrby] ${context}:`, error));
+    const onError = opts.onError ?? ((error, context) => console.warn(`[yrby] ${context}:`, error));
+    this.#onError = (error, context) => {
+      try { onError(error, context); }
+      catch (callbackError) { console.warn("[yrby] onError callback failed:", callbackError, "while reporting:", error); }
+    };
+    this.awareness = new ProviderAwareness(doc, this.#onError);
 
     this.session = new YProtocolSession(doc, {
       awareness: this.awareness,
@@ -238,7 +242,7 @@ export class ActionCableProvider {
         break;
       case "installed":
         if (current !== event.opening) {
-          queueMicrotask(() => event.subscription.unsubscribe?.());
+          this.#unsubscribe(event.subscription);
           return;
         }
         next = { phase: "connecting", connection: { opening: event.opening, subscription: event.subscription } };
@@ -283,7 +287,7 @@ export class ActionCableProvider {
       // still send the presence removal before its deferred unsubscribe.
       this.session.removeLocalAwareness();
       this.session.pause();
-      queueMicrotask(() => next.connection.subscription.unsubscribe?.());
+      this.#unsubscribe(next.connection.subscription);
       this.#transition({ type: "stopped", connection: next.connection });
       return next;
     }
@@ -300,6 +304,13 @@ export class ActionCableProvider {
     this.#refreshStatus();
     if (next.phase === "destroyed") this.#statusListeners.clear();
     return next;
+  }
+
+  #unsubscribe(subscription: CableSubscription): void {
+    queueMicrotask(() => {
+      try { subscription.unsubscribe?.(); }
+      catch (error) { this.#onError(error, "unsubscribe"); }
+    });
   }
 
   #receive(message: CableMessage, connection: Connection): void {
@@ -429,5 +440,17 @@ export class ActionCableProvider {
         }
       });
     }
+  }
+}
+
+// Awareness emits application events during presence removal and destruction.
+// A listener failure must not interrupt those operations or leave its timer alive.
+class ProviderAwareness extends Awareness {
+  constructor(doc: Doc, private readonly onError: (error: unknown, context: string) => void) {
+    super(doc);
+  }
+  override emit(...args: Parameters<Awareness["emit"]>): void {
+    try { super.emit(...args); }
+    catch (error) { this.onError(error, `awareness:${args[0]}`); }
   }
 }

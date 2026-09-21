@@ -751,3 +751,95 @@ test("a retired page handler cannot restore presence into a replacement connecti
   oldShow({ persisted: true });
   assert.equal(p.awareness.getLocalState(), null);
 });
+
+
+for (const event of ["change", "update"]) {
+  test(`a throwing awareness ${event} listener cannot strand disconnect or queued delivery`, async t => {
+    const c = fakeConsumer(), errors = [], doc = new Y.Doc();
+    const p = makeProvider(t, doc, c, {}, { onError: (error, context) => errors.push({ error, context }) });
+    p.connect(); c.deliverConnected();
+    c.deliverReceived(syncStep2Envelope(new Y.Doc()));
+    doc.getText("t").insert(0, "pending");
+    const failure = new Error("presence cleanup failed");
+    const listener = () => { throw failure; };
+    p.awareness.on(event, listener);
+    t.after(() => {
+      p.awareness.off(event, listener);
+      p.session.destroy(); p.awareness.destroy(); doc.destroy();
+    });
+    assert.doesNotThrow(() => p.disconnect());
+    await Promise.resolve();
+    assert.equal(p.status, "disconnected");
+    assert.equal(p.synced, false);
+    assert.equal(p.hasPending, true);
+    assert.equal(c.calls.removed, 1);
+    assert.ok(errors.some(entry => entry.error === failure && entry.context === `awareness:${event}`));
+    p.connect(); c.deliverConnected();
+    assert.equal(c.calls.subscriptions.length, 2);
+    assert.equal(p.status, "connected");
+    const replay = c.calls.send.filter(message => message.id !== undefined).at(-1);
+    c.deliverReceived({ ack: replay.id });
+    assert.equal(p.hasPending, false);
+    p.destroy();
+    await Promise.resolve();
+    assert.equal(c.calls.removed, 2);
+  });
+}
+
+test("throwing awareness destroy listeners cannot leave owned timers or doc listeners alive", async t => {
+  const c = fakeConsumer(), errors = [], doc = new Y.Doc();
+  const p = makeProvider(t, doc, c, {}, { onError: (error, context) => errors.push({ error, context }) });
+  p.connect(); c.deliverConnected();
+  doc.getText("t").insert(0, "pending");
+  const failure = new Error("editor disposal failed");
+  const listener = () => { throw failure; };
+  p.awareness.on("destroy", listener);
+  t.after(() => {
+    p.awareness.off("destroy", listener);
+    p.session.destroy(); p.awareness.destroy(); doc.destroy();
+  });
+  const timer = p.awareness._checkInterval;
+  p.destroy();
+  await Promise.resolve();
+  assert.equal(p.status, "disconnected");
+  assert.equal(p.hasPending, false);
+  assert.equal(c.calls.removed, 1);
+  assert.equal(timer._destroyed, true, "Awareness's owned Node timer was canceled");
+  assert.ok(errors.some(entry => entry.error === failure && entry.context === "awareness:destroy"));
+  doc.getText("t").insert(0, "later");
+  assert.equal(p.hasPending, false);
+  assert.throws(() => p.connect(), /destroyed/);
+  assert.doesNotThrow(() => p.destroy());
+});
+
+test("a throwing onError callback cannot interrupt notifications, rejection, or reconnect", async t => {
+  const warnings = [];
+  t.mock.method(console, "warn", (...args) => warnings.push(args));
+  const c = fakeConsumer(), seen = [];
+  const p = makeProvider(t, new Y.Doc(), c, {}, { onError() { throw new Error("reporter failed"); } });
+  p.onStatusChange(() => { throw new Error("UI listener failed"); });
+  p.onStatusChange(({ status }) => seen.push(status));
+  p.connect(); c.deliverConnected();
+  c.deliverRejected();
+  await Promise.resolve();
+  assert.deepEqual(seen, ["connecting", "connected", "disconnected"]);
+  assert.equal(c.calls.removed, 1);
+  p.connect(); c.deliverConnected();
+  assert.equal(p.status, "connected");
+  assert.equal(c.calls.subscriptions.length, 2);
+  assert.ok(warnings.length >= 4, "reporter failures remain visible");
+  p.destroy();
+});
+
+test("a throwing unsubscribe is reported without interrupting a replacement connection", async t => {
+  const c = fakeConsumer(), errors = [];
+  const p = makeProvider(t, new Y.Doc(), c, {}, { onError: (error, context) => errors.push({ error, context }) });
+  p.connect(); c.deliverConnected();
+  const failure = new Error("transport teardown failed");
+  c.calls.subscriptions[0].unsubscribe = () => { throw failure; };
+  p.disconnect(); p.connect(); c.deliverConnected();
+  await Promise.resolve();
+  assert.equal(p.status, "connected");
+  assert.equal(c.calls.subscriptions.length, 2);
+  assert.deepEqual(errors, [{ error: failure, context: "unsubscribe" }]);
+});
