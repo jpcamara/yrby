@@ -75,6 +75,8 @@ cd packages/client
 npm ci
 npm test
 npm run test:browser
+npm run test:browser:turbolinks
+npm run test:browser:collaboration
 ```
 
 `npm ci` installs `agent-browser`. It also needs a Chrome to drive: run
@@ -86,6 +88,22 @@ Turbo navigation. It checks pending-edit recovery, shared views, retargeting,
 presence, async startup, encrypted and custom storage, subscribe-time
 authorization, and late callbacks from replaced subscriptions. It stops its
 server and browser sessions afterward. Logs and a screenshot go under `tmp/`.
+
+The collaboration suite runs four independent Chrome sessions for each pairing
+of Turbo/Turbolinks and the ActionCable/AnyCable JavaScript consumers. All use the
+fixture's real Rails ActionCable endpoint. Actual keyboard input continues during
+page visits, delayed acknowledgments, two-client outages, history restores, and
+held cached previews. It checks exact character counts, editor/server convergence,
+fresh-client recovery, binding lifetimes, and cleanup after awareness callbacks
+throw. The fixture applies incremental textarea edits so typing preserves other
+users' character identities.
+
+`FRAMEWORK=turbo` or `FRAMEWORK=turbolinks` selects a framework;
+`CONSUMER=actioncable` or `CONSUMER=anycable` selects a consumer. Its port range
+starts at `PORT` (default 3793). The combinations run sequentially; each uses four
+browser sessions plus a fresh reader. JSON evidence, server logs, and screenshots
+are saved under `tmp/browser-collaboration/<run>/<framework-consumer>/` and uploaded
+by CI. Run browser suites sequentially so their browser daemons do not interfere.
 
 The fixture is local-only. It has no authentication beyond the grants being
 tested. Do not deploy it.

@@ -1,5 +1,6 @@
 // Editor bindings for the fixture page, shared by the Turbo and Turbolinks entries.
 import { YrbyDocumentElement } from "../src/document_element.ts";
+import { simpleDiffString } from "lib0/diff";
 window.anyCableConsumer = async () => (await import("@anycable/web")).createConsumer("/cable");
 window.YrbyDocumentElement = YrbyDocumentElement;
 window.browserEvents = [];
@@ -21,10 +22,14 @@ document.addEventListener("yrby:synced", ({ target: el, detail: { doc, signal, l
   const update = () => { input.value = text.toString(); };
   update();
   input.disabled = false;
-  input.addEventListener("input", () => doc.transact(() => {
-    text.delete(0, text.length);
-    text.insert(0, input.value);
-  }), { signal });
+  input.addEventListener("input", () => {
+    // Replace only the edited range so concurrent character identities survive.
+    const diff = simpleDiffString(text.toString(), input.value);
+    doc.transact(() => {
+      text.delete(diff.index, diff.remove);
+      text.insert(diff.index, diff.insert);
+    });
+  }, { signal });
   text.observe(update);
   const presence = () => lease.setPresence({ user: { name: "Browser reviewer" } });
   input.addEventListener("focus", presence, { signal });
