@@ -7,7 +7,7 @@ import { fakeConsumer, sync, tick } from "./session_helpers.js";
 
 function setup(t, attributes = { grant: "g", name: "body" }, consumer = fakeConsumer(), document = new EventTarget()) {
   const el = new YrbyDocumentElement();
-  let connected = true;
+  let connected = false;
   el.ownerDocument = document;
   Object.defineProperty(el, "isConnected", { get: () => connected });
   el.getAttribute = name => attributes[name] ?? null;
@@ -204,4 +204,87 @@ test("the refresh attribute reaches the session and changing it does not rebind"
   await tick();
   assert.equal(signal.aborted, false);
   assert.equal(el.session, session);
+});
+
+
+test("activation cannot acquire a document before DOM connection or after removal", async t => {
+  const { el, consumer, mount, remove } = setup(t);
+  el.activate(); await tick();
+  assert.equal(consumer.created.length, 0);
+  assert.equal(el.doc, undefined);
+  await mount();
+  assert.equal(consumer.created.length, 1);
+  remove(); await tick();
+  el.activate(); await tick();
+  assert.equal(consumer.created.length, 1);
+  assert.equal(el.doc, undefined);
+});
+
+test("a consumer resolving just before removal cannot subscribe from a queued continuation", async t => {
+  const consumer = fakeConsumer();
+  let provide;
+  const { el, mount, remove } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
+  await mount();
+  provide(consumer); // queues attach's continuation before deferred DOM cleanup
+  remove();
+  await tick();
+  assert.equal(consumer.created.length, 0);
+  assert.equal(el.doc, undefined);
+});
+
+test("sync completing just before removal cannot announce an abandoned editor", async t => {
+  const { el, consumer, mount, remove } = setup(t);
+  await mount();
+  let ready = false;
+  el.whenSynced.then(() => { ready = true; });
+  sync(consumer.created[0]);
+  remove();
+  await tick();
+  assert.equal(ready, false);
+  assert.equal(el.events.length, 0);
+  assert.equal(el.doc, undefined);
+});
+
+for (const field of ["grant", "name", "channel"]) {
+  test(`retargeting ${field} during a same-turn DOM move preserves the original queue but replaces the binding`, async t => {
+    const { el, consumer, mount, remove, change } = setup(t);
+    await mount(); sync(consumer.created[0], "original"); await el.whenSynced;
+    const session = el.session, signal = el.events[0].detail.signal;
+    session.doc.getText("content").insert(0, "pending ");
+    remove();
+    change(field, "other");
+    await mount();
+    assert.equal(signal.aborted, true);
+    assert.notEqual(el.session, session);
+    assert.equal(el.session.descriptor[field], "other");
+    assert.equal(session.hasPending, true);
+    assert.equal(session.doc.getText("content").toString(), "pending original");
+    assert.equal(el.doc.getText("content").toString(), "");
+  });
+}
+
+
+test("canceled consumer readiness stays abandoned after a later successful mount", async t => {
+  const consumer = fakeConsumer();
+  let provide;
+  const { el, mount, remove } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
+  let abandonedReady = false;
+  el.whenSynced.then(() => { abandonedReady = true; });
+  await mount();
+  provide(consumer);
+  remove();
+  await tick();
+  await mount();
+  sync(consumer.created.at(-1)); await el.whenSynced;
+  assert.equal(abandonedReady, false);
+  assert.equal(el.events.length, 1);
+});
+
+test("an inactive element preserves its initial readiness until its first lease", async t => {
+  const { el, consumer, mount } = setup(t);
+  const ready = el.whenSynced;
+  el.activate(); el.deactivate(); await tick();
+  assert.equal(el.whenSynced, ready);
+  await mount(); sync(consumer.created[0]); await ready;
+  assert.equal(el.events.length, 1);
 });
