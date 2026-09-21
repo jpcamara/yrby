@@ -288,3 +288,71 @@ test("an inactive element preserves its initial readiness until its first lease"
   await mount(); sync(consumer.created[0]); await ready;
   assert.equal(el.events.length, 1);
 });
+
+
+test("a queued retarget cannot reactivate an element suspended for caching", async t => {
+  const { el, consumer, mount, change } = setup(t);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  change("name", "other");
+  el.deactivate();
+  await tick();
+  assert.equal(el.doc, undefined);
+  assert.equal(el.inert, true);
+  assert.equal(consumer.created.length, 1);
+  el.activate(); await tick();
+  assert.equal(consumer.created.at(-1).params.name, "other");
+});
+
+test("retargeting inside acquisition cannot install a lease for the previous descriptor", async t => {
+  const { el, consumer, mount, change } = setup(t);
+  const store = DocumentSessionStore.for(consumer);
+  store.addEventListener("change", () => { change("name", "replacement"); }, { once: true });
+  await mount();
+  assert.equal(el.session.descriptor.name, "replacement");
+  assert.equal(store.sessions.length, 1);
+  assert.equal(store.sessions[0], el.session);
+  sync(consumer.created.at(-1)); await el.whenSynced;
+  assert.equal(el.events.length, 1);
+  assert.equal(el.events[0].detail.session.descriptor.name, "replacement");
+});
+
+for (const action of ["deactivate", "discard"]) {
+  test(`${action} inside acquisition cannot leave an abandoned lease installed`, async t => {
+    const { el, consumer, mount } = setup(t);
+    const store = DocumentSessionStore.for(consumer);
+    let abandonedReady = false;
+    el.whenSynced.then(() => { abandonedReady = true; });
+    store.addEventListener("change", event => {
+      if (action === "deactivate") el.deactivate();
+      else event.detail.discard();
+    }, { once: true });
+    await mount();
+    assert.equal(el.session, undefined);
+    assert.equal(el.doc, undefined);
+    assert.equal(el.inert, true);
+    assert.equal(el.events.length, 0);
+    assert.equal(store.sessions.length, 0);
+    el.activate(); await tick();
+    sync(consumer.created.at(-1)); await el.whenSynced;
+    assert.equal(el.events.length, 1);
+    assert.equal(abandonedReady, false);
+  });
+}
+
+test("a failed consumer attempt cannot resolve its abandoned readiness on a later activation", async t => {
+  let fail;
+  const { el, mount } = setup(t, undefined, new Promise((_, reject) => { fail = reject; }));
+  let abandonedReady = false;
+  el.whenSynced.then(() => { abandonedReady = true; });
+  await mount();
+  const error = new Error("unavailable");
+  fail(error); await tick();
+  assert.equal(el.events[0].type, "yrby:error");
+  assert.equal(el.events[0].detail.error, error);
+  const consumer = fakeConsumer();
+  YrbyDocumentElement.consumer = consumer;
+  el.activate(); await tick();
+  sync(consumer.created[0]); await el.whenSynced;
+  assert.equal(el.events[1].type, "yrby:synced");
+  assert.equal(abandonedReady, false);
+});

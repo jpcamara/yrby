@@ -21,10 +21,19 @@ export type ResolvedDescriptor = Readonly<{ channel: string; grant: string; name
 // "open" is the normal state, with or without editors attached; see hasPending
 // for whether anything is still being delivered.
 export type DocumentSessionState = "open" | "blocked" | "closed";
-// One grant refresh per rejection. "fetching" while the request is in flight,
-// "spent" once it was used, back to "idle" when the transport comes up again,
-// so a renewed grant that is rejected in turn blocks instead of looping.
-type Renewal = "idle" | "fetching" | "spent";
+// Refreshing and renewed are open substates: editors and queued work survive.
+// "renewed" waits for the transport to accept the new grant before another
+// refresh is allowed. Blocked and closed cannot have a renewal in progress.
+type SessionPhase = "open" | "refreshing" | "renewed" | "blocked" | "closed";
+type SessionEvent = "refresh" | "renew" | "accept" | "block" | "retry" | "close";
+type SessionLifecycle = Readonly<{ phase: SessionPhase }>;
+const TRANSITIONS: Record<SessionPhase, Partial<Record<SessionEvent, SessionPhase>>> = {
+  open:       { refresh: "refreshing", block: "blocked", close: "closed" },
+  refreshing: { renew: "renewed",      block: "blocked", close: "closed" },
+  renewed:    { accept: "open",        block: "blocked", close: "closed" },
+  blocked:    { retry: "open",                          close: "closed" },
+  closed:     {},
+};
 // A refresh request that never answers would leave the session offline with
 // its editors attached and no way forward. After this long it blocks instead.
 const REFRESH_TIMEOUT_MS = 15_000;
@@ -88,8 +97,7 @@ export class DocumentLease {
 export class DocumentSession {
   readonly doc = new Y.Doc();
   readonly provider: ActionCableProvider;
-  #phase: DocumentSessionState = "open";
-  #renewal: Renewal = "idle";
+  #lifecycle: SessionLifecycle = { phase: "open" };
   #leases = new Set<DocumentLease>();
   #error: unknown;
 
@@ -115,14 +123,17 @@ export class DocumentSession {
     this.provider.awareness.setLocalState(null); // no cursor until an editor sets one
     this.provider.onStatusChange(({ status }) => {
       const up = status === "connected" || status === "synced";
-      if (up && this.#renewal === "spent") this.#renewal = "idle";
+      if (up) this.#transition("accept");
       this.#settle(); // also fires when the pending queue empties
     });
   }
   get error(): unknown { return this.#error; }
   get hasPending(): boolean { return this.provider.hasPending; }
   get whenSynced(): Promise<void> { return this.provider.whenSynced; }
-  get state(): DocumentSessionState { return this.#phase; }
+  get state(): DocumentSessionState {
+    const { phase } = this.#lifecycle;
+    return phase === "refreshing" || phase === "renewed" ? "open" : phase;
+  }
 
   /** @internal */
   attach(): DocumentLease {
@@ -140,88 +151,81 @@ export class DocumentSession {
   }
   /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
   retry(): void {
-    if (this.#phase !== "blocked") return;
-    this.#phase = "open";
-    this.#error = undefined;
-    this.#renewal = "idle";
+    if (!this.#transition("retry")) return;
     this.#connect();
     this.#settle();
   }
   /** Explicit application decision; ordinary detach never discards pending work. */
-  discard(): void {
-    this.#end("closed");
-  }
+  discard(): void { this.#transition("close"); }
 
-  // The only place the phase changes after construction, and the two ways an
-  // open session stops: blocked keeps the work in the queue for retry(),
-  // closed throws it away. Both end every lease first, because an editor's
-  // teardown can flush one last edit, and both notify exactly once.
-  #end(phase: "blocked" | "closed", error?: unknown): void {
-    if (this.#phase === phase || this.#phase === "closed") return;
-    if (phase === "blocked" && this.#phase !== "open") return;
-    this.#phase = phase;
-    if (error !== undefined) this.#error = error;
-    for (const lease of this.#leases) lease.release();
-    if (phase === "blocked") this.provider.disconnect();
-    else this.#dispose();
-    this.store.changed(this);
+  #transition(event: SessionEvent, error?: unknown): SessionLifecycle | undefined {
+    const phase = TRANSITIONS[this.#lifecycle.phase][event];
+    if (!phase) return;
+    const next = this.#lifecycle = { phase };
+    if (event === "retry") this.#error = undefined;
+    if (phase === "blocked" || phase === "closed") {
+      if (error !== undefined) this.#error = error;
+      // Retire the old connection before abort handlers can retry. Remove a
+      // closed session before those handlers can acquire its replacement.
+      if (phase === "blocked") this.provider.disconnect();
+      else this.remove();
+      for (const lease of [...this.#leases]) lease.release();
+      if (phase === "closed") {
+        this.provider.destroy();
+        this.doc.destroy();
+      }
+      // An abort handler may already have retried or discarded this session.
+      if (this.#lifecycle === next) this.store.changed(this);
+    }
+    return next;
   }
 
   #connect(): void {
-    if (this.#phase !== "open") return;
+    // Acquiring another lease during a refresh must not retry the old grant.
+    const { phase } = this.#lifecycle;
+    if (phase !== "open" && phase !== "renewed") return;
     try {
       this.provider.connect();
     } catch (error) {
-      this.#block(error);
+      this.#transition("block", error);
     }
   }
-  // The server refused the subscription. With a refresh URL and no renewal
-  // since the transport last came up, ask for a new grant and resubscribe
-  // with it. Otherwise, or if that fails, block.
   #rejected(error: unknown): void {
     const refresh = this.descriptor.refresh;
-    if (!refresh || this.#renewal !== "idle") { this.#block(error); return; }
-    this.#renewal = "fetching";
-    void this.#renew(refresh);
+    if (!refresh) { this.#transition("block", error); return; }
+    const attempt = this.#transition("refresh");
+    if (!attempt) { this.#transition("block", error); return; }
+    void this.#renew(refresh, attempt);
   }
-  async #renew(refresh: string): Promise<void> {
+  async #renew(refresh: string, attempt: SessionLifecycle): Promise<void> {
     let grant: string;
     try {
       grant = await fetchGrant(refresh);
     } catch (error) {
-      this.#renewal = "spent";
-      this.#block(error);
+      if (this.#lifecycle === attempt) this.#transition("block", error);
       return;
     }
-    this.#renewal = "spent";
-    if (this.#phase !== "open") return; // blocked or discarded during the fetch
+    // Completion belongs to this exact refresh, even if a later retry is open.
+    if (this.#lifecycle !== attempt) return;
+    this.#transition("renew");
     try {
       this.provider.renew({ grant });
     } catch (error) {
-      this.#block(error); // the consumer refused to create the subscription
+      this.#transition("block", error);
       return;
     }
     this.store.changed(this);
-  }
-  #block(error: unknown): void {
-    this.#end("blocked", error);
   }
   // Close once nothing needs the session: no leases and nothing unacknowledged.
   // Only an open session has anything to report; blocked and closed announce
-  // themselves through #end.
+  // themselves through #transition.
   #settle(): void {
-    if (this.#phase !== "open") return;
+    if (this.state !== "open") return;
     if (!this.#leases.size && !this.provider.hasPending) {
-      this.#end("closed");
+      this.#transition("close");
       return;
     }
     this.store.changed(this);
-  }
-  // Teardown only; #end does the notifying.
-  #dispose(): void {
-    this.remove();
-    this.provider.destroy();
-    this.doc.destroy();
   }
 }
 

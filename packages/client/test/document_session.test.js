@@ -304,3 +304,106 @@ test("the phase transitions are the only ones allowed, and each notifies once", 
   assert.equal(session.state, "closed");
   assert.equal(seen.length, afterClose, "a closed session stays quiet");
 });
+
+
+test("a new lease waits for the in-flight refresh instead of subscribing with the rejected grant", async t => {
+  const { consumer, store } = setup(t);
+  let respond;
+  const calls = stubFetch(t, () => new Promise(resolve => { respond = resolve; }));
+  const first = store.acquire(refreshing);
+  consumer.created[0].handlers.rejected();
+  const second = store.acquire(refreshing);
+  assert.equal(second.session, first.session);
+  assert.equal(second.session.state, "open");
+  assert.equal(consumer.created.length, 1);
+  respond(jsonResponse({ grant: "renewed" }));
+  await tick(); await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(consumer.created.length, 2);
+  assert.equal(consumer.created[1].params.grant, "renewed");
+  assert.equal(first.signal.aborted, false);
+  assert.equal(second.signal.aborted, false);
+});
+
+for (const outcome of ["success", "failure"]) {
+  test(`a stale refresh ${outcome} cannot change a session that has blocked and retried`, async t => {
+    const { consumer, store } = setup(t);
+    let respond, fail;
+    stubFetch(t, () => new Promise((resolve, reject) => { respond = resolve; fail = reject; }));
+    const lease = store.acquire(refreshing), session = lease.session;
+    sync(consumer.created[0]);
+    session.doc.getText("content").insert(0, "keep me");
+    consumer.created[0].handlers.rejected();
+    // The provider is public: an application can reconnect before refresh ends.
+    session.provider.connect();
+    consumer.created.at(-1).handlers.rejected();
+    assert.equal(session.state, "blocked");
+    session.retry();
+    const retry = consumer.created.at(-1);
+    const subscriptions = consumer.created.length;
+    if (outcome === "success") respond(jsonResponse({ grant: "stale" }));
+    else fail(new Error("stale failure"));
+    await tick(); await tick();
+    assert.equal(session.state, "open");
+    assert.equal(session.error, undefined);
+    assert.equal(session.hasPending, true);
+    assert.equal(consumer.created.length, subscriptions);
+    assert.equal(retry.removed, false);
+    assert.equal(session.provider.channelParams.grant, "g");
+  });
+}
+
+test("retrying and acquiring from an abort handler preserves the replacement connection and lease", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  sync(consumer.created[0]);
+  session.doc.getText("content").insert(0, "keep me");
+  let replacement;
+  lease.signal.addEventListener("abort", () => {
+    session.retry();
+    replacement = store.acquire(descriptor);
+  });
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(session.state, "open");
+  assert.equal(session.provider.status, "connecting");
+  assert.equal(consumer.created.length, 2);
+  assert.equal(consumer.created[1].removed, false);
+  assert.equal(replacement.session, session);
+  assert.equal(replacement.signal.aborted, false);
+  sync(consumer.created[1]);
+  ack(consumer.created[1]);
+  assert.equal(session.hasPending, false);
+  assert.equal(session.state, "open");
+});
+
+test("acquiring from a closing session's abort handler creates a live replacement", t => {
+  const { store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  let replacement;
+  lease.signal.addEventListener("abort", () => { replacement = store.acquire(descriptor); });
+  session.discard();
+  assert.equal(session.state, "closed");
+  assert.notEqual(replacement.session, session);
+  assert.equal(replacement.session.state, "open");
+  assert.equal(replacement.signal.aborted, false);
+  assert.equal(replacement.session.doc.isDestroyed, false);
+  assert.deepEqual(store.sessions, [replacement.session]);
+});
+
+
+test("a renewed grant can reconnect before its first acceptance without refreshing again", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const first = store.acquire(refreshing);
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  first.session.provider.disconnect();
+  const second = store.acquire(refreshing);
+  assert.equal(second.session, first.session);
+  assert.equal(consumer.created.length, 3);
+  assert.equal(consumer.created.at(-1).params.grant, "renewed");
+  consumer.created.at(-1).handlers.rejected();
+  assert.equal(second.session.state, "blocked");
+  assert.equal(calls.length, 1);
+});
