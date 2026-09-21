@@ -280,6 +280,11 @@ Pass `onError(error, context)` (on either `ActionCableProvider` or
 is decoded defensively, dropped, and reported here rather than thrown into your
 transport callback. Defaults to a `console.warn`.
 
+The provider also reports failures from status listeners, awareness events, and
+unsubscribe through `onError`. Awareness event failures do not interrupt presence
+removal or destruction. If the error handler itself throws, the provider logs
+that failure and continues.
+
 ## ReliableSync (standalone)
 
 ```js
@@ -298,6 +303,9 @@ rs.pause();           // dropped: keep the queue, stop retransmitting
 ```
 
 Pending updates are retained and replayed until the server acknowledges them.
+`enqueue` copies the supplied bytes, so the caller may reuse its input buffer.
+`pending` returns a snapshot, including copies of each update's bytes; sorting or
+editing that snapshot cannot change delivery.
 Document delivery stays queued and ack-tracked for the lifetime of the session.
 
 ## How it fits

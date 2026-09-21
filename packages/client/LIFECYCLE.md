@@ -55,6 +55,11 @@ Its reason records whether to disconnect, report rejection, or finish destructio
 a destroy request during cleanup supersedes disconnection. Unsubscribe is deferred
 one microtask so the removal frame can flush. Destroyed is terminal.
 
+The provider's awareness instance catches application event failures so presence
+removal and destruction can finish, including cancellation of its reaper timer.
+Failures go through `onError`; a throwing error handler falls back to console
+reporting. Deferred unsubscribe failures are reported through the same boundary.
+
 Provider status is a projection of the provider and protocol states. `#last` is
 only a notification cache. If a listener causes a newer transition, the older
 notification stops rather than delivering stale status to the remaining listeners.
@@ -72,7 +77,9 @@ sending owns its retransmission timer. Queue changes select idle or sending.
 Leaving sending cancels that timer. Its callback checks the sending-state identity,
 so a queued tick cannot retransmit a later queue. Timer ownership is established
 before sending: a synchronous acknowledgment or pause can clean it up immediately.
-Destroy clears the queue and is terminal.
+Destroy clears the queue and is terminal. Enqueue copies the caller's bytes;
+inspection through `pending` returns a copy of the queue and each update, so
+ordinary array operations or buffer reuse cannot mutate delivery state.
 
 **Adapter and leases.** Only an active adapter may schedule reconciliation. It
 leaves the per-document registry before invoking teardown callbacks, so those

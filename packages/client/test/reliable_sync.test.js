@@ -274,3 +274,33 @@ test("a failed timer installation can be retried without losing pending work", (
   h.rs.destroy();
   assert.equal(active, false);
 });
+
+
+test("pending is a snapshot that can be sorted and edited without changing delivery", () => {
+  const h = harness();
+  h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
+  const pending = h.rs.pending;
+  pending.reverse();
+  pending[0].seq = 99;
+  pending[0].update.fill(99);
+  pending.pop();
+  assert.deepEqual(h.rs.pending, [{ seq: 1, update: u(1) }, { seq: 2, update: u(2) }]);
+  h.rs.resume();
+  assert.deepEqual(h.mergeCalls[0], [u(1), u(2)]);
+  assert.equal(h.sent[0].id, 2);
+  assert.equal(h.hasTimer(), true);
+  h.rs.acknowledge(2);
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+});
+
+test("enqueue retains its own bytes when the caller reuses an input buffer", () => {
+  for (const buffer of [u(7), Buffer.from([7])]) {
+    const h = harness();
+    h.rs.enqueue(buffer);
+    buffer.fill(9);
+    h.rs.resume();
+    assert.deepEqual(h.sent[0], { update: u(7), id: 1 });
+    h.rs.destroy();
+  }
+});
