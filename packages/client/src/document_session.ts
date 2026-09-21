@@ -149,10 +149,22 @@ export class DocumentSession {
   }
   /** Explicit application decision; ordinary detach never discards pending work. */
   discard(): void {
-    if (this.#phase === "closed") return;
-    this.#phase = "closed";
+    this.#end("closed");
+  }
+
+  // The only place the phase changes after construction, and the two ways an
+  // open session stops: blocked keeps the work in the queue for retry(),
+  // closed throws it away. Both end every lease first, because an editor's
+  // teardown can flush one last edit, and both notify exactly once.
+  #end(phase: "blocked" | "closed", error?: unknown): void {
+    if (this.#phase === phase || this.#phase === "closed") return;
+    if (phase === "blocked" && this.#phase !== "open") return;
+    this.#phase = phase;
+    if (error !== undefined) this.#error = error;
     for (const lease of this.#leases) lease.release();
-    this.#dispose();
+    if (phase === "blocked") this.provider.disconnect();
+    else this.#dispose();
+    this.store.changed(this);
   }
 
   #connect(): void {
@@ -192,30 +204,24 @@ export class DocumentSession {
     this.store.changed(this);
   }
   #block(error: unknown): void {
-    if (this.#phase !== "open") return;
-    this.#phase = "blocked";
-    this.#error = error;
-    // Editors detach; a final flush from their teardown lands in the queue,
-    // which the provider keeps until retry() or discard().
-    for (const lease of this.#leases) lease.release();
-    this.provider.disconnect();
-    this.store.changed(this);
+    this.#end("blocked", error);
   }
-  // Close once nothing needs the session: no editors and nothing unacknowledged.
+  // Close once nothing needs the session: no leases and nothing unacknowledged.
+  // Only an open session has anything to report; blocked and closed announce
+  // themselves through #end.
   #settle(): void {
-    if (this.#phase === "closed") return;
-    if (this.#phase === "open" && !this.#leases.size && !this.provider.hasPending) {
-      this.#phase = "closed";
-      this.#dispose();
+    if (this.#phase !== "open") return;
+    if (!this.#leases.size && !this.provider.hasPending) {
+      this.#end("closed");
       return;
     }
     this.store.changed(this);
   }
+  // Teardown only; #end does the notifying.
   #dispose(): void {
     this.remove();
     this.provider.destroy();
     this.doc.destroy();
-    this.store.changed(this);
   }
 }
 

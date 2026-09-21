@@ -268,3 +268,39 @@ test("a consumer that throws while resubscribing with a renewed grant blocks the
   assert.match(String(session.error), /socket gone/);
   assert.equal(lease.signal.aborted, true);
 });
+
+test("the phase transitions are the only ones allowed, and each notifies once", async t => {
+  const { consumer, store } = setup(t);
+  const seen = [];
+  store.addEventListener("change", event => seen.push(event.detail.state));
+  const lease = store.acquire(descriptor), session = lease.session;
+  sync(consumer.created[0]);
+  session.doc.getText("content").insert(0, "work");
+
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(session.state, "blocked");
+  const afterBlock = seen.length;
+  assert.equal(seen.at(-1), "blocked");
+  assert.equal(seen.filter(s => s === "blocked").length, 1, "blocking notified once");
+
+  // Already blocked: a second failure changes nothing and says nothing.
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(session.state, "blocked");
+  assert.equal(seen.length, afterBlock, "no event for a repeated block");
+  assert.equal(session.hasPending, true, "the queue is untouched");
+
+  // blocked -> closed is legal, and the work goes with it.
+  session.discard();
+  assert.equal(session.state, "closed");
+  assert.equal(seen.at(-1), "closed");
+  assert.equal(store.sessions.length, 0);
+
+  // closed is terminal: nothing reopens or re-ends it.
+  const afterClose = seen.length;
+  session.discard();
+  session.retry();
+  assert.equal(session.state, "closed");
+  assert.equal(seen.length, afterClose, "a closed session stays quiet");
+});
