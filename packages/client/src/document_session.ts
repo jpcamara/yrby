@@ -38,6 +38,8 @@ const TRANSITIONS: Record<SessionPhase, Partial<Record<SessionEvent, SessionPhas
 // its editors attached and no way forward. After this long it blocks instead.
 const REFRESH_TIMEOUT_MS = 15_000;
 const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
+// Only the store acquires leases; this symbol is not exported.
+const attachLease = Symbol("attachLease");
 
 /** The sessions of one consumer. Emits "change" with the session in `detail`. */
 export class DocumentSessionStore extends EventTarget {
@@ -67,7 +69,7 @@ export class DocumentSessionStore extends EventTarget {
       session = new DocumentSession(this, descriptor, () => { this.#sessions.delete(key); });
       this.#sessions.set(key, session);
     }
-    return session.attach();
+    return session[attachLease]();
   }
   /** @internal */
   changed(session: DocumentSession): void {
@@ -78,7 +80,10 @@ export class DocumentSessionStore extends EventTarget {
 /** A caller's hold on a session. Release it when the caller is finished. */
 export class DocumentLease {
   #controller = new AbortController();
-  constructor(readonly session: DocumentSession) {}
+  #onRelease: () => void;
+  constructor(readonly session: DocumentSession, onRelease: () => void) {
+    this.#onRelease = onRelease;
+  }
   /** Aborts when the lease ends, including when the session blocks or is discarded. */
   get signal(): AbortSignal { return this.#controller.signal; }
   setPresence(state: Record<string, unknown> | null): void {
@@ -88,7 +93,7 @@ export class DocumentLease {
   release(): void {
     if (this.signal.aborted) return;
     this.#controller.abort();
-    this.session.release(this);
+    this.#onRelease();
   }
 }
 
@@ -133,16 +138,15 @@ export class DocumentSession {
     return phase === "refreshing" || phase === "renewed" ? "open" : phase;
   }
 
-  /** @internal */
-  attach(): DocumentLease {
-    const lease = new DocumentLease(this);
+  [attachLease](): DocumentLease {
+    if (this.#lifecycle.phase === "closed") throw new Error("Cannot acquire a closed document session");
+    const lease = new DocumentLease(this, () => this.#release(lease));
     this.#leases.add(lease);
     this.#connect();
     this.store.changed(this);
     return lease;
   }
-  /** @internal */
-  release(lease: DocumentLease): void {
+  #release(lease: DocumentLease): void {
     this.#leases.delete(lease);
     if (!this.#leases.size) this.provider.awareness.setLocalState(null);
     this.#settle();
