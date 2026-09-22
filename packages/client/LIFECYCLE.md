@@ -38,7 +38,9 @@ owned by the session. Retrying reconnects that session; discarding destroys it.
 The transition table prevents another refresh until a renewed grant is accepted.
 A pending refresh captures its originating state object. After block, retry, or
 close, that response cannot change the session. Closing removes the session from
-the store before editor cleanup can acquire a replacement.
+the store before editor cleanup can acquire a replacement. Applications acquire
+through `store.acquire()` and release through `lease.release()`; session bookkeeping
+is internal. A closed session rejects new leases.
 
 **Elements.** Only syncing and ready states contain a lease. Inactive waits for
 the adapter; idle is already activated and may bind after descriptor changes

@@ -11,6 +11,38 @@ function setup(t) {
   return { consumer, store };
 }
 
+test("sessions expose no direct lease acquisition or release methods", t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  sync(consumer.created[0]);
+  assert.equal(session.attach, undefined);
+  assert.equal(session.release, undefined);
+  let cleanups = 0;
+  lease.signal.addEventListener("abort", () => { cleanups++; });
+  lease.release();
+  lease.release();
+  assert.equal(cleanups, 1);
+  assert.equal(lease.signal.aborted, true);
+  assert.equal(session.state, "closed");
+  assert.equal(session.doc.isDestroyed, true);
+  assert.equal(session.attach, undefined);
+});
+
+test("even a retained internal acquisition method cannot attach to a closed session", t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  // Deliberately reflect on the internal operation to exercise its terminal-state guard.
+  const key = Object.getOwnPropertySymbols(Object.getPrototypeOf(session)).find(key => key.description === "attachLease");
+  const acquire = session[key].bind(session);
+  session.discard();
+  assert.throws(acquire, /Cannot acquire a closed document session/);
+  assert.equal(session.state, "closed");
+  assert.equal(session.doc.isDestroyed, true);
+  assert.equal(lease.signal.aborted, true);
+  assert.equal(consumer.created.length, 1);
+  assert.deepEqual(store.sessions, []);
+});
+
 test("matching leases share one document and queue; consumer scopes are isolated", async t => {
   const { consumer, store } = setup(t);
   const first = store.acquire(descriptor), second = store.acquire(descriptor);
