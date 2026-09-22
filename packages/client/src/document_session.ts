@@ -2,10 +2,10 @@
 //
 // A session lives while something still needs it: an editor attached to it,
 // or edits the server has not acknowledged. Once neither remains it closes
-// itself. When the server rejects the subscription, the session asks the
-// application for a fresh grant once (through the descriptor's refresh URL),
-// then blocks: editors are released, the work stays queued in memory, and the
-// application chooses between retry() and discard().
+// itself. After a subscription rejection, the session tries the descriptor's
+// refresh URL once, if provided. If no URL exists, the refresh fails, or the
+// new grant is rejected, it blocks: editors are released, work stays queued
+// in memory, and the application chooses between retry() and discard().
 import * as Y from "yjs";
 import { uuidv4 } from "lib0/random";
 import { ActionCableProvider, type CableConsumer } from "./actioncable_provider.js";
