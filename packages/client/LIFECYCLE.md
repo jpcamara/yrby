@@ -34,13 +34,39 @@ owned by the session. Retrying reconnects that session; discarding destroys it.
 
 ## Ownership rules
 
-**Sessions.** Refreshing and renewed are substates of the public `open` state.
-The transition table prevents another refresh until a renewed grant is accepted.
-A pending refresh captures its originating state object. After block, retry, or
-close, that response cannot change the session. Closing removes the session from
-the store before editor cleanup can acquire a replacement. Applications acquire
-through `store.acquire()` and release through `lease.release()`; session bookkeeping
-is internal. A closed session rejects new leases.
+**Sessions.** Commands, lease releases, provider callbacks, and refresh results
+all enter `#transition`. It owns operation guards, phase changes, lease membership,
+effect ordering, idle closure, and change notifications. Connection and refresh
+helpers execute the requested work and report results as events; they do not
+inspect phases or decide whether a result is still current. Getters only project
+state. Refreshing and renewed are substates of the public `open` state.
+
+| Event | Allowed phase / condition | Result |
+| --- | --- | --- |
+| acquire | Any except closed | Add a lease; connect only in open or renewed |
+| release | The lease is still owned | Remove it; clear presence after the last lease |
+| retry | blocked | Clear error, enter open, reconnect |
+| discard | Any except closed | Close and destroy the session |
+| provider status | open, refreshing, renewed | An accepted renewed grant enters open |
+| rejection | open with a refresh URL | Enter refreshing and fetch a grant |
+| rejection | open without a refresh URL, refreshing, renewed | Block and release editor leases |
+| refresh result | The originating refreshing state is still current | Enter renewed and resubscribe |
+| connection or refresh failure | The originating active state is still current | Block and release editor leases |
+| other error | Any except closed | Record the error |
+
+After effects finish, an open lifetime closes if no leases or pending edits remain.
+Closed sessions ignore late callbacks. A pending refresh captures its originating
+state object, so a response after block, retry, or close cannot affect a newer
+attempt. Applications acquire through `store.acquire()` and release through
+`lease.release()`; session bookkeeping is internal.
+
+Phase changes take effect before cleanup callbacks. Closing removes the session
+from the store before editor cleanup can acquire a replacement; blocking snapshots
+its retiring leases before callbacks can acquire new ones. Nested callbacks remain
+synchronous, but change notifications wait for the outer operation to finish.
+The depth and pending-notification fields only batch those notifications; they do
+not encode session phases. Observers therefore see completed cleanup and any
+replacement lease acquired during it.
 
 **Elements.** Only syncing and ready states contain a lease. Inactive waits for
 the adapter; idle is already activated and may bind after descriptor changes

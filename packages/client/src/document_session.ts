@@ -8,7 +8,7 @@
 // in memory, and the application chooses between retry() and discard().
 import * as Y from "yjs";
 import { uuidv4 } from "lib0/random";
-import { ActionCableProvider, type CableConsumer } from "./actioncable_provider.js";
+import { ActionCableProvider, type CableConsumer, type ProviderStatus } from "./actioncable_provider.js";
 
 export interface DocumentDescriptor {
   channel?: string;
@@ -25,15 +25,17 @@ export type DocumentSessionState = "open" | "blocked" | "closed";
 // "renewed" waits for the transport to accept the new grant before another
 // refresh is allowed. Blocked and closed cannot have a renewal in progress.
 type SessionPhase = "open" | "refreshing" | "renewed" | "blocked" | "closed";
-type SessionEvent = "refresh" | "renew" | "accept" | "block" | "retry" | "close";
 type SessionLifecycle = Readonly<{ phase: SessionPhase }>;
-const TRANSITIONS: Record<SessionPhase, Partial<Record<SessionEvent, SessionPhase>>> = {
-  open:       { refresh: "refreshing", block: "blocked", close: "closed" },
-  refreshing: { renew: "renewed",      block: "blocked", close: "closed" },
-  renewed:    { accept: "open",        block: "blocked", close: "closed" },
-  blocked:    { retry: "open",                          close: "closed" },
-  closed:     {},
-};
+type SessionEvent =
+  | { type: "acquire" | "retry" | "discard" }
+  | { type: "release"; lease: DocumentLease }
+  | { type: "status"; status: ProviderStatus }
+  | { type: "rejected" | "error"; error: unknown }
+  | { type: "refreshed"; from: SessionLifecycle; grant: string }
+  | { type: "failed"; from: SessionLifecycle; error: unknown };
+type SessionEffect =
+  | { type: "connect"; grant?: string }
+  | { type: "refresh"; url: string };
 // A refresh request that never answers would leave the session offline with
 // its editors attached and no way forward. After this long it blocks instead.
 const REFRESH_TIMEOUT_MS = 15_000;
@@ -103,6 +105,8 @@ export class DocumentSession {
   #lifecycle: SessionLifecycle = { phase: "open" };
   #leases = new Set<DocumentLease>();
   #error: unknown;
+  #transitionDepth = 0;
+  #notificationPending = false;
 
   /** Use DocumentSessionStore.acquire to create and own sessions. */
   constructor(
@@ -118,17 +122,10 @@ export class DocumentSession {
       // Ack sequence numbers belong to this session, not a record.
       session_id: uuidv4(),
     }, {
-      onError: (error, context) => {
-        if (context === "rejected") this.#rejected(error);
-        else { this.#error = error; this.store.changed(this); }
-      },
+      onError: (error, context) => this.#transition({ type: context === "rejected" ? "rejected" : "error", error }),
     });
     this.provider.awareness.setLocalState(null); // no cursor until an editor sets one
-    this.provider.onStatusChange(({ status }) => {
-      const up = status === "connected" || status === "synced";
-      if (up) this.#transition("accept");
-      this.#settle(); // also fires when the pending queue empties
-    });
+    this.provider.onStatusChange(({ status }) => this.#transition({ type: "status", status }));
   }
   get error(): unknown { return this.#error; }
   get hasPending(): boolean { return this.provider.hasPending; }
@@ -138,96 +135,135 @@ export class DocumentSession {
     return phase === "refreshing" || phase === "renewed" ? "open" : phase;
   }
 
-  [attachLease](): DocumentLease {
-    if (this.#lifecycle.phase === "closed") throw new Error("Cannot acquire a closed document session");
-    const lease = new DocumentLease(this, () => this.#release(lease));
-    this.#leases.add(lease);
-    this.#connect();
-    this.store.changed(this);
-    return lease;
-  }
-  #release(lease: DocumentLease): void {
-    this.#leases.delete(lease);
-    if (!this.#leases.size) this.provider.awareness.setLocalState(null);
-    this.#settle();
-  }
+  [attachLease](): DocumentLease { return this.#transition({ type: "acquire" }); }
   /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
-  retry(): void {
-    if (!this.#transition("retry")) return;
-    this.#connect();
-    this.#settle();
-  }
+  retry(): void { this.#transition({ type: "retry" }); }
   /** Explicit application decision; ordinary detach never discards pending work. */
-  discard(): void { this.#transition("close"); }
+  discard(): void { this.#transition({ type: "discard" }); }
 
-  #transition(event: SessionEvent, error?: unknown): SessionLifecycle | undefined {
-    const phase = TRANSITIONS[this.#lifecycle.phase][event];
-    if (!phase) return;
-    const next = this.#lifecycle = { phase };
-    if (event === "retry") this.#error = undefined;
-    if (phase === "blocked" || phase === "closed") {
-      if (error !== undefined) this.#error = error;
-      // Retire the old connection before abort handlers can retry. Remove a
-      // closed session before those handlers can acquire its replacement.
-      if (phase === "blocked") this.provider.disconnect();
-      else this.remove();
-      for (const lease of [...this.#leases]) lease.release();
-      if (phase === "closed") {
-        this.provider.destroy();
-        this.doc.destroy();
-      }
-      // An abort handler may already have retried or discarded this session.
-      if (this.#lifecycle === next) this.store.changed(this);
-    }
-    return next;
-  }
-
-  #connect(): void {
-    // Acquiring another lease during a refresh must not retry the old grant.
-    const { phase } = this.#lifecycle;
-    if (phase !== "open" && phase !== "renewed") return;
+  #transition(event: { type: "acquire" }): DocumentLease;
+  #transition(event: SessionEvent): void;
+  #transition(event: SessionEvent): DocumentLease | void {
+    this.#transitionDepth++;
     try {
-      this.provider.connect();
-    } catch (error) {
-      this.#transition("block", error);
+      const current = this.#lifecycle;
+      // Closing still releases existing leases, but cannot acquire new ones.
+      if (current.phase === "closed" && event.type !== "release") {
+        if (event.type === "acquire") throw new Error("Cannot acquire a closed document session");
+        return;
+      }
+      let next = current;
+      let effect: SessionEffect | undefined;
+      let lease: DocumentLease | undefined;
+      switch (event.type) {
+        case "acquire": {
+          const acquired = new DocumentLease(this, () => this.#transition({ type: "release", lease: acquired }));
+          this.#leases.add(acquired);
+          lease = acquired;
+          if (current.phase === "open" || current.phase === "renewed") effect = { type: "connect" };
+          break;
+        }
+        case "release":
+          if (!this.#leases.delete(event.lease)) return;
+          if (!this.#leases.size) this.provider.awareness.setLocalState(null);
+          if (current.phase === "blocked" || current.phase === "closed") return;
+          break;
+        case "retry":
+          if (current.phase !== "blocked") return;
+          next = { phase: "open" };
+          this.#error = undefined;
+          effect = { type: "connect" };
+          break;
+        case "discard":
+          next = { phase: "closed" };
+          break;
+        case "status":
+          if (current.phase === "blocked") return;
+          if (current.phase === "renewed" && (event.status === "connected" || event.status === "synced")) {
+            next = { phase: "open" };
+          }
+          break;
+        case "rejected":
+          if (current.phase === "blocked") return;
+          if (current.phase === "open" && this.descriptor.refresh) {
+            next = { phase: "refreshing" };
+            effect = { type: "refresh", url: this.descriptor.refresh };
+          } else {
+            next = { phase: "blocked" };
+            this.#error = event.error;
+          }
+          break;
+        case "refreshed":
+          if (current !== event.from || current.phase !== "refreshing") return;
+          next = { phase: "renewed" };
+          effect = { type: "connect", grant: event.grant };
+          break;
+        case "failed":
+          if (current !== event.from || current.phase === "blocked") return;
+          next = { phase: "blocked" };
+          this.#error = event.error;
+          break;
+        case "error":
+          this.#error = event.error;
+          this.#notificationPending = true;
+          return;
+        default: {
+          const unhandled: never = event;
+          throw new Error(`Unhandled document session event: ${unhandled}`);
+        }
+      }
+      // Presence callbacks during release can already have ended this lifetime.
+      if (this.#lifecycle !== current) return lease;
+      this.#lifecycle = next;
+      this.#notificationPending = true;
+
+      if (next !== current && (next.phase === "blocked" || next.phase === "closed")) {
+        // Snapshot before callbacks can retry and acquire replacement leases.
+        const retiring = [...this.#leases];
+        if (next.phase === "blocked") this.provider.disconnect();
+        else this.remove(); // replacement acquisition must find a new session
+        for (const owned of retiring) owned.release();
+        if (next.phase === "closed") {
+          this.provider.destroy();
+          this.doc.destroy();
+        }
+        return lease;
+      }
+      if (effect?.type === "connect") this.#connect(next, effect.grant);
+      else if (effect?.type === "refresh") void this.#refresh(effect.url, next);
+      if (this.#lifecycle !== next) return lease;
+
+      // An open lifetime ends only after both ownership and delivery are done.
+      if (next.phase !== "blocked" && next.phase !== "closed" && !this.#leases.size && !this.provider.hasPending) {
+        this.#transition({ type: "discard" });
+      }
+      return lease;
+    } finally {
+      // Nested provider/lease callbacks finish before observers see the result.
+      if (--this.#transitionDepth === 0 && this.#notificationPending) {
+        this.#notificationPending = false;
+        this.store.changed(this);
+      }
     }
   }
-  #rejected(error: unknown): void {
-    const refresh = this.descriptor.refresh;
-    if (!refresh) { this.#transition("block", error); return; }
-    const attempt = this.#transition("refresh");
-    if (!attempt) { this.#transition("block", error); return; }
-    void this.#renew(refresh, attempt);
+
+  #connect(from: SessionLifecycle, grant?: string): void {
+    try {
+      if (grant === undefined) this.provider.connect();
+      else this.provider.renew({ grant });
+    } catch (error) {
+      this.#transition({ type: "failed", from, error });
+    }
   }
-  async #renew(refresh: string, attempt: SessionLifecycle): Promise<void> {
+  async #refresh(url: string, from: SessionLifecycle): Promise<void> {
     let grant: string;
     try {
-      grant = await fetchGrant(refresh);
+      grant = await fetchGrant(url);
     } catch (error) {
-      if (this.#lifecycle === attempt) this.#transition("block", error);
+      this.#transition({ type: "failed", from, error });
       return;
     }
-    // Completion belongs to this exact refresh, even if a later retry is open.
-    if (this.#lifecycle !== attempt) return;
-    this.#transition("renew");
-    try {
-      this.provider.renew({ grant });
-    } catch (error) {
-      this.#transition("block", error);
-      return;
-    }
-    this.store.changed(this);
-  }
-  // Close once nothing needs the session: no leases and nothing unacknowledged.
-  // Only an open session has anything to report; blocked and closed announce
-  // themselves through #transition.
-  #settle(): void {
-    if (this.state !== "open") return;
-    if (!this.#leases.size && !this.provider.hasPending) {
-      this.#transition("close");
-      return;
-    }
-    this.store.changed(this);
+    this.#transition({ type: "refreshed", from, grant });
   }
 }
 
