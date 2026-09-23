@@ -46,7 +46,6 @@ const DEFAULT_RESEND_INTERVAL = 1000;
 type DeliveryState =
   | { phase: "paused" | "idle" | "destroyed" }
   | { phase: "sending"; stopTimer: () => void };
-type DeliveryEvent = "resume" | "pause" | "queueChanged" | "destroy";
 
 export class ReliableSync {
   #pending: Pending[] = [];
@@ -92,7 +91,7 @@ export class ReliableSync {
     if (this.#state.phase === "destroyed") return;
     this.#pending.push({ seq: this.#nextSeq++, update: new Uint8Array(update) });
     this.#tail = undefined;
-    this.#transition("queueChanged");
+    this.#reconcile();
     this.#flush();
   }
 
@@ -107,18 +106,18 @@ export class ReliableSync {
     if (newest && id > newest.seq) return;
     this.#pending = this.#pending.filter((p) => p.seq > id);
     this.#tail = undefined;
-    this.#transition("queueChanged");
+    this.#reconcile();
   }
 
   /** The transport is up: replay the tail and keep retransmitting until it is acknowledged. */
   resume(): void {
-    this.#transition("resume");
+    this.#setPhase(this.hasPending ? "sending" : "idle");
     this.#flush();
   }
 
   /** The transport is down: keep the queue, stop retransmitting. */
   pause(): void {
-    this.#transition("pause");
+    this.#setPhase("paused");
   }
 
   /** Send the tail again if anything is unacknowledged. The internal timer calls this; a host with its own scheduler may too. */
@@ -127,21 +126,15 @@ export class ReliableSync {
   }
 
   /** Stop the timer and drop the queue. Later enqueues are ignored. */
-  destroy(): void { this.#transition("destroy"); }
+  destroy(): void { this.#setPhase("destroyed"); }
 
-  #transition(event: DeliveryEvent): void {
+  #reconcile(): void {
+    if (this.#state.phase === "paused" || this.#state.phase === "destroyed") return;
+    this.#setPhase(this.hasPending ? "sending" : "idle");
+  }
+  #setPhase(phase: DeliveryState["phase"]): void {
     const current = this.#state;
     if (current.phase === "destroyed") return;
-    let phase: DeliveryState["phase"];
-    switch (event) {
-      case "destroy": phase = "destroyed"; break;
-      case "pause": phase = "paused"; break;
-      case "resume": phase = this.hasPending ? "sending" : "idle"; break;
-      case "queueChanged":
-        if (current.phase === "paused") return;
-        phase = this.hasPending ? "sending" : "idle";
-        break;
-    }
     if (phase === current.phase) return;
     const next: DeliveryState = phase === "sending" ? { phase, stopTimer: () => {} } : { phase };
     this.#state = next;
