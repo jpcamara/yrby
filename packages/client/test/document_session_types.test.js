@@ -20,6 +20,8 @@ for (const [format, entry, extension] of [["ESM", "../dist/index.js", "mts"], ["
       declare const store: DocumentSessionStore;
       declare const descriptor: DocumentDescriptor;
       const lease = store.acquire(descriptor);
+      // @ts-expect-error Notifications are internal to session transitions.
+      store.changed(lease.session);
       const session = lease.session;
       lease.release();
       session.retry();

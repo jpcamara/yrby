@@ -15,6 +15,7 @@ test("one consumer has one canonical document store", t => {
   const { consumer, store } = setup(t);
   assert.throws(() => new DocumentSessionStore(consumer), /DocumentSessionStore.for/);
   assert.equal(DocumentSessionStore.for(consumer), store);
+  assert.equal(store.changed, undefined);
   const first = store.acquire(descriptor);
   const second = DocumentSessionStore.for(consumer).acquire(descriptor);
   assert.equal(first.session, second.session);
