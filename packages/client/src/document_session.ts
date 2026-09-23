@@ -36,6 +36,16 @@ type SessionEvent =
 type SessionEffect =
   | { type: "connect"; grant?: string }
   | { type: "refresh"; url: string };
+// Event selection has no side effects. Application below owns every mutation.
+type SessionDecision =
+  | {
+      type: "advance";
+      next: SessionLifecycle;
+      effect?: SessionEffect;
+      error?: { type: "set"; value: unknown } | { type: "clear" };
+    }
+  | { type: "release-only" }
+  | { type: "record-error"; error: unknown };
 // A refresh request that never answers would leave the session offline with
 // its editors attached and no way forward. After this long it blocks instead.
 const REFRESH_TIMEOUT_MS = 15_000;
@@ -153,103 +163,115 @@ export class DocumentSession {
     this.#transitionDepth++;
     try {
       const current = this.#lifecycle;
-      // Closing still releases existing leases, but cannot acquire new ones.
-      if (current.phase === "closed" && event.type !== "release") {
-        if (event.type === "acquire") throw new Error("Cannot acquire a closed document session");
-        return;
-      }
-      let next = current;
-      let effect: SessionEffect | undefined;
-      let lease: DocumentLease | undefined;
-      switch (event.type) {
-        case "acquire": {
-          const acquired = new DocumentLease(this, () => this.#transition({ type: "release", lease: acquired }));
-          this.#leases.add(acquired);
-          lease = acquired;
-          if (current.phase === "open" || current.phase === "renewed") effect = { type: "connect" };
-          break;
-        }
-        case "release":
-          if (!this.#leases.delete(event.lease)) return;
-          if (!this.#leases.size) this.provider.awareness.setLocalState(null);
-          if (current.phase === "blocked" || current.phase === "closed") return;
-          break;
-        case "retry":
-          if (current.phase !== "blocked") return;
-          next = { phase: "open" };
-          this.#error = undefined;
-          effect = { type: "connect" };
-          break;
-        case "discard":
-          next = { phase: "closed" };
-          break;
-        case "status":
-          if (current.phase === "blocked") return;
-          if (current.phase === "renewed" && (event.status === "connected" || event.status === "synced")) {
-            next = { phase: "open" };
-          }
-          break;
-        case "rejected":
-          if (current.phase === "blocked") return;
-          if (current.phase === "open" && this.descriptor.refresh) {
-            next = { phase: "refreshing" };
-            effect = { type: "refresh", url: this.descriptor.refresh };
-          } else {
-            next = { phase: "blocked" };
-            this.#error = event.error;
-          }
-          break;
-        case "refreshed":
-          if (current !== event.from || current.phase !== "refreshing") return;
-          next = { phase: "renewed" };
-          effect = { type: "connect", grant: event.grant };
-          break;
-        case "failed":
-          if (current !== event.from || current.phase === "blocked") return;
-          next = { phase: "blocked" };
-          this.#error = event.error;
-          break;
-        case "error":
-          this.#error = event.error;
-          this.#notificationPending = true;
-          return;
-        default: {
-          const unhandled: never = event;
-          throw new Error(`Unhandled document session event: ${unhandled}`);
-        }
-      }
-      // Presence callbacks during release can already have ended this lifetime.
-      if (this.#lifecycle !== current) return lease;
-      this.#lifecycle = next;
-      this.#notificationPending = true;
-
-      if (next !== current && (next.phase === "blocked" || next.phase === "closed")) {
-        // Snapshot before callbacks can retry and acquire replacement leases.
-        const retiring = [...this.#leases];
-        if (next.phase === "blocked") this.provider.disconnect();
-        else this.remove(); // replacement acquisition must find a new session
-        for (const owned of retiring) owned.release();
-        if (next.phase === "closed") {
-          this.provider.destroy();
-          this.doc.destroy();
-        }
-        return lease;
-      }
-      if (effect?.type === "connect") this.#connect(next, effect.grant);
-      else if (effect?.type === "refresh") void this.#refresh(effect.url, next);
-      if (this.#lifecycle !== next) return lease;
-
-      // An open lifetime ends only after both ownership and delivery are done.
-      if (next.phase !== "blocked" && next.phase !== "closed" && !this.#leases.size && !this.provider.hasPending) {
-        this.#transition({ type: "discard" });
-      }
-      return lease;
+      const decision = this.#decide(current, event);
+      if (decision) return this.#apply(current, event, decision);
     } finally {
       // Nested provider/lease callbacks finish before observers see the result.
       if (--this.#transitionDepth === 0 && this.#notificationPending) {
         this.#notificationPending = false;
         this.store[notifyStoreChange](this);
       }
+    }
+  }
+
+  #decide(current: SessionLifecycle, event: SessionEvent): SessionDecision | undefined {
+    // Closing still releases existing leases, but cannot acquire new ones.
+    if (current.phase === "closed" && event.type !== "release") {
+      if (event.type === "acquire") throw new Error("Cannot acquire a closed document session");
+      return;
+    }
+    switch (event.type) {
+      case "acquire":
+        if (current.phase === "open" || current.phase === "renewed") {
+          return { type: "advance", next: current, effect: { type: "connect" } };
+        }
+        return { type: "advance", next: current };
+      case "release":
+        if (!this.#leases.has(event.lease)) return;
+        return current.phase === "blocked" || current.phase === "closed"
+          ? { type: "release-only" }
+          : { type: "advance", next: current };
+      case "retry":
+        if (current.phase !== "blocked") return;
+        return { type: "advance", next: { phase: "open" }, effect: { type: "connect" }, error: { type: "clear" } };
+      case "discard":
+        return { type: "advance", next: { phase: "closed" } };
+      case "status":
+        if (current.phase === "blocked") return;
+        if (current.phase === "renewed" && (event.status === "connected" || event.status === "synced")) {
+          return { type: "advance", next: { phase: "open" } };
+        }
+        return { type: "advance", next: current };
+      case "rejected":
+        if (current.phase === "blocked") return;
+        if (current.phase === "open" && this.descriptor.refresh) {
+          return { type: "advance", next: { phase: "refreshing" },
+            effect: { type: "refresh", url: this.descriptor.refresh } };
+        }
+        return { type: "advance", next: { phase: "blocked" }, error: { type: "set", value: event.error } };
+      case "refreshed":
+        if (current !== event.from || current.phase !== "refreshing") return;
+        return { type: "advance", next: { phase: "renewed" },
+          effect: { type: "connect", grant: event.grant } };
+      case "failed":
+        if (current !== event.from || current.phase === "blocked") return;
+        return { type: "advance", next: { phase: "blocked" }, error: { type: "set", value: event.error } };
+      case "error":
+        return { type: "record-error", error: event.error };
+      default: {
+        const unhandled: never = event;
+        throw new Error(`Unhandled document session event: ${unhandled}`);
+      }
+    }
+  }
+
+  #apply(current: SessionLifecycle, event: SessionEvent, decision: SessionDecision): DocumentLease | void {
+    if (decision.type === "record-error") {
+      this.#error = decision.error;
+      this.#notificationPending = true;
+      return;
+    }
+
+    let lease: DocumentLease | undefined;
+    if (event.type === "acquire") {
+      const acquired = new DocumentLease(this, () => this.#transition({ type: "release", lease: acquired }));
+      this.#leases.add(acquired);
+      lease = acquired;
+    } else if (event.type === "release") {
+      this.#leases.delete(event.lease);
+      if (!this.#leases.size) this.provider.awareness.setLocalState(null);
+    }
+    if (decision.type === "release-only" || this.#lifecycle !== current) return lease;
+
+    this.#lifecycle = decision.next;
+    if (decision.error?.type === "clear") this.#error = undefined;
+    else if (decision.error?.type === "set") this.#error = decision.error.value;
+    this.#notificationPending = true;
+    this.#completeTransition(current, decision);
+    return lease;
+  }
+
+  #completeTransition(current: SessionLifecycle, decision: Extract<SessionDecision, { type: "advance" }>): void {
+    const { next, effect } = decision;
+    if (next !== current && (next.phase === "blocked" || next.phase === "closed")) {
+      // Snapshot before callbacks can retry and acquire replacement leases.
+      const retiring = [...this.#leases];
+      if (next.phase === "blocked") this.provider.disconnect();
+      else this.remove(); // replacement acquisition must find a new session
+      for (const owned of retiring) owned.release();
+      if (next.phase === "closed") {
+        this.provider.destroy();
+        this.doc.destroy();
+      }
+      return;
+    }
+    if (effect?.type === "connect") this.#connect(next, effect.grant);
+    else if (effect?.type === "refresh") void this.#refresh(effect.url, next);
+    if (this.#lifecycle !== next) return;
+
+    // An open lifetime ends only after both ownership and delivery are done.
+    if (next.phase !== "blocked" && next.phase !== "closed" && !this.#leases.size && !this.provider.hasPending) {
+      this.#transition({ type: "discard" });
     }
   }
 
