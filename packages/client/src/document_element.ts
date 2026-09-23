@@ -26,12 +26,6 @@ type ElementState =
   | { phase: "detached" | "inactive" | "idle" }
   | Loading | Syncing
   | { phase: "ready"; lease: DocumentLease };
-type ElementEvent =
-  | { type: "connect" | "activate" | "resume" | "deactivate" | "destroy" | "retarget" }
-  | { type: "acquired"; from: Loading; lease: DocumentLease }
-  | { type: "failed"; from: Loading; error: unknown }
-  | { type: "synced"; from: Syncing }
-  | { type: "released"; lease: DocumentLease };
 
 export class YrbyDocumentElement extends Base {
   /** Set before adding elements to use another consumer, such as AnyCable's. */
@@ -48,9 +42,9 @@ export class YrbyDocumentElement extends Base {
   get whenSynced(): Promise<void> { return this.#whenSynced; }
 
   connectedCallback(): void {
-    this.#transition({ type: "connect" });
+    if (this.#state.phase === "detached") this.#setState({ phase: "inactive" });
     this.#unregister ??= registerDocumentMount(this);
-    this.#transition({ type: "resume" });
+    this.#resume();
   }
   disconnectedCallback(): void {
     // Same-turn moves keep their binding. Async results check isConnected
@@ -62,62 +56,53 @@ export class YrbyDocumentElement extends Base {
     // The refresh URL is read when the session is acquired and is not part of
     // its identity, so changing it does not rebind the editor.
     if (name === "refresh") return;
-    this.#transition({ type: "retarget" });
-    queueMicrotask(() => this.#transition({ type: "resume" }));
+    if (this.#state.phase !== "detached" && this.#state.phase !== "inactive") this.#setState({ phase: "idle" });
+    queueMicrotask(() => this.#resume());
   }
 
   /** @internal Called by the Turbo adapter. */
-  activate(): void { this.#transition({ type: "activate" }); }
-  /** @internal */
-  deactivate(): void { this.#transition({ type: "deactivate" }); }
-  /** Release the editor lease. Unsaved work remains owned by its session. */
-  destroy(): void { this.#transition({ type: "destroy" }); }
-
-  #transition(event: ElementEvent): void {
-    const current = this.#state;
-    let next: ElementState;
-    switch (event.type) {
-      case "connect":
-        if (current.phase !== "detached") return;
-        next = { phase: "inactive" };
-        break;
-      case "activate":
-      case "resume":
-        if (!this.isConnected) return;
-        // Resume only a live page whose descriptor changed. It cannot undo a
-        // Turbo deactivation; only the adapter's activate event can do that.
-        if (current.phase !== "idle" && !(event.type === "activate" && current.phase === "inactive")) return;
-        next = { phase: "loading" };
-        break;
-      case "deactivate":
-        if (current.phase === "detached" || current.phase === "inactive") return;
-        next = { phase: "inactive" };
-        break;
-      case "destroy":
-        if (current.phase === "detached") return;
-        next = { phase: "detached" };
-        break;
-      case "retarget":
-        if (current.phase === "detached" || current.phase === "inactive") return;
-        next = { phase: "idle" };
-        break;
-      case "acquired":
-        if (current !== event.from || !this.isConnected) { event.lease.release(); return; }
-        next = { phase: "syncing", lease: event.lease };
-        break;
-      case "failed":
-        if (current !== event.from || !this.isConnected) return;
-        next = { phase: "idle" };
-        break;
-      case "synced":
-        if (current !== event.from || !this.isConnected) return;
-        next = { phase: "ready", lease: event.from.lease };
-        break;
-      case "released":
-        if (!("lease" in current) || current.lease !== event.lease) return;
-        next = { phase: "idle" };
-        break;
+  activate(): void {
+    if (this.isConnected && (this.#state.phase === "inactive" || this.#state.phase === "idle")) {
+      this.#setState({ phase: "loading" });
     }
+  }
+  /** @internal */
+  deactivate(): void {
+    if (this.#state.phase !== "detached" && this.#state.phase !== "inactive") this.#setState({ phase: "inactive" });
+  }
+  /** Release the editor lease. Unsaved work remains owned by its session. */
+  destroy(): void {
+    if (this.#state.phase !== "detached") this.#setState({ phase: "detached" });
+  }
+
+  // A queued retarget may resume an idle live element, but never a page that
+  // the Turbo adapter deactivated for caching.
+  #resume(): void {
+    if (this.isConnected && this.#state.phase === "idle") this.#setState({ phase: "loading" });
+  }
+  #acquired(from: Loading, lease: DocumentLease): void {
+    if (this.#state !== from || !this.isConnected) { lease.release(); return; }
+    this.#setState({ phase: "syncing", lease });
+  }
+  #failed(from: Loading, error: unknown): void {
+    if (this.#state !== from || !this.isConnected) return;
+    this.#setState({ phase: "idle" });
+    this.#error(error);
+  }
+  #synced(from: Syncing): void {
+    if (this.#state === from && this.isConnected) this.#setState({ phase: "ready", lease: from.lease });
+  }
+  #released(lease: DocumentLease): void {
+    const current = this.#state;
+    if (!("lease" in current) || current.lease !== lease) return;
+    this.#setState({ phase: "idle" });
+    if (lease.session.state === "blocked") this.#error(lease.session.error, lease.session);
+  }
+
+  // Publish state before releasing the old lease: editor cleanup can
+  // synchronously retarget or remount this element.
+  #setState(next: ElementState): void {
+    const current = this.#state;
     this.#state = next;
     const previousLease = "lease" in current ? current.lease : undefined;
     const nextLease = "lease" in next ? next.lease : undefined;
@@ -142,10 +127,6 @@ export class YrbyDocumentElement extends Base {
       this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
         detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal } }));
     }
-    if (event.type === "failed") this.#error(event.error);
-    if (event.type === "released" && event.lease.session.state === "blocked") {
-      this.#error(event.lease.session.error, event.lease.session);
-    }
   }
 
   async #load(from: Loading): Promise<void> {
@@ -159,18 +140,18 @@ export class YrbyDocumentElement extends Base {
       const consumer = await (YrbyDocumentElement.consumer ?? defaultConsumer());
       if (this.#state !== from || !this.isConnected) return;
       const lease = DocumentSessionStore.for(consumer).acquire(descriptor);
-      this.#transition({ type: "acquired", from, lease });
+      this.#acquired(from, lease);
     } catch (error) {
-      this.#transition({ type: "failed", from, error });
+      this.#failed(from, error);
     }
   }
   #watchLease(from: Syncing): void {
     const { lease } = from, { session } = lease;
     // A store listener may have blocked or discarded it inside acquire().
-    if (lease.signal.aborted) { this.#transition({ type: "released", lease }); return; }
-    lease.signal.addEventListener("abort", () => this.#transition({ type: "released", lease }), { once: true });
+    if (lease.signal.aborted) { this.#released(lease); return; }
+    lease.signal.addEventListener("abort", () => this.#released(lease), { once: true });
     if (session.state === "blocked") { lease.release(); return; }
-    void session.whenSynced.then(() => this.#transition({ type: "synced", from }));
+    void session.whenSynced.then(() => this.#synced(from));
   }
   // Inert until synced, so nobody types into a document that is not live.
   // The application's own inert value is parked in an attribute, which a

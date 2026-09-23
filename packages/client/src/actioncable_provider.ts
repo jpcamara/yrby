@@ -76,11 +76,6 @@ type ProviderState =
   | Opening
   | { phase: "connecting" | "connected"; connection: Connection }
   | { phase: "stopping"; connection: Connection; reason: StopReason };
-type ProviderEvent =
-  | { type: "open" | "disconnect" | "destroy" }
-  | { type: "installed"; opening: Opening; subscription: CableSubscription }
-  | { type: "failed"; opening: Opening }
-  | { type: "connected" | "lost" | "rejected" | "stopped"; connection: Connection };
 
 export class ActionCableProvider {
   readonly doc: Doc;
@@ -181,8 +176,13 @@ export class ActionCableProvider {
   }
 
   connect(): void {
-    const opening = this.#transition({ type: "open" });
-    if (!opening || opening.phase !== "subscribing") return;
+    const current = this.#state;
+    if (current.phase === "destroyed" || (current.phase === "stopping" && current.reason === "destroy")) {
+      throw new Error("provider is destroyed");
+    }
+    if (current.phase !== "disconnected") return;
+    const opening: Opening = { phase: "subscribing" };
+    this.#state = opening;
     const run = (callback: (connection: Connection) => void) => {
       const invoke = () => {
         const state = this.#state;
@@ -200,19 +200,26 @@ export class ActionCableProvider {
         { channel: this.channelName, ...this.channelParams },
         {
           received: (message: CableMessage) => run(connection => this.#receive(message, connection)),
-          connected: () => run(connection => this.#transition({ type: "connected", connection })),
-          disconnected: () => run(connection => this.#transition({ type: "lost", connection })),
-          rejected: () => run(connection => this.#transition({ type: "rejected", connection })),
+          connected: () => run(connection => this.#connected(connection)),
+          disconnected: () => run(connection => this.#lost(connection)),
+          rejected: () => run(connection => this.#stop("reject", connection)),
         }
       );
     } catch (error) {
-      if (this.#transition({ type: "failed", opening })) throw error;
+      if (this.#state === opening) {
+        this.#state = { phase: "disconnected" };
+        this.#refreshStatus();
+        throw error;
+      }
       return;
     }
-    this.#transition({ type: "installed", opening, subscription });
+    if (this.#state !== opening) { this.#unsubscribe(subscription); return; }
+    this.#state = { phase: "connecting", connection: { opening, subscription } };
+    this.#watchPage();
+    this.#refreshStatus();
   }
 
-  disconnect(): void { this.#transition({ type: "disconnect" }); }
+  disconnect(): void { this.#stop("disconnect"); }
 
   /**
    * Resubscribe with updated channel params, such as a renewed grant. The
@@ -227,83 +234,63 @@ export class ActionCableProvider {
     this.connect();
   }
 
-  destroy(): void { this.#transition({ type: "destroy" }); }
+  destroy(): void { this.#stop("destroy"); }
 
-  #transition(event: ProviderEvent): ProviderState | undefined {
+  #active(connection: Connection): boolean {
     const current = this.#state;
-    let next: ProviderState;
-    switch (event.type) {
-      case "open":
-        if (current.phase === "destroyed" || (current.phase === "stopping" && current.reason === "destroy")) {
-          throw new Error("provider is destroyed");
-        }
-        if (current.phase !== "disconnected") return;
-        next = { phase: "subscribing" };
-        break;
-      case "installed":
-        if (current !== event.opening) {
-          this.#unsubscribe(event.subscription);
-          return;
-        }
-        next = { phase: "connecting", connection: { opening: event.opening, subscription: event.subscription } };
-        break;
-      case "failed":
-        if (current !== event.opening) return;
-        next = { phase: "disconnected" };
-        break;
-      case "connected":
-      case "lost":
-      case "rejected":
-        if (!(current.phase === "connecting" || current.phase === "connected") || current.connection !== event.connection) return;
-        if (event.type === "connected" && current.phase === "connected") return;
-        next = event.type === "rejected"
-          ? { phase: "stopping", connection: current.connection, reason: "reject" }
-          : { phase: event.type === "connected" ? "connected" : "connecting", connection: current.connection };
-        break;
-      case "disconnect":
-      case "destroy":
-        if (current.phase === "destroyed") return;
-        if (current.phase === "stopping") {
-          if (event.type !== "destroy" || current.reason === "destroy") return;
-          next = { ...current, reason: "destroy" };
-        } else if ("connection" in current) {
-          next = { phase: "stopping", connection: current.connection, reason: event.type };
-        } else {
-          if (event.type === "disconnect" && current.phase === "disconnected") return;
-          next = { phase: event.type === "destroy" ? "destroyed" : "disconnected" };
-        }
-        break;
-      case "stopped":
-        if (current.phase !== "stopping" || current.connection !== event.connection) return;
-        next = { phase: current.reason === "destroy" ? "destroyed" : "disconnected" };
-        break;
+    return (current.phase === "connecting" || current.phase === "connected") && current.connection === connection;
+  }
+  #connected(connection: Connection): void {
+    if (!this.#active(connection) || this.#state.phase === "connected") return;
+    this.#state = { phase: "connected", connection };
+    this.session.resume();
+    this.#refreshStatus();
+  }
+  #lost(connection: Connection): void {
+    if (!this.#active(connection)) return;
+    this.#state = { phase: "connecting", connection };
+    this.session.pause();
+    this.#refreshStatus();
+  }
+  #stop(reason: StopReason, connection?: Connection): void {
+    const current = this.#state;
+    if (current.phase === "destroyed" || (connection && !this.#active(connection))) return;
+    if (current.phase === "stopping") {
+      // Destruction supersedes a disconnect triggered during presence removal.
+      if (reason === "destroy" && current.reason !== "destroy") this.#state = { ...current, reason };
+      return;
     }
-    this.#state = next;
-    if (next.phase === "subscribing") return next;
-    if (next.phase === "stopping") {
-      if (current.phase === "stopping") return next; // destruction supersedes an in-progress disconnect
+    if ("connection" in current) {
+      this.#state = { phase: "stopping", connection: current.connection, reason };
       this.#unwatchPage();
-      // Retired callbacks are already silent, but the old subscription can
-      // still send the presence removal before its deferred unsubscribe.
+      // Retired callbacks are silent, but the old subscription can still
+      // send presence removal before its deferred unsubscribe.
       this.session.removeLocalAwareness();
       this.session.pause();
-      this.#unsubscribe(next.connection.subscription);
-      this.#transition({ type: "stopped", connection: next.connection });
-      return next;
+      this.#unsubscribe(current.connection.subscription);
+      this.#finishStop(current.connection);
+      return;
     }
-    if (next.phase === "destroyed") {
-      this.session.destroy();
-      this.awareness.destroy();
-      this.doc.off("update", this.#onDocUpdate);
-    } else if (event.type === "installed") this.#watchPage();
-    else if (event.type === "connected") this.session.resume();
-    else if (event.type === "lost") this.session.pause();
-    else if (current.phase === "stopping" && current.reason === "reject") {
-      this.#onError(new Error("subscription rejected by the server"), "rejected");
-    }
+    if (reason === "disconnect" && current.phase === "disconnected") return;
+    this.#state = { phase: reason === "destroy" ? "destroyed" : "disconnected" };
+    if (reason === "destroy") this.#destroyOwned();
     this.#refreshStatus();
-    if (next.phase === "destroyed") this.#statusListeners.clear();
-    return next;
+    if (reason === "destroy") this.#statusListeners.clear();
+  }
+  #finishStop(connection: Connection): void {
+    const current = this.#state;
+    if (current.phase !== "stopping" || current.connection !== connection) return;
+    const destroyed = current.reason === "destroy";
+    this.#state = { phase: destroyed ? "destroyed" : "disconnected" };
+    if (destroyed) this.#destroyOwned();
+    else if (current.reason === "reject") this.#onError(new Error("subscription rejected by the server"), "rejected");
+    this.#refreshStatus();
+    if (destroyed) this.#statusListeners.clear();
+  }
+  #destroyOwned(): void {
+    this.session.destroy();
+    this.awareness.destroy();
+    this.doc.off("update", this.#onDocUpdate);
   }
 
   #unsubscribe(subscription: CableSubscription): void {
