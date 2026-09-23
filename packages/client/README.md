@@ -1,26 +1,25 @@
 # yrby-client
 
-The **client core** for the [`yrby`](https://github.com/jpcamara/yrby)
-y-websocket protocol — everything a Yjs provider needs *except the transport*.
-Bring your own socket (ActionCable, AnyCable, raw WebSocket); this owns the
-protocol.
+The JavaScript client for yrby's Yjs protocol. Most Rails apps import
+`yrby-client/element` and bind an editor when it emits `yrby:synced`.
+Applications that manage their own editor lifetime can use
+`DocumentSessionStore` instead.
 
-Three layers, use whichever you need:
+Each piece owns one lifetime:
 
-- **`ActionCableProvider`** — a ready-made Yjs provider for ActionCable /
-  AnyCable. Pass a `Y.Doc`, a cable consumer, and a channel; it wires the
-  subscription and you're collaborating. Awareness/presence rides AnyCable
-  `whisper` when available via an awareness-only envelope and falls back to
-  normal sends on plain ActionCable; document updates always go through the
-  server as reliable recorded/acked updates.
-- **`YProtocolSession`** — the transport-agnostic core. Binds to a `Y.Doc` (+ optional
-  `Awareness`) and owns the y-protocols **message encode/decode**, the
-  **sync-step handshake** (SyncStep1 / SyncStep2 / Update), **awareness**, and
-  reliable delivery. Speaks raw `Uint8Array` frames; you wire any socket.
-- **`ReliableSync`** — the zero-dependency reliable-delivery state machine on its
-  own: ack-tracked queue, **sync-since-last-ack** (the unacked tail merged into
-  one causally-complete delta), cumulative acks, retransmit, and reconnect
-  replay. Compose it yourself if you already have your own framing.
+- **`<yrby-document>`** attaches an editor while its page is live. Turbo and
+  Turbolinks previews never attach one.
+- **`DocumentSessionStore`** owns a document and its pending work after an editor
+  detaches. Leases make that ownership explicit.
+- **`ActionCableProvider`** owns one ActionCable or AnyCable subscription and
+  translates its JSON envelopes to protocol frames.
+- **`YProtocolSession`** handles the Yjs handshake, frames, and awareness without
+  depending on a particular transport.
+- **`ReliableSync`** keeps local updates until the server acknowledges them,
+  then replays the unacknowledged tail after a reconnect.
+
+`<yrby-document>` uses each lower layer in that order. You can also use the
+provider, protocol session, or zero-dependency delivery core on its own.
 
 ## Install
 
@@ -28,10 +27,10 @@ Three layers, use whichever you need:
 npm install yrby-client
 ```
 
-`ActionCableProvider` and `YProtocolSession` need `yjs` and `y-protocols` (peers — your
-app already has them), plus an ActionCable/AnyCable consumer. `ReliableSync` has
-**no dependencies**; import it on its own via `yrby-client/reliable` if
-that's all you want.
+`ActionCableProvider` needs `yjs`, `y-protocols`, and an ActionCable/AnyCable
+consumer. `YProtocolSession` needs `yjs` and `y-protocols`, but takes raw frames
+from any transport. `ReliableSync` has **no dependencies**; import it on its own
+via `yrby-client/reliable` if that's all you want.
 
 Written in **TypeScript** and ships bundled type declarations, so TS projects get
 full types (typed options, methods, and errors) with no `@types` package — and
@@ -303,7 +302,9 @@ rs.pause();           // dropped: keep the queue, stop retransmitting
 ```
 
 Pending updates are retained and replayed until the server acknowledges them.
-`enqueue` copies the supplied bytes, so the caller may reuse its input buffer.
+The unacknowledged tail is merged into one causally complete update before each
+send, so a missed frame does not create a gap. `enqueue` copies the supplied
+bytes, so the caller may reuse its input buffer.
 `pending` returns a snapshot, including copies of each update's bytes; sorting or
 editing that snapshot cannot change delivery.
 Document delivery stays queued and ack-tracked for the lifetime of the session.
