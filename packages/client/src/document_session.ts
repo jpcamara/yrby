@@ -44,6 +44,8 @@ const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
 const storeToken = Symbol("storeToken");
 // Only the store acquires leases; this symbol is not exported.
 const attachLease = Symbol("attachLease");
+// Only a session publishes store changes; this symbol is not exported.
+const notifyStoreChange = Symbol("notifyStoreChange");
 
 /** The sessions of one consumer. Emits "change" with the session in `detail`. */
 export class DocumentSessionStore extends EventTarget {
@@ -78,8 +80,7 @@ export class DocumentSessionStore extends EventTarget {
     }
     return session[attachLease]();
   }
-  /** @internal */
-  changed(session: DocumentSession): void {
+  [notifyStoreChange](session: DocumentSession): void {
     this.dispatchEvent(new CustomEvent("change", { detail: session }));
   }
 }
@@ -247,7 +248,7 @@ export class DocumentSession {
       // Nested provider/lease callbacks finish before observers see the result.
       if (--this.#transitionDepth === 0 && this.#notificationPending) {
         this.#notificationPending = false;
-        this.store.changed(this);
+        this.store[notifyStoreChange](this);
       }
     }
   }
