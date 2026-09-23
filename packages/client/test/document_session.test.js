@@ -11,6 +11,16 @@ function setup(t) {
   return { consumer, store };
 }
 
+test("one consumer has one canonical document store", t => {
+  const { consumer, store } = setup(t);
+  assert.throws(() => new DocumentSessionStore(consumer), /DocumentSessionStore.for/);
+  assert.equal(DocumentSessionStore.for(consumer), store);
+  const first = store.acquire(descriptor);
+  const second = DocumentSessionStore.for(consumer).acquire(descriptor);
+  assert.equal(first.session, second.session);
+  assert.equal(consumer.created.length, 1);
+});
+
 test("sessions expose no direct lease acquisition or release methods", t => {
   const { consumer, store } = setup(t);
   const lease = store.acquire(descriptor), session = lease.session;
