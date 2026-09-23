@@ -12,7 +12,11 @@ for (const [format, entry, extension] of [["ESM", "../dist/index.js", "mts"], ["
     t.after(() => rmSync(directory, { recursive: true, force: true }));
     const file = join(directory, `consumer.${extension}`);
     writeFileSync(file, `
-      import type { DocumentSessionStore, DocumentDescriptor } from ${JSON.stringify(fileURLToPath(new URL(entry, import.meta.url)))};
+      import { DocumentSessionStore, type DocumentDescriptor } from ${JSON.stringify(fileURLToPath(new URL(entry, import.meta.url)))};
+      declare const consumer: Parameters<typeof DocumentSessionStore.for>[0];
+      const canonical = DocumentSessionStore.for(consumer);
+      // @ts-expect-error A consumer must use its one canonical store.
+      new DocumentSessionStore(consumer);
       declare const store: DocumentSessionStore;
       declare const descriptor: DocumentDescriptor;
       const lease = store.acquire(descriptor);

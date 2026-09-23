@@ -40,6 +40,8 @@ type SessionEffect =
 // its editors attached and no way forward. After this long it blocks instead.
 const REFRESH_TIMEOUT_MS = 15_000;
 const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
+// Only the factory may create a store for a consumer.
+const storeToken = Symbol("storeToken");
 // Only the store acquires leases; this symbol is not exported.
 const attachLease = Symbol("attachLease");
 
@@ -47,11 +49,14 @@ const attachLease = Symbol("attachLease");
 export class DocumentSessionStore extends EventTarget {
   static for(consumer: CableConsumer): DocumentSessionStore {
     let store = stores.get(consumer);
-    if (!store) stores.set(consumer, store = new DocumentSessionStore(consumer));
+    if (!store) stores.set(consumer, store = new DocumentSessionStore(consumer, storeToken));
     return store;
   }
   #sessions = new Map<string, DocumentSession>();
-  constructor(readonly consumer: CableConsumer) { super(); }
+  private constructor(readonly consumer: CableConsumer, token: typeof storeToken) {
+    super();
+    if (token !== storeToken) throw new Error("Use DocumentSessionStore.for(consumer)");
+  }
   get sessions(): readonly DocumentSession[] { return [...this.#sessions.values()]; }
 
   /** Acquire a lease on this document session, creating it on first use. */

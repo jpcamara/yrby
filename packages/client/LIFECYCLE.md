@@ -57,8 +57,9 @@ state. Refreshing and renewed are substates of the public `open` state.
 After effects finish, an open lifetime closes if no leases or pending edits remain.
 Closed sessions ignore late callbacks. A pending refresh captures its originating
 state object, so a response after block, retry, or close cannot affect a newer
-attempt. Applications acquire through `store.acquire()` and release through
-`lease.release()`; session bookkeeping is internal.
+attempt. Applications obtain the one store per consumer through
+`DocumentSessionStore.for(consumer)`, then acquire through `store.acquire()` and
+release through `lease.release()`; session bookkeeping is internal.
 
 Phase changes take effect before cleanup callbacks. Closing removes the session
 from the store before editor cleanup can acquire a replacement; blocking snapshots
