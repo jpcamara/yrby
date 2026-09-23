@@ -43,6 +43,71 @@ test("even a retained internal acquisition method cannot attach to a closed sess
   assert.deepEqual(store.sessions, []);
 });
 
+test("discarding from an acquisition observer announces closure once", t => {
+  const { store } = setup(t);
+  const seen = [];
+  store.addEventListener("change", event => {
+    const session = event.detail;
+    seen.push(session.state);
+    if (session.state === "open") session.discard();
+  });
+  const lease = store.acquire(descriptor);
+  assert.equal(lease.signal.aborted, true);
+  assert.equal(lease.session.doc.isDestroyed, true);
+  assert.deepEqual(seen, ["open", "closed"]);
+  assert.deepEqual(store.sessions, []);
+});
+
+test("closed sessions ignore deferred provider errors", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  sync(consumer.created[0]);
+  consumer.created[0].unsubscribe = () => { throw new Error("late unsubscribe failure"); };
+  const seen = [];
+  store.addEventListener("change", event => seen.push(event.detail.state));
+  lease.release();
+  await tick();
+  assert.equal(session.state, "closed");
+  assert.equal(session.error, undefined);
+  assert.deepEqual(seen, ["closed"]);
+});
+
+test("an initial connection failure returns an aborted lease on a blocked session", t => {
+  const { consumer, store } = setup(t);
+  consumer.subscriptions.create = () => { throw new Error("cannot subscribe"); };
+  const lease = store.acquire(descriptor);
+  assert.equal(lease.signal.aborted, true);
+  assert.equal(lease.session.state, "blocked");
+  assert.match(String(lease.session.error), /cannot subscribe/);
+  assert.equal(lease.session.doc.isDestroyed, false);
+  assert.deepEqual(store.sessions, [lease.session]);
+});
+
+test("observers see cleanup-triggered retry only after its replacement lease is acquired", t => {
+  const { consumer, store } = setup(t);
+  const first = store.acquire(descriptor), session = first.session;
+  sync(consumer.created[0]);
+  session.doc.getText("content").insert(0, "keep me");
+  let replacement;
+  let cleanupFinished = false;
+  first.signal.addEventListener("abort", () => {
+    session.retry();
+    replacement = store.acquire(descriptor);
+    cleanupFinished = true;
+  });
+  const seen = [];
+  store.addEventListener("change", event => seen.push({
+    state: event.detail.state,
+    cleanupFinished,
+    replacementLive: replacement?.signal.aborted === false,
+  }));
+  consumer.created[0].handlers.rejected();
+  assert.deepEqual(seen, [{ state: "open", cleanupFinished: true, replacementLive: true }]);
+  assert.equal(replacement.session, session);
+  assert.equal(session.hasPending, true);
+  assert.equal(consumer.created.length, 2);
+});
+
 test("matching leases share one document and queue; consumer scopes are isolated", async t => {
   const { consumer, store } = setup(t);
   const first = store.acquire(descriptor), second = store.acquire(descriptor);
