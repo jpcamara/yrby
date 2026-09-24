@@ -43,9 +43,10 @@ export interface Pending {
 
 const DEFAULT_RESEND_INTERVAL = 1000;
 
-type DeliveryState =
-  | { phase: "paused" | "idle" | "destroyed" }
-  | { phase: "sending"; stopTimer: () => void };
+// "live" means the transport is up. The retransmit timer runs exactly while
+// delivery is live and something is unacknowledged.
+type Phase = "paused" | "live" | "destroyed";
+type Timer = { stop: () => void };
 
 export class ReliableSync {
   #pending: Pending[] = [];
@@ -55,7 +56,12 @@ export class ReliableSync {
   #setInterval: (handler: () => void, ms: number) => TimerHandle;
   #clearInterval: (handle: TimerHandle) => void;
   #nextSeq = 1;
-  #state: DeliveryState = { phase: "paused" };
+  #phase: Phase = "paused";
+  #timer: Timer | undefined;
+  // Bumped on every queue or phase change. Injected send/merge/timer functions
+  // can call back into this object, so work started before such a call checks
+  // afterwards whether anything moved underneath it.
+  #version = 0;
   // The queue merged into one delta, memoized until the queue changes, so a
   // retransmit tick does not re-merge everything every second.
   #tail: Uint8Array | undefined;
@@ -88,10 +94,9 @@ export class ReliableSync {
 
   /** Queue a local update and, while connected, send the tail. Ignored after destroy(). */
   enqueue(update: Uint8Array): void {
-    if (this.#state.phase === "destroyed") return;
+    if (this.#phase === "destroyed") return;
     this.#pending.push({ seq: this.#nextSeq++, update: new Uint8Array(update) });
-    this.#tail = undefined;
-    this.#reconcile();
+    this.#queueChanged();
     this.#flush();
   }
 
@@ -101,23 +106,28 @@ export class ReliableSync {
    * anything sent is ignored rather than trusted.
    */
   acknowledge(id: number): void {
-    if (this.#state.phase === "destroyed" || !Number.isSafeInteger(id) || id < 0) return;
-    const newest = this.#pending[this.#pending.length - 1];
+    if (this.#phase === "destroyed" || !Number.isSafeInteger(id) || id < 0) return;
+    const newest = this.#pending.at(-1);
     if (newest && id > newest.seq) return;
     this.#pending = this.#pending.filter((p) => p.seq > id);
-    this.#tail = undefined;
-    this.#reconcile();
+    this.#queueChanged();
   }
 
   /** The transport is up: replay the tail and keep retransmitting until it is acknowledged. */
   resume(): void {
-    this.#setPhase(this.hasPending ? "sending" : "idle");
+    if (this.#phase === "destroyed") return;
+    this.#phase = "live";
+    this.#version++;
+    this.#updateTimer();
     this.#flush();
   }
 
   /** The transport is down: keep the queue, stop retransmitting. */
   pause(): void {
-    this.#setPhase("paused");
+    if (this.#phase === "destroyed") return;
+    this.#phase = "paused";
+    this.#version++;
+    this.#updateTimer();
   }
 
   /** Send the tail again if anything is unacknowledged. The internal timer calls this; a host with its own scheduler may too. */
@@ -126,59 +136,60 @@ export class ReliableSync {
   }
 
   /** Stop the timer and drop the queue. Later enqueues are ignored. */
-  destroy(): void { this.#setPhase("destroyed"); }
-
-  #reconcile(): void {
-    if (this.#state.phase === "paused" || this.#state.phase === "destroyed") return;
-    this.#setPhase(this.hasPending ? "sending" : "idle");
+  destroy(): void {
+    if (this.#phase === "destroyed") return;
+    this.#phase = "destroyed";
+    this.#pending = [];
+    this.#queueChanged();
   }
-  #setPhase(phase: DeliveryState["phase"]): void {
-    const current = this.#state;
-    if (current.phase === "destroyed") return;
-    if (phase === current.phase) return;
-    const next: DeliveryState = phase === "sending" ? { phase, stopTimer: () => {} } : { phase };
-    this.#state = next;
-    if (phase === "destroyed") {
-      this.#pending = [];
-      this.#tail = undefined;
+
+  #queueChanged(): void {
+    this.#version++;
+    this.#tail = undefined;
+    this.#updateTimer();
+  }
+
+  // Start or stop the retransmit timer so it runs exactly while live with work queued.
+  #updateTimer(): void {
+    const wanted = this.#phase === "live" && this.hasPending;
+    if (wanted === (this.#timer !== undefined)) return;
+    if (!wanted) {
+      const timer = this.#timer!;
+      this.#timer = undefined;
+      timer.stop();
+      return;
     }
-    if (current.phase === "sending") current.stopTimer();
-    if (this.#state !== next || next.phase !== "sending") return;
-    let timer: TimerHandle;
+    // Installed before setInterval so a tick during that call sees its own
+    // timer. Stopping it before the handle exists does nothing; the check
+    // after setInterval returns cancels the real handle.
+    const timer: Timer = this.#timer = { stop: () => {} };
+    let handle: TimerHandle;
     try {
-      timer = this.#setInterval(() => {
-        if (this.#state === next) this.#flush();
-      }, this.#resendInterval);
+      handle = this.#setInterval(() => { if (this.#timer === timer) this.#flush(); }, this.#resendInterval);
     } catch (error) {
-      if (this.#state === next) this.#state = current;
+      // Nothing is lost: the next resume or queue change tries again.
+      if (this.#timer === timer) this.#timer = undefined;
       throw error;
     }
-    next.stopTimer = () => this.#clearInterval(timer);
-    // An injected timer may call back before returning its handle.
-    if (this.#state !== next) { next.stopTimer(); return; }
-    const handle = timer as { unref?: () => void };
-    if (handle && typeof handle.unref === "function") handle.unref();
+    timer.stop = () => this.#clearInterval(handle);
+    // An injected timer may tick before returning its handle, and that tick
+    // can pause or drain delivery.
+    if (this.#timer !== timer) { timer.stop(); return; }
+    (handle as { unref?: () => void } | null)?.unref?.();
   }
 
   // Send the whole tail as one delta, tagged with its highest seq so one ack
   // covers all of it. Nothing goes out while disconnected.
   #flush(): void {
-    const current = this.#state, pending = this.#pending;
-    if (current.phase !== "sending" || !pending.length) return;
-    const id = pending[pending.length - 1].seq;
-    const update = this.#mergedTail();
-    if (this.#state === current && this.#pending === pending && pending[pending.length - 1]?.seq === id) this.#send(update, id);
-  }
-
-  #mergedTail(): Uint8Array {
+    if (this.#phase !== "live" || !this.#pending.length) return;
     if (this.#tail === undefined) {
-      const pending = this.#pending, id = pending[pending.length - 1].seq;
-      const updates = pending.map((p) => p.update);
+      const version = this.#version;
+      const updates = this.#pending.map((p) => p.update);
       const tail = updates.length === 1 ? updates[0] : this.#merge(updates);
-      if (this.#pending === pending && pending[pending.length - 1]?.seq === id) this.#tail = tail;
-      return tail;
+      // merge may have changed the queue, paused, or already sent through a nested resume.
+      if (this.#version !== version) return;
+      this.#tail = tail;
     }
-    return this.#tail;
+    this.#send(this.#tail, this.#pending.at(-1)!.seq);
   }
-
 }

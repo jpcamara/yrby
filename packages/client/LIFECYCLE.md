@@ -1,18 +1,17 @@
 # Client lifecycles
 
-Each layer owns its transitions and the resources attached to its current state.
-The machines communicate through commands, status events, and lease aborts.
-They do not write each other's state.
+Five objects each own one lifetime. They talk through method calls, status
+events, and lease aborts, and none of them writes another's state.
 
-| Owner | States | Transition owner |
+| Owner | States | Where the rules live |
 | --- | --- | --- |
-| `DocumentSession` | open, refreshing, renewed, blocked, closed | `#transition` |
-| `YrbyDocumentElement` | detached, inactive, idle, loading, syncing, ready | `#transition` |
-| `ActionCableProvider` | disconnected, subscribing, connecting, connected, stopping, destroyed | `#transition` |
-| `YProtocolSession` | unsynced, synced, destroyed | `#transition` |
-| `ReliableSync` | paused, idle, sending, destroyed | `#transition` |
-| `TurboAdapter` | active, destroyed | `destroy` is its only lifecycle transition |
-| `DocumentLease` | live, released | the native abort signal; `release` aborts it |
+| `DocumentSession` | open, refreshing, renewed, blocked, closed | `TRANSITIONS` table and `#transition` |
+| `YrbyDocumentElement` | detached, inactive, idle, loading, syncing, ready | `requests` table and `#setState` |
+| `ActionCableProvider` | disconnected, subscribing, connecting, connected, stopping, destroyed | `connect` and `#stop` |
+| `YProtocolSession` | unsynced, synced, destroyed | `resume`, `pause`, `receive` |
+| `ReliableSync` | paused, live, destroyed | `#updateTimer` |
+| `TurboAdapter` | active, destroyed | `destroy` |
+| `DocumentLease` | live, released | its abort signal; `release` aborts it |
 
 ## How the layers meet
 
@@ -28,101 +27,115 @@ flowchart TD
   Delivery -->|send update and acknowledgment ID| Provider
 ```
 
-A blocked session retires its connection and aborts its leases. The element's
-lease-abort event releases the editor and holds it inert. Queued edits remain
-owned by the session. Retrying reconnects that session; discarding destroys it.
+A blocked session disconnects and aborts its leases. Each element hears the
+abort, releases its editor, and goes inert. Queued edits stay with the session.
+Retrying reconnects the session; discarding destroys it.
 
-## Ownership rules
+## One rule that applies everywhere
 
-**Sessions.** Commands, lease releases, provider callbacks, and refresh results
-all enter `#transition`. It owns operation guards, phase changes, lease membership,
-effect ordering, idle closure, and change notifications. Connection and refresh
-helpers execute the requested work and report results as events; they do not
-inspect phases or decide whether a result is still current. Getters only project
-state. Refreshing and renewed are substates of the public `open` state.
+Application callbacks run synchronously in the middle of our own work: editor
+cleanup, status listeners, awareness listeners, injected timers, store
+listeners. Any of them can call back in and change state. So work that calls
+out checks afterwards that it still owns the state it started from, usually
+by comparing an identity object (a state, lease, attempt, cycle, or timer).
+That check is the reason for most of the short `if (this.#state !== x) return`
+lines.
 
-| Event | Allowed phase / condition | Result |
+## Sessions
+
+`TRANSITIONS` lists every legal phase change; `#transition` is the only code
+that changes the phase. Refreshing and renewed are substates of the public
+`open` state.
+
+| Event | Allowed when | Result |
 | --- | --- | --- |
-| acquire | Any except closed | Add a lease; connect only in open or renewed |
-| release | The lease is still owned | Remove it; clear presence after the last lease |
-| retry | blocked | Clear error, enter open, reconnect |
-| discard | Any except closed | Close and destroy the session |
-| provider status | open, refreshing, renewed | An accepted renewed grant enters open |
+| acquire | not closed | Add a lease; connect in open or renewed |
+| release | the lease is still held | Remove it; clear presence after the last lease |
+| retry | blocked | Clear the error, enter open, reconnect |
+| discard | not closed | Close and destroy the session |
+| provider status | open, refreshing, renewed | A connected renewed grant enters open |
 | rejection | open with a refresh URL | Enter refreshing and fetch a grant |
-| rejection | open without a refresh URL, refreshing, renewed | Block and release editor leases |
-| refresh result | The originating refreshing state is still current | Enter renewed and resubscribe |
-| connection or refresh failure | The originating active state is still current | Block and release editor leases |
-| other error | Any except closed | Record the error |
+| rejection | anything else that is not blocked or closed | Block |
+| refresh result | the refreshing state that started it is still current | Enter renewed and resubscribe, or block on failure |
+| connect failure | the state that started it is still current | Block |
+| other error | not closed | Record the error |
 
-After effects finish, an open lifetime closes if no leases or pending edits remain.
-Closed sessions ignore late callbacks. A pending refresh captures its originating
-state object, so a response after block, retry, or close cannot affect a newer
-attempt. Applications obtain the one store per consumer through
-`DocumentSessionStore.for(consumer)`, then acquire through `store.acquire()` and
-release through `lease.release()`; session bookkeeping is internal.
+Every entry point runs inside `#batch`. When the outermost batch ends, a
+session with no leases and nothing to deliver closes, then observers get one
+change notification. Blocked sessions never close on their own. Closing
+removes the session from the store before releasing leases, so editor cleanup
+can acquire a fresh replacement. Blocking snapshots its leases before releasing
+them for the same reason.
 
-Phase changes take effect before cleanup callbacks. Closing removes the session
-from the store before editor cleanup can acquire a replacement; blocking snapshots
-its retiring leases before callbacks can acquire new ones. Nested callbacks remain
-synchronous, but change notifications wait for the outer operation to finish.
-The depth and pending-notification fields only batch those notifications; they do
-not encode session phases. Observers therefore see completed cleanup and any
-replacement lease acquired during it.
+## Elements
 
-**Elements.** Only syncing and ready states contain a lease. Inactive waits for
-the adapter; idle is already activated and may bind after descriptor changes
-settle. DOM membership comes from `isConnected`. Same-turn moves retain the
-binding, but async completions cannot bind or announce readiness while removed.
-Readiness is replaced when an attempt or lease is abandoned.
+The `requests` table lists each outside request (connect, activate, resume,
+retarget, deactivate, destroy), the phases it may leave, and its target. Any
+other request is a no-op. Adapter activation can wake an inactive element; a
+queued resume after an attribute change wakes only an idle one, so it cannot
+undo a Turbo cache deactivation.
 
-**Providers.** Subscribing reserves the attempt before calling the consumer.
-Callbacks fired during `create` wait until its returned subscription is installed.
-Connecting and connected own a connection. Each callback and asynchronous send
-result must still belong to that connection. The stopping state rejects incoming
-callbacks while allowing the retiring subscription to send its presence removal.
-Its reason records whether to disconnect, report rejection, or finish destruction;
-a destroy request during cleanup supersedes disconnection. Unsubscribe is deferred
-one microtask so the removal frame can flush. Destroyed is terminal.
+Async results (consumer loaded, lease acquired, first sync, lease aborted) are
+not in the table. Each one carries the state that started it and does nothing
+if the element has moved on or left the DOM.
 
-The provider's awareness instance catches application event failures so presence
-removal and destruction can finish, including cancellation of its reaper timer.
-Failures go through `onError`; a throwing error handler falls back to console
-reporting. Deferred unsubscribe failures are reported through the same boundary.
+Loading, syncing, and ready are one attempt moving forward with one lease.
+`#setState` treats any other move out of an attempt as abandoning it: it
+replaces the `whenSynced` promise, holds the element inert, and releases the
+lease. Releasing runs editor cleanup, which can retarget or remount the
+element, so the new phase's work starts only if the state is still the one
+just set.
 
-Provider status is a projection of the provider and protocol states. `#last` is
-only a notification cache. If a listener causes a newer transition, the older
-notification stops rather than delivering stale status to the remaining listeners.
-The page-handler pair is a resource; retired handlers cannot restore old presence.
+## Providers
 
-**Protocol.** Resume and pause begin new handshake cycles. Catch-up retains its
-cycle, so a synchronous handshake reply is valid. A receive interrupted by a
-new cycle cannot mark that cycle synced or return an obsolete reply. Destroyed
-sessions ignore later receive, bootstrap, resume, pause, and presence-removal calls.
-The protocol detaches from externally owned docs and awareness; it does not destroy
-them.
+Each `connect()` creates an attempt object. Cable callbacks carry it and run
+only while that attempt is connecting or connected. A consumer that calls back
+inside `create()` is deferred one microtask, until the subscription is
+installed. If `disconnect()` or `destroy()` runs inside `create()`, the
+returned subscription is unsubscribed.
 
-**Delivery.** Paused retains the queue; idle is resumed with an empty queue;
-sending owns its retransmission timer. Queue changes select idle or sending.
-Leaving sending cancels that timer. Its callback checks the sending-state identity,
-so a queued tick cannot retransmit a later queue. Timer ownership is established
-before sending: a synchronous acknowledgment or pause can clean it up immediately.
-Destroy clears the queue and is terminal. Enqueue copies the caller's bytes;
-inspection through `pending` returns a copy of the queue and each update, so
-ordinary array operations or buffer reuse cannot mutate delivery state.
+`#stop` handles disconnect, rejection, and destroy. With a live subscription
+it enters stopping, removes our presence (the old subscription may still send
+that one frame), pauses the protocol, and schedules the unsubscribe for the
+next microtask. A `destroy()` during those calls upgrades the stop reason.
+Destroyed is terminal. Send failures are reported only while the failing
+subscription is still the current one.
 
-**Adapter and leases.** Only an active adapter may schedule reconciliation. It
-leaves the per-document registry before invoking teardown callbacks, so those
-callbacks can register a replacement safely. A lease derives release state from
-`signal.aborted`; there is no second released flag to keep synchronized.
+The provider's awareness catches listener failures, so presence removal and
+destruction always finish. Failures go through `onError`; a throwing `onError`
+falls back to `console.warn`. If a status listener causes a newer status, the
+older notification stops instead of delivering stale status to the remaining
+listeners.
 
-## Data is not another lifecycle
+## Protocol
 
-Pending updates, acknowledgment sequence numbers, merge caches, lease collections,
-listeners, readiness promises, and parked presence/inert values remain ordinary
-data. `hasPending` derives from the queue. There are no separate connected,
-destroyed, synced, released, active, or attaching booleans to combine by hand.
+`resume` and `pause` each start a new handshake cycle. A receive interrupted
+by a new cycle cannot mark that cycle synced or return a stale reply. Incoming
+frames are fully validated before anything is applied. After `destroy`,
+everything is a no-op. The protocol detaches from the doc and awareness it was
+given but does not destroy them.
 
-The unit suites exercise synchronous consumer callbacks, retries during cleanup,
-late frames and timer ticks, canceled grant refreshes, and interrupted handshakes.
-The browser suites cover Rails, ActionCable/AnyCable, Turbo/Turbolinks, navigation,
-offline delivery, grant renewal, and editor bindings.
+## Delivery
+
+The retransmit timer runs exactly while delivery is live and the queue is not
+empty; `#updateTimer` enforces that after every change. A tick checks that its
+timer is still the current one. The injected `send`, `merge`, and timer
+functions may call back in, so a queue version number lets a flush notice that
+the queue changed during `merge`. Destroy clears the queue and is terminal.
+Enqueue copies the caller's bytes, and `pending` returns copies, so callers
+cannot mutate the queue.
+
+## Adapter and leases
+
+Only an active adapter schedules reconciliation. It leaves the per-document
+registry before calling teardown callbacks, so those callbacks can register a
+replacement. A lease's released state is `signal.aborted`; there is no second
+flag.
+
+## Test coverage
+
+The unit suites exercise synchronous consumer callbacks, retries during
+cleanup, late frames and timer ticks, canceled grant refreshes, and interrupted
+handshakes. The browser suite runs four editors and a fresh reader against
+Rails with ActionCable and AnyCable consumers, under Turbo and Turbolinks,
+through navigation, offline edits, and reconnects.

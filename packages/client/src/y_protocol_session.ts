@@ -184,8 +184,7 @@ export class YProtocolSession {
     // A malformed/truncated frame must never take down the transport callback:
     // decode + apply defensively, drop the frame on error, keep the session live.
     try {
-      const validatedType = this.#validateFrame(frame);
-      if (validatedType === null) return null;
+      if (!validateFrame(frame)) return null; // a y-protocols type yrby doesn't speak
 
       const decoder = decoding.createDecoder(frame);
       const encoder = encoding.createEncoder();
@@ -203,7 +202,7 @@ export class YProtocolSession {
           if (this.awareness) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
           break;
         default:
-          return null; // a y-protocols type yrby doesn't speak (auth, query-awareness): ignore
+          return null; // unreachable: validateFrame accepted only the two types above
       }
       return this.#current(cycle) && encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
     } catch (error) {
@@ -244,52 +243,47 @@ export class YProtocolSession {
     encoding.writeVarUint8Array(e, encodeAwarenessUpdate(this.awareness as Awareness, clients));
     return encoding.toUint8Array(e);
   }
+}
 
-  #validateFrame(frame: Uint8Array): number | null {
-    const decoder = decoding.createDecoder(frame);
-    const type = decoding.readVarUint(decoder);
-    switch (type) {
-      case MessageType.Sync: {
-        const scratchDoc = new Doc();
-        try {
-          const scratchEncoder = encoding.createEncoder();
-          encoding.writeVarUint(scratchEncoder, MessageType.Sync);
-          readSyncMessage(decoder, scratchEncoder, scratchDoc, this);
-        } finally {
-          scratchDoc.destroy();
-        }
-        break;
-      }
-      case MessageType.Awareness:
-        // Validate the payload's CONTENTS, not just the envelope.
-        // applyAwarenessUpdate mutates state entry by entry and only notifies
-        // listeners at the end — a bad entry mid-payload would leave earlier
-        // entries applied with no event fired. Dry-running every entry here
-        // makes the real apply infallible (and catches trailing garbage
-        // inside the blob).
-        {
-          const payload = decoding.readVarUint8Array(decoder);
-          const inner = decoding.createDecoder(payload);
-          const count = decoding.readVarUint(inner);
-          for (let i = 0; i < count; i++) {
-            decoding.readVarUint(inner); // clientID
-            decoding.readVarUint(inner); // clock
-            JSON.parse(decoding.readVarString(inner)); // state (null on removal)
-          }
-          if (decoding.hasContent(inner)) {
-            throw new Error("awareness payload has trailing bytes");
-          }
-        }
-        break;
-      default:
-        return null; // a y-protocols type yrby doesn't speak: ignore
-    }
-    // This protocol is one message per frame. Anything left after a complete
-    // message is malformed (trailing garbage, or low-level packed messages whose
-    // tail we'd silently drop), so reject it before mutating local state.
-    if (decoding.hasContent(decoder)) {
-      throw new Error("frame has trailing bytes after a complete message");
-    }
-    return type;
+// Check a whole incoming frame before anything is applied, so a malformed
+// frame changes nothing. Returns false for a frame type yrby ignores (auth,
+// query-awareness) and throws for a malformed one.
+function validateFrame(frame: Uint8Array): boolean {
+  const decoder = decoding.createDecoder(frame);
+  const type = decoding.readVarUint(decoder);
+  if (type === MessageType.Sync) validateSync(decoder);
+  else if (type === MessageType.Awareness) validateAwareness(decoding.readVarUint8Array(decoder));
+  else return false;
+  // This protocol is one message per frame. Anything left after a complete
+  // message is malformed (trailing garbage, or low-level packed messages whose
+  // tail we'd silently drop).
+  if (decoding.hasContent(decoder)) throw new Error("frame has trailing bytes after a complete message");
+  return true;
+}
+
+// Dry-run the sync message against a throwaway doc.
+function validateSync(decoder: decoding.Decoder): void {
+  const scratchDoc = new Doc();
+  try {
+    const scratchEncoder = encoding.createEncoder();
+    encoding.writeVarUint(scratchEncoder, MessageType.Sync);
+    readSyncMessage(decoder, scratchEncoder, scratchDoc, null);
+  } finally {
+    scratchDoc.destroy();
   }
+}
+
+// applyAwarenessUpdate mutates state entry by entry and notifies listeners
+// only at the end, so a bad entry mid-payload would leave earlier entries
+// applied with no event fired. Reading every entry first makes the real apply
+// infallible and catches trailing bytes inside the payload.
+function validateAwareness(payload: Uint8Array): void {
+  const decoder = decoding.createDecoder(payload);
+  const count = decoding.readVarUint(decoder);
+  for (let i = 0; i < count; i++) {
+    decoding.readVarUint(decoder); // clientID
+    decoding.readVarUint(decoder); // clock
+    JSON.parse(decoding.readVarString(decoder)); // state (null on removal)
+  }
+  if (decoding.hasContent(decoder)) throw new Error("awareness payload has trailing bytes");
 }
