@@ -5,8 +5,8 @@ events, and lease aborts, and none of them writes another's state.
 
 | Owner | States | Where the rules live |
 | --- | --- | --- |
-| `DocumentSession` | open, refreshing, renewed, blocked, closed | `TRANSITIONS` table and `#transition` |
-| `YrbyDocumentElement` | detached, inactive, idle, loading, syncing, ready | `requests` table and `#setState` |
+| `DocumentSession` | open, refreshing, renewed, blocked, closed | `TRANSITIONS` table; `#settle` acts on the phase |
+| `YrbyDocumentElement` | no phases: facts plus the current attempt | `#settle` |
 | `ActionCableProvider` | disconnected, subscribing, connecting, connected, stopping, destroyed | `connect` and `#stop` |
 | `YProtocolSession` | unsynced, synced, destroyed | `resume`, `pause`, `receive` |
 | `ReliableSync` | paused, live, destroyed | `#updateTimer` |
@@ -31,60 +31,77 @@ A blocked session disconnects and aborts its leases. Each element hears the
 abort, releases its editor, and goes inert. Queued edits stay with the session.
 Retrying reconnects the session; discarding destroys it.
 
-## One rule that applies everywhere
+## The rules
 
-Application callbacks run synchronously in the middle of our own work: editor
-cleanup, status listeners, awareness listeners, injected timers, store
-listeners. Any of them can call back in and change state. So work that calls
-out checks afterwards that it still owns the state it started from, usually
-by comparing an identity object (a state, lease, attempt, cycle, or timer).
-That check is the reason for most of the short `if (this.#state !== x) return`
-lines.
+Application code runs in the middle of our work: editor cleanup when a lease
+is aborted, status and store listeners, `yrby:*` event listeners. Any of it can
+call back in. The element and the session handle that with three rules:
+
+1. **Commands act now; callbacks wait.** Explicit commands (`acquire`,
+   `retry`, `discard`, and the element's deactivate, retarget, and destroy)
+   take effect immediately. Turbo snapshots the page as soon as `before-cache`
+   returns, and a retargeted editor must stop writing to the old document at
+   once. Callbacks and async results (provider status and errors, lease
+   aborts, consumer loading, first sync) only record what happened and ask for
+   a settle.
+2. **Settle decides.** Each object schedules at most one `#settle()` at a time,
+   as a microtask, so it runs once the current call stack has finished. It
+   compares the current facts with what exists and fixes the difference, so an
+   extra settle is harmless.
+3. **Our state is final before application code runs.** Phase, store
+   membership, and the current attempt are updated first. Releasing leases,
+   which runs editor cleanup, comes after.
+
+The provider, protocol, and delivery layers (released in 0.5.0) keep their
+own synchronous rules, described below.
 
 ## Sessions
 
-`TRANSITIONS` lists every legal phase change; `#transition` is the only code
-that changes the phase. Refreshing and renewed are substates of the public
-`open` state.
+`TRANSITIONS` lists every legal phase change. `#transition` is the only code
+that changes the phase, and it never calls out.
 
-| Event | Allowed when | Result |
-| --- | --- | --- |
-| acquire | not closed | Add a lease; connect in open or renewed |
-| release | the lease is still held | Remove it; clear presence after the last lease |
-| retry | blocked | Clear the error, enter open, reconnect |
-| discard | not closed | Close and destroy the session |
-| provider status | open, refreshing, renewed | A connected renewed grant enters open |
-| rejection | open with a refresh URL | Enter refreshing and fetch a grant |
-| rejection | anything else that is not blocked or closed | Block |
-| refresh result | the refreshing state that started it is still current | Enter renewed and resubscribe, or block on failure |
-| connect failure | the state that started it is still current | Block |
-| other error | not closed | Record the error |
+| Event | Result |
+| --- | --- |
+| acquire | Add a lease; connect now in open or renewed (not allowed once closed) |
+| release | Remove the lease; clear presence after the last one |
+| retry | From blocked: clear the error, enter open, connect now |
+| discard | Close now: leave the store, release leases, destroy the provider and doc |
+| provider status | Ignored while blocked or closed. A connected renewed grant enters open. |
+| rejection | From open with a refresh URL: enter refreshing and fetch a grant. Otherwise block. |
+| refresh result | If the refreshing state that started it is still current: enter renewed and resubscribe with the new grant, or block on failure |
+| connect failure | Block |
+| other error | Record it, unless closed |
 
-Every entry point runs inside `#batch`. When the outermost batch ends, a
-session with no leases and nothing to deliver closes, then observers get one
-change notification. Blocked sessions never close on their own. Closing
-removes the session from the store before releasing leases, so editor cleanup
-can acquire a fresh replacement. Blocking snapshots its leases before releasing
-them for the same reason.
+Settle then does two things. It releases the leases a blocked session held
+when it blocked; a lease acquired while blocked is kept for `retry()`. And it
+closes a session with no leases and nothing to deliver. After that it tells
+store observers once. A connect failure only blocks, so it can't loop.
+
+Editor cleanup can make a final edit when its lease is released. That edit is
+queued before settle checks whether anything is left to deliver, so the
+session stays open until the server acknowledges it. Closing leaves the store
+before releasing leases, so cleanup can acquire a fresh replacement.
 
 ## Elements
 
-The `requests` table lists each outside request (connect, activate, resume,
-retarget, deactivate, destroy), the phases it may leave, and its target. Any
-other request is a no-op. Adapter activation can wake an inactive element; a
-queued resume after an attribute change wakes only an idle one, so it cannot
-undo a Turbo cache deactivation.
+The element has no phase machine. It binds when three facts hold: it is in
+the page, the Turbo adapter says the page is live (`activate`/`deactivate`),
+and its attributes name a document. `#settle` compares that with the current
+attempt: one try at binding one document, which records its consumer, lease,
+first sync, and any failure as they arrive.
 
-Async results (consumer loaded, lease acquired, first sync, lease aborted) are
-not in the table. Each one carries the state that started it and does nothing
-if the element has moved on or left the DOM.
-
-Loading, syncing, and ready are one attempt moving forward with one lease.
-`#setState` treats any other move out of an attempt as abandoning it: it
-replaces the `whenSynced` promise, holds the element inert, and releases the
-lease. Releasing runs editor cleanup, which can retarget or remount the
-element, so the new phase's work starts only if the state is still the one
-just set.
+- Settle starts an attempt, acquires once the consumer has loaded, and
+  announces readiness after the first sync. That releases inert, resolves
+  `whenSynced`, and dispatches `yrby:synced`.
+- Removal is handled at settle, so a same-turn DOM move keeps its binding.
+- An adapter activation after caching uses the adapter's latest word, so a
+  queued settle can never wake a page Turbo has cached.
+- Abandoning an attempt holds the element inert and replaces `whenSynced`, so
+  the old promise never resolves for an abandoned attempt.
+- If the session blocks (reported with `yrby:error`), is discarded, or the
+  consumer fails to load, the attempt records why when it happens, and the
+  element stalls on that document. It tries again after the next page render,
+  an attribute change, or re-insertion.
 
 ## Providers
 
