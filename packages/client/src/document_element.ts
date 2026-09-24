@@ -26,6 +26,22 @@ type ElementState =
   | { phase: "detached" | "inactive" | "idle" }
   | Loading | Syncing
   | { phase: "ready"; lease: DocumentLease };
+type Phase = ElementState["phase"];
+
+// Every outside request, the phases it may leave, and where it goes. A request
+// from any other phase is a no-op. Loading additionally requires a connected
+// element. Async completions are not listed: they check identity instead.
+const live = ["idle", "loading", "syncing", "ready"] as const;
+const requests = {
+  connect: { from: ["detached"], to: "inactive" },
+  // Turbo's adapter decides the page is live.
+  activate: { from: ["inactive", "idle"], to: "loading" },
+  // A queued retarget wakes only an idle element, never one Turbo deactivated for caching.
+  resume: { from: ["idle"], to: "loading" },
+  retarget: { from: live, to: "idle" },
+  deactivate: { from: live, to: "inactive" },
+  destroy: { from: ["inactive", ...live], to: "detached" },
+} as const satisfies Record<string, { from: readonly Phase[]; to: "detached" | "inactive" | "idle" | "loading" }>;
 
 export class YrbyDocumentElement extends Base {
   /** Set before adding elements to use another consumer, such as AnyCable's. */
@@ -42,9 +58,9 @@ export class YrbyDocumentElement extends Base {
   get whenSynced(): Promise<void> { return this.#whenSynced; }
 
   connectedCallback(): void {
-    if (this.#state.phase === "detached") this.#setState({ phase: "inactive" });
+    this.#request("connect");
     this.#unregister ??= registerDocumentMount(this);
-    this.#resume();
+    this.#request("resume");
   }
   disconnectedCallback(): void {
     // Same-turn moves keep their binding. Async results check isConnected
@@ -56,29 +72,22 @@ export class YrbyDocumentElement extends Base {
     // The refresh URL is read when the session is acquired and is not part of
     // its identity, so changing it does not rebind the editor.
     if (name === "refresh") return;
-    if (this.#state.phase !== "detached" && this.#state.phase !== "inactive") this.#setState({ phase: "idle" });
-    queueMicrotask(() => this.#resume());
+    this.#request("retarget");
+    queueMicrotask(() => this.#request("resume"));
   }
 
   /** @internal Called by the Turbo adapter. */
-  activate(): void {
-    if (this.isConnected && (this.#state.phase === "inactive" || this.#state.phase === "idle")) {
-      this.#setState({ phase: "loading" });
-    }
-  }
+  activate(): void { this.#request("activate"); }
   /** @internal */
-  deactivate(): void {
-    if (this.#state.phase !== "detached" && this.#state.phase !== "inactive") this.#setState({ phase: "inactive" });
-  }
+  deactivate(): void { this.#request("deactivate"); }
   /** Release the editor lease. Unsaved work remains owned by its session. */
-  destroy(): void {
-    if (this.#state.phase !== "detached") this.#setState({ phase: "detached" });
-  }
+  destroy(): void { this.#request("destroy"); }
 
-  // A queued retarget may resume an idle live element, but never a page that
-  // the Turbo adapter deactivated for caching.
-  #resume(): void {
-    if (this.isConnected && this.#state.phase === "idle") this.#setState({ phase: "loading" });
+  #request(name: keyof typeof requests): void {
+    const { from, to } = requests[name];
+    if (!(from as readonly Phase[]).includes(this.#state.phase)) return;
+    if (to === "loading" && !this.isConnected) return;
+    this.#setState({ phase: to });
   }
   #acquired(from: Loading, lease: DocumentLease): void {
     if (this.#state !== from || !this.isConnected) { lease.release(); return; }

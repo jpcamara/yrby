@@ -176,11 +176,8 @@ export class ActionCableProvider {
   }
 
   connect(): void {
-    const current = this.#state;
-    if (current.phase === "destroyed" || (current.phase === "stopping" && current.reason === "destroy")) {
-      throw new Error("provider is destroyed");
-    }
-    if (current.phase !== "disconnected") return;
+    if (this.#destroying()) throw new Error("provider is destroyed");
+    if (this.#state.phase !== "disconnected") return;
     const opening: Opening = { phase: "subscribing" };
     this.#state = opening;
     const run = (callback: (connection: Connection) => void) => {
@@ -228,7 +225,7 @@ export class ActionCableProvider {
    * destroy().
    */
   renew(params: object): void {
-    if (this.#state.phase === "destroyed" || (this.#state.phase === "stopping" && this.#state.reason === "destroy")) return;
+    if (this.#destroying()) return;
     Object.assign(this.channelParams, params);
     this.disconnect();
     this.connect();
@@ -236,6 +233,10 @@ export class ActionCableProvider {
 
   destroy(): void { this.#stop("destroy"); }
 
+  #destroying(): boolean {
+    const current = this.#state;
+    return current.phase === "destroyed" || (current.phase === "stopping" && current.reason === "destroy");
+  }
   #active(connection: Connection): boolean {
     const current = this.#state;
     return (current.phase === "connecting" || current.phase === "connected") && current.connection === connection;
@@ -321,10 +322,7 @@ export class ActionCableProvider {
       return;
     }
     const reply = this.session.receive(frame);
-    const state = this.#state;
-    if (reply && (state.phase === "connecting" || state.phase === "connected") && state.connection === connection) {
-      this.#send(reply, undefined);
-    }
+    if (reply && this.#active(connection)) this.#send(reply, undefined);
     this.#refreshStatus();
   }
 
@@ -420,12 +418,7 @@ export class ActionCableProvider {
   // surface via onError instead of as unhandled rejections.
   #observe(result: unknown, connection: Connection): void {
     if (result instanceof Promise) {
-      result.catch(error => {
-        const state = this.#state;
-        if ((state.phase === "connecting" || state.phase === "connected") && state.connection === connection) {
-          this.#onError(error, "send");
-        }
-      });
+      result.catch(error => { if (this.#active(connection)) this.#onError(error, "send"); });
     }
   }
 }
