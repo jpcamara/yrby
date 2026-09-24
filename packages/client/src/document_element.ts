@@ -24,8 +24,14 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-// "idle" is activated but unbound; "inactive" waits for the adapter's activation.
-// Async completions carry the state that started them. Leaving it invalidates them.
+// detached  not in the page, and not registered with the Turbo adapter
+// inactive  in the page, waiting for the adapter to say the page is live
+// idle      live but unbound, for example right after an attribute change
+// loading   getting the consumer and a lease
+// syncing   holding a lease, waiting for the first catch-up with the server
+// ready     bound and editable
+// Async work keeps the state object it started from and gives up if the
+// element has moved on.
 type Loading = { phase: "loading" };
 type Syncing = { phase: "syncing"; lease: DocumentLease };
 type ElementState =
@@ -34,21 +40,16 @@ type ElementState =
   | { phase: "ready"; lease: DocumentLease };
 type Phase = ElementState["phase"];
 
-// Every outside request, the phases it may leave, and where it goes. A request
-// from any other phase is a no-op. Loading additionally requires a connected
-// element. Async completions are not listed: they check identity instead.
-const attempting = ["loading", "syncing", "ready"] as const;
-const live = ["idle", ...attempting] as const;
+// Each request may leave only the listed phases; anything else is ignored.
 const requests = {
-  connect: { from: ["detached"], to: "inactive" },
-  // Turbo's adapter decides the page is live.
-  activate: { from: ["inactive", "idle"], to: "loading" },
-  // A queued retarget wakes only an idle element, never one Turbo deactivated for caching.
-  resume: { from: ["idle"], to: "loading" },
-  retarget: { from: live, to: "idle" },
-  deactivate: { from: live, to: "inactive" },
-  destroy: { from: ["inactive", ...live], to: "detached" },
-} as const satisfies Record<string, { from: readonly Phase[]; to: "detached" | "inactive" | "idle" | "loading" }>;
+  connect:    { from: ["detached"],                                        to: "inactive" },
+  activate:   { from: ["inactive", "idle"],                                to: "loading" },
+  resume:     { from: ["idle"],                                            to: "loading" },
+  retarget:   { from: ["idle", "loading", "syncing", "ready"],             to: "idle" },
+  deactivate: { from: ["idle", "loading", "syncing", "ready"],             to: "inactive" },
+  destroy:    { from: ["inactive", "idle", "loading", "syncing", "ready"], to: "detached" },
+} satisfies Record<string, Move>;
+type Move = { from: Phase[]; to: "detached" | "inactive" | "idle" | "loading" };
 
 export class YrbyDocumentElement extends Base {
   /** Set before adding elements to use another consumer, such as AnyCable's. */
@@ -90,10 +91,12 @@ export class YrbyDocumentElement extends Base {
   /** Release the editor lease. Unsaved work remains owned by its session. */
   destroy(): void { this.#request("destroy"); }
 
+  // Activation and resume differ in one way: resume never wakes an inactive
+  // element, so a queued attribute change cannot undo a Turbo cache deactivation.
   #request(name: keyof typeof requests): void {
-    const { from, to } = requests[name];
-    if (!(from as readonly Phase[]).includes(this.#state.phase)) return;
-    if (to === "loading" && !this.isConnected) return;
+    const { from, to }: Move = requests[name];
+    if (!from.includes(this.#state.phase)) return;
+    if (to === "loading" && !this.isConnected) return; // removed, or not yet in the page
     this.#setState({ phase: to });
   }
   #acquired(from: Loading, lease: DocumentLease): void {
@@ -118,11 +121,12 @@ export class YrbyDocumentElement extends Base {
   #setState(next: ElementState): void {
     const previous = this.#state;
     this.#state = next;
-    // loading -> syncing -> ready is one attempt moving forward with one lease.
-    // Leaving an attempt any other way abandons it.
+    // loading -> syncing -> ready is one attempt at binding, with one lease.
+    // Leaving it any other way abandons the attempt and its readiness promise.
+    const inAttempt = previous.phase === "loading" || "lease" in previous;
     const advancing = (previous.phase === "loading" && next.phase === "syncing") ||
       (previous.phase === "syncing" && next.phase === "ready");
-    if (!advancing && (attempting as readonly Phase[]).includes(previous.phase)) this.#readiness = deferred();
+    if (inAttempt && !advancing) this.#readiness = deferred();
 
     // Settle the element before the old lease's editor cleanup runs below.
     if (next.phase !== "ready") this.#holdInert();
