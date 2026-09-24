@@ -156,6 +156,16 @@ test("rejection aborts editor cleanup, reports the recoverable session, and stay
   assert.equal(el.events.at(-1).detail.session, session);
 });
 
+test("an editor's abort handler no longer sees the released document", async t => {
+  const { el, consumer, mount } = setup(t);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  let seen = "unset";
+  el.events[0].detail.signal.addEventListener("abort", () => { seen = el.doc; });
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(seen, undefined);
+});
+
 test("a stale failed initialization cannot damage a newer lease", async t => {
   let reject;
   const consumer = fakeConsumer();
