@@ -18,6 +18,12 @@ function defaultConsumer(): Promise<CableConsumer> {
     .catch(error => { sharedConsumer = undefined; throw error; });
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(r => { resolve = r; });
+  return { promise, resolve };
+}
+
 // "idle" is activated but unbound; "inactive" waits for the adapter's activation.
 // Async completions carry the state that started them. Leaving it invalidates them.
 type Loading = { phase: "loading" };
@@ -31,7 +37,8 @@ type Phase = ElementState["phase"];
 // Every outside request, the phases it may leave, and where it goes. A request
 // from any other phase is a no-op. Loading additionally requires a connected
 // element. Async completions are not listed: they check identity instead.
-const live = ["idle", "loading", "syncing", "ready"] as const;
+const attempting = ["loading", "syncing", "ready"] as const;
+const live = ["idle", ...attempting] as const;
 const requests = {
   connect: { from: ["detached"], to: "inactive" },
   // Turbo's adapter decides the page is live.
@@ -49,13 +56,13 @@ export class YrbyDocumentElement extends Base {
   static observedAttributes = ["grant", "name", "channel", "refresh"];
   #state: ElementState = { phase: "detached" };
   #unregister: (() => void) | undefined;
-  #resolveSynced!: () => void;
-  #whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
+  // Settles when the current attempt first syncs. Abandoning the attempt replaces it.
+  #readiness = deferred();
   get session() { return "lease" in this.#state ? this.#state.lease.session : undefined; }
   get doc() { return this.session?.doc; }
   get provider() { return this.session?.provider; }
   /** Resolves after the current lease's first catch-up; never for an abandoned one. */
-  get whenSynced(): Promise<void> { return this.#whenSynced; }
+  get whenSynced(): Promise<void> { return this.#readiness.promise; }
 
   connectedCallback(): void {
     this.#request("connect");
@@ -108,34 +115,25 @@ export class YrbyDocumentElement extends Base {
     if (lease.session.state === "blocked") this.#error(lease.session.error, lease.session);
   }
 
-  // Publish state before releasing the old lease: editor cleanup can
-  // synchronously retarget or remount this element.
   #setState(next: ElementState): void {
-    const current = this.#state;
+    const previous = this.#state;
     this.#state = next;
-    const previousLease = "lease" in current ? current.lease : undefined;
-    const nextLease = "lease" in next ? next.lease : undefined;
-    if ((current.phase === "loading" && next.phase !== "syncing") || (previousLease && previousLease !== nextLease)) {
-      this.#whenSynced = new Promise<void>(resolve => { this.#resolveSynced = resolve; });
-    }
+    // loading -> syncing -> ready is one attempt moving forward with one lease.
+    // Leaving an attempt any other way abandons it.
+    const advancing = (previous.phase === "loading" && next.phase === "syncing") ||
+      (previous.phase === "syncing" && next.phase === "ready");
+    if (!advancing && (attempting as readonly Phase[]).includes(previous.phase)) this.#readiness = deferred();
+
+    // Settle the element before the old lease's editor cleanup runs below.
     if (next.phase !== "ready") this.#holdInert();
-    if (next.phase === "detached") {
-      const unregister = this.#unregister;
-      this.#unregister = undefined;
-      unregister?.();
-    }
-    if (previousLease !== nextLease) previousLease?.release();
-    // Editor teardown can synchronously retarget or remount the element.
+    if (next.phase === "detached") this.#unregisterMount();
+    if ("lease" in previous && !advancing) previous.lease.release();
+    // That cleanup can synchronously retarget or remount this element.
     if (this.#state !== next) return;
+
     if (next.phase === "loading") void this.#load(next);
     else if (next.phase === "syncing") this.#watchLease(next);
-    else if (next.phase === "ready") {
-      const { lease } = next, { session } = lease;
-      this.#restoreInert();
-      this.#resolveSynced();
-      this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
-        detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal } }));
-    }
+    else if (next.phase === "ready") this.#announceReady(next.lease);
   }
 
   async #load(from: Loading): Promise<void> {
@@ -161,6 +159,18 @@ export class YrbyDocumentElement extends Base {
     lease.signal.addEventListener("abort", () => this.#released(lease), { once: true });
     if (session.state === "blocked") { lease.release(); return; }
     void session.whenSynced.then(() => this.#synced(from));
+  }
+  #announceReady(lease: DocumentLease): void {
+    const { session } = lease;
+    this.#restoreInert();
+    this.#readiness.resolve();
+    this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
+      detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal } }));
+  }
+  #unregisterMount(): void {
+    const unregister = this.#unregister;
+    this.#unregister = undefined;
+    unregister?.();
   }
   // Inert until synced, so nobody types into a document that is not live.
   // The application's own inert value is parked in an attribute, which a

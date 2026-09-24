@@ -109,8 +109,8 @@ export class DocumentSession {
   #lifecycle: SessionLifecycle = { phase: "open" };
   #leases = new Set<DocumentLease>();
   #error: unknown;
-  #notificationDepth = 0;
-  #notificationPending = false;
+  #batchDepth = 0;
+  #changed = false;
 
   /** Use DocumentSessionStore.acquire to create and own sessions. */
   constructor(
@@ -126,13 +126,13 @@ export class DocumentSession {
       // Ack sequence numbers belong to this session, not a record.
       session_id: uuidv4(),
     }, {
-      onError: (error, context) => this.#batchChanges(() => {
+      onError: (error, context) => this.#batch(() => {
         if (context === "rejected") this.#rejected(error);
         else this.#recordError(error);
       }),
     });
     this.provider.awareness.setLocalState(null); // no cursor until an editor sets one
-    this.provider.onStatusChange(({ status }) => this.#batchChanges(() => this.#status(status)));
+    this.provider.onStatusChange(({ status }) => this.#batch(() => this.#status(status)));
   }
   get error(): unknown { return this.#error; }
   get hasPending(): boolean { return this.provider.hasPending; }
@@ -143,53 +143,57 @@ export class DocumentSession {
   }
 
   [attachLease](): DocumentLease {
-    return this.#batchChanges(() => {
-      const current = this.#lifecycle;
-      if (current.phase === "closed") throw new Error("Cannot acquire a closed document session");
+    return this.#batch(() => {
+      const { phase } = this.#lifecycle;
+      if (phase === "closed") throw new Error("Cannot acquire a closed document session");
       const lease = new DocumentLease(this, () => this.#release(lease));
       this.#leases.add(lease);
       this.#markChanged();
-      if (current.phase === "open" || current.phase === "renewed") this.#connect(current);
-      if (this.#lifecycle === current) this.#closeIfIdle();
+      if (phase === "open" || phase === "renewed") this.#connect();
       return lease;
     });
   }
   #release(lease: DocumentLease): void {
-    this.#batchChanges(() => {
-      const current = this.#lifecycle;
+    this.#batch(() => {
+      const { phase } = this.#lifecycle;
       if (!this.#leases.delete(lease)) return;
       if (!this.#leases.size) this.provider.awareness.setLocalState(null);
-      if (current.phase === "blocked" || current.phase === "closed" || this.#lifecycle !== current) return;
-      this.#markChanged();
-      this.#closeIfIdle();
+      // Blocking and closing release every lease themselves and announce that once.
+      if (phase !== "blocked" && phase !== "closed") this.#markChanged();
     });
   }
   /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
   retry(): void {
-    this.#batchChanges(() => {
-      const next = this.#transition("retry");
-      if (!next) return;
-      this.#connect(next);
-      if (this.#lifecycle === next) this.#closeIfIdle();
-    });
+    this.#batch(() => { if (this.#transition("retry")) this.#connect(); });
   }
   /** Explicit application decision; ordinary detach never discards pending work. */
-  discard(): void { this.#batchChanges(() => { this.#transition("close"); }); }
+  discard(): void { this.#batch(() => { this.#transition("close"); }); }
 
-  // Callbacks can synchronously release leases, retry, or acquire replacements.
-  // Observers see the result only after the outermost operation is complete.
-  #batchChanges<T>(operation: () => T): T {
-    this.#notificationDepth++;
+  // Every entry point runs inside a batch. Callbacks can synchronously release
+  // leases, retry, or acquire replacements, so only the outermost batch
+  // finishes the job: it closes a session nobody needs any more (closing runs
+  // as its own batch), then tells observers once.
+  #batch<T>(operation: () => T): T {
+    this.#batchDepth++;
     try {
       return operation();
     } finally {
-      if (--this.#notificationDepth === 0 && this.#notificationPending) {
-        this.#notificationPending = false;
-        this.store[notifyStoreChange](this);
+      if (--this.#batchDepth === 0) {
+        if (this.#unneeded()) this.#batch(() => this.#transition("close"));
+        else if (this.#changed) {
+          this.#changed = false;
+          this.store[notifyStoreChange](this);
+        }
       }
     }
   }
-  #markChanged(): void { this.#notificationPending = true; }
+  // No editor and nothing to deliver. A blocked session keeps its queue until
+  // the application retries or discards.
+  #unneeded(): boolean {
+    const { phase } = this.#lifecycle;
+    return phase !== "blocked" && phase !== "closed" && !this.#leases.size && !this.provider.hasPending;
+  }
+  #markChanged(): void { this.#changed = true; }
 
   // This is the only place that changes the phase.
   #transition(event: PhaseEvent, error?: unknown): SessionLifecycle | undefined {
@@ -212,16 +216,15 @@ export class DocumentSession {
     }
     return next;
   }
-  #closeIfIdle(): void {
-    if (this.#lifecycle.phase !== "blocked" && this.#lifecycle.phase !== "closed" &&
-        !this.#leases.size && !this.provider.hasPending) this.#transition("close");
-  }
-  #connect(from: SessionLifecycle, grant?: string): void {
+  // Connect with the current grant, or resubscribe with a renewed one. A
+  // failure blocks the session unless something else already moved it on.
+  #connect(grant?: string): void {
+    const from = this.#lifecycle;
     try {
       if (grant === undefined) this.provider.connect();
       else this.provider.renew({ grant });
     } catch (error) {
-      this.#failed(from, error);
+      if (this.#lifecycle === from) this.#transition("block", error);
     }
   }
   #status(status: ProviderStatus): void {
@@ -229,41 +232,33 @@ export class DocumentSession {
     if (phase === "blocked" || phase === "closed") return;
     if (phase === "renewed" && (status === "connected" || status === "synced")) this.#transition("accept");
     else this.#markChanged();
-    this.#closeIfIdle();
   }
   #rejected(error: unknown): void {
     const { phase } = this.#lifecycle;
     if (phase === "blocked" || phase === "closed") return;
-    if (phase === "open" && this.descriptor.refresh) {
-      const attempt = this.#transition("refresh");
-      if (attempt) void this.#refresh(this.descriptor.refresh, attempt);
-      if (this.#lifecycle === attempt) this.#closeIfIdle();
-    } else {
-      this.#transition("block", error);
-    }
-  }
-  #failed(from: SessionLifecycle, error: unknown): void {
-    if (this.#lifecycle === from) this.#transition("block", error);
+    // Try the refresh URL once per rejection. A rejection while refreshing, or
+    // of the renewed grant, blocks.
+    const url = this.descriptor.refresh;
+    if (phase === "open" && url) void this.#refresh(url, this.#transition("refresh")!);
+    else this.#transition("block", error);
   }
   #recordError(error: unknown): void {
     if (this.#lifecycle.phase === "closed") return;
     this.#error = error;
     this.#markChanged();
   }
-  async #refresh(url: string, from: SessionLifecycle): Promise<void> {
-    let grant: string;
+  async #refresh(url: string, attempt: SessionLifecycle): Promise<void> {
+    let grant: string | undefined, failure: unknown;
     try {
       grant = await fetchGrant(url);
     } catch (error) {
-      this.#batchChanges(() => this.#failed(from, error));
-      return;
+      failure = error;
     }
-    this.#batchChanges(() => {
-      if (this.#lifecycle !== from) return;
-      const next = this.#transition("renew");
-      if (!next) return;
-      this.#connect(next, grant);
-      if (this.#lifecycle === next) this.#closeIfIdle();
+    this.#batch(() => {
+      // A retry, discard, or block while the request was out owns the session now.
+      if (this.#lifecycle !== attempt) return;
+      if (grant === undefined) this.#transition("block", failure);
+      else if (this.#transition("renew")) this.#connect(grant);
     });
   }
 }
