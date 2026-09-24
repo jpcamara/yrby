@@ -51,7 +51,7 @@ export class YrbyDocumentElement extends Base {
   #live = false; // the adapter's latest word: live page, or cached snapshot
   #attempt: Attempt | undefined;
   // A document whose session blocked or failed. Not retried until the page
-  // renders again or the attributes change.
+  // renders again, the attributes change, or the element is re-inserted.
   #stalled: string | undefined;
   #unregister: (() => void) | undefined;
   #settleQueued = false;
