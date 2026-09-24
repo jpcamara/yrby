@@ -57,7 +57,11 @@ export class YrbyDocumentElement extends Base {
   #settleQueued = false;
   // Settles when the current attempt first syncs. Abandoning the attempt replaces it.
   #readiness = deferred();
-  get session() { return this.#attempt?.lease?.session; }
+  get session() {
+    // A lease aborted by its session is gone at once, before settle catches up.
+    const lease = this.#attempt?.lease;
+    return lease && !lease.signal.aborted ? lease.session : undefined;
+  }
   get doc() { return this.session?.doc; }
   get provider() { return this.session?.provider; }
   /** Resolves after the current lease's first catch-up; never for an abandoned one. */
