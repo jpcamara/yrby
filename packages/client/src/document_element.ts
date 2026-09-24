@@ -6,7 +6,7 @@
 // element, owns the document and any unacknowledged edits, so nothing is lost
 // when the element goes away.
 import { type CableConsumer } from "./actioncable_provider.js";
-import { DocumentSessionStore, type DocumentLease } from "./document_session.js";
+import { DocumentSessionStore, type DocumentDescriptor, type DocumentLease } from "./document_session.js";
 import { registerDocumentMount } from "./turbo_adapter.js";
 
 // Importable outside a browser (tests, SSR) where HTMLElement is undefined.
@@ -24,157 +24,168 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-// detached  not in the page, and not registered with the Turbo adapter
-// inactive  in the page, waiting for the adapter to say the page is live
-// idle      live but unbound, for example right after an attribute change
-// loading   getting the consumer and a lease
-// syncing   holding a lease, waiting for the first catch-up with the server
-// ready     bound and editable
-// Async work keeps the state object it started from and gives up if the
-// element has moved on.
-type Loading = { phase: "loading" };
-type Syncing = { phase: "syncing"; lease: DocumentLease };
-type ElementState =
-  | { phase: "detached" | "inactive" | "idle" }
-  | Loading | Syncing
-  | { phase: "ready"; lease: DocumentLease };
-type Phase = ElementState["phase"];
+// One try at binding one document. Async steps only record their results here
+// and request a settle. A result for an abandoned attempt is simply never read.
+type Attempt = {
+  key: string;
+  descriptor: DocumentDescriptor;
+  consumer?: CableConsumer;
+  lease?: DocumentLease;
+  synced?: boolean;
+  announced?: boolean;
+  // Set when the attempt cannot continue, with the yrby:error detail to report, if any.
+  ended?: { report?: ErrorReport };
+};
+type ErrorReport = { error: unknown; session?: DocumentLease["session"] };
 
-// Each request may leave only the listed phases; anything else is ignored.
-const requests = {
-  connect:    { from: ["detached"],                                        to: "inactive" },
-  activate:   { from: ["inactive", "idle"],                                to: "loading" },
-  resume:     { from: ["idle"],                                            to: "loading" },
-  retarget:   { from: ["idle", "loading", "syncing", "ready"],             to: "idle" },
-  deactivate: { from: ["idle", "loading", "syncing", "ready"],             to: "inactive" },
-  destroy:    { from: ["inactive", "idle", "loading", "syncing", "ready"], to: "detached" },
-} satisfies Record<string, Move>;
-type Move = { from: Phase[]; to: "detached" | "inactive" | "idle" | "loading" };
-
+// The element binds when it is in the page, the Turbo adapter says the page is
+// live, and it has a descriptor. Letting go is immediate: Turbo snapshots the
+// page right after deactivation, and a retarget must stop editing the old
+// document at once. Taking hold, and every async result, goes through #settle,
+// which runs after the current call stack and compares what should be bound
+// with what is.
 export class YrbyDocumentElement extends Base {
   /** Set before adding elements to use another consumer, such as AnyCable's. */
   static consumer: CableConsumer | Promise<CableConsumer> | undefined;
   static observedAttributes = ["grant", "name", "channel", "refresh"];
-  #state: ElementState = { phase: "detached" };
+  #live = false; // the adapter's latest word: live page, or cached snapshot
+  #attempt: Attempt | undefined;
+  // A document whose session blocked or failed. Not retried until the page
+  // renders again or the attributes change.
+  #stalled: string | undefined;
   #unregister: (() => void) | undefined;
+  #settleQueued = false;
   // Settles when the current attempt first syncs. Abandoning the attempt replaces it.
   #readiness = deferred();
-  get session() { return "lease" in this.#state ? this.#state.lease.session : undefined; }
+  get session() { return this.#attempt?.lease?.session; }
   get doc() { return this.session?.doc; }
   get provider() { return this.session?.provider; }
   /** Resolves after the current lease's first catch-up; never for an abandoned one. */
   get whenSynced(): Promise<void> { return this.#readiness.promise; }
 
   connectedCallback(): void {
-    this.#request("connect");
+    this.#stalled = undefined;
+    if (!this.#attempt) this.#holdInert();
     this.#unregister ??= registerDocumentMount(this);
-    this.#request("resume");
+    this.#requestSettle();
   }
-  disconnectedCallback(): void {
-    // Same-turn moves keep their binding. Async results check isConnected
-    // directly while this deferred removal is still waiting to run.
-    queueMicrotask(() => { if (!this.isConnected) this.destroy(); });
-  }
+  // Same-turn moves keep their binding: settle checks isConnected afterwards.
+  disconnectedCallback(): void { this.#requestSettle(); }
   attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
     if (oldValue === newValue) return;
     // The refresh URL is read when the session is acquired and is not part of
     // its identity, so changing it does not rebind the editor.
     if (name === "refresh") return;
-    this.#request("retarget");
-    queueMicrotask(() => this.#request("resume"));
+    this.#stalled = undefined;
+    this.#letGo();
+    this.#requestSettle();
   }
 
-  /** @internal Called by the Turbo adapter. */
-  activate(): void { this.#request("activate"); }
+  /** @internal Called by the Turbo adapter. A new render also retries a stalled document. */
+  activate(): void {
+    this.#live = true;
+    this.#stalled = undefined;
+    this.#requestSettle();
+  }
   /** @internal */
-  deactivate(): void { this.#request("deactivate"); }
+  deactivate(): void {
+    this.#live = false;
+    this.#letGo();
+  }
   /** Release the editor lease. Unsaved work remains owned by its session. */
-  destroy(): void { this.#request("destroy"); }
-
-  // Activation and resume differ in one way: resume never wakes an inactive
-  // element, so a queued attribute change cannot undo a Turbo cache deactivation.
-  #request(name: keyof typeof requests): void {
-    const { from, to }: Move = requests[name];
-    if (!from.includes(this.#state.phase)) return;
-    if (to === "loading" && !this.isConnected) return; // removed, or not yet in the page
-    this.#setState({ phase: to });
-  }
-  #acquired(from: Loading, lease: DocumentLease): void {
-    if (this.#state !== from || !this.isConnected) { lease.release(); return; }
-    this.#setState({ phase: "syncing", lease });
-  }
-  #failed(from: Loading, error: unknown): void {
-    if (this.#state !== from || !this.isConnected) return;
-    this.#setState({ phase: "idle" });
-    this.#error(error);
-  }
-  #synced(from: Syncing): void {
-    if (this.#state === from && this.isConnected) this.#setState({ phase: "ready", lease: from.lease });
-  }
-  #released(lease: DocumentLease): void {
-    const current = this.#state;
-    if (!("lease" in current) || current.lease !== lease) return;
-    this.#setState({ phase: "idle" });
-    if (lease.session.state === "blocked") this.#error(lease.session.error, lease.session);
+  destroy(): void {
+    // Registering again on the next connection asks the adapter for a fresh verdict.
+    this.#live = false;
+    const unregister = this.#unregister;
+    this.#unregister = undefined;
+    unregister?.();
+    this.#letGo();
   }
 
-  #setState(next: ElementState): void {
-    const previous = this.#state;
-    this.#state = next;
-    // loading -> syncing -> ready is one attempt at binding, with one lease.
-    // Leaving it any other way abandons the attempt and its readiness promise.
-    const inAttempt = previous.phase === "loading" || "lease" in previous;
-    const advancing = (previous.phase === "loading" && next.phase === "syncing") ||
-      (previous.phase === "syncing" && next.phase === "ready");
-    if (inAttempt && !advancing) this.#readiness = deferred();
-
-    // Settle the element before the old lease's editor cleanup runs below.
-    if (next.phase !== "ready") this.#holdInert();
-    if (next.phase === "detached") this.#unregisterMount();
-    if ("lease" in previous && !advancing) previous.lease.release();
-    // That cleanup can synchronously retarget or remount this element.
-    if (this.#state !== next) return;
-
-    if (next.phase === "loading") void this.#load(next);
-    else if (next.phase === "syncing") this.#watchLease(next);
-    else if (next.phase === "ready") this.#announceReady(next.lease);
+  #requestSettle(): void {
+    if (this.#settleQueued) return;
+    this.#settleQueued = true;
+    queueMicrotask(() => this.#settle());
   }
-
-  async #load(from: Loading): Promise<void> {
-    const descriptor = {
-      channel: this.getAttribute("channel") || undefined,
-      grant: this.getAttribute("grant") || "",
-      name: this.getAttribute("name") || "",
-      refresh: this.getAttribute("refresh") || undefined,
-    };
-    try {
-      const consumer = await (YrbyDocumentElement.consumer ?? defaultConsumer());
-      if (this.#state !== from || !this.isConnected) return;
-      const lease = DocumentSessionStore.for(consumer).acquire(descriptor);
-      this.#acquired(from, lease);
-    } catch (error) {
-      this.#failed(from, error);
+  #settle(): void {
+    this.#settleQueued = false;
+    if (!this.isConnected) { this.destroy(); return; }
+    const descriptor = this.#descriptor();
+    const key = this.#live ? JSON.stringify([descriptor.channel, descriptor.grant, descriptor.name]) : undefined;
+    const attempt = this.#attempt;
+    if (attempt && attempt.key !== key) {
+      // Editor cleanup can change the facts; decide again once it has finished.
+      this.#letGo();
+      this.#requestSettle();
+      return;
     }
+    if (key === undefined || key === this.#stalled) return;
+
+    if (!attempt) this.#start(key, descriptor);
+    else if (attempt.ended) this.#stall(attempt.ended.report);
+    else if (attempt.consumer && !attempt.lease) this.#acquire(attempt, attempt.consumer);
+    else if (attempt.synced && !attempt.announced) this.#announce(attempt);
   }
-  #watchLease(from: Syncing): void {
-    const { lease } = from, { session } = lease;
-    // A store listener may have blocked or discarded it inside acquire().
-    if (lease.signal.aborted) { this.#released(lease); return; }
-    lease.signal.addEventListener("abort", () => this.#released(lease), { once: true });
-    if (session.state === "blocked") { lease.release(); return; }
-    void session.whenSynced.then(() => this.#synced(from));
+
+  #start(key: string, descriptor: DocumentDescriptor): void {
+    const attempt: Attempt = { key, descriptor };
+    this.#attempt = attempt;
+    Promise.resolve(YrbyDocumentElement.consumer ?? defaultConsumer()).then(
+      consumer => { attempt.consumer = consumer; },
+      error => { attempt.ended = { report: { error } }; },
+    ).then(() => this.#requestSettle());
   }
-  #announceReady(lease: DocumentLease): void {
-    const { session } = lease;
+  #acquire(attempt: Attempt, consumer: CableConsumer): void {
+    let lease: DocumentLease;
+    try {
+      lease = DocumentSessionStore.for(consumer).acquire(attempt.descriptor);
+    } catch (error) {
+      this.#stall({ error });
+      return;
+    }
+    attempt.lease = lease;
+    // Blocked or discarded. Only a block is reported, and the session's state
+    // is read now, before anything can retry it.
+    lease.signal.addEventListener("abort", () => {
+      const { session } = lease;
+      attempt.ended ??= { report: session.state === "blocked" ? { error: session.error, session } : undefined };
+      this.#requestSettle();
+    }, { once: true });
+    void lease.session.whenSynced.then(() => { attempt.synced = true; this.#requestSettle(); });
+  }
+  #announce(attempt: Attempt): void {
+    attempt.announced = true;
+    const lease = attempt.lease!, { session } = lease;
     this.#restoreInert();
     this.#readiness.resolve();
     this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
       detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal } }));
   }
-  #unregisterMount(): void {
-    const unregister = this.#unregister;
-    this.#unregister = undefined;
-    unregister?.();
+  // Give up on this document until the page renders again, the attributes
+  // change, or the element is re-inserted.
+  #stall(report: ErrorReport | undefined): void {
+    this.#stalled = this.#attempt?.key;
+    this.#letGo();
+    if (report) this.dispatchEvent(new CustomEvent("yrby:error", { bubbles: true, detail: report }));
+  }
+  // End the current attempt. Releasing the lease runs editor cleanup, which
+  // may change attributes or move the element; those only request a settle.
+  #letGo(): void {
+    const attempt = this.#attempt;
+    if (!attempt) return;
+    this.#attempt = undefined;
+    this.#readiness = deferred();
+    this.#holdInert();
+    attempt.lease?.release();
+  }
+
+  #descriptor(): DocumentDescriptor {
+    return {
+      channel: this.getAttribute("channel") || undefined,
+      grant: this.getAttribute("grant") || "",
+      name: this.getAttribute("name") || "",
+      refresh: this.getAttribute("refresh") || undefined,
+    };
   }
   // Inert until synced, so nobody types into a document that is not live.
   // The application's own inert value is parked in an attribute, which a
@@ -188,9 +199,6 @@ export class YrbyDocumentElement extends Base {
     if (saved === null) return;
     this.inert = saved === "true";
     this.removeAttribute("data-yrby-inert");
-  }
-  #error(error: unknown, session?: DocumentLease["session"]): void {
-    this.dispatchEvent(new CustomEvent("yrby:error", { bubbles: true, detail: { error, session } }));
   }
 }
 if (typeof customElements !== "undefined" && !customElements.get("yrby-document")) {

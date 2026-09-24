@@ -148,6 +148,7 @@ test("rejection aborts editor cleanup, reports the recoverable session, and stay
   const signal = el.events[0].detail.signal;
   signal.addEventListener("abort", () => session.doc.getText("content").insert(0, "final"));
   consumer.created[0].handlers.rejected();
+  await tick();
   assert.equal(el.inert, true);
   assert.equal(el.doc, undefined);
   assert.equal(session.hasPending, true);
@@ -191,6 +192,7 @@ test("old adapter cleanup cannot unregister a replacement adapter in the same do
   const doc = current.el.doc;
   old.remove(); await tick();
   disconnectTurbo(document);
+  await tick();
   assert.equal(current.el.doc, undefined);
   assert.equal(doc.isDestroyed, true);
 });
