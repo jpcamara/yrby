@@ -172,17 +172,36 @@ test("an editor's abort handler no longer sees the released document", async t =
   assert.equal(seen, undefined);
 });
 
-test("reactivating an element whose session is still blocked reports it again and stays inert", async t => {
+test("a render does not retry a blocked session; retrying the session rebinds the element", async t => {
   const { el, consumer, mount } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
+  const session = el.session;
+  el.doc.getText("content").insert(0, "unsent");
   consumer.created[0].handlers.rejected();
   await tick();
   assert.equal(el.events.at(-1).type, "yrby:error");
   el.activate(); await tick();
-  assert.equal(el.events.at(-1).type, "yrby:error");
+  assert.equal(el.events.filter(event => event.type === "yrby:error").length, 1);
   assert.equal(el.events.filter(event => event.type === "yrby:synced").length, 1);
   assert.equal(el.inert, true);
   assert.equal(el.doc, undefined);
+  session.retry(); await tick();
+  assert.equal(el.session, session, "the session holding the unsent edit is kept");
+  sync(consumer.created.at(-1)); await el.whenSynced;
+  assert.equal(el.events.at(-1).type, "yrby:synced");
+  assert.equal(el.inert, false);
+  assert.equal(el.doc.getText("content").toString(), "unsent");
+});
+
+test("an element without a grant waits quietly until the attributes name a document", async t => {
+  const { el, consumer, mount, change } = setup(t, { name: "body" });
+  await mount();
+  assert.equal(consumer.created.length, 0);
+  assert.equal(el.events.length, 0);
+  assert.equal(el.inert, true);
+  change("grant", "g"); await tick();
+  sync(consumer.created[0]); await el.whenSynced;
+  assert.equal(el.events.length, 1);
 });
 
 test("a stale failed initialization cannot damage a newer lease", async t => {
@@ -347,16 +366,29 @@ test("retargeting inside acquisition cannot install a lease for the previous des
   assert.equal(el.events[0].detail.session.descriptor.name, "replacement");
 });
 
-for (const action of ["deactivate", "discard"]) {
+test("discard inside acquisition rebinds the element to a fresh session", async t => {
+  const { el, consumer, mount } = setup(t);
+  const store = DocumentSessionStore.for(consumer);
+  let discarded, abandonedReady = false;
+  el.whenSynced.then(() => { abandonedReady = true; });
+  store.addEventListener("change", event => { discarded = event.detail; discarded.discard(); }, { once: true });
+  await mount();
+  assert.equal(discarded.state, "closed");
+  assert.notEqual(el.session, discarded);
+  assert.equal(store.sessions.length, 1);
+  assert.equal(el.events.length, 0);
+  sync(consumer.created.at(-1)); await el.whenSynced;
+  assert.equal(el.events.length, 1);
+  assert.equal(abandonedReady, false);
+});
+
+for (const action of ["deactivate"]) {
   test(`${action} inside acquisition cannot leave an abandoned lease installed`, async t => {
     const { el, consumer, mount } = setup(t);
     const store = DocumentSessionStore.for(consumer);
     let abandonedReady = false;
     el.whenSynced.then(() => { abandonedReady = true; });
-    store.addEventListener("change", event => {
-      if (action === "deactivate") el.deactivate();
-      else event.detail.discard();
-    }, { once: true });
+    store.addEventListener("change", () => { el.deactivate(); }, { once: true });
     await mount();
     assert.equal(el.session, undefined);
     assert.equal(el.doc, undefined);
