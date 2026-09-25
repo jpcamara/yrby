@@ -91,10 +91,8 @@ for those.
 
 Import failures and subscription rejection emit `yrby:error` with
 `detail.error`; rejection also includes the recoverable `detail.session`.
-A blocked session stays inert and fires `yrby:error` with the session in its
-detail. Call `session.retry()` and the element attaches again by itself; if the
-application discards the session instead, the element starts over with a fresh
-one. `element.destroy()` releases its
+A blocked session stays inert. After retrying it, call `element.activate()`
+to attach again, or remount the element. `element.destroy()` releases its
 lease and prevents automatic binding until it is reinserted; it does not
 discard pending edits.
 
