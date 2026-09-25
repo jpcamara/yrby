@@ -553,3 +553,318 @@ test("a renewed grant can reconnect before its first acceptance without refreshi
   assert.equal(second.session.state, "blocked");
   assert.equal(calls.length, 1);
 });
+
+test("acquire requires a grant and a name and creates nothing without them", t => {
+  const { consumer, store } = setup(t);
+  for (const input of [{ name: "body" }, { grant: "g" }, { grant: "", name: "body" }, { grant: "g", name: "" }]) {
+    assert.throws(() => store.acquire(input), /requires a grant and name/);
+  }
+  assert.deepEqual(store.sessions, []);
+  assert.equal(consumer.created.length, 0);
+});
+
+test("the default channel and an explicit one name the same session; another channel does not", async t => {
+  const { consumer, store } = setup(t);
+  const implicit = store.acquire(descriptor);
+  const explicit = store.acquire({ ...descriptor, channel: "Y::DocumentChannel" });
+  const other = store.acquire({ ...descriptor, channel: "NotesChannel" });
+  assert.equal(implicit.session, explicit.session);
+  assert.notEqual(other.session, implicit.session);
+  assert.equal(implicit.session.descriptor.channel, "Y::DocumentChannel");
+  assert.equal(Object.isFrozen(implicit.session.descriptor), true);
+  await tick();
+  assert.deepEqual(consumer.created.map(sub => sub.params.channel), ["Y::DocumentChannel", "NotesChannel"]);
+});
+
+test("the first acquirer's refresh URL is the one the shared session renews with", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const first = store.acquire({ ...descriptor, refresh: "/first" });
+  const second = store.acquire({ ...descriptor, refresh: "/second" });
+  assert.equal(second.session, first.session);
+  assert.equal(first.session.descriptor.refresh, "/first");
+  await tick();
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  assert.deepEqual(calls.map(call => call.url), ["/first"]);
+});
+
+test("a session first acquired without a refresh URL blocks on rejection even if a later lease names one", async t => {
+  const { consumer, store } = setup(t);
+  const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const first = store.acquire(descriptor);
+  store.acquire(refreshing);
+  assert.equal(first.session.descriptor.refresh, undefined);
+  await tick();
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  assert.equal(calls.length, 0);
+  assert.equal(first.session.state, "blocked");
+});
+
+test("presence is set only through a live lease and cleared when the last lease is released", async t => {
+  const { store } = setup(t);
+  const first = store.acquire(descriptor), second = store.acquire(descriptor);
+  const { awareness } = first.session.provider;
+  assert.equal(awareness.getLocalState(), null, "no cursor before an editor sets one");
+  first.setPresence({ user: "jp" });
+  assert.deepEqual(awareness.getLocalState(), { user: "jp" });
+  first.release();
+  first.setPresence({ user: "stale" });
+  assert.deepEqual(awareness.getLocalState(), { user: "jp" }, "a released lease cannot change presence");
+  second.setPresence({ user: "rowan" });
+  assert.deepEqual(awareness.getLocalState(), { user: "rowan" });
+  second.release();
+  assert.equal(awareness.getLocalState(), null, "the last release clears presence");
+});
+
+test("releasing one of several leases keeps the session open and connected", async t => {
+  const { consumer, store } = setup(t);
+  const first = store.acquire(descriptor), second = store.acquire(descriptor);
+  await tick();
+  first.release();
+  await tick();
+  assert.equal(second.session.state, "open");
+  assert.equal(second.signal.aborted, false);
+  assert.equal(consumer.created[0].removed, false);
+  assert.deepEqual(store.sessions, [second.session]);
+});
+
+test("an idle session closes on the last release, unsubscribes, and announces closure once", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  await tick();
+  const seen = [];
+  store.addEventListener("change", event => seen.push(event.detail.state));
+  lease.release();
+  assert.equal(session.state, "open", "closing waits for settle");
+  await tick();
+  assert.equal(session.state, "closed");
+  assert.deepEqual(seen, ["closed"]);
+  assert.deepEqual(store.sessions, []);
+  assert.equal(consumer.created[0].removed, true);
+  assert.equal(session.doc.isDestroyed, true);
+});
+
+test("discard leaves the store before editor cleanup runs, then destroys the document", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  session.doc.getText("content").insert(0, "unsaved");
+  const during = {};
+  lease.signal.addEventListener("abort", () => {
+    during.sessions = store.sessions;
+    during.state = session.state;
+    during.docDestroyed = session.doc.isDestroyed;
+  });
+  session.discard();
+  assert.deepEqual(during, { sessions: [], state: "closed", docDestroyed: false });
+  assert.equal(session.doc.isDestroyed, true);
+  assert.equal(session.hasPending, false);
+});
+
+test("a lease acquired while blocked is kept for retry and does not connect until then", async t => {
+  const { consumer, store } = setup(t);
+  const first = store.acquire(descriptor), session = first.session;
+  await tick();
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(first.signal.aborted, true);
+  const waiting = store.acquire(descriptor);
+  assert.equal(waiting.session, session);
+  await tick();
+  assert.equal(waiting.signal.aborted, false, "only leases held at the block are retired");
+  assert.equal(session.state, "blocked");
+  assert.equal(consumer.created.length, 1, "a blocked session does not reconnect for a new lease");
+  session.retry();
+  await tick();
+  assert.equal(session.state, "open");
+  assert.equal(consumer.created.length, 2);
+  assert.equal(waiting.signal.aborted, false);
+});
+
+test("a blocked session is never closed implicitly, even with no leases or pending work", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  assert.equal(session.hasPending, false);
+  assert.equal(session.state, "blocked");
+  assert.deepEqual(store.sessions, [session]);
+  // Retrying a session nobody needs lets the idle rule close it.
+  session.retry();
+  await tick();
+  assert.equal(session.state, "closed");
+  assert.deepEqual(store.sessions, []);
+});
+
+test("retry outside the blocked state changes nothing and notifies nobody", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  await tick();
+  const seen = [];
+  store.addEventListener("change", event => seen.push(event.detail.state));
+  session.retry();
+  await tick();
+  assert.deepEqual(seen, []);
+  assert.equal(consumer.created.length, 1);
+  assert.equal(consumer.created[0].removed, false);
+  assert.equal(lease.signal.aborted, false);
+});
+
+test("retry clears the block error and notifies once", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  session.doc.getText("content").insert(0, "keep me");
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.match(String(session.error), /rejected/);
+  const seen = [];
+  store.addEventListener("change", event => seen.push({ state: event.detail.state, error: event.detail.error }));
+  session.retry();
+  assert.equal(session.state, "open");
+  assert.equal(session.error, undefined);
+  await tick();
+  assert.deepEqual(seen, [{ state: "open", error: undefined }]);
+});
+
+test("a provider error outside rejection is recorded and announced without blocking", async t => {
+  const { consumer, store } = setup(t);
+  const lease = store.acquire(descriptor), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  await tick();
+  const seen = [];
+  store.addEventListener("change", event => seen.push(event.detail.state));
+  consumer.created[0].handlers.received({ update: "%%% not base64 %%%" });
+  await tick();
+  assert.ok(session.error, "the error is exposed");
+  assert.equal(session.state, "open");
+  assert.equal(lease.signal.aborted, false);
+  assert.deepEqual(seen, ["open"]);
+});
+
+test("discarding while a refresh is in flight ignores its late grant", async t => {
+  const { consumer, store } = setup(t);
+  let respond;
+  stubFetch(t, () => new Promise(resolve => { respond = resolve; }));
+  const lease = store.acquire(refreshing), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(session.state, "open", "refreshing is an open substate");
+  assert.equal(lease.signal.aborted, false, "editors survive a refresh");
+  const seen = [];
+  store.addEventListener("change", event => seen.push(event.detail.state));
+  session.discard();
+  await tick();
+  respond(jsonResponse({ grant: "late" }));
+  await tick(); await tick();
+  assert.equal(session.state, "closed");
+  assert.equal(consumer.created.length, 1, "no resubscription for a closed session");
+  assert.deepEqual(seen, ["closed"], "the late grant says nothing");
+});
+
+test("a rejection while refreshing blocks, and the late grant cannot reopen the session", async t => {
+  const { consumer, store } = setup(t);
+  let respond;
+  const calls = stubFetch(t, () => new Promise(resolve => { respond = resolve; }));
+  const lease = store.acquire(refreshing), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  session.provider.connect();
+  consumer.created.at(-1).handlers.rejected();
+  await tick();
+  assert.equal(session.state, "blocked");
+  assert.equal(lease.signal.aborted, true);
+  const subscriptions = consumer.created.length;
+  respond(jsonResponse({ grant: "late" }));
+  await tick(); await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(session.state, "blocked");
+  assert.equal(consumer.created.length, subscriptions);
+  assert.match(String(session.error), /rejected/);
+});
+
+for (const [label, respond, pattern] of [
+  ["no grant field", () => jsonResponse({}), /returned no grant/],
+  ["an empty grant", () => jsonResponse({ grant: "" }), /returned no grant/],
+  ["a non-string grant", () => jsonResponse({ grant: 42 }), /returned no grant/],
+  ["a null body", () => jsonResponse(null), /returned no grant/],
+  ["a body that is not JSON", () => new Response("<html>", { status: 200 }), /JSON/],
+  ["a network failure or timeout", () => { throw new DOMException("The operation timed out.", "TimeoutError"); }, /timed out/],
+]) {
+  test(`a refresh answered with ${label} blocks without resubscribing`, async t => {
+    const { consumer, store } = setup(t);
+    stubFetch(t, respond);
+    const lease = store.acquire(refreshing), session = lease.session;
+    await tick();
+    sync(consumer.created[0]);
+    consumer.created[0].handlers.rejected();
+    await tick(); await tick();
+    assert.equal(session.state, "blocked");
+    assert.match(String(session.error), pattern);
+    assert.equal(lease.signal.aborted, true);
+    assert.equal(consumer.created.length, 1);
+    session.retry();
+    await tick();
+    assert.equal(consumer.created.at(-1).params.grant, "g", "retry falls back to the original grant");
+  });
+}
+
+test("a successful refresh keeps the session open throughout and never reports an error", async t => {
+  const { consumer, store } = setup(t);
+  stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const seen = [];
+  store.addEventListener("change", event => seen.push({ state: event.detail.state, error: event.detail.error }));
+  const lease = store.acquire(refreshing), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  consumer.created[0].handlers.rejected();
+  await tick(); await tick();
+  sync(consumer.created.at(-1));
+  await tick();
+  assert.ok(seen.length > 0);
+  assert.deepEqual(seen.filter(entry => entry.state !== "open" || entry.error !== undefined), []);
+  assert.equal(lease.signal.aborted, false);
+  assert.equal(session.provider.status, "synced");
+});
+
+test("an earlier refresh answering during a later refresh cannot install its grant", async t => {
+  const { consumer, store } = setup(t);
+  const responders = [];
+  stubFetch(t, () => new Promise(resolve => { responders.push(resolve); }));
+  const lease = store.acquire(refreshing), session = lease.session;
+  await tick();
+  sync(consumer.created[0]);
+  session.doc.getText("content").insert(0, "keep me");
+  consumer.created[0].handlers.rejected(); // first refresh starts
+  session.provider.connect();
+  consumer.created.at(-1).handlers.rejected(); // rejected while refreshing: blocks
+  session.retry();
+  await tick();
+  consumer.created.at(-1).handlers.rejected(); // second refresh starts
+  await tick();
+  assert.equal(responders.length, 2);
+  const subscriptions = consumer.created.length;
+  responders[0](jsonResponse({ grant: "stale" }));
+  await tick(); await tick();
+  assert.equal(consumer.created.length, subscriptions, "the first answer belongs to an abandoned refresh");
+  responders[1](jsonResponse({ grant: "fresh" }));
+  await tick(); await tick();
+  assert.equal(consumer.created.at(-1).params.grant, "fresh");
+  assert.equal(session.provider.channelParams.grant, "fresh");
+  assert.equal(session.state, "open");
+});
