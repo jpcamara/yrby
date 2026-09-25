@@ -57,7 +57,7 @@
     "build": "npm run clean && tsc && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({ type: 'commonjs' }) + '\\n')\"",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build",
-    "test": "npm run build && node --test",
+    "test": "npm run build && node --test --test-timeout=30000",
     "test:browser": "node browser/run.mjs",
     "test:browser:turbolinks": "node browser/run_turbolinks.mjs",
     "test:browser:collaboration": "node browser/run_collaboration.mjs"
