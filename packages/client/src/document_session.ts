@@ -151,7 +151,7 @@ export class DocumentSession {
       const { phase } = this.#lifecycle;
       if (phase === "closed" || phase === "blocked") return;
       // A renewed grant is accepted once the server lets it connect.
-      if (this.#lifecycle.phase === "renewed" && (status === "connected" || status === "synced")) this.#transition("accept");
+      if (phase === "renewed" && (status === "connected" || status === "synced")) this.#transition("accept");
       this.#changed();
     });
   }
