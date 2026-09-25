@@ -98,10 +98,16 @@ first sync, and any failure as they arrive.
   queued settle can never wake a page Turbo has cached.
 - Abandoning an attempt holds the element inert and replaces `whenSynced`, so
   the old promise never resolves for an abandoned attempt.
-- If the session blocks (reported with `yrby:error`), is discarded, or the
-  consumer fails to load, the attempt records why when it happens, and the
-  element stalls on that document. It tries again after the next page render,
-  an attribute change, or re-insertion.
+- An attempt records why it ended when that happens: the consumer or acquire
+  failed, the session blocked, or the session was discarded.
+  - Blocked: the element fires `yrby:error` and stalls. It watches that
+    session and binds again once the session is retried or discarded.
+  - Discarded: the element starts over with a fresh session.
+  - Failed: the element fires `yrby:error` and stalls until the next page
+    render.
+  An attribute change or re-insertion always retries.
+- An element whose attributes do not name a document yet (no grant or name)
+  simply waits; nothing is loaded and nothing is reported.
 
 ## Providers
 

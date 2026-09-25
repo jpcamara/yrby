@@ -37,7 +37,13 @@ const TRANSITIONS: Record<SessionPhase, Partial<Record<PhaseEvent, SessionPhase>
 // A refresh request that never answers would leave the session offline with
 // its editors attached and no way forward. After this long it blocks instead.
 const REFRESH_TIMEOUT_MS = 15_000;
+const DEFAULT_CHANNEL = "Y::DocumentChannel";
 const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
+
+/** The identity of the document a descriptor names. Matching keys share a session. */
+export function documentKey(descriptor: DocumentDescriptor): string {
+  return JSON.stringify([descriptor.channel || DEFAULT_CHANNEL, descriptor.grant, descriptor.name]);
+}
 // Only the factory may create a store for a consumer.
 const storeToken = Symbol("storeToken");
 // Only the store acquires leases; this symbol is not exported.
@@ -65,12 +71,12 @@ export class DocumentSessionStore extends EventTarget {
     // The refresh URL is not part of the identity: matching tuples share a
     // session, and the first acquirer's URL is the one that session renews with.
     const descriptor: ResolvedDescriptor = Object.freeze({
-      channel: input.channel || "Y::DocumentChannel",
+      channel: input.channel || DEFAULT_CHANNEL,
       grant: input.grant,
       name: input.name,
       ...(input.refresh ? { refresh: input.refresh } : {}),
     });
-    const key = JSON.stringify([descriptor.channel, descriptor.grant, descriptor.name]);
+    const key = documentKey(descriptor);
     let session = this.#sessions.get(key);
     if (!session) {
       session = new DocumentSession(this, descriptor, () => { this.#sessions.delete(key); });
