@@ -81,7 +81,8 @@ export class YrbyDocumentElement extends Base {
 
   #live = false; // the adapter's latest word: live page, or cached snapshot
   #attempt: BindAttempt | undefined;
-  // Also cleared when the attributes change or the element is re-inserted.
+  // The document not to retry yet, if any. An attribute change or
+  // re-insertion always clears it.
   #stall: Stall | undefined;
   #unregister: (() => void) | undefined;
   #settleQueued = false;
