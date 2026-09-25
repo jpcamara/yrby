@@ -27,12 +27,19 @@ export type DocumentSessionState = "open" | "blocked" | "closed";
 type SessionPhase = "open" | "refreshing" | "renewed" | "blocked" | "closed";
 type SessionLifecycle = Readonly<{ phase: SessionPhase }>;
 type PhaseEvent = "refresh" | "renew" | "accept" | "block" | "retry" | "close";
-const TRANSITIONS: Record<SessionPhase, Partial<Record<PhaseEvent, SessionPhase>>> = {
-  open:       { refresh: "refreshing", block: "blocked", close: "closed" },
-  refreshing: { renew: "renewed",      block: "blocked", close: "closed" },
-  renewed:    { accept: "open",        block: "blocked", close: "closed" },
-  blocked:    { retry: "open",                          close: "closed" },
-  closed:     {},
+// Everything a phase decides: the state apps see, whether a new lease
+// connects right away (not while blocked, nor while waiting for a refreshed
+// grant), and the legal moves. A move not listed is ignored.
+const PHASES: Record<SessionPhase, {
+  state: DocumentSessionState;
+  connects: boolean;
+  on: Partial<Record<PhaseEvent, SessionPhase>>;
+}> = {
+  open:       { state: "open",    connects: true,  on: { refresh: "refreshing", block: "blocked", close: "closed" } },
+  refreshing: { state: "open",    connects: false, on: { renew: "renewed",      block: "blocked", close: "closed" } },
+  renewed:    { state: "open",    connects: true,  on: { accept: "open",        block: "blocked", close: "closed" } },
+  blocked:    { state: "blocked", connects: false, on: { retry: "open",                          close: "closed" } },
+  closed:     { state: "closed",  connects: false, on: {} },
 };
 // A refresh request that never answers would leave the session offline with
 // its editors attached and no way forward. After this long it blocks instead.
@@ -143,33 +150,28 @@ export class DocumentSession {
     }, {
       onError: (error, context) => {
         if (context === "rejected") this.#rejected(error);
-        else if (this.#lifecycle.phase !== "closed") { this.#error = error; this.#changed(); }
+        else if (this.state !== "closed") { this.#error = error; this.#changed(); }
       },
     });
     this.provider.awareness.setLocalState(null); // no cursor until an editor sets one
     this.provider.onStatusChange(({ status }) => {
-      const { phase } = this.#lifecycle;
-      if (phase === "closed" || phase === "blocked") return;
-      // A renewed grant is accepted once the server lets it connect.
-      if (phase === "renewed" && (status === "connected" || status === "synced")) this.#transition("accept");
+      if (this.state !== "open") return;
+      // The server accepted the subscription, so a renewed grant is good.
+      if (status === "connected" || status === "synced") this.#transition("accept");
       this.#changed();
     });
   }
   get error(): unknown { return this.#error; }
   get hasPending(): boolean { return this.provider.hasPending; }
   get whenSynced(): Promise<void> { return this.provider.whenSynced; }
-  get state(): DocumentSessionState {
-    const { phase } = this.#lifecycle;
-    return phase === "refreshing" || phase === "renewed" ? "open" : phase;
-  }
+  get state(): DocumentSessionState { return PHASES[this.#lifecycle.phase].state; }
 
   [attachLease](): DocumentLease {
-    if (this.#lifecycle.phase === "closed") throw new Error("Cannot acquire a closed document session");
+    if (this.state === "closed") throw new Error("Cannot acquire a closed document session");
     const lease = new DocumentLease(this, () => this.#release(lease));
     this.#leases.add(lease);
     this.#changed();
-    const { phase } = this.#lifecycle;
-    if (phase === "open" || phase === "renewed") this.#connect();
+    if (PHASES[this.#lifecycle.phase].connects) this.#connect();
     return lease;
   }
   #release(lease: DocumentLease): void {
@@ -195,15 +197,15 @@ export class DocumentSession {
     let lifecycle: SessionLifecycle;
     do {
       lifecycle = this.#lifecycle;
-      this.#enforce(lifecycle.phase);
+      this.#enforce();
     } while (this.#lifecycle !== lifecycle); // cleanup may have retried or blocked
     if (!this.#dirty) return;
     this.#dirty = false;
     this.store[notifyStoreChange](this);
   }
-  #enforce(phase: SessionPhase): void {
-    if (phase === "closed") return;
-    if (phase === "blocked") {
+  #enforce(): void {
+    if (this.state === "closed") return;
+    if (this.state === "blocked") {
       const retiring = this.#retiring;
       this.#retiring = undefined;
       // The queue stays until retry() or discard().
@@ -226,7 +228,7 @@ export class DocumentSession {
 
   // The only place that changes the phase. It never calls out; #settle acts on it.
   #transition(event: PhaseEvent, error?: unknown): boolean {
-    const phase = TRANSITIONS[this.#lifecycle.phase][event];
+    const phase = PHASES[this.#lifecycle.phase].on[event];
     if (!phase) return false;
     this.#lifecycle = { phase };
     this.#retiring = phase === "blocked" ? [...this.#leases] : undefined;
@@ -247,12 +249,8 @@ export class DocumentSession {
   // of the renewed grant, blocks.
   #rejected(error: unknown): void {
     const url = this.descriptor.refresh;
-    if (this.#lifecycle.phase === "open" && url) {
-      this.#transition("refresh");
-      void this.#refresh(url, this.#lifecycle);
-    } else {
-      this.#transition("block", error);
-    }
+    if (url && this.#transition("refresh")) void this.#refresh(url, this.#lifecycle);
+    else this.#transition("block", error);
   }
   async #refresh(url: string, attempt: SessionLifecycle): Promise<void> {
     let grant: string;
