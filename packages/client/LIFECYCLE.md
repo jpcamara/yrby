@@ -5,7 +5,7 @@ events, and lease aborts, and none of them writes another's state.
 
 | Owner | States | Where the rules live |
 | --- | --- | --- |
-| `DocumentSession` | open, refreshing, renewed, blocked, closed | `TRANSITIONS` table; `#settle` acts on the phase |
+| `DocumentSession` | open, refreshing, renewed, blocked, closed | `PHASES` table; `#settle` acts on the phase |
 | `YrbyDocumentElement` | no phases: facts plus the current attempt | `#settle` |
 | `ActionCableProvider` | disconnected, subscribing, connecting, connected, stopping, destroyed | `connect` and `#stop` |
 | `YProtocolSession` | unsynced, synced, destroyed | `resume`, `pause`, `receive` |
@@ -57,7 +57,7 @@ own synchronous rules, described below.
 
 ## Sessions
 
-`TRANSITIONS` lists every legal phase change. `#transition` is the only code
+`PHASES` says, for each phase, what apps see, whether a new lease connects, and the legal moves. `#transition` is the only code
 that changes the phase, and it never calls out.
 
 | Event | Result |
