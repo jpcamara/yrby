@@ -6,16 +6,28 @@
 // element, owns the document and any unacknowledged edits, so nothing is lost
 // when the element goes away.
 import { type CableConsumer } from "./actioncable_provider.js";
-import { DocumentSessionStore, type DocumentDescriptor, type DocumentLease } from "./document_session.js";
+import {
+  DocumentSessionStore,
+  type DocumentDescriptor,
+  type DocumentLease,
+  type DocumentSession,
+} from "./document_session.js";
 import { registerDocumentMount } from "./turbo_adapter.js";
 
 // Importable outside a browser (tests, SSR) where HTMLElement is undefined.
 const Base = (typeof HTMLElement === "undefined" ? class {} : HTMLElement) as typeof HTMLElement;
+
+// Where the application's own inert value is parked while the element holds it inert.
+const INERT_ATTRIBUTE = "data-yrby-inert";
+
 let sharedConsumer: Promise<CableConsumer> | undefined;
+
+// Loaded once per page. A failed import is forgotten so a later attempt can retry it.
 function defaultConsumer(): Promise<CableConsumer> {
-  return sharedConsumer ??= import("@rails/actioncable")
-    .then(ac => ac.createConsumer() as CableConsumer)
+  sharedConsumer ??= import("@rails/actioncable")
+    .then(actioncable => actioncable.createConsumer() as CableConsumer)
     .catch(error => { sharedConsumer = undefined; throw error; });
+  return sharedConsumer;
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -24,86 +36,101 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+// Which document a descriptor names, for comparing attempts.
+function documentKey(descriptor: DocumentDescriptor): string {
+  return JSON.stringify([descriptor.channel, descriptor.grant, descriptor.name]);
+}
+
+// The yrby:error detail for a session that ended a lease. A block is reported;
+// a discard is not.
+function blockReport(session: DocumentSession): ErrorDetail | undefined {
+  return session.state === "blocked" ? { error: session.error, session } : undefined;
+}
+
+type ErrorDetail = { error: unknown; session?: DocumentSession };
+
 // One try at binding one document. Async steps only record their results here
 // and request a settle. A result for an abandoned attempt is simply never read.
-type Attempt = {
+type BindAttempt = {
   key: string;
   descriptor: DocumentDescriptor;
   consumer?: CableConsumer;
   lease?: DocumentLease;
   synced?: boolean;
   announced?: boolean;
-  // Set when the attempt cannot continue, with the yrby:error detail to report, if any.
-  ended?: { report?: ErrorReport };
+  // Set when the attempt cannot continue, with the yrby:error detail, if any.
+  ended?: { detail: ErrorDetail | undefined };
 };
-type ErrorReport = { error: unknown; session?: DocumentLease["session"] };
 
 // The element binds when it is in the page, the Turbo adapter says the page is
-// live, and it has a descriptor. Letting go is immediate: Turbo snapshots the
-// page right after deactivation, and a retarget must stop editing the old
-// document at once. Taking hold, and every async result, goes through #settle,
-// which runs after the current call stack and compares what should be bound
-// with what is.
+// live, and it has a descriptor. Abandoning an attempt is immediate: Turbo
+// snapshots the page right after deactivation, and a retarget must stop
+// editing the old document at once. Starting and advancing an attempt, and
+// every async result, go through #settle, which runs after the current call
+// stack and compares what should be bound with what is.
 export class YrbyDocumentElement extends Base {
   /** Set before adding elements to use another consumer, such as AnyCable's. */
   static consumer: CableConsumer | Promise<CableConsumer> | undefined;
-  static observedAttributes = ["grant", "name", "channel", "refresh"];
+  // refresh is read at acquisition and is not part of the document's
+  // identity, so changing it does not rebind the editor.
+  static observedAttributes = ["grant", "name", "channel"];
+
   #live = false; // the adapter's latest word: live page, or cached snapshot
-  #attempt: Attempt | undefined;
-  // A document whose session blocked or failed. Not retried until the page
-  // renders again, the attributes change, or the element is re-inserted.
-  #stalled: string | undefined;
+  #attempt: BindAttempt | undefined;
+  // The document whose session blocked or failed. It is not retried until the
+  // page renders again, the attributes change, or the element is re-inserted.
+  #stalledKey: string | undefined;
   #unregister: (() => void) | undefined;
   #settleQueued = false;
-  // Settles when the current attempt first syncs. Abandoning the attempt replaces it.
-  #readiness = deferred();
-  get session() {
+  // Resolves when the current attempt first syncs. Abandoning the attempt replaces it.
+  #firstSync = deferred();
+
+  get session(): DocumentSession | undefined {
     // A lease aborted by its session is gone at once, before settle catches up.
     const lease = this.#attempt?.lease;
     return lease && !lease.signal.aborted ? lease.session : undefined;
   }
-  get doc() { return this.session?.doc; }
-  get provider() { return this.session?.provider; }
-  /** Resolves after the current lease's first catch-up; never for an abandoned one. */
-  get whenSynced(): Promise<void> { return this.#readiness.promise; }
+  get doc(): DocumentSession["doc"] | undefined { return this.session?.doc; }
+  get provider(): DocumentSession["provider"] | undefined { return this.session?.provider; }
+  /** Resolves after the current attempt's first sync; never for an abandoned attempt. */
+  get whenSynced(): Promise<void> { return this.#firstSync.promise; }
 
   connectedCallback(): void {
-    this.#stalled = undefined;
+    this.#stalledKey = undefined;
+    // A same-turn move keeps its attempt, and a live editor must not flicker inert.
     if (!this.#attempt) this.#holdInert();
     this.#unregister ??= registerDocumentMount(this);
     this.#requestSettle();
   }
   // Same-turn moves keep their binding: settle checks isConnected afterwards.
   disconnectedCallback(): void { this.#requestSettle(); }
-  attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
+  attributeChangedCallback(_name: string, oldValue: string | null, newValue: string | null): void {
     if (oldValue === newValue) return;
-    // The refresh URL is read when the session is acquired and is not part of
-    // its identity, so changing it does not rebind the editor.
-    if (name === "refresh") return;
-    this.#stalled = undefined;
-    this.#letGo();
+    this.#stalledKey = undefined;
+    this.#abandon();
     this.#requestSettle();
   }
 
-  /** @internal Called by the Turbo adapter. A new render also retries a stalled document. */
+  /** @internal Called by the Turbo adapter when the page is live. A new render also retries a stalled document. */
   activate(): void {
     this.#live = true;
-    this.#stalled = undefined;
+    this.#stalledKey = undefined;
     this.#requestSettle();
   }
-  /** @internal */
+  /** @internal Called by the Turbo adapter when the page is cached or previewed. */
   deactivate(): void {
     this.#live = false;
-    this.#letGo();
+    this.#abandon();
   }
   /** Release the editor lease. Unsaved work remains owned by its session. */
   destroy(): void {
-    // Registering again on the next connection asks the adapter for a fresh verdict.
+    // Forget the adapter's verdict; registering on the next connection gets a fresh one.
     this.#live = false;
+    // Cleared before the call, which can re-enter through a replacement registration.
     const unregister = this.#unregister;
     this.#unregister = undefined;
     unregister?.();
-    this.#letGo();
+    this.#abandon();
   }
 
   #requestSettle(): void {
@@ -115,31 +142,34 @@ export class YrbyDocumentElement extends Base {
     this.#settleQueued = false;
     if (!this.isConnected) { this.destroy(); return; }
     const descriptor = this.#descriptor();
-    const key = this.#live ? JSON.stringify([descriptor.channel, descriptor.grant, descriptor.name]) : undefined;
+    // undefined: nothing should be bound, because the page is not live.
+    const key = this.#live ? documentKey(descriptor) : undefined;
     const attempt = this.#attempt;
     if (attempt && attempt.key !== key) {
-      // Editor cleanup can change the facts; decide again once it has finished.
-      this.#letGo();
+      // Defensive: every change to these facts already abandons the attempt.
+      this.#abandon();
       this.#requestSettle();
       return;
     }
-    if (key === undefined || key === this.#stalled) return;
+    if (key === undefined || key === this.#stalledKey) return;
 
+    // Advance one step: start, acquire once the consumer loads, announce once
+    // synced. An ended attempt stalls instead.
     if (!attempt) this.#start(key, descriptor);
-    else if (attempt.ended) this.#stall(attempt.ended.report);
+    else if (attempt.ended) this.#stall(attempt.ended.detail);
     else if (attempt.consumer && !attempt.lease) this.#acquire(attempt, attempt.consumer);
     else if (attempt.synced && !attempt.announced) this.#announce(attempt);
   }
 
   #start(key: string, descriptor: DocumentDescriptor): void {
-    const attempt: Attempt = { key, descriptor };
+    const attempt: BindAttempt = { key, descriptor };
     this.#attempt = attempt;
     Promise.resolve(YrbyDocumentElement.consumer ?? defaultConsumer()).then(
       consumer => { attempt.consumer = consumer; },
-      error => { attempt.ended = { report: { error } }; },
+      error => { attempt.ended = { detail: { error } }; },
     ).then(() => this.#requestSettle());
   }
-  #acquire(attempt: Attempt, consumer: CableConsumer): void {
+  #acquire(attempt: BindAttempt, consumer: CableConsumer): void {
     let lease: DocumentLease;
     try {
       lease = DocumentSessionStore.for(consumer).acquire(attempt.descriptor);
@@ -149,43 +179,48 @@ export class YrbyDocumentElement extends Base {
     }
     attempt.lease = lease;
     const { session } = lease;
-    if (session.state === "blocked") {
-      // A blocked session keeps new leases for retry(), and its first sync
-      // may be long past. An editor must not bind to it.
-      attempt.ended = { report: { error: session.error, session } };
+    // A blocked session keeps new leases for retry(), and its first sync may
+    // be long past. An editor must not bind to it.
+    const blocked = blockReport(session);
+    if (blocked) {
+      attempt.ended = { detail: blocked };
       this.#requestSettle();
       return;
     }
-    // Blocked or discarded. Only a block is reported, and the session's state
-    // is read now, before anything can retry it.
+    // The lease aborts when its session blocks or is discarded. The reason is
+    // read now, before anything can retry the session.
     lease.signal.addEventListener("abort", () => {
-      attempt.ended ??= { report: session.state === "blocked" ? { error: session.error, session } : undefined };
+      attempt.ended ??= { detail: blockReport(session) };
       this.#requestSettle();
     }, { once: true });
-    void lease.session.whenSynced.then(() => { attempt.synced = true; this.#requestSettle(); });
+    void session.whenSynced.then(() => {
+      attempt.synced = true;
+      this.#requestSettle();
+    });
   }
-  #announce(attempt: Attempt): void {
+  #announce(attempt: BindAttempt): void {
     attempt.announced = true;
-    const lease = attempt.lease!, { session } = lease;
+    const lease = attempt.lease!;
+    const { session } = lease;
     this.#restoreInert();
-    this.#readiness.resolve();
-    this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true,
-      detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal } }));
+    this.#firstSync.resolve();
+    this.dispatchEvent(new CustomEvent("yrby:synced", {
+      bubbles: true,
+      detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal },
+    }));
   }
-  // Give up on this document until the page renders again, the attributes
-  // change, or the element is re-inserted.
-  #stall(report: ErrorReport | undefined): void {
-    this.#stalled = this.#attempt?.key;
-    this.#letGo();
-    if (report) this.dispatchEvent(new CustomEvent("yrby:error", { bubbles: true, detail: report }));
+  #stall(detail: ErrorDetail | undefined): void {
+    this.#stalledKey = this.#attempt?.key;
+    this.#abandon();
+    if (detail) this.dispatchEvent(new CustomEvent("yrby:error", { bubbles: true, detail }));
   }
-  // End the current attempt. Releasing the lease runs editor cleanup, which
+  // Ends the current attempt. Releasing the lease runs editor cleanup, which
   // may change attributes or move the element; those only request a settle.
-  #letGo(): void {
+  #abandon(): void {
     const attempt = this.#attempt;
     if (!attempt) return;
     this.#attempt = undefined;
-    this.#readiness = deferred();
+    this.#firstSync = deferred();
     this.#holdInert();
     attempt.lease?.release();
   }
@@ -202,16 +237,17 @@ export class YrbyDocumentElement extends Base {
   // The application's own inert value is parked in an attribute, which a
   // Turbo cache clone carries along, and put back on readiness.
   #holdInert(): void {
-    if (this.getAttribute("data-yrby-inert") === null) this.setAttribute("data-yrby-inert", String(this.inert));
+    if (!this.hasAttribute(INERT_ATTRIBUTE)) this.setAttribute(INERT_ATTRIBUTE, String(this.inert));
     this.inert = true;
   }
   #restoreInert(): void {
-    const saved = this.getAttribute("data-yrby-inert");
+    const saved = this.getAttribute(INERT_ATTRIBUTE);
     if (saved === null) return;
     this.inert = saved === "true";
-    this.removeAttribute("data-yrby-inert");
+    this.removeAttribute(INERT_ATTRIBUTE);
   }
 }
+
 if (typeof customElements !== "undefined" && !customElements.get("yrby-document")) {
   customElements.define("yrby-document", YrbyDocumentElement);
 }

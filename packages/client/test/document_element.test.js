@@ -13,13 +13,19 @@ function setup(t, attributes = { grant: "g", name: "body" }, consumer = fakeCons
   el.getAttribute = name => attributes[name] ?? null;
   el.setAttribute = (name, value) => { attributes[name] = value; };
   el.removeAttribute = name => { delete attributes[name]; };
+  el.hasAttribute = name => name in attributes;
   el.events = [];
   el.dispatchEvent = event => { el.events.push(event); return true; };
   el.inert = false;
   YrbyDocumentElement.consumer = consumer;
   const mount = async () => { connected = true; el.connectedCallback(); await tick(); };
   const remove = () => { connected = false; el.disconnectedCallback(); };
-  const change = (name, value) => { const old = attributes[name]; attributes[name] = value; el.attributeChangedCallback(name, old, value); };
+  // Like a browser, only observed attributes reach the callback.
+  const change = (name, value) => {
+    const old = attributes[name] ?? null;
+    attributes[name] = value;
+    if (YrbyDocumentElement.observedAttributes.includes(name)) el.attributeChangedCallback(name, old, value);
+  };
   t.after(async () => {
     remove(); await tick(); disconnectTurbo(document);
     if (consumer.created) for (const session of DocumentSessionStore.for(consumer).sessions) session.discard();
