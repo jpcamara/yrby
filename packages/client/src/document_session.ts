@@ -44,6 +44,7 @@ const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
 export function documentKey(descriptor: DocumentDescriptor): string {
   return JSON.stringify([descriptor.channel || DEFAULT_CHANNEL, descriptor.grant, descriptor.name]);
 }
+
 // Only the factory may create a store for a consumer.
 const storeToken = Symbol("storeToken");
 // Only the store acquires leases; this symbol is not exported.
