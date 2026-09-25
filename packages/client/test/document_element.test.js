@@ -166,6 +166,19 @@ test("an editor's abort handler no longer sees the released document", async t =
   assert.equal(seen, undefined);
 });
 
+test("reactivating an element whose session is still blocked reports it again and stays inert", async t => {
+  const { el, consumer, mount } = setup(t);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  consumer.created[0].handlers.rejected();
+  await tick();
+  assert.equal(el.events.at(-1).type, "yrby:error");
+  el.activate(); await tick();
+  assert.equal(el.events.at(-1).type, "yrby:error");
+  assert.equal(el.events.filter(event => event.type === "yrby:synced").length, 1);
+  assert.equal(el.inert, true);
+  assert.equal(el.doc, undefined);
+});
+
 test("a stale failed initialization cannot damage a newer lease", async t => {
   let reject;
   const consumer = fakeConsumer();

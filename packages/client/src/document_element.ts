@@ -148,10 +148,17 @@ export class YrbyDocumentElement extends Base {
       return;
     }
     attempt.lease = lease;
+    const { session } = lease;
+    if (session.state === "blocked") {
+      // A blocked session keeps new leases for retry(), and its first sync
+      // may be long past. An editor must not bind to it.
+      attempt.ended = { report: { error: session.error, session } };
+      this.#requestSettle();
+      return;
+    }
     // Blocked or discarded. Only a block is reported, and the session's state
     // is read now, before anything can retry it.
     lease.signal.addEventListener("abort", () => {
-      const { session } = lease;
       attempt.ended ??= { report: session.state === "blocked" ? { error: session.error, session } : undefined };
       this.#requestSettle();
     }, { once: true });
