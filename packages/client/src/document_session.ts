@@ -194,11 +194,9 @@ export class DocumentSession {
   }
   #settle(): void {
     this.#settleQueued = false;
-    let lifecycle: SessionLifecycle;
-    do {
-      lifecycle = this.#lifecycle;
-      this.#enforce();
-    } while (this.#lifecycle !== lifecycle); // cleanup may have retried or blocked
+    // If editor cleanup retries or blocks during this, #changed has already
+    // queued the next settle to deal with it.
+    this.#enforce();
     if (!this.#dirty) return;
     this.#dirty = false;
     this.store[notifyStoreChange](this);
