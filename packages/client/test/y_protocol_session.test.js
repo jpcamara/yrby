@@ -262,6 +262,20 @@ test("receive: trailing bytes after a complete message are rejected via onError"
   eng.destroy();
 });
 
+test("receive: a well-framed update with corrupt contents is reported via onError", () => {
+  const errors = [];
+  const { eng } = engine({ onError: (_e, c) => errors.push(c) });
+  const peer = new Y.Doc();
+  peer.getText("t").insert(0, "hello");
+  const update = Y.encodeStateAsUpdate(peer);
+  // A truncated update inside a correctly length-prefixed frame: the frame is
+  // well formed, so only Yjs can notice the damage.
+  const reply = eng.receive(updateFrame(update.slice(0, update.length - 2)));
+  assert.equal(reply, null);
+  assert.ok(errors.includes("receive"), "the Yjs error reaches onError");
+  eng.destroy();
+});
+
 test("receive: a padded sync update is rejected before mutating the doc", () => {
   const errors = [];
   const { doc, eng } = engine({ onError: (_e, c) => errors.push(c) });

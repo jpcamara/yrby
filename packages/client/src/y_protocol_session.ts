@@ -192,7 +192,9 @@ export class YProtocolSession {
       switch (type) {
         case MessageType.Sync: {
           encoding.writeVarUint(encoder, MessageType.Sync);
-          const syncType = readSyncMessage(decoder, encoder, this.doc, this);
+          // y-protocols catches a failing update itself; the handler is how we hear about it.
+          const report = (error: Error) => { if (this.#current(cycle)) this.#onError(error, "receive"); };
+          const syncType = readSyncMessage(decoder, encoder, this.doc, this, report);
           if (syncType === messageYjsSyncStep2 && this.#current(cycle)) {
             this.#state = { phase: "synced", cycle };
           }
@@ -245,32 +247,27 @@ export class YProtocolSession {
   }
 }
 
-// Check a whole incoming frame before anything is applied, so a malformed
-// frame changes nothing. Returns false for a frame type yrby ignores (auth,
-// query-awareness) and throws for a malformed one.
+// Check a frame's structure before anything is applied, so a truncated or
+// padded frame changes nothing. Returns false for a frame type yrby ignores
+// (auth, query-awareness) and throws for a malformed one. The contents of a
+// Yjs update are checked by Yjs itself when it is applied.
 function validateFrame(frame: Uint8Array): boolean {
   const decoder = decoding.createDecoder(frame);
   const type = decoding.readVarUint(decoder);
-  if (type === MessageType.Sync) validateSync(decoder);
-  else if (type === MessageType.Awareness) validateAwareness(decoding.readVarUint8Array(decoder));
-  else return false;
+  if (type === MessageType.Sync) {
+    // Every sync message is a subtype followed by one length-prefixed payload.
+    decoding.readVarUint(decoder);
+    decoding.readVarUint8Array(decoder);
+  } else if (type === MessageType.Awareness) {
+    validateAwareness(decoding.readVarUint8Array(decoder));
+  } else {
+    return false;
+  }
   // This protocol is one message per frame. Anything left after a complete
   // message is malformed (trailing garbage, or low-level packed messages whose
   // tail we'd silently drop).
   if (decoding.hasContent(decoder)) throw new Error("frame has trailing bytes after a complete message");
   return true;
-}
-
-// Dry-run the sync message against a throwaway doc.
-function validateSync(decoder: decoding.Decoder): void {
-  const scratchDoc = new Doc();
-  try {
-    const scratchEncoder = encoding.createEncoder();
-    encoding.writeVarUint(scratchEncoder, MessageType.Sync);
-    readSyncMessage(decoder, scratchEncoder, scratchDoc, null);
-  } finally {
-    scratchDoc.destroy();
-  }
 }
 
 // applyAwarenessUpdate mutates state entry by entry and notifies listeners
