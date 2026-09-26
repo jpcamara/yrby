@@ -127,9 +127,11 @@ listeners.
 ## Protocol
 
 `resume` and `pause` each start a new handshake cycle. A receive interrupted
-by a new cycle cannot mark that cycle synced or return a stale reply. Incoming
-frames are fully validated before anything is applied. After `destroy`,
-everything is a no-op. The protocol detaches from the doc and awareness it was
+by a new cycle cannot mark that cycle synced or return a stale reply. A
+frame's structure is checked before anything is applied, and presence
+payloads are read in full first. A damaged Yjs update inside a well-formed
+frame is reported through `onError`. After `destroy`, everything is a no-op.
+The protocol detaches from the doc and awareness it was
 given but does not destroy them.
 
 ## Delivery
