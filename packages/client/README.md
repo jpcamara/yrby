@@ -1,26 +1,25 @@
 # yrby-client
 
-The **client core** for the [`yrby`](https://github.com/jpcamara/yrby)
-y-websocket protocol — everything a Yjs provider needs *except the transport*.
-Bring your own socket (ActionCable, AnyCable, raw WebSocket); this owns the
-protocol.
+The JavaScript client for yrby's Yjs protocol. Most Rails apps import
+`yrby-client/element` and bind an editor when it emits `yrby:synced`.
+Applications that manage their own editor lifetime can use
+`DocumentSessionStore` instead.
 
-Three layers, use whichever you need:
+Each piece owns one lifetime:
 
-- **`ActionCableProvider`** — a ready-made Yjs provider for ActionCable /
-  AnyCable. Pass a `Y.Doc`, a cable consumer, and a channel; it wires the
-  subscription and you're collaborating. Awareness/presence rides AnyCable
-  `whisper` when available via an awareness-only envelope and falls back to
-  normal sends on plain ActionCable; document updates always go through the
-  server as reliable recorded/acked updates.
-- **`YProtocolSession`** — the transport-agnostic core. Binds to a `Y.Doc` (+ optional
-  `Awareness`) and owns the y-protocols **message encode/decode**, the
-  **sync-step handshake** (SyncStep1 / SyncStep2 / Update), **awareness**, and
-  reliable delivery. Speaks raw `Uint8Array` frames; you wire any socket.
-- **`ReliableSync`** — the zero-dependency reliable-delivery state machine on its
-  own: ack-tracked queue, **sync-since-last-ack** (the unacked tail merged into
-  one causally-complete delta), cumulative acks, retransmit, and reconnect
-  replay. Compose it yourself if you already have your own framing.
+- **`<yrby-document>`** attaches an editor while its page is live. Turbo and
+  Turbolinks previews never attach one.
+- **`DocumentSessionStore`** owns a document and its pending work after an editor
+  detaches. Leases make that ownership explicit.
+- **`ActionCableProvider`** owns one ActionCable or AnyCable subscription and
+  translates its JSON envelopes to protocol frames.
+- **`YProtocolSession`** handles the Yjs handshake, frames, and awareness without
+  depending on a particular transport.
+- **`ReliableSync`** keeps local updates until the server acknowledges them,
+  then replays the unacknowledged tail after a reconnect.
+
+`<yrby-document>` uses each lower layer in that order. You can also use the
+provider, protocol session, or zero-dependency delivery core on its own.
 
 ## Install
 
@@ -28,14 +27,144 @@ Three layers, use whichever you need:
 npm install yrby-client
 ```
 
-`ActionCableProvider` and `YProtocolSession` need `yjs` and `y-protocols` (peers — your
-app already has them), plus an ActionCable/AnyCable consumer. `ReliableSync` has
-**no dependencies**; import it on its own via `yrby-client/reliable` if
-that's all you want.
+`ActionCableProvider` needs `yjs`, `y-protocols`, and an ActionCable/AnyCable
+consumer. `YProtocolSession` needs `yjs` and `y-protocols`, but takes raw frames
+from any transport. `ReliableSync` has **no dependencies**; import it on its own
+via `yrby-client/reliable` if that's all you want.
 
 Written in **TypeScript** and ships bundled type declarations, so TS projects get
 full types (typed options, methods, and errors) with no `@types` package — and
 plain-JS projects use the same compiled ESM with nothing extra to install.
+
+## `<yrby-document>` (the easiest path)
+
+This is the element yrby-rails' `collaborative_document_tag` renders, and it
+connects on its own, like `<turbo-cable-stream-source>` does for
+`turbo_stream_from`. The tag gives it a signed grant. Import the element once
+and it handles the rest:
+
+```js
+import "yrby-client/element";
+
+document.addEventListener("yrby:synced", ({ target, detail }) => {
+  const editor = bindYourEditor(target, detail.doc, detail.provider);
+  detail.signal.addEventListener("abort", () => editor.destroy(), { once: true });
+});
+```
+
+`bindYourEditor` is your application's editor binding. Its cleanup must detach
+Yjs listeners and disable or remove editor controls. It must not destroy the
+document or provider, which the session owns, or disconnect the shared consumer.
+The abort signal fires before yrby checks whether a final update still needs
+delivery. Use it even if the editor has already left the DOM.
+
+A document session owns the `Y.Doc`, the provider, and any unacknowledged
+edits. The element attaches an editor to that session. Removing the last editor
+clears presence and releases the session if it has nothing pending. A session
+with pending edits keeps delivering them under its original grant until they
+are acknowledged. A rejection stops the retries and keeps the work in memory
+for recovery. It does not count as an acknowledgment.
+
+Turbo and Turbolinks 5 are both supported; the element listens for either
+one's lifecycle events. Cached previews are inert and create no document or
+provider. Cached markup contains no CRDT snapshot. Restoring a page from history reattaches to a
+pending session, or loads saved content from Rails. A new grant gets a separate
+session, and the previous session's edits reach it through normal server sync.
+This guarantee holds within a tab. It is not offline storage, and closing or
+reloading the tab loses unacknowledged edits.
+
+Moving the element within the same turn keeps its editor binding and document.
+A clean remount after a delay reloads saved content, and it does not keep the
+old undo stack or `Y.Doc`. Changing the grant, name, or channel aborts the old
+binding at once and acquires a new session for the new tuple. Pending work
+stays with the old session and its original authorization.
+
+The element exposes its current `session`, `doc`, and `provider`. They are
+unavailable before a session is acquired and while the element is retargeting,
+and reading a getter never creates a document. `whenSynced` is always a
+promise, even before the consumer is initialized. It resolves after the current
+session's first catch-up, and it never resolves for an abandoned lease.
+The bubbling `yrby:synced` event fires once per lease, with
+`detail.signal` for cleanup. Synced does not mean the connection is online or
+that every edit is acknowledged. Use `provider.synced` and `session.hasPending`
+for those.
+
+Import failures and subscription rejection emit `yrby:error` with
+`detail.error`; rejection also includes the recoverable `detail.session`.
+A blocked session stays inert. After retrying it, call `element.activate()`
+to attach again, or remount the element. `element.destroy()` releases its
+lease and prevents automatic binding until it is reinserted; it does not
+discard pending edits.
+
+A `refresh` attribute names a same-origin URL that returns a new grant for
+this document as JSON, `{ "grant": "..." }`. It is used when the server
+rejects the subscription, which is what happens when a grant expires and the
+cable reconnects. The session fetches the URL with the browser's session
+cookies, resubscribes with the new grant, and keeps its document, its pending
+edits, and its acknowledgment route. The application decides whether to issue
+a grant, so the request is a fresh permission check. Nothing is fetched ahead
+of time. One renewal is tried per rejection: if the refresh fails, does not
+answer within 15 seconds, or the renewed grant is rejected as well, the
+session blocks as it would without the attribute. The attribute is read when the session is acquired, and changing
+it later does not rebind the editor.
+
+Install `@rails/actioncable`, `yjs`, and `y-protocols` for the default element.
+All default elements share one consumer, including its in-flight import.
+For AnyCable assign an ActionCable-compatible consumer before adding elements:
+
+```js
+import { YrbyDocumentElement } from "yrby-client/element";
+import { createConsumer } from "@anycable/web";
+
+YrbyDocumentElement.consumer = createConsumer();
+```
+
+## Document sessions
+
+A store is scoped to one consumer. Matching `{ channel, grant, name }` tuples
+share a document and queue. Grants are compared exactly, never decoded to
+infer a common record. Different consumers have separate scopes. Each session
+adds an opaque `session_id` subscription parameter to isolate its
+acknowledgments; this parameter never selects or authorizes a server document.
+
+Headless workflows can hold an explicit lease through their own lifetime:
+
+```js
+import { DocumentSessionStore } from "yrby-client";
+
+const store = DocumentSessionStore.for(consumer);
+const lease = store.acquire({ grant, name: "body" });
+const { session } = lease;
+await session.whenSynced;
+// Work with session.doc; keep lease until your workflow is finished.
+lease.release(); // idempotent; pending work continues delivering
+```
+
+Use `lease.setPresence(state)` for the focused editor and
+`lease.setPresence(null)` when it blurs. Views of the same session share
+one presence; the last call wins. A binding can access its lease through
+`yrby:synced`'s `detail.lease`.
+
+`session.state` is `open`, `blocked`, or `closed`, independent
+of the provider's live transport status. The store emits `change` with the
+changed session in `event.detail`. Observe it to report delivery failures
+after the originating page disappears.
+
+```js
+store.addEventListener("change", ({ detail: session }) => {
+  if (session.state === "blocked") reportDeliveryFailure(session.error, session);
+});
+```
+
+Sessions keep their queues while the consumer is down and deliver when it
+reconnects. A new consumer has its own store and never adopts another's work.
+
+A blocked session keeps its document and pending edits in memory. `retry()`
+reconnects with the session's current grant, which is the original one or the
+last one its `refresh` URL returned; `discard()` drops the work. Cache
+eviction never discards unsaved work. A grant supplied any other way, such as
+a new element attribute, does not unblock a blocked session; it starts a
+separate one.
 
 ## ActionCableProvider (the easy path)
 
@@ -51,12 +180,14 @@ const provider = new ActionCableProvider(doc, consumer, "DocumentChannel", { id:
 provider.connect(); // does not auto-connect — wire your editor binding first
 
 // Observe the connection (one signal, no separate "sync" event):
-provider.onStatusChange(({ status }) => render(status)); // returns an unsubscribe fn
+provider.onStatusChange(({ status, pending }) => render(status, pending)); // returns an unsubscribe fn
 //   "connecting"  -> subscription created, transport not up yet
 //   "connected"   -> transport up, exchanging sync steps (show "syncing")
 //   "synced"      -> caught up with the server
 //   "disconnected"-> torn down via disconnect()/destroy()
 //                    (a dropped transport ActionCable will retry shows as "connecting")
+//   pending       -> true while local edits await acknowledgment; listeners
+//                    fire when either status or pending changes
 
 // provider.status     -> the current status (same union as above)
 // provider.awareness  -> the provider's Awareness instance (always a fresh one)
@@ -78,6 +209,11 @@ await provider.whenSynced; // resolves immediately if already synced
 
 It resolves once, on the first catch-up, and stays resolved across later
 reconnects. Use `onStatusChange` to track the live connection.
+
+Callbacks from superseded subscriptions are ignored after `disconnect()` or
+`destroy()`. A consumer that invokes its callbacks during subscription creation
+is supported: the provider waits until creation returns before handling them.
+These guards are separate from the managed session's unique acknowledgment route.
 
 On `disconnect()` / `destroy()` — and on browser `pagehide` — the provider
 broadcasts a presence removal so peers drop your cursor immediately instead of
@@ -124,10 +260,10 @@ const session = new YProtocolSession(doc, {
 });
 
 // wire your transport's callbacks:
-subscription.connected    = () => session.onConnect();      // handshake + replay
-subscription.disconnected = () => session.onDisconnect();   // pause + clear presence
+subscription.connected    = () => session.resume();         // handshake + replay
+subscription.disconnected = () => session.pause();          // keep the queue, clear presence
 subscription.received = (msg) => {
-  if (msg.ack !== undefined) return session.ack(msg.ack);   // reliable ack envelope
+  if (msg.ack !== undefined) return session.acknowledge(msg.ack); // reliable ack envelope
   const reply = session.receive(fromBase64(msg.update));     // decode + apply
   if (reply) subscription.send({ update: toBase64(reply) });     // e.g. answer a SyncStep1
 };
@@ -143,6 +279,11 @@ Pass `onError(error, context)` (on either `ActionCableProvider` or
 is decoded defensively, dropped, and reported here rather than thrown into your
 transport callback. Defaults to a `console.warn`.
 
+The provider also reports failures from status listeners, awareness events, and
+unsubscribe through `onError`. Awareness event failures do not interrupt presence
+removal or destruction. If the error handler itself throws, the provider logs
+that failure and continues.
+
 ## ReliableSync (standalone)
 
 ```js
@@ -154,13 +295,18 @@ const rs = new ReliableSync({
   merge: Y.mergeUpdates,
 });
 
-rs.enqueue(update);  // a local document update
-rs.onAck(id);        // an { ack: id } arrived
-rs.onConnect();      // (re)connected — replay the tail, resume retransmits
-rs.onDisconnect();   // dropped — keep the queue, pause
+rs.enqueue(update);   // a local document update
+rs.acknowledge(id);   // an { ack: id } arrived
+rs.resume();          // (re)connected: replay the tail, keep retransmitting
+rs.pause();           // dropped: keep the queue, stop retransmitting
 ```
 
 Pending updates are retained and replayed until the server acknowledges them.
+The unacknowledged tail is merged into one causally complete update before each
+send, so a missed frame does not create a gap. `enqueue` copies the supplied
+bytes, so the caller may reuse its input buffer.
+`pending` returns a snapshot, including copies of each update's bytes; sorting or
+editing that snapshot cannot change delivery.
 Document delivery stays queued and ack-tracked for the lifetime of the session.
 
 ## How it fits

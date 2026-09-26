@@ -55,7 +55,7 @@ test("queues while disconnected, replays the tail on connect", () => {
   assert.equal(h.sent.length, 0, "nothing is sent before connecting");
   assert.equal(h.rs.hasPending, true);
 
-  h.rs.onConnect();
+  h.rs.resume();
   assert.equal(h.sent.length, 1, "one merged flush on connect");
   assert.deepEqual(h.sent[0].id, 2, "id is the highest seq in the batch");
   assert.deepEqual(h.mergeCalls[0], [u(1), u(2)], "the unacked tail is merged");
@@ -63,7 +63,7 @@ test("queues while disconnected, replays the tail on connect", () => {
 
 test("single pending update is sent without calling merge", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(7));
   assert.equal(h.mergeCalls.length, 0, "no merge for a single update");
   assert.deepEqual(h.sent.at(-1), { update: u(7), id: 1 });
@@ -71,33 +71,33 @@ test("single pending update is sent without calling merge", () => {
 
 test("ack prunes cumulatively (seq <= id)", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1)); // seq 1
   h.rs.enqueue(u(2)); // seq 2
   h.rs.enqueue(u(3)); // seq 3
   assert.equal(h.rs.pending.length, 3);
 
-  h.rs.onAck(2); // confirms seq 1 and 2
+  h.rs.acknowledge(2); // confirms seq 1 and 2
   assert.deepEqual(h.rs.pending.map((p) => p.seq), [3], "only seq 3 remains");
 
-  h.rs.onAck(3);
+  h.rs.acknowledge(3);
   assert.equal(h.rs.hasPending, false, "queue drains once everything is acked");
 });
 
 test("reconnect resends the whole unacked tail", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
-  h.rs.onAck(1); // confirmed
+  h.rs.acknowledge(1); // confirmed
   h.rs.enqueue(u(2));
   h.rs.enqueue(u(3));
   const before = h.sent.length;
 
-  h.rs.onDisconnect();
+  h.rs.pause();
   assert.equal(h.hasTimer(), false, "timer paused on disconnect");
   assert.equal(h.rs.hasPending, true, "queue is kept across the drop");
 
-  h.rs.onConnect();
+  h.rs.resume();
   assert.equal(h.sent.length, before + 1, "the unacked tail is replayed");
   assert.deepEqual(h.sent.at(-1).id, 3);
   assert.deepEqual(h.mergeCalls.at(-1), [u(2), u(3)]);
@@ -105,19 +105,19 @@ test("reconnect resends the whole unacked tail", () => {
 
 test("periodic tick retransmits the tail while unacked", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
   const after = h.sent.length;
   h.tick();
   assert.equal(h.sent.length, after + 1, "a tick re-flushes the unacked tail");
-  h.rs.onAck(1);
+  h.rs.acknowledge(1);
   h.tick();
   assert.equal(h.sent.length, after + 1, "nothing to resend once acked");
 });
 
 test("unacked updates stay retained and keep retransmitting until acked", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
   const before = h.sent.length;
   for (let i = 0; i < 10; i++) h.tick();
@@ -126,31 +126,31 @@ test("unacked updates stay retained and keep retransmitting until acked", () => 
   assert.equal(h.rs.hasPending, true, "the update is retained without an ack");
   assert.equal(h.hasTimer(), true, "the retransmit timer remains active");
 
-  h.rs.onAck(1);
+  h.rs.acknowledge(1);
   assert.equal(h.rs.hasPending, false, "ack drains the retained update");
   assert.equal(h.hasTimer(), false, "the retransmit timer stops once the queue drains");
 });
 
 test("onAck ignores malformed, negative, and impossible future acks", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
   h.rs.enqueue(u(2)); // seqs 1,2
 
-  h.rs.onAck(NaN);
-  h.rs.onAck("2"); // not a number at runtime
-  h.rs.onAck(-1);
-  h.rs.onAck(999); // future: beyond the highest pending seq
+  h.rs.acknowledge(NaN);
+  h.rs.acknowledge("2"); // not a number at runtime
+  h.rs.acknowledge(-1);
+  h.rs.acknowledge(999); // future: beyond the highest pending seq
   assert.equal(h.rs.hasPending, true, "no invalid ack pruned the queue");
   assert.equal(h.rs.pending.length, 2);
 
-  h.rs.onAck(1); // valid
+  h.rs.acknowledge(1); // valid
   assert.equal(h.rs.pending.length, 1, "a valid ack prunes seq <= id");
 });
 
 test("the merged tail is memoized across retransmit ticks, invalidated on change", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
   h.rs.enqueue(u(2)); // one merge for this flush
   const mergesAfterFlush = h.mergeCalls.length;
@@ -165,15 +165,15 @@ test("the merged tail is memoized across retransmit ticks, invalidated on change
 
 test("connect with an empty queue does not start the retransmit timer", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   assert.equal(h.hasTimer(), false, "no timer while nothing is pending");
 });
 
 test("the retransmit timer restarts when a new update is enqueued after drain", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
-  h.rs.onAck(1);
+  h.rs.acknowledge(1);
   assert.equal(h.hasTimer(), false, "timer stopped after drain");
 
   h.rs.enqueue(u(2));
@@ -182,7 +182,7 @@ test("the retransmit timer restarts when a new update is enqueued after drain", 
 
 test("destroy while connected stops the timer and ignores further enqueues", () => {
   const h = harness();
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
   assert.equal(h.hasTimer(), true);
 
@@ -198,7 +198,109 @@ test("destroy while connected stops the timer and ignores further enqueues", () 
 
 test("resendInterval is forwarded to setInterval", () => {
   const h = harness({ resendInterval: 2500 });
-  h.rs.onConnect();
+  h.rs.resume();
   h.rs.enqueue(u(1));
   assert.equal(h.intervalMs(), 2500);
+});
+
+
+test("pausing from a replay send cannot leave a retransmission timer running", () => {
+  const h = harness({ send: () => h.rs.pause() });
+  h.rs.enqueue(u(1));
+  h.rs.resume();
+  assert.equal(h.rs.hasPending, true);
+  assert.equal(h.hasTimer(), false);
+});
+
+test("a queued tick from an earlier sending state cannot retransmit a later queue", () => {
+  const callbacks = [];
+  const h = harness({ setInterval: fn => { callbacks.push(fn); return callbacks.length; }, clearInterval() {} });
+  h.rs.enqueue(u(1)); h.rs.resume();
+  const oldTick = callbacks[0];
+  h.rs.pause(); h.rs.enqueue(u(2)); h.rs.resume();
+  const sent = h.sent.length;
+  oldTick();
+  assert.equal(h.sent.length, sent);
+  callbacks.at(-1)();
+  assert.equal(h.sent.length, sent + 1);
+  h.rs.destroy();
+});
+
+test("destruction from merge cannot send or resurrect the merged tail", () => {
+  const h = harness({ merge: () => { h.rs.destroy(); return u(9); } });
+  h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
+  assert.doesNotThrow(() => h.rs.resume());
+  h.rs.resume(); h.rs.enqueue(u(3)); h.rs.retransmit();
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+});
+
+test("a timer that ticks before returning its handle is canceled when its send pauses delivery", () => {
+  const active = new Set();
+  const h = harness({
+    send: () => h.rs.pause(),
+    setInterval: fn => { active.add(1); fn(); return 1; },
+    clearInterval: handle => active.delete(handle),
+  });
+  h.rs.enqueue(u(1)); h.rs.resume();
+  assert.equal(active.size, 0);
+  assert.equal(h.rs.hasPending, true);
+});
+
+test("synchronous acknowledgment during replay leaves no timer behind", () => {
+  const h = harness({ send: (_update, id) => h.rs.acknowledge(id) });
+  h.rs.enqueue(u(1)); h.rs.resume();
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+  h.rs.destroy(); h.rs.resume(); h.rs.pause(); h.rs.enqueue(u(2));
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+});
+
+
+test("a failed timer installation can be retried without losing pending work", () => {
+  let attempts = 0, active = false;
+  const h = harness({
+    setInterval: () => { if (++attempts === 1) throw new Error("timer unavailable"); active = true; return 1; },
+    clearInterval: () => { active = false; },
+  });
+  h.rs.enqueue(u(1));
+  assert.throws(() => h.rs.resume(), /timer unavailable/);
+  assert.equal(h.rs.hasPending, true);
+  h.rs.resume();
+  assert.equal(attempts, 2);
+  assert.equal(active, true);
+  h.rs.destroy();
+  assert.equal(active, false);
+});
+
+
+test("pending is a snapshot that can be sorted and edited without changing delivery", () => {
+  const h = harness();
+  h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
+  const pending = h.rs.pending;
+  pending.reverse();
+  pending[0].seq = 99;
+  pending[0].update.fill(99);
+  pending.pop();
+  assert.deepEqual(h.rs.pending, [{ seq: 1, update: u(1) }, { seq: 2, update: u(2) }]);
+  h.rs.resume();
+  assert.deepEqual(h.mergeCalls[0], [u(1), u(2)]);
+  assert.equal(h.sent[0].id, 2);
+  assert.equal(h.hasTimer(), true);
+  h.rs.acknowledge(2);
+  assert.equal(h.rs.hasPending, false);
+  assert.equal(h.hasTimer(), false);
+});
+
+test("enqueue retains its own bytes when the caller reuses an input buffer", () => {
+  for (const buffer of [u(7), Buffer.from([7])]) {
+    const h = harness();
+    h.rs.enqueue(buffer);
+    buffer.fill(9);
+    h.rs.resume();
+    assert.deepEqual(h.sent[0], { update: u(7), id: 1 });
+    h.rs.destroy();
+  }
 });

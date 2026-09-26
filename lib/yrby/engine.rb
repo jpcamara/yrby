@@ -2,10 +2,15 @@
 
 require "rails/engine"
 require "action_dispatch" # Engine::Configuration references it at subclass definition
+require "global_id/railtie" # initialize signed grants even when the app does not load Active Job
 
 module Yrby
   # The Rails engine. Autoloads the gem's models (Y::Document,
   # Y::DocumentUpdate) from app/models.
   class Engine < ::Rails::Engine
+    initializer "yrby.collaborative" do
+      ActiveSupport.on_load(:active_record) { include Y::Collaborative }
+      ActiveSupport.on_load(:action_view) { include Y::Collaborative::Helper }
+    end
   end
 end

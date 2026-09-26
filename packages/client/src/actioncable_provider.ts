@@ -9,8 +9,8 @@
 // the server's persistence/ack path.
 //
 // The constructor does not auto-connect: wire up your editor binding first, then
-// call `connect()`. Watch the connection with `onStatusChange(({ status }) => ...)`
-// or the `status` getter. Editors that must not bind before the first sync
+// call `connect()`. Watch the connection with `onStatusChange(({ status, pending }) => ...)`
+// or the `status` and `hasPending` getters. Editors that must not bind before the first sync
 // can `await provider.whenSynced` after connect(). On `disconnect()`/`destroy()`,
 // and on browser `pagehide`, the provider broadcasts a presence removal so peers
 // drop our cursor right away instead of waiting for the awareness timeout.
@@ -28,9 +28,11 @@ import type { Doc } from "yjs";
  */
 export type ProviderStatus = "connecting" | "connected" | "synced" | "disconnected";
 
-/** Payload passed to onStatusChange listeners. */
+/** Payload passed to onStatusChange listeners. Fires when either field changes. */
 export interface StatusEvent {
   status: ProviderStatus;
+  /** True while local edits await the server's acknowledgment. */
+  pending: boolean;
 }
 
 /** The minimal slice of an ActionCable/AnyCable subscription this provider uses. */
@@ -66,6 +68,17 @@ interface CableMessage {
   ack?: number;
 }
 
+// One connect() call. Cable callbacks carry the attempt that created them, so
+// callbacks from a retired subscription cannot touch a newer one.
+type Attempt = object;
+type StopReason = "disconnect" | "reject" | "destroy";
+type ProviderState =
+  | { phase: "disconnected" | "destroyed" }
+  | { phase: "subscribing"; attempt: Attempt }
+  | { phase: "connecting" | "connected"; attempt: Attempt; subscription: CableSubscription }
+  // Presence removal and unsubscribe are running. A destroy() meanwhile upgrades the reason.
+  | { phase: "stopping"; attempt: Attempt; subscription: CableSubscription; reason: StopReason };
+
 export class ActionCableProvider {
   readonly doc: Doc;
   readonly consumer: CableConsumer;
@@ -73,20 +86,31 @@ export class ActionCableProvider {
   readonly channelParams: object;
   readonly awareness: Awareness;
   readonly session: YProtocolSession;
-  #subscription: CableSubscription | null = null;
+  #state: ProviderState = { phase: "disconnected" };
   #onError: (error: unknown, context: string) => void;
-  #connected = false;
-  #status: ProviderStatus = "disconnected";
+  // The last event listeners saw. A refresh notifies only when something differs.
+  #last: StatusEvent = { status: "disconnected", pending: false };
   #statusListeners = new Set<(event: StatusEvent) => void>();
-  #whenSynced: Promise<void> | null = null;
-  // `session.synced` resets on every transport drop (a reconnect
-  // re-handshakes). Whether the first catch-up has ever happened is tracked
-  // separately here, so `whenSynced` does not depend on when it is first
-  // read.
-  #everSynced = false;
-  #onUnload: (() => void) | null = null;
-  #onRestore: ((event: PageTransitionEvent) => void) | null = null;
-  #stashedPresence: Record<string, unknown> | null = null;
+  #resolveSynced!: () => void;
+  #onDocUpdate = (): void => this.#refreshStatus(); // a local edit may have made the queue non-empty
+  #page: { hide: () => void; show: (event: PageTransitionEvent) => void } | null = null;
+
+  /**
+   * Resolves once the document has first caught up with the server. Most
+   * editor bindings seed an empty document when they mount, so binding
+   * before the server's state arrives makes each client insert its own
+   * top-level node. Create the editor after this resolves:
+   *
+   *   provider.connect();
+   *   await provider.whenSynced;
+   *   // now hand the doc to the editor binding
+   *
+   * It settles on the first catch-up and stays settled across later
+   * reconnects, even while `synced` is false during a re-handshake; use
+   * `onStatusChange` to track the live connection. If the provider is
+   * destroyed before the first sync, it never settles.
+   */
+  readonly whenSynced = new Promise<void>((resolve) => { this.#resolveSynced = resolve; });
 
   constructor(
     doc: Doc,
@@ -99,8 +123,12 @@ export class ActionCableProvider {
     this.consumer = consumer;
     this.channelName = channelName;
     this.channelParams = channelParams;
-    this.awareness = new Awareness(doc);
-    this.#onError = opts.onError ?? ((error, context) => console.warn(`[yrby] ${context}:`, error));
+    const onError = opts.onError ?? ((error, context) => console.warn(`[yrby] ${context}:`, error));
+    this.#onError = (error, context) => {
+      try { onError(error, context); }
+      catch (callbackError) { console.warn("[yrby] onError callback failed:", callbackError, "while reporting:", error); }
+    };
+    this.awareness = new ProviderAwareness(doc, this.#onError);
 
     this.session = new YProtocolSession(doc, {
       awareness: this.awareness,
@@ -108,41 +136,13 @@ export class ActionCableProvider {
       onError: this.#onError,
       send: (frame, id) => this.#send(frame, id),
     });
+    // After the session's own listener, so the queue already holds the edit.
+    this.doc.on("update", this.#onDocUpdate);
   }
 
   /** True once the document has caught up with the server (received a SyncStep2). */
   get synced(): boolean {
     return this.session.synced;
-  }
-
-  /**
-   * Resolves once the document has first caught up with the server. Most
-   * editor bindings seed an empty document when they mount, so binding
-   * before the server's state arrives makes each client insert its own
-   * top-level node. Create the editor after this resolves:
-   *
-   *   provider.connect();
-   *   await provider.whenSynced;
-   *   // now hand the doc to the editor binding
-   *
-   * Resolves immediately if the first catch-up has already happened, even
-   * while the transport is down (`synced` is false during a reconnect;
-   * whether the doc has ever synced does not change). It stays resolved
-   * across later reconnects; use `onStatusChange` to track the live
-   * connection. If the provider is destroyed before the first sync, the
-   * promise never settles.
-   */
-  get whenSynced(): Promise<void> {
-    this.#whenSynced ??= this.#everSynced
-      ? Promise.resolve()
-      : new Promise((resolve) => {
-          const off = this.onStatusChange(({ status }) => {
-            if (status !== "synced") return;
-            off();
-            resolve();
-          });
-        });
-    return this.#whenSynced;
   }
 
   /** True while there are unacknowledged local document updates in flight. */
@@ -168,7 +168,7 @@ export class ActionCableProvider {
 
   /** Current connection status. See {@link ProviderStatus}. */
   get status(): ProviderStatus {
-    return this.#status;
+    return this.#computeStatus();
   }
 
   /** Subscribe to status changes. Returns an unsubscribe function. */
@@ -178,133 +178,210 @@ export class ActionCableProvider {
   }
 
   connect(): void {
-    if (this.#subscription) return;
-    const provider = this;
-    this.#subscription = this.consumer.subscriptions.create(
-      { channel: this.channelName, ...this.channelParams },
-      {
-        received(message: CableMessage) {
-          // Reliable-delivery ack: confirm + prune the local queue.
-          if (message && message.ack !== undefined) {
-            provider.session.ack(message.ack);
-            return;
-          }
-          const awarenessPayload = message && message.awareness;
-          const payload = message && (awarenessPayload ?? message.update);
-          if (typeof payload !== "string") return;
-          // Guard base64 decode too: a malformed envelope must not throw into
-          // the cable callback (session.receive is itself defensive).
-          let frame: Uint8Array;
-          try {
-            frame = fromBase64(payload);
-          } catch (error) {
-            provider.#onError(error, "received");
-            return;
-          }
-          if (awarenessPayload !== undefined && frame[0] !== MessageType.Awareness) {
-            provider.#onError(new Error("awareness envelope carried a non-awareness frame"), "received");
-            return;
-          }
-          const reply = provider.session.receive(frame);
-          if (reply) provider.#send(reply, undefined); // e.g. SyncStep2 answering a SyncStep1
-          provider.#refreshStatus(); // a SyncStep2 may have just flipped us to "synced"
-        },
-        connected() {
-          provider.#connected = true;
-          provider.session.onConnect(); // handshake + replay the unacked tail
-          provider.#refreshStatus();
-        },
-        disconnected() {
-          provider.#connected = false;
-          provider.session.onDisconnect(); // pause retransmits, clear remote presence
-          provider.#refreshStatus(); // subscription still set -> "connecting" (retrying)
-        },
-        rejected() {
-          // The channel refused the subscription (auth, missing doc). Surface
-          // it and tear down — otherwise the provider sits at "connecting"
-          // forever, silently queueing edits. The app decides what's next.
-          provider.#onError(new Error("subscription rejected by the server"), "rejected");
-          provider.disconnect();
-        },
-      }
-    );
-    this.#installUnloadHandler();
-    this.#refreshStatus(); // -> "connecting"
+    if (this.#destroying()) throw new Error("provider is destroyed");
+    if (this.#state.phase !== "disconnected") return;
+    const attempt: Attempt = {};
+    this.#state = { phase: "subscribing", attempt };
+    // A consumer may call back inside create(), before the subscription is
+    // installed. Those callbacks wait one microtask.
+    const on = <A extends unknown[]>(callback: (...args: A) => void) => (...args: A): void => {
+      const run = () => { if (this.#active(attempt)) callback(...args); };
+      if (this.#state.phase === "subscribing") queueMicrotask(run);
+      else run();
+    };
+    let subscription: CableSubscription;
+    try {
+      subscription = this.consumer.subscriptions.create(
+        { channel: this.channelName, ...this.channelParams },
+        {
+          received: on((message: CableMessage) => this.#receive(message, attempt)),
+          connected: on(() => this.#connected()),
+          disconnected: on(() => this.#lost()),
+          rejected: on(() => this.#stop("reject")),
+        }
+      );
+    } catch (error) {
+      if (!this.#subscribing(attempt)) return;
+      this.#state = { phase: "disconnected" };
+      this.#refreshStatus();
+      throw error;
+    }
+    // disconnect() or destroy() ran inside create().
+    if (!this.#subscribing(attempt)) { this.#unsubscribe(subscription); return; }
+    this.#state = { phase: "connecting", attempt, subscription };
+    this.#watchPage();
+    this.#refreshStatus();
   }
 
-  disconnect(): void {
-    if (!this.#subscription) return;
-    const sub = this.#subscription;
-    // Tell peers we're gone while the transport is still live, then pause and
-    // detach. Defer the unsubscribe one microtask so the removal frame flushes
-    // before the channel tears down.
-    this.session.removeLocalAwareness();
-    this.session.onDisconnect();
-    this.#connected = false;
-    this.#subscription = null;
-    this.#removeUnloadHandler();
-    // Universal teardown: both @rails/actioncable and @anycable/web subscriptions
-    // expose unsubscribe() (Rails' just calls consumer.subscriptions.remove(this)
-    // internally). @anycable has NO consumer.subscriptions.remove, so calling that
-    // would throw there.
-    queueMicrotask(() => sub.unsubscribe?.());
-    this.#refreshStatus(); // -> "disconnected"
-  }
+  disconnect(): void { this.#stop("disconnect"); }
 
-  destroy(): void {
+  /**
+   * Resubscribe with updated channel params, such as a renewed grant. The
+   * doc, the delivery queue, awareness, and this provider's ack route all
+   * carry over; only the cable subscription is replaced. A no-op after
+   * destroy().
+   */
+  renew(params: object): void {
+    if (this.#destroying()) return;
+    Object.assign(this.channelParams, params);
     this.disconnect();
+    this.connect();
+  }
+
+  destroy(): void { this.#stop("destroy"); }
+
+  #destroying(): boolean {
+    const state = this.#state;
+    return state.phase === "destroyed" || (state.phase === "stopping" && state.reason === "destroy");
+  }
+  #subscribing(attempt: Attempt): boolean {
+    return this.#state.phase === "subscribing" && this.#state.attempt === attempt;
+  }
+  // Only a connecting or connected subscription hears its cable callbacks.
+  #active(attempt: Attempt): boolean {
+    const state = this.#state;
+    return (state.phase === "connecting" || state.phase === "connected") && state.attempt === attempt;
+  }
+  // Cable callbacks below run only for the active attempt; on() in connect() checks.
+  #connected(): void {
+    const state = this.#state;
+    if (state.phase !== "connecting") return;
+    this.#state = { ...state, phase: "connected" };
+    this.session.resume();
+    this.#refreshStatus();
+  }
+  #lost(): void {
+    const state = this.#state;
+    if (state.phase !== "connecting" && state.phase !== "connected") return;
+    this.#state = { ...state, phase: "connecting" };
+    this.session.pause();
+    this.#refreshStatus();
+  }
+  #stop(reason: StopReason): void {
+    const state = this.#state;
+    if (state.phase === "destroyed") return;
+    if (state.phase === "stopping") {
+      if (reason === "destroy") state.reason = reason;
+      return;
+    }
+    if (state.phase === "disconnected" && reason === "disconnect") return;
+    let finalReason = reason;
+    if ("subscription" in state) {
+      const stopping = { ...state, phase: "stopping" as const, reason };
+      this.#state = stopping;
+      this.#unwatchPage();
+      // Retired callbacks are silent, but the old subscription can still
+      // send presence removal before its deferred unsubscribe.
+      this.session.removeLocalAwareness();
+      this.session.pause();
+      this.#unsubscribe(state.subscription);
+      if (this.#state !== stopping) return;
+      finalReason = stopping.reason; // a destroy() during those calls upgrades it
+    }
+    const destroyed = finalReason === "destroy";
+    this.#state = { phase: destroyed ? "destroyed" : "disconnected" };
+    if (destroyed) this.#destroyOwned();
+    else if (finalReason === "reject") this.#onError(new Error("subscription rejected by the server"), "rejected");
+    this.#refreshStatus();
+    if (destroyed) this.#statusListeners.clear();
+  }
+  #destroyOwned(): void {
     this.session.destroy();
-    this.awareness.destroy(); // stops its reaper timer
-    this.#statusListeners.clear();
+    this.awareness.destroy();
+    this.doc.off("update", this.#onDocUpdate);
+  }
+
+  #unsubscribe(subscription: CableSubscription): void {
+    queueMicrotask(() => {
+      try { subscription.unsubscribe?.(); }
+      catch (error) { this.#onError(error, "unsubscribe"); }
+    });
+  }
+
+  #receive(message: CableMessage, attempt: Attempt): void {
+    if (message && message.ack !== undefined) {
+      this.session.acknowledge(message.ack);
+      this.#refreshStatus();
+      return;
+    }
+    const awarenessPayload = message && message.awareness;
+    const payload = message && (awarenessPayload ?? message.update);
+    if (typeof payload !== "string") return;
+    let frame: Uint8Array;
+    try {
+      frame = fromBase64(payload);
+    } catch (error) {
+      this.#onError(error, "received");
+      return;
+    }
+    if (awarenessPayload !== undefined && frame[0] !== MessageType.Awareness) {
+      this.#onError(new Error("awareness envelope carried a non-awareness frame"), "received");
+      return;
+    }
+    const reply = this.session.receive(frame);
+    // Applying the frame runs doc observers, which may have replaced the connection.
+    if (reply && this.#active(attempt)) this.#send(reply, undefined);
+    this.#refreshStatus();
   }
 
   #computeStatus(): ProviderStatus {
-    if (!this.#subscription) return "disconnected";
-    if (!this.#connected) return "connecting";
-    return this.session.synced ? "synced" : "connected";
+    switch (this.#state.phase) {
+      case "subscribing":
+      case "connecting": return "connecting";
+      case "connected": return this.session.synced ? "synced" : "connected";
+      default: return "disconnected";
+    }
   }
 
   #refreshStatus(): void {
-    const next = this.#computeStatus();
-    if (next === this.#status) return;
-    this.#status = next;
-    if (next === "synced") this.#everSynced = true;
-    for (const listener of this.#statusListeners) listener({ status: next });
-  }
-
-  // Presence teardown/restore around page lifecycle:
-  // - `pagehide`: remove local presence while the socket is still live so peers
-  //   drop our cursor now (bfcache-safe; the awareness timeout is the backstop).
-  // - `pageshow` with `persisted`: the user came BACK (bfcache restore), so put
-  //   their presence back — editors set awareness once at setup, so without
-  //   this they'd rejoin as a ghost with no cursor.
-  #installUnloadHandler(): void {
-    if (typeof window === "undefined" || this.#onUnload) return;
-    this.#onUnload = () => {
-      this.#stashedPresence = this.awareness.getLocalState();
-      this.session.removeLocalAwareness();
-    };
-    this.#onRestore = (event: PageTransitionEvent) => {
-      if (!event.persisted || !this.#stashedPresence) return;
-      if (this.awareness.getLocalState() === null) {
-        this.awareness.setLocalState(this.#stashedPresence);
+    const status = this.#computeStatus();
+    const pending = this.hasPending;
+    if (status === this.#last.status && pending === this.#last.pending) return;
+    const event = this.#last = { status, pending };
+    if (status === "synced") this.#resolveSynced();
+    // A listener that throws is an application bug, not a transport failure:
+    // report it and keep going, so one bad listener cannot stop the others or
+    // break the cable callback that triggered the refresh.
+    for (const listener of this.#statusListeners) {
+      if (this.#last !== event) break; // a listener caused a newer transition
+      try {
+        listener({ status, pending });
+      } catch (error) {
+        this.#onError(error, "listener");
       }
-      this.#stashedPresence = null;
-    };
-    window.addEventListener("pagehide", this.#onUnload);
-    window.addEventListener("pageshow", this.#onRestore);
+    }
   }
 
-  #removeUnloadHandler(): void {
-    if (typeof window === "undefined") return;
-    if (this.#onUnload) {
-      window.removeEventListener("pagehide", this.#onUnload);
-      this.#onUnload = null;
-    }
-    if (this.#onRestore) {
-      window.removeEventListener("pageshow", this.#onRestore);
-      this.#onRestore = null;
-    }
+  // Presence around the page lifecycle. `pagehide` removes our cursor while
+  // the socket is still live, so peers drop it now rather than after the
+  // awareness timeout. A `pageshow` with `persisted` is a bfcache return, so
+  // the cursor goes back; editor bindings set awareness once at setup, and
+  // without this the returning user would be a ghost.
+  #watchPage(): void {
+    if (typeof window === "undefined" || this.#page) return;
+    let stashed: Record<string, unknown> | null = null;
+    const page = this.#page = {
+      hide: (): void => {
+        if (this.#page !== page) return;
+        stashed = this.awareness.getLocalState();
+        this.session.removeLocalAwareness();
+      },
+      show: (event: PageTransitionEvent): void => {
+        if (this.#page !== page || !event.persisted || !stashed) return;
+        if (this.awareness.getLocalState() === null) this.awareness.setLocalState(stashed);
+        stashed = null;
+      },
+    };
+    window.addEventListener("pagehide", this.#page.hide);
+    window.addEventListener("pageshow", this.#page.show);
+  }
+
+  #unwatchPage(): void {
+    if (!this.#page || typeof window === "undefined") return;
+    const page = this.#page;
+    this.#page = null;
+    window.removeEventListener("pagehide", page.hide);
+    window.removeEventListener("pageshow", page.show);
   }
 
   // Send one raw protocol frame over the cable. Awareness frames are whispered
@@ -313,31 +390,40 @@ export class ActionCableProvider {
   // server can ack. A no-op while disconnected: reliable frames stay queued in
   // the session and flush on the next connect().
   #send(frame: Uint8Array, id: number | undefined): void {
-    const sub = this.#subscription;
-    if (!sub) return;
-    const update = toBase64(frame);
+    const state = this.#state;
+    if (!("subscription" in state)) return;
     const isAwareness = frame[0] === MessageType.Awareness;
+    if (state.phase === "stopping" && !isAwareness) return;
+    const { subscription } = state;
+    const update = toBase64(frame);
     // Route transport failures (sync throws, or @anycable/web's rejected
     // promises) to onError instead of letting them escape into update
     // handlers. A failed send is recoverable: reliable frames stay queued
-    // until acked, and awareness is best-effort anyway.
+    // until acked, and awareness is best-effort anyway. A failure from a
+    // subscription that has since been replaced is not reported.
+    const report = (error: unknown) => {
+      const current = this.#state;
+      if ("subscription" in current && current.subscription === subscription) this.#onError(error, "send");
+    };
     try {
-      if (isAwareness && typeof sub.whisper === "function") {
-        this.#observe(sub.whisper({ awareness: update }));
-        return;
-      }
-      const payload = id === undefined ? { update } : { update, id };
-      this.#observe(sub.send(payload));
+      const result = isAwareness && typeof subscription.whisper === "function"
+        ? subscription.whisper({ awareness: update })
+        : subscription.send(id === undefined ? { update } : { update, id });
+      if (result instanceof Promise) result.catch(report);
     } catch (error) {
-      this.#onError(error, "send");
+      report(error);
     }
   }
+}
 
-  // Attach a rejection handler when a transport returns a promise, so failures
-  // surface via onError instead of as unhandled rejections.
-  #observe(result: unknown): void {
-    if (result instanceof Promise) {
-      result.catch((error) => this.#onError(error, "send"));
-    }
+// Awareness emits application events during presence removal and destruction.
+// A listener failure must not interrupt those operations or leave its timer alive.
+class ProviderAwareness extends Awareness {
+  constructor(doc: Doc, private readonly onError: (error: unknown, context: string) => void) {
+    super(doc);
+  }
+  override emit(...args: Parameters<Awareness["emit"]>): void {
+    try { super.emit(...args); }
+    catch (error) { this.onError(error, `awareness:${args[0]}`); }
   }
 }

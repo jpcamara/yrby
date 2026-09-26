@@ -42,7 +42,7 @@ test("requires a doc and a send function", () => {
 
 test("onConnect emits a SyncStep1 handshake frame", () => {
   const { eng, sent } = engine();
-  eng.onConnect();
+  eng.resume();
   assert.equal(sent.length, 1);
   assert.equal(frameType(sent[0].frame), MSG.Sync, "handshake is a Sync message");
   assert.equal(sent[0].id, undefined, "handshake carries no reliable id");
@@ -50,7 +50,7 @@ test("onConnect emits a SyncStep1 handshake frame", () => {
 
 test("a local edit is framed as a Sync update and tagged with a reliable id", () => {
   const { doc, eng, sent } = engine();
-  eng.onConnect();
+  eng.resume();
   const before = sent.length;
   doc.getText("t").insert(0, "hi");
   const frame = sent.at(-1);
@@ -62,10 +62,10 @@ test("a local edit is framed as a Sync update and tagged with a reliable id", ()
 
 test("an ack drains the pending queue", () => {
   const { doc, eng, sent } = engine();
-  eng.onConnect();
+  eng.resume();
   doc.getText("t").insert(0, "hi");
   const { id } = sent.at(-1);
-  eng.ack(id);
+  eng.acknowledge(id);
   assert.equal(eng.hasPending, false);
 });
 
@@ -83,7 +83,7 @@ test("applyRemoteUpdate seeds the doc without re-sending it as a local edit", ()
 
   // On connect, only the SyncStep1 handshake goes out, never a reliable
   // { update, id } frame echoing the bootstrap state back to the server.
-  eng.onConnect();
+  eng.resume();
   assert.equal(sent.length, 1, "only the handshake was sent");
   assert.equal(frameType(sent[0].frame), MSG.Sync, "and it's the SyncStep1 handshake");
   assert.equal(sent[0].id, undefined, "the handshake carries no reliable id");
@@ -112,7 +112,7 @@ test("synced flips true after a SyncStep2 arrives", () => {
   peer.getText("t").insert(0, "x");
   // SyncStep1 -> reply is our step2; feeding the peer a step1 makes IT produce a
   // step2 for us. Simulate the server's SyncStep2 by replying to our step1.
-  eng.onConnect(); // sends our SyncStep1 (ignored here)
+  eng.resume(); // sends our SyncStep1 (ignored here)
   const serverReplyToOurStep1 = eng.receive(syncStep1Frame(peer)); // step1 in, step2 out is to peer
   // The server's SyncStep2 *to us*: build it from the peer answering our step vector.
   const e = encoding.createEncoder();
@@ -133,7 +133,7 @@ test("two engines converge end-to-end through a relay", () => {
     ...noTimers,
     send: (frame, id) => {
       const reply = b.receive(frame);
-      if (id !== undefined) a.ack(id);
+      if (id !== undefined) a.acknowledge(id);
       if (reply) a.receive(reply);
     },
   });
@@ -141,13 +141,13 @@ test("two engines converge end-to-end through a relay", () => {
     ...noTimers,
     send: (frame, id) => {
       const reply = a.receive(frame);
-      if (id !== undefined) b.ack(id);
+      if (id !== undefined) b.acknowledge(id);
       if (reply) b.receive(reply);
     },
   });
 
-  a.onConnect();
-  b.onConnect();
+  a.resume();
+  b.resume();
   docA.getText("t").insert(0, "from A ");
   docB.getText("t").insert(0, "from B ");
 
@@ -167,7 +167,7 @@ test("presence frames as Awareness, doc updates as Sync (the first byte identifi
     ...noTimers,
     send: (frame) => types.push(frameType(frame)),
   });
-  eng.onConnect();
+  eng.resume();
   doc.getText("t").insert(0, "hi"); // document update
   awA.setLocalStateField("user", "alice"); // presence
 
@@ -259,6 +259,20 @@ test("receive: trailing bytes after a complete message are rejected via onError"
   const reply = eng.receive(padded);
   assert.equal(reply, null, "a frame with trailing bytes yields no reply");
   assert.ok(errors.includes("receive"), "trailing bytes reported via onError");
+  eng.destroy();
+});
+
+test("receive: a well-framed update with corrupt contents is reported via onError", () => {
+  const errors = [];
+  const { eng } = engine({ onError: (_e, c) => errors.push(c) });
+  const peer = new Y.Doc();
+  peer.getText("t").insert(0, "hello");
+  const update = Y.encodeStateAsUpdate(peer);
+  // A truncated update inside a correctly length-prefixed frame: the frame is
+  // well formed, so only Yjs can notice the damage.
+  const reply = eng.receive(updateFrame(update.slice(0, update.length - 2)));
+  assert.equal(reply, null);
+  assert.ok(errors.includes("receive"), "the Yjs error reaches onError");
   eng.destroy();
 });
 
@@ -397,4 +411,56 @@ test("receive: an awareness payload with trailing bytes inside the blob is rejec
   assert.equal(awareness.getStates().has(777), false, "nothing was applied");
   session.destroy();
   awareness.destroy();
+});
+
+
+
+function step2Frame(peer) {
+  const e = encoding.createEncoder();
+  encoding.writeVarUint(e, MSG.Sync);
+  writeSyncStep2FromPeer(e, peer);
+  return encoding.toUint8Array(e);
+}
+
+test("destroy is terminal for sync, received frames, bootstrap updates, and sends", () => {
+  const { doc, eng, sent } = engine();
+  const peer = new Y.Doc();
+  eng.resume(); eng.receive(step2Frame(peer));
+  assert.equal(eng.synced, true);
+  eng.destroy();
+  const count = sent.length;
+  peer.getText("t").insert(0, "late");
+  eng.resume(); eng.pause(); eng.applyRemoteUpdate(Y.encodeStateAsUpdate(peer));
+  assert.equal(eng.receive(step2Frame(peer)), null);
+  assert.equal(eng.receive(syncStep1Frame(peer)), null);
+  assert.equal(doc.getText("t").toString(), "");
+  assert.equal(eng.synced, false);
+  assert.equal(sent.length, count);
+  doc.destroy(); peer.destroy();
+});
+
+for (const action of ["pause", "destroy"]) {
+  test(`${action} during the opening handshake cannot resume delivery afterwards`, () => {
+    const frames = [];
+    const { doc, eng } = engine({ send: (frame, id) => { frames.push({ frame, id }); eng[action](); } });
+    eng.resume();
+    doc.getText("t").insert(0, "offline");
+    assert.equal(frames.length, 1);
+    assert.equal(frames[0].id, undefined);
+    assert.equal(eng.synced, false);
+    eng.destroy(); doc.destroy();
+  });
+}
+
+test("a catch-up interrupted by a new handshake cannot sync that new cycle", () => {
+  const { doc, eng } = engine();
+  const peer = new Y.Doc();
+  peer.getText("t").insert(0, "remote");
+  eng.resume();
+  doc.once("update", () => { eng.pause(); eng.resume(); });
+  eng.receive(step2Frame(peer));
+  assert.equal(eng.synced, false);
+  eng.receive(step2Frame(peer));
+  assert.equal(eng.synced, true);
+  eng.destroy(); doc.destroy(); peer.destroy();
 });
