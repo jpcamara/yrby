@@ -666,6 +666,12 @@ test("attributes that change without a callback are still honored on the next se
   assert.equal(el.session.descriptor.name, "notes");
 });
 
+// Poll for a condition that depends on real module loading or timers.
+async function eventually(condition, timeout = 2000) {
+  const started = Date.now();
+  while (!condition() && Date.now() - started < timeout) await new Promise(resolve => setTimeout(resolve, 5));
+}
+
 test("the default consumer is loaded lazily, a failed load is forgotten, and a later render retries it", async t => {
   const hadDocument = "document" in globalThis, savedDocument = globalThis.document;
   t.after(() => { if (hadDocument) globalThis.document = savedDocument; else delete globalThis.document; });
@@ -673,14 +679,15 @@ test("the default consumer is loaded lazily, a failed load is forgotten, and a l
   const { el, mount } = setup(t);
   YrbyDocumentElement.consumer = undefined;
   await mount();
-  await new Promise(resolve => setTimeout(resolve, 20)); // the dynamic import settles in a later task
+  // The dynamic import settles in a later task, sooner or later depending on the machine.
+  await eventually(() => errors(el).length === 1);
   assert.equal(errors(el).length, 1);
   assert.match(String(errors(el)[0].detail.error), /document is not defined/);
   // With a DOM, the retry creates a real consumer. Subscribing needs a socket
   // URL this stub cannot build, so the session blocks and reports itself.
   globalThis.document = { head: { querySelector: () => null }, createElement() { throw new Error("no socket in tests"); } };
   el.activate();
-  await new Promise(resolve => setTimeout(resolve, 20));
+  await eventually(() => errors(el).length === 2);
   assert.equal(errors(el).length, 2);
   const { session } = errors(el)[1].detail;
   assert.equal(session.state, "blocked");
@@ -688,7 +695,7 @@ test("the default consumer is loaded lazily, a failed load is forgotten, and a l
   assert.equal(typeof session.store.consumer.subscriptions.create, "function");
   // The loaded consumer is shared by later attempts.
   el.activate();
-  await new Promise(resolve => setTimeout(resolve, 20));
+  await eventually(() => errors(el).length === 3);
   assert.equal(errors(el).at(-1).detail.session, session);
   session.discard();
 });
