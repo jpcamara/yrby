@@ -56,8 +56,10 @@ module Y
       # The built-in model that stores this attribute's document.
       def model_class = record.class.collaborative_document_class(name)
 
-      # The row, when one exists. Never creates one.
-      def stored_record = model_class.find_by(record: record, name: name)
+      # The row, when one exists. Never creates one. Only the id and key are
+      # loaded: load_state re-reads the snapshot fresh, so selecting it here
+      # would fetch the largest column twice.
+      def stored_record = model_class.select(:id, :key).find_by(record: record, name: name)
 
       def storage
         record.class.collaborative_document_options.dig(name, :storage)
