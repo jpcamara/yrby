@@ -92,14 +92,14 @@ class CollaborativeAttributeTest < ActionCable::Channel::TestCase
 
     assert_equal "body", attribute.name
     assert_predicate attribute.name, :frozen?
-    assert_equal stored, attribute.collaborative_record
+    assert_equal stored, attribute.document_row
     assert_equal "existing-room", attribute.key
     assert_equal "from doc1", attribute.y_doc.read_text("content")
     refute_same attribute.y_doc, attribute.y_doc
     @page.collaborative_document(:secret).append(UPDATE)
 
     assert_equal "from doc1", @page.collaborative_document(:secret).y_doc.read_text("content")
-    assert_instance_of Y::EncryptedDocument, @page.collaborative_document(:secret).collaborative_record
+    assert_instance_of Y::EncryptedDocument, @page.collaborative_document(:secret).document_row
   end
 
   def test_key_does_not_create_a_document_row
@@ -110,7 +110,7 @@ class CollaborativeAttributeTest < ActionCable::Channel::TestCase
   end
 
   def test_custom_storage_cannot_silently_fall_back_to_plain_database_access
-    assert_raises(ArgumentError) { @page.collaborative_document(:external).collaborative_record }
+    assert_raises(ArgumentError) { @page.collaborative_document(:external).document_row }
     assert_raises(ArgumentError) { Page.collaborative_document_class(:external) }
     assert_raises(ArgumentError) { Page.has_collaborative_document(:bad, storage: Object.new) }
     assert_raises(ArgumentError) { Page.has_collaborative_document(:bad, storage: STORE, encrypted: true) }

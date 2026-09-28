@@ -63,8 +63,8 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     subscribe grant: grant, name: "body", session_id: "browser-session"
 
     assert_predicate subscription, :confirmed?
-    assert_equal @page.collaborative_document(:body).collaborative_record,
-                 subscription.send(:document).collaborative_record
+    assert_equal @page.collaborative_document(:body).document_row,
+                 subscription.send(:document).document_row
   end
 
   def test_a_signed_grant_subscribes_and_gets_the_opening_handshake
@@ -307,7 +307,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
     document = secret.collaborative_document(:body)
 
-    assert_instance_of Y::EncryptedDocument, document.collaborative_record
+    assert_instance_of Y::EncryptedDocument, document.document_row
     doc = Y::Doc.new
     doc.apply_update(document.load_state)
 
@@ -316,7 +316,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     # The recorded bytes are ciphertext at rest, so reading them through the
     # plain classes gives back garbage, not the document. Each document has
     # one access path.
-    raw = Y::DocumentUpdate.find_by!(document_id: document.collaborative_record.id).payload
+    raw = Y::DocumentUpdate.find_by!(document_id: document.document_row.id).payload
 
     refute_equal update, raw, "the stored payload must not be the plaintext delta"
     assert_raises(StandardError, "the plain path reads ciphertext, not a document") do
@@ -330,8 +330,8 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     document = @page.collaborative_document(:body)
 
     assert_instance_of Y::Collaborative::Attribute, document
-    assert_instance_of Y::Document, document.collaborative_record
-    assert_equal document.collaborative_record, @page.collaborative_document("body").collaborative_record
+    assert_instance_of Y::Document, document.document_row
+    assert_equal document.document_row, @page.collaborative_document("body").document_row
     assert_equal @page, document.record
   end
 

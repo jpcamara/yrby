@@ -590,9 +590,9 @@ configure your app's encryption keys and use one access path per document.
 Rows written encrypted read back as ciphertext through the plain classes.
 
 `post.collaborative_document(:body)` returns a bound `Y::Collaborative::Attribute`
-with `load_state`, `append(update)`, `key`, and `doc`. `doc` reconstructs a fresh
-native `Y::Doc` for Ruby reads and rendering. For built-in row operations such
-as compaction, use `post.collaborative_document(:body).collaborative_record.compact!`.
+with `load_state`, `append(update)`, `key`, and `y_doc`. `y_doc` reconstructs a
+fresh native `Y::Doc` for Ruby reads and rendering. For built-in row operations such
+as compaction, use `post.collaborative_document(:body).document_row.compact!`.
 The same accessor serves the channel and application code, including encryption.
 
 Custom storage can use the shipped channel too. Declare one adapter implementing

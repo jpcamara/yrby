@@ -2,10 +2,18 @@
 
 module Y
   module Collaborative
-    # One attribute's document on one record. Ruby callers and the channel
-    # both go through it, so they share one storage choice, including custom
-    # adapters that have no Y::Document row.
+    # The collaborative document for one attribute of one record, such as a
+    # post's body. Ruby code and the shipped channel both use it, so they read
+    # and write the same place.
     class Attribute
+      # The built-in tables, with the same load/write interface as a custom store.
+      BuiltInStore = Data.define(:model) do
+        # Only the id is loaded: the row's load_state re-reads the snapshot
+        # fresh, so selecting it here would fetch the largest column twice.
+        def load(record, name) = model.select(:id).find_by(record:, name:)&.load_state
+        def write(record, name, update) = model.for(record, name).append(update)
+      end
+
       attr_reader :record, :name
 
       def initialize(record, name)
@@ -15,28 +23,14 @@ module Y
         @name = name.to_s.dup.freeze
       end
 
-      # Never creates a row. A stored binding keeps whatever key it was given;
-      # otherwise this is the conventional record/attribute key.
-      def key
-        return Y::Document.key_for(record, name) if storage
+      # The document as update bytes, or nil before the first write.
+      def load_state = store.load(record, name)
 
-        stored_record&.key || Y::Document.key_for(record, name)
-      end
+      # Saves one change. Returns only once it is durable and raises on failure;
+      # the channel acknowledges and broadcasts only after this returns.
+      def append(update) = store.write(record, name, update)
 
-      # The document's state as update bytes, or nil when nothing has been
-      # written yet. A custom store's load(record, name) returns the same.
-      # Reads never create a row; the first append does.
-      def load_state
-        storage ? storage.load(record, name) : stored_record&.load_state
-      end
-
-      # Custom writes must return only after durable persistence, and raise on
-      # failure. The channel acknowledges and broadcasts only after this returns.
-      def append(update)
-        storage ? storage.write(record, name, update) : collaborative_record.append(update)
-      end
-
-      # A fresh Y::Doc rebuilt from storage on every call. Nothing is cached.
+      # A Y::Doc built fresh from storage on every call.
       def y_doc
         Y::Doc.new.tap do |doc|
           state = load_state
@@ -44,26 +38,23 @@ module Y
         end
       end
 
-      # The built-in storage row (Y::Document or Y::EncryptedDocument), created
-      # on first use, for operations such as compaction. Raises for a custom
-      # store, which has no row.
-      def collaborative_record
-        model_class.for(record, name)
+      # The document's name on the wire, such as "post/1/body". A document first
+      # created by a key-only channel, before it was linked to a record, keeps
+      # its original key. Never creates a row.
+      def key
+        existing = custom_store ? nil : document_class.select(:key).find_by(record:, name:)
+        existing&.key || Y::Document.key_for(record, name)
       end
+
+      # The Y::Document (or Y::EncryptedDocument) row, created if missing, for
+      # maintenance such as compaction. Raises for a custom store, which has none.
+      def document_row = document_class.for(record, name)
 
       private
 
-      # The built-in model that stores this attribute's document.
-      def model_class = record.class.collaborative_document_class(name)
-
-      # The row, when one exists. Never creates one. Only the id and key are
-      # loaded: load_state re-reads the snapshot fresh, so selecting it here
-      # would fetch the largest column twice.
-      def stored_record = model_class.select(:id, :key).find_by(record: record, name: name)
-
-      def storage
-        record.class.collaborative_document_options.dig(name, :storage)
-      end
+      def store = custom_store || BuiltInStore.new(document_class)
+      def custom_store = record.class.collaborative_document_options.dig(name, :storage)
+      def document_class = record.class.collaborative_document_class(name)
     end
   end
 end
