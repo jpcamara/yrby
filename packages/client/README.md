@@ -21,6 +21,45 @@ Each piece owns one lifetime:
 `<yrby-document>` uses each lower layer in that order. You can also use the
 provider, protocol session, or zero-dependency delivery core on its own.
 
+### How the classes relate
+
+```mermaid
+flowchart TD
+  Adapter["TurboAdapter<br/>one per page"]
+  Element["&lt;yrby-document&gt;<br/>YrbyDocumentElement"]
+  Consumer["CableConsumer<br/>ActionCable or AnyCable, shared by the page"]
+  Store["DocumentSessionStore<br/>one per consumer"]
+  Session["DocumentSession<br/>one per document"]
+  Lease["DocumentLease<br/>one per holder"]
+  Doc["Y.Doc"]
+  Provider["ActionCableProvider"]
+  Awareness["Awareness<br/>presence"]
+  Subscription["Cable subscription<br/>one per connect()"]
+  Protocol["YProtocolSession"]
+  Delivery["ReliableSync"]
+
+  Adapter -->|"activate / deactivate"| Element
+  Element -->|"acquire()"| Store
+  Store -->|"finds or creates"| Session
+  Element -->|"holds while bound"| Lease
+  Lease -->|"is a hold on"| Session
+  Session -->|"owns"| Doc
+  Session -->|"owns for its whole life"| Provider
+  Provider -->|"owns"| Awareness
+  Provider -->|"owns"| Protocol
+  Provider -->|"creates via"| Consumer
+  Consumer -->|"returns"| Subscription
+  Protocol -->|"owns"| Delivery
+  Protocol -.->|"listens for edits"| Doc
+```
+
+Read each arrow and its label as a sentence, such as "DocumentSession owns
+ActionCableProvider for its whole life." Signals travel the other way: the provider
+reports status and rejections to its session, and a session that blocks or is
+discarded aborts its leases, which releases the element's editor. Several
+elements naming the same document share one session, and pending edits stay
+with that session after every element has gone.
+
 ## Install
 
 ```bash
