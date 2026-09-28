@@ -30,7 +30,7 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   channel. `y_doc` reconstructs a native `Y::Doc`; `load_state`, `append`, and
   `key` follow the same storage choice. `key` and `load_state` never create a
   row; the first `append` does. Built-in row operations are explicitly
-  available through `.collaborative_record`.
+  available through `.document_row`.
 - `has_collaborative_document :body, storage: PostStore` selects one adapter
   implementing `load(record, name)` and `write(record, name, update)` for both
   channel persistence and Ruby reads. Custom storage creates no built-in rows,
