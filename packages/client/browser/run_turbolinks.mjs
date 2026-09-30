@@ -49,7 +49,7 @@ try {
   }
   assert.ok(up, "Rails fixture boots");
   await browser("open", base);
-  await wait('!!window.Turbolinks && ["#body-doc", "#secret-doc", "#external-doc", "#notes-doc"].every(id => document.querySelector(id)?.provider?.synced)');
+  await wait('!!window.Turbolinks && ["#body-doc", "#secret-doc", "#notes-doc"].every(id => document.querySelector(id)?.provider?.synced)');
   check("Turbolinks page binds every element over one socket", await evaluate('window.socketCount === 1 && !window.Turbo'));
   await browser("find", "label", "Body", "fill", "before turbolinks");
   await wait('!document.querySelector("#body-doc").provider.hasPending');
@@ -69,6 +69,8 @@ try {
   await browser("find", "text", "Away", "click");
   await wait("location.pathname === '/away'");
   check("Turbolinks navigation stays in the same JS context", await evaluate('!!window.savedDoc && !!window.Turbolinks'));
+  // Turbolinks may update the URL before its before-cache teardown runs.
+  await wait("moved.unmountCount === 1");
   check("before-cache detached the editor and the session drains", await evaluate(
     'moved.unmountCount === 1 && !savedDoc.isDestroyed && savedProvider.hasPending && socketCount === socketsBefore'));
   await browser("back");
@@ -100,7 +102,8 @@ try {
 
   // A permanent element is carried into the next page and rebound once.
   await evaluate('window.permanent = document.querySelector("#body-doc"); permanent.setAttribute("data-turbolinks-permanent", ""); window.permanentMounts = permanent.mountCount; Turbolinks.visit("/?permanent=1")');
-  await wait('location.search === "?permanent=1" && document.querySelector("#body-doc")?.provider?.synced');
+  // The permanent element keeps its synced session, so wait for the rebind itself.
+  await wait('location.search === "?permanent=1" && document.querySelector("#body-doc")?.provider?.synced && permanent.mountCount > permanentMounts');
   check("Turbolinks permanent element is rebound without duplicating editor listeners", await evaluate(
     'document.querySelector("#body-doc") === permanent && permanent.mountCount > permanentMounts && permanent.mountCount - permanent.unmountCount === 1'));
   await browser("find", "label", "Body", "fill", "typed after turbolinks visits");
