@@ -31,10 +31,6 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   `key` follow the same storage choice. `key` and `load_state` never create a
   row; the first `append` does. Built-in row operations are explicitly
   available through `.document_row`.
-- `has_collaborative_document :body, storage: PostStore` selects one adapter
-  implementing `load(record, name)` and `write(record, name, update)` for both
-  channel persistence and Ruby reads. Custom storage creates no built-in rows,
-  cannot be combined with `encrypted: true`, and must supply both operations.
 - `Y::Document.key_for(record, name)` exposes the existing conventional key
   without allocating a document row.
 - `collaborative_sgid(name, expires_in:)` and

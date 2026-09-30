@@ -58,40 +58,26 @@ module Y
     end
 
     class_methods do
-      # Select storage once for both the shipped channel and Ruby reads.
-      # A custom adapter implements load(record, name) and write(record, name, update).
-      # Undeclared attributes use plain Y::Document storage.
-      def has_collaborative_document(name, encrypted: false, storage: nil) # rubocop:disable Naming/PredicatePrefix
-        if storage && (!storage.respond_to?(:load) || !storage.respond_to?(:write))
-          raise ArgumentError, "storage must implement load(record, name) and write(record, name, update)"
-        end
-        raise ArgumentError, "encrypted: applies to built-in storage only" if encrypted && storage
-
+      # Declares how one attribute's document is stored, for both the shipped
+      # channel and Ruby reads. Undeclared attributes use plain Y::Document.
+      def has_collaborative_document(name, encrypted: false) # rubocop:disable Naming/PredicatePrefix
         self.collaborative_document_options = collaborative_document_options.merge(
-          name.to_s => { encrypted: encrypted, storage: storage }.freeze
+          name.to_s => { encrypted: encrypted }.freeze
         ).freeze
       end
 
       # The model that stores this attribute's document: Y::Document, or
-      # Y::EncryptedDocument when declared encrypted. An undeclared attribute
-      # gets the plain model. Looked up on each call rather than stored at
-      # declaration, so the engine's models are not loaded while the app's
-      # are still loading. A custom store keeps the document elsewhere and
-      # has no model, so asking for one is an error: returning Y::Document
-      # would quietly read an empty row while the store held the real one.
+      # Y::EncryptedDocument when declared encrypted. Looked up on each call
+      # rather than stored at declaration, so the engine's models are not
+      # loaded while the app's are still loading.
       def collaborative_document_class(name)
-        options = collaborative_document_options.fetch(name.to_s, {})
-        if options[:storage]
-          raise ArgumentError,
-                "custom storage has no document model; use collaborative_document(name)"
-        end
-
-        options[:encrypted] ? Y::EncryptedDocument : Y::Document
+        encrypted = collaborative_document_options.dig(name.to_s, :encrypted)
+        encrypted ? Y::EncryptedDocument : Y::Document
       end
     end
 
-    # The document for one attribute: load_state, append, and doc, using the
-    # storage the model declared.
+    # The document for one attribute: load_state, append, y_doc, and key,
+    # using the storage the model declared.
     def collaborative_document(name)
       Attribute.new(self, name)
     end

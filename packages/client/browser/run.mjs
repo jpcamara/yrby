@@ -56,10 +56,10 @@ try {
   assert.ok(up, "Rails fixture boots");
   await browser(session, "open", base);
   console.log(JSON.stringify(await browser(session, "snapshot", "-i")));
-  await wait('["#body-doc", "#secret-doc", "#external-doc", "#notes-doc"].every(id => document.querySelector(id)?.provider?.synced)');
+  await wait('["#body-doc", "#secret-doc", "#notes-doc"].every(id => document.querySelector(id)?.provider?.synced)');
   check("simultaneous default elements share one real WebSocket", await evaluate('window.socketCount === 1 && document.querySelector("#body-doc").provider.consumer === document.querySelector("#secret-doc").provider.consumer'));
-  // Four elements on the page: body, secret, external, and notes.
-  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 4 && initialReadiness.every(Boolean) && browserEvents.length === 4 && browserEvents.every(e => e.synced && e.hasProvider)'));
+  // Three elements on the page: body, secret, and notes.
+  check("readiness exists before import and resolves only after catch-up", await evaluate('initialReadiness.length === 3 && initialReadiness.every(Boolean) && browserEvents.length === 3 && browserEvents.every(e => e.synced && e.hasProvider)'));
   await browser(session, "find", "label", "Body", "fill", "before move");
   await wait('!document.querySelector("#body-doc").provider.hasPending');
   check("ordinary edit reaches the Ruby accessor", (await state("body")).text === "before move");
@@ -81,12 +81,6 @@ try {
   const encrypted = await state("secret");
   check("encrypted browser edit reads through declared storage", encrypted.text === "encrypted browser edit" && encrypted.storage === "Y::EncryptedDocument");
   check("encrypted payload has a ciphertext envelope", JSON.parse(Buffer.from(encrypted.raw_payload, "base64").toString()).p !== undefined);
-
-  await browser(session, "find", "label", "Custom storage", "fill", "custom adapter browser edit");
-  await wait('!document.querySelector("#external-doc").provider.hasPending');
-  const custom = await state("external");
-  check("custom storage serves both browser writes and native Ruby reads without built-in rows",
-    custom.text === "custom adapter browser edit" && custom.storage === "BrowserStore" && custom.built_in_rows === 0);
 
   // Take the cable down while leaving HTTP available for Turbo Drive.
   await evaluate('goOffline(); window.suspendedSockets = socketCount');

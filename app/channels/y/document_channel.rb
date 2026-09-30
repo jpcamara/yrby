@@ -17,8 +17,7 @@ module Y
   #
   # Storage is whatever the model declared. An attribute marked
   # `has_collaborative_document :name, encrypted: true` loads and appends
-  # through Y::EncryptedDocument. A declared storage adapter handles both reads
-  # and writes. Undeclared attributes use plain Y::Document. Every change is
+  # through Y::EncryptedDocument. Undeclared attributes use plain Y::Document. Every change is
   # recorded before it is acknowledged or broadcast. For custom authorization
   # or room-keyed documents, write an application channel instead.
   #
@@ -115,8 +114,8 @@ module Y
       reject_subscription
     end
 
-    # Picking storage needs the record, since an attribute may be encrypted or
-    # use a custom adapter. It is looked up lazily so a fresh AnyCable instance
+    # Picking storage needs the record, since an attribute may be encrypted.
+    # It is looked up lazily so a fresh AnyCable instance
     # can handle a document frame, and only document frames need it. Awareness
     # frames are relayed without touching it.
     def document

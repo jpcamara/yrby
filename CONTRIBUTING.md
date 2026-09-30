@@ -85,7 +85,7 @@ existing Chrome. `AB_BIN` selects a different `agent-browser` binary, and
 `PORT` defaults to 3789. The run starts a Rails/SQLite/Puma fixture and drives
 two Chrome sessions through real ActionCable, the AnyCable web client, and
 Turbo navigation. It checks pending-edit recovery, shared views, retargeting,
-presence, async startup, encrypted and custom storage, subscribe-time
+presence, async startup, encrypted storage, subscribe-time
 authorization, and late callbacks from replaced subscriptions. It stops its
 server and browser sessions afterward. Logs and a screenshot go under `tmp/`.
 

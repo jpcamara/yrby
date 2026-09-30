@@ -595,38 +595,9 @@ fresh native `Y::Doc` for Ruby reads and rendering. For built-in row operations 
 as compaction, use `post.collaborative_document(:body).document_row.compact!`.
 The same accessor serves the channel and application code, including encryption.
 
-Custom storage can use the shipped channel too. Declare one adapter implementing
-both `load(record, name)` and `write(record, name, update)`:
-
-```ruby
-class PostStore
-  def self.load(record, name)
-    # Return lossless binary Yjs state, or nil for a new document.
-  end
-
-  def self.write(record, name, update)
-    # Persist durably before returning. Tolerate duplicates; raise on failure.
-  end
-end
-
-class Post < ApplicationRecord
-  has_collaborative_document :body, storage: PostStore
-end
-```
-
-The helper and Ruby accessor stay the same. The adapter supplies both channel
-loads/appends and `post.collaborative_document(:body).y_doc`; yrby creates no
-built-in document rows for it. A failed write is neither acknowledged nor
-broadcast. Custom storage owns encryption and compaction, so combining `storage:`
-with `encrypted: true` raises, as does asking a custom attribute for `.document`.
-Plain undeclared attributes still use `Y::Document`. Declarations are inherited
-without mutating their parent. Changing an existing attribute's storage requires
-migrating its data; the declaration does not copy it.
-
-Built-in attributes retain their stored document key. Custom attributes use the
-same conventional record/attribute key returned by `Y::Document.key_for(record,
-name)`, without requiring a built-in row. Grants keep their existing scope and
-lifetime.
+An attribute keeps the key its document row was stored under. Otherwise its key
+is `Y::Document.key_for(record, name)`, available without creating a row. Grants
+keep their existing scope and lifetime.
 
 To require current user permissions in addition to the signed grant, configure
 the shipped channel. The block runs in channel context, so it can use identifiers
