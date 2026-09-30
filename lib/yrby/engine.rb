@@ -2,7 +2,7 @@
 
 require "rails/engine"
 require "action_dispatch" # Engine::Configuration references it at subclass definition
-require "global_id/railtie" # initialize signed grants even when the app does not load Active Job
+require "global_id/railtie" # so signed grants work even when the app doesn't load Active Job
 
 module Yrby
   # The Rails engine. Autoloads the gem's models (Y::Document,

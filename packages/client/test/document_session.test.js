@@ -11,7 +11,7 @@ function setup(t) {
   return { consumer, store };
 }
 
-test("one consumer has one canonical document store", async t => {
+test("one consumer has one document store", async t => {
   const { consumer, store } = setup(t);
   assert.throws(() => new DocumentSessionStore(consumer), /DocumentSessionStore.for/);
   assert.equal(DocumentSessionStore.for(consumer), store);
@@ -42,11 +42,11 @@ test("sessions expose no direct lease acquisition or release methods", async t =
   assert.equal(session.attach, undefined);
 });
 
-test("even a retained internal acquisition method cannot attach to a closed session", async t => {
+test("the internal attach method throws on a closed session", async t => {
   const { consumer, store } = setup(t);
   const lease = store.acquire(descriptor), session = lease.session;
   await tick();
-  // Deliberately reflect on the internal operation to exercise its terminal-state guard.
+  // Reach into the internal method on purpose to hit its closed-session guard.
   const key = Object.getOwnPropertySymbols(Object.getPrototypeOf(session)).find(key => key.description === "attachLease");
   const acquire = session[key].bind(session);
   session.discard();
@@ -58,7 +58,7 @@ test("even a retained internal acquisition method cannot attach to a closed sess
   assert.deepEqual(store.sessions, []);
 });
 
-test("discarding from an acquisition observer announces closure once", async t => {
+test("discard from a change listener during acquisition notifies closed once", async t => {
   const { store } = setup(t);
   const seen = [];
   store.addEventListener("change", event => {
@@ -101,7 +101,7 @@ test("an initial connection failure returns an aborted lease on a blocked sessio
   assert.deepEqual(store.sessions, [lease.session]);
 });
 
-test("observers see cleanup-triggered retry only after its replacement lease is acquired", async t => {
+test("a retry from an abort handler is notified after the replacement lease is acquired", async t => {
   const { consumer, store } = setup(t);
   const first = store.acquire(descriptor), session = first.session;
   await tick();
@@ -128,7 +128,7 @@ test("observers see cleanup-triggered retry only after its replacement lease is 
   assert.equal(consumer.created.length, 2);
 });
 
-test("matching leases share one document and queue; consumer scopes are isolated", async t => {
+test("matching leases share one document and queue, and each consumer has its own", async t => {
   const { consumer, store } = setup(t);
   const first = store.acquire(descriptor), second = store.acquire(descriptor);
   assert.equal(first.session, second.session);
@@ -201,7 +201,7 @@ test("an edit added while a lease is live is retained after the earlier ack", as
   assert.equal(session.state, "closed");
 });
 
-test("fresh grants and replacement lifetimes use different acknowledgment routes", async t => {
+test("a new grant and a replacement session each get their own ack route", async t => {
   const { consumer, store } = setup(t);
   const first = store.acquire(descriptor);
   await tick();
@@ -221,7 +221,7 @@ test("fresh grants and replacement lifetimes use different acknowledgment routes
   sync(replacementSub);
   replacement.session.doc.getText("content").insert(0, "new edit");
   // Cable routes incoming messages by serialized subscription identifier, even
-  // if the old handler is gone. Old ACKs must never reach the new queue.
+  // after the old handler is gone, so an old ack has to miss the new queue.
   const oldIdentifier = JSON.stringify(originalSub.params);
   const oldAck = originalSub.sent.filter(message => message.id !== undefined).at(-1).id;
   for (const sub of consumer.created) {
@@ -230,7 +230,7 @@ test("fresh grants and replacement lifetimes use different acknowledgment routes
   assert.equal(replacement.session.hasPending, true);
 });
 
-test("rejection retains the final editor update and retry uses original authorization", async t => {
+test("a rejection keeps the final editor edit and retry reconnects with the original grant", async t => {
   const { consumer, store } = setup(t);
   const lease = store.acquire(descriptor), session = lease.session;
   await tick();
@@ -326,7 +326,7 @@ test("a failed refresh blocks the session with the refresh error", async t => {
   assert.equal(consumer.created.length, 1, "no resubscription without a grant");
 });
 
-test("a renewed grant that is rejected in turn blocks without fetching again, and retry uses it", async t => {
+test("a rejected renewed grant blocks the session with no second fetch, and retry uses the renewed grant", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
   const lease = store.acquire(refreshing), session = lease.session;
@@ -365,7 +365,7 @@ test("a reconnect after a successful renewal may renew again on the next rejecti
   assert.equal(lease.signal.aborted, false);
 });
 
-test("without a refresh URL a rejection blocks immediately and nothing is fetched", async t => {
+test("a rejection with no refresh URL blocks immediately and fetches nothing", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "unused" }));
   const lease = store.acquire(descriptor), session = lease.session;
@@ -378,7 +378,7 @@ test("without a refresh URL a rejection blocks immediately and nothing is fetche
   assert.equal(lease.signal.aborted, true);
 });
 
-test("a refresh request carries a timeout signal so a silent endpoint cannot hold the session offline", async t => {
+test("the refresh fetch is given a timeout signal, so a silent endpoint does not hang the session", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
   store.acquire(refreshing);
@@ -422,7 +422,7 @@ test("the phase transitions are the only ones allowed, and each notifies once", 
   assert.equal(seen.at(-1), "blocked");
   assert.equal(seen.filter(s => s === "blocked").length, 1, "blocking notified once");
 
-  // Already blocked: a second failure changes nothing and says nothing.
+  // A second rejection while blocked changes nothing and sends no event.
   consumer.created[0].handlers.rejected();
   await tick();
   assert.equal(session.state, "blocked");
@@ -436,7 +436,7 @@ test("the phase transitions are the only ones allowed, and each notifies once", 
   assert.equal(seen.at(-1), "closed");
   assert.equal(store.sessions.length, 0);
 
-  // closed is terminal: nothing reopens or re-ends it.
+  // closed is terminal. discard and retry do nothing to it.
   const afterClose = seen.length;
   session.discard();
   session.retry();
@@ -446,7 +446,7 @@ test("the phase transitions are the only ones allowed, and each notifies once", 
 });
 
 
-test("a new lease waits for the in-flight refresh instead of subscribing with the rejected grant", async t => {
+test("a lease acquired during a refresh waits for the renewed grant", async t => {
   const { consumer, store } = setup(t);
   let respond;
   const calls = stubFetch(t, () => new Promise(resolve => { respond = resolve; }));
@@ -467,7 +467,7 @@ test("a new lease waits for the in-flight refresh instead of subscribing with th
 });
 
 for (const outcome of ["success", "failure"]) {
-  test(`a stale refresh ${outcome} cannot change a session that has blocked and retried`, async t => {
+  test(`a refresh ${outcome} that arrives after block and retry is ignored`, async t => {
     const { consumer, store } = setup(t);
     let respond, fail;
     stubFetch(t, () => new Promise((resolve, reject) => { respond = resolve; fail = reject; }));
@@ -476,7 +476,7 @@ for (const outcome of ["success", "failure"]) {
     sync(consumer.created[0]);
     session.doc.getText("content").insert(0, "keep me");
     consumer.created[0].handlers.rejected();
-    // The provider is public: an application can reconnect before refresh ends.
+    // The provider is public, so an application can reconnect before the refresh ends.
     session.provider.connect();
     consumer.created.at(-1).handlers.rejected();
     assert.equal(session.state, "blocked");
@@ -536,7 +536,7 @@ test("acquiring from a closing session's abort handler creates a live replacemen
 });
 
 
-test("a renewed grant can reconnect before its first acceptance without refreshing again", async t => {
+test("a renewed grant reconnects before its first acceptance with no second refresh", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
   const first = store.acquire(refreshing);
@@ -589,7 +589,7 @@ test("the first acquirer's refresh URL is the one the shared session renews with
   assert.deepEqual(calls.map(call => call.url), ["/first"]);
 });
 
-test("a session first acquired without a refresh URL blocks on rejection even if a later lease names one", async t => {
+test("a session first acquired with no refresh URL blocks on rejection even if a later lease names one", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ grant: "renewed" }));
   const first = store.acquire(descriptor);
@@ -630,7 +630,7 @@ test("releasing one of several leases keeps the session open and connected", asy
   assert.deepEqual(store.sessions, [second.session]);
 });
 
-test("an idle session closes on the last release, unsubscribes, and announces closure once", async t => {
+test("an idle session closes on the last release, unsubscribes, and notifies closed once", async t => {
   const { consumer, store } = setup(t);
   const lease = store.acquire(descriptor), session = lease.session;
   await tick();
@@ -687,7 +687,7 @@ test("a lease acquired while blocked is kept for retry and does not connect unti
   assert.equal(waiting.signal.aborted, false);
 });
 
-test("a blocked session is never closed implicitly, even with no leases or pending work", async t => {
+test("a blocked session stays in the store even with no leases or pending work", async t => {
   const { consumer, store } = setup(t);
   const lease = store.acquire(descriptor), session = lease.session;
   await tick();
@@ -738,7 +738,7 @@ test("retry clears the block error and notifies once", async t => {
   assert.deepEqual(seen, [{ state: "open", error: undefined }]);
 });
 
-test("a provider error outside rejection is recorded and announced without blocking", async t => {
+test("a provider error other than rejection is recorded and notified, and the session stays open", async t => {
   const { consumer, store } = setup(t);
   const lease = store.acquire(descriptor), session = lease.session;
   await tick();
@@ -776,7 +776,7 @@ test("discarding while a refresh is in flight ignores its late grant", async t =
   assert.deepEqual(seen, ["closed"], "the late grant says nothing");
 });
 
-test("a rejection while refreshing blocks, and the late grant cannot reopen the session", async t => {
+test("a rejection while refreshing blocks the session, and the late grant is ignored", async t => {
   const { consumer, store } = setup(t);
   let respond;
   const calls = stubFetch(t, () => new Promise(resolve => { respond = resolve; }));
@@ -824,7 +824,7 @@ for (const [label, respond, pattern] of [
   });
 }
 
-test("a successful refresh keeps the session open throughout and never reports an error", async t => {
+test("a successful refresh keeps the session open the whole time with no error", async t => {
   const { consumer, store } = setup(t);
   stubFetch(t, () => jsonResponse({ grant: "renewed" }));
   const seen = [];
@@ -842,7 +842,7 @@ test("a successful refresh keeps the session open throughout and never reports a
   assert.equal(session.provider.status, "synced");
 });
 
-test("an earlier refresh answering during a later refresh cannot install its grant", async t => {
+test("an answer from an earlier refresh is ignored while a later refresh is in flight", async t => {
   const { consumer, store } = setup(t);
   const responders = [];
   stubFetch(t, () => new Promise(resolve => { responders.push(resolve); }));

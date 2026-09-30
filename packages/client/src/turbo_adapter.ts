@@ -1,6 +1,6 @@
-// Browser policy for Turbo and Turbolinks: an editor binds only while its page
-// is the live one. Cached snapshots and previews never own a document or a
-// delivery queue; the session store does.
+// Browser policy for Turbo and Turbolinks. An editor binds only while its page
+// is the live one. A cached snapshot or preview does not own a document or a
+// delivery queue. The session store owns those.
 export interface DocumentMount {
   readonly ownerDocument: Document;
   readonly isConnected: boolean;

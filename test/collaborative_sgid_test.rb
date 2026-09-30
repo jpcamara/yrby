@@ -9,10 +9,10 @@ GlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secret")
 
-# The signed token for record-backed documents. A page mints
-# collaborative_sgid(:attr), a channel trades it back through
-# Y::Collaborative.locate, and the purpose scope keeps a token for one
-# attribute from opening any other.
+# The signed token for record-backed documents. A page renders
+# collaborative_sgid(:attr) and a channel looks the record up with
+# Y::Collaborative.locate. The purpose scope keeps a token for one attribute
+# from opening any other.
 class CollaborativeSgidTest < Minitest::Test
   include ActiveSupport::Testing::TimeHelpers
 
@@ -62,8 +62,9 @@ class CollaborativeSgidTest < Minitest::Test
   end
 
   def test_without_expires_in_the_default_lifetime_applies
-    # Outside Rails, GlobalID sets no default, so the token has no expiry. The
-    # point is that omitting the option does not pass an explicit nil through.
+    # Outside Rails, GlobalID sets no default, so the token has no expiry.
+    # This checks that omitting the option doesn't pass an explicit nil
+    # through.
     token = @page.collaborative_sgid(:body)
 
     travel 2.minutes do

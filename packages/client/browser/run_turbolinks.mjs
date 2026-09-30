@@ -1,5 +1,5 @@
-// Real-Chrome regression for Turbolinks 5, the predecessor of Turbo: the same
-// fixture app, bundled with Turbolinks instead of Turbo.
+// Real-Chrome regression for Turbolinks 5, the predecessor of Turbo. It runs
+// the same fixture app, bundled with Turbolinks in place of Turbo.
 // From packages/client: npm run test:browser:turbolinks
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
@@ -55,8 +55,8 @@ try {
   await wait('!document.querySelector("#body-doc").provider.hasPending');
   check("ordinary edit reaches Ruby", (await state("body")).text === "before turbolinks");
 
-  // Take the cable down, edit, and navigate. before-cache must detach the editor
-  // while the session keeps the edit; a history restore must reattach to it.
+  // Take the cable down, edit, and navigate. before-cache should detach the editor
+  // and the session should keep the edit, so a history restore can reattach to it.
   await evaluate(`window.moved = document.querySelector("#body-doc");
     window.savedDoc = moved.doc; window.savedProvider = moved.provider; window.cable = savedProvider.consumer;
     window.cableOpen = cable.connection.open;
@@ -71,11 +71,11 @@ try {
   check("Turbolinks navigation stays in the same JS context", await evaluate('!!window.savedDoc && !!window.Turbolinks'));
   // Turbolinks may update the URL before its before-cache teardown runs.
   await wait("moved.unmountCount === 1");
-  check("before-cache detached the editor and the session drains", await evaluate(
+  check("before-cache detached the editor and the session kept the edit", await evaluate(
     'moved.unmountCount === 1 && !savedDoc.isDestroyed && savedProvider.hasPending && socketCount === socketsBefore'));
   await browser("back");
   await wait('document.querySelector("#body-doc")?.doc === savedDoc');
-  check("history restore reattaches the pending session without a new socket", await evaluate(
+  check("history restore reattaches the pending session over the same socket", await evaluate(
     'socketCount === socketsBefore && document.querySelector("#body-doc").session.state === "open" && savedDoc.getText("content").toString() === "pending across Turbolinks"'));
   await evaluate("goOnline()");
   await wait('document.querySelector("#body-doc")?.provider?.synced && !document.querySelector("#body-doc").provider.hasPending');
@@ -93,7 +93,7 @@ try {
     };
     Turbolinks.visit("/");`);
   await wait('document.documentElement.hasAttribute("data-turbolinks-preview") && !!document.querySelector("#body-doc") && !!window.releaseFresh');
-  check("Turbolinks preview is inert and never starts a provider", await evaluate(`window.previewElement = document.querySelector("#body-doc");
+  check("Turbolinks preview is inert and has no provider", await evaluate(`window.previewElement = document.querySelector("#body-doc");
     previewElement.inert && !previewElement.provider && !previewElement.doc`));
   await evaluate("releaseFresh()");
   await wait('!document.documentElement.hasAttribute("data-turbolinks-preview") && document.querySelector("#body-doc") !== previewElement && document.querySelector("#body-doc")?.provider?.synced');
@@ -104,7 +104,7 @@ try {
   await evaluate('window.permanent = document.querySelector("#body-doc"); permanent.setAttribute("data-turbolinks-permanent", ""); window.permanentMounts = permanent.mountCount; Turbolinks.visit("/?permanent=1")');
   // The permanent element keeps its synced session, so wait for the rebind itself.
   await wait('location.search === "?permanent=1" && document.querySelector("#body-doc")?.provider?.synced && permanent.mountCount > permanentMounts');
-  check("Turbolinks permanent element is rebound without duplicating editor listeners", await evaluate(
+  check("Turbolinks permanent element is rebound with one editor binding", await evaluate(
     'document.querySelector("#body-doc") === permanent && permanent.mountCount > permanentMounts && permanent.mountCount - permanent.unmountCount === 1'));
   await browser("find", "label", "Body", "fill", "typed after turbolinks visits");
   await wait('!document.querySelector("#body-doc").provider.hasPending');

@@ -1,10 +1,10 @@
 // <yrby-document grant="..." name="..." [channel="..."] [refresh="..."]>
 //
 // The element attaches an editor to a document session while it is live in
-// the page, and detaches when Turbo caches the page, the element leaves the
-// DOM, or its grant/name/channel attributes change. The session, not the
-// element, owns the document and any unacknowledged edits, so nothing is lost
-// when the element goes away.
+// the page. It detaches when Turbo caches the page, when the element leaves
+// the DOM, or when its grant/name/channel attributes change. The session owns
+// the document and any unacknowledged edits, so they survive the element
+// going away.
 import { type CableConsumer } from "./actioncable_provider.js";
 import {
   DocumentSessionStore,
@@ -18,7 +18,7 @@ import { registerDocumentMount } from "./turbo_adapter.js";
 // Importable outside a browser (tests, SSR) where HTMLElement is undefined.
 const Base = (typeof HTMLElement === "undefined" ? class {} : HTMLElement) as typeof HTMLElement;
 
-// Where the application's own inert value is parked while the element holds it inert.
+// Saves the application's own inert value while the element forces inert on.
 const INERT_ATTRIBUTE = "data-yrby-inert";
 
 let sharedConsumer: Promise<CableConsumer> | undefined;
@@ -45,8 +45,9 @@ function blockReport(session: DocumentSession): ErrorDetail | undefined {
 
 type ErrorDetail = { error: unknown; session?: DocumentSession };
 
-// One try at binding one document. Async steps only record their results here
-// and request a settle. A result for an abandoned attempt is simply never read.
+// One try at binding one document. Async steps write their results here and
+// ask for a settle. If the attempt was abandoned in the meantime, nothing
+// reads the result.
 type BindAttempt = {
   key: string;
   descriptor: DocumentDescriptor;
@@ -59,11 +60,12 @@ type BindAttempt = {
 };
 
 // The element binds when it is in the page, the Turbo adapter says the page is
-// live, and it has a descriptor. Abandoning an attempt is immediate: Turbo
-// snapshots the page right after deactivation, and a retarget must stop
-// editing the old document at once. Starting and advancing an attempt, and
-// every async result, go through #settle, which runs after the current call
-// stack and compares what should be bound with what is.
+// live, and it has a descriptor. Abandoning an attempt happens synchronously.
+// Turbo copies the page as soon as before-cache fires, and after a retarget
+// the editor has to stop writing to the old document before anything else
+// runs. Starting an attempt, advancing it, and handling every async result
+// go through #settle, which runs after the current call stack and compares
+// what should be bound with what is.
 export class YrbyDocumentElement extends Base {
   /** Set before adding elements to use another consumer, such as AnyCable's. */
   static consumer: CableConsumer | Promise<CableConsumer> | undefined;
@@ -71,7 +73,7 @@ export class YrbyDocumentElement extends Base {
   // identity, so changing it does not rebind the editor.
   static observedAttributes = ["grant", "name", "channel"];
 
-  #live = false; // the adapter's latest word: live page, or cached snapshot
+  #live = false; // what the Turbo adapter last told us: the page is live, or it is a cached copy
   #attempt: BindAttempt | undefined;
   // The document whose session blocked or failed. It is not retried until the
   // page renders again, the attributes change, or the element is re-inserted.
@@ -82,23 +84,23 @@ export class YrbyDocumentElement extends Base {
   #firstSync = deferred();
 
   get session(): DocumentSession | undefined {
-    // A lease aborted by its session is gone at once, before settle catches up.
+    // A lease its session aborted is already gone, even before settle has run.
     const lease = this.#attempt?.lease;
     return lease && !lease.signal.aborted ? lease.session : undefined;
   }
   get doc(): DocumentSession["doc"] | undefined { return this.session?.doc; }
   get provider(): DocumentSession["provider"] | undefined { return this.session?.provider; }
-  /** Resolves after the current attempt's first sync; never for an abandoned attempt. */
+  /** Resolves after the current attempt's first sync. An abandoned attempt's promise is left unresolved. */
   get whenSynced(): Promise<void> { return this.#firstSync.promise; }
 
   connectedCallback(): void {
     this.#stalledKey = undefined;
-    // A same-turn move keeps its attempt, and a live editor must not flicker inert.
+    // A same-turn move keeps its attempt, so don't flip a live editor to inert.
     if (!this.#attempt) this.#holdInert();
     this.#unregister ??= registerDocumentMount(this);
     this.#requestSettle();
   }
-  // Same-turn moves keep their binding: settle checks isConnected afterwards.
+  // Same-turn moves keep their binding, because settle checks isConnected afterwards.
   disconnectedCallback(): void { this.#requestSettle(); }
   attributeChangedCallback(_name: string, oldValue: string | null, newValue: string | null): void {
     if (oldValue === newValue) return;
@@ -118,11 +120,11 @@ export class YrbyDocumentElement extends Base {
     this.#live = false;
     this.#abandon();
   }
-  /** Release the editor lease. Unsaved work remains owned by its session. */
+  /** Release the editor lease. Unsaved work is kept by its session. */
   destroy(): void {
-    // Forget the adapter's verdict; registering on the next connection gets a fresh one.
+    // Forget what the adapter said. Registering on the next connection gets a fresh answer.
     this.#live = false;
-    // Cleared before the call, which can re-enter through a replacement registration.
+    // Clear it before the call, since the call can re-enter through a replacement registration.
     const unregister = this.#unregister;
     this.#unregister = undefined;
     unregister?.();
@@ -138,20 +140,20 @@ export class YrbyDocumentElement extends Base {
     this.#settleQueued = false;
     if (!this.isConnected) { this.destroy(); return; }
     const descriptor = this.#descriptor();
-    // undefined: nothing should be bound. The page is cached, or the
-    // attributes do not name a document yet.
+    // key is undefined when nothing should be bound, either because the page
+    // is cached or because the attributes do not name a document yet.
     const key = this.#live && descriptor.grant && descriptor.name ? documentKey(descriptor) : undefined;
     const attempt = this.#attempt;
     if (attempt && attempt.key !== key) {
-      // Defensive: every change to these facts already abandons the attempt.
+      // Should not happen, since every change to these facts already abandons the attempt.
       this.#abandon();
       this.#requestSettle();
       return;
     }
     if (key === undefined || key === this.#stalledKey) return;
 
-    // Advance one step: start, acquire once the consumer loads, announce once
-    // synced. An ended attempt stalls instead.
+    // Advance one step. Start, then acquire once the consumer loads, then
+    // announce once synced. An ended attempt stalls.
     if (!attempt) this.#start(key, descriptor);
     else if (attempt.ended) this.#stall(attempt.ended.detail);
     else if (attempt.consumer && !attempt.lease) this.#acquire(attempt, attempt.consumer);
@@ -184,8 +186,8 @@ export class YrbyDocumentElement extends Base {
       this.#requestSettle();
       return;
     }
-    // The lease aborts when its session blocks or is discarded. The reason is
-    // read now, before anything can retry the session.
+    // The lease aborts when its session blocks or is discarded. Read the
+    // reason now, before anything retries the session.
     lease.signal.addEventListener("abort", () => {
       attempt.ended ??= { detail: blockReport(session) };
       this.#requestSettle();
@@ -230,9 +232,9 @@ export class YrbyDocumentElement extends Base {
       refresh: this.getAttribute("refresh") || undefined,
     };
   }
-  // Inert until synced, so nobody types into a document that is not live.
-  // The application's own inert value is parked in an attribute, which a
-  // Turbo cache clone carries along, and put back on readiness.
+  // Inert until synced, so nobody types into a document that is not live yet.
+  // The application's own inert value is saved in an attribute, which
+  // survives a Turbo cache clone, and put back when the element is ready.
   #holdInert(): void {
     if (!this.hasAttribute(INERT_ATTRIBUTE)) this.setAttribute(INERT_ATTRIBUTE, String(this.inert));
     this.inert = true;

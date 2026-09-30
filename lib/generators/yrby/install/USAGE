@@ -1,7 +1,7 @@
 Description:
     Creates the migration for the gem's document storage (Y::Document +
-    Y::DocumentUpdate). The models and the Y::DocumentChannel that syncs
-    through them ship in the gem; nothing else lands in the app.
+    Y::DocumentUpdate). The models and Y::DocumentChannel ship in the gem,
+    so the migration is the only file added to the app.
 
 Example:
     bin/rails generate yrby:install
@@ -9,7 +9,7 @@ Example:
     This will create:
         db/migrate/XXXXXXXX_create_y_tables.rb
 
-    To also generate an explicit application channel:
+    To also generate an application channel:
         bin/rails generate yrby:install --channel
 
     Implement authorized?(key) in the generated channel before using it.

@@ -42,9 +42,9 @@ class SyncTest < Minitest::Test
 
       define_method(:sync_distribute) { |encoded| broadcasts << encoded }
     end
-    # Most tests exercise the sync protocol, not authorization; opting the
-    # helper in keeps them on the happy path. authorized: false leaves the
-    # concern's fail-closed default in place.
+    # Most tests exercise the sync protocol and don't care about
+    # authorization, so the helper authorizes by default. authorized: false
+    # leaves the concern's default in place, which rejects.
     klass.define_method(:authorized?) { |_key| true } if authorized
     klass.on_load(&loader)
     klass.on_change(&recorder)
@@ -72,10 +72,10 @@ class SyncTest < Minitest::Test
       on_load { |_key| nil }
     end
 
-    # Outside a yrby-rails app there is no Y::Document default, and the
-    # concern fails closed. The full suite loads the models into this
-    # process, so that state is stubbed by hand here (this suite has no
-    # minitest/mock).
+    # Outside a yrby-rails app Y::Document isn't loaded, so the hooks have no
+    # default and the concern raises. The full suite loads the models into
+    # this process, so that state is stubbed by hand here. This suite has no
+    # minitest/mock.
     sync = Y::ActionCable::Sync
     sync.singleton_class.alias_method(:real_default_hook, :default_hook)
     sync.define_singleton_method(:default_hook) { |_name| nil }

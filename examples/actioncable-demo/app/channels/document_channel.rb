@@ -21,8 +21,8 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # This is the gem's local test/demo app: every document is deliberately
-  # public. Real apps check the connection's identity against the key here.
+  # This is the gem's local test/demo app, so every document is public on
+  # purpose. A real app checks the connection's identity against the key here.
   def authorized?(_key)
     true
   end

@@ -10,7 +10,7 @@ GlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secret")
 
-# The view side: collaborative_document_tag renders the signed grant, channel
+# The view side. collaborative_document_tag renders the signed grant, channel
 # name, and attribute name a client needs.
 class CollaborativeHelperTest < Minitest::Test
   include ActiveSupport::Testing::TimeHelpers
@@ -48,7 +48,7 @@ class CollaborativeHelperTest < Minitest::Test
     refute_includes collaborative_document_tag(@page, :body), "refresh="
   end
 
-  def test_expires_in_option_mints_an_expiring_grant
+  def test_expires_in_option_renders_an_expiring_grant
     html = collaborative_document_tag(@page, :body, expires_in: 1.minute)
     grant = html[/ grant="([^"]+)"/, 1]
 
@@ -58,7 +58,7 @@ class CollaborativeHelperTest < Minitest::Test
     end
   end
 
-  # Pointing the tag at a subclass of the shipped channel is one attribute.
+  # The tag points at a subclass of the shipped channel with one attribute.
   def test_channel_option_names_the_channel_the_element_subscribes_to
     html = collaborative_document_tag(@page, :body, channel: "PostDocumentChannel")
 

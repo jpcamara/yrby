@@ -15,20 +15,20 @@ for (const [format, entry, extension] of [["ESM", "../dist/index.js", "mts"], ["
       import { DocumentSessionStore, type DocumentDescriptor } from ${JSON.stringify(fileURLToPath(new URL(entry, import.meta.url)))};
       declare const consumer: Parameters<typeof DocumentSessionStore.for>[0];
       const canonical = DocumentSessionStore.for(consumer);
-      // @ts-expect-error A consumer must use its one canonical store.
+      // @ts-expect-error Each consumer has one store, from DocumentSessionStore.for.
       new DocumentSessionStore(consumer);
       declare const store: DocumentSessionStore;
       declare const descriptor: DocumentDescriptor;
       const lease = store.acquire(descriptor);
-      // @ts-expect-error Notifications are internal to session transitions.
+      // @ts-expect-error changed() is internal to session transitions.
       store.changed(lease.session);
       const session = lease.session;
       lease.release();
       session.retry();
       session.discard();
-      // @ts-expect-error Acquire through the store, never directly from a session.
+      // @ts-expect-error Leases are acquired through the store.
       session.attach();
-      // @ts-expect-error Release through the lease so cleanup cannot be skipped.
+      // @ts-expect-error Releasing goes through the lease, which runs the cleanup.
       session.release(lease);
     `);
     const program = ts.createProgram([file], {

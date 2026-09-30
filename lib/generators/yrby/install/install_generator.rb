@@ -5,10 +5,10 @@ require "generators/yrby/tables/tables_generator"
 
 module Yrby
   module Generators
-    # `bin/rails generate yrby:install` creates the storage migration (through
-    # yrby:tables) and nothing else. The models and Y::DocumentChannel ship in
-    # the gem. Pass --channel to also generate an application channel, for
-    # custom authorization or room-keyed documents.
+    # `bin/rails generate yrby:install` creates the storage migration through
+    # yrby:tables. That is all it generates, since the models and
+    # Y::DocumentChannel ship in the gem. Pass --channel to also generate an
+    # application channel, for custom authorization or room-keyed documents.
     class InstallGenerator < ::Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
       class_option :channel, type: :boolean, default: false, desc: "Generate a custom DocumentChannel"
@@ -27,14 +27,14 @@ module Yrby
           Next steps:
 
             1. bin/rails db:migrate
-            2. Render a collaborative document where the page is authorized
-               to edit the record:
+            2. Render a collaborative document on a page where the user may
+               edit the record:
 
                  <%= collaborative_document_tag @post, :body %>
 
             3. Install the yrby-client npm package. The tag is an
-               auto-connecting element; your code receives the synced
-               document and hands it to any editor that speaks Yjs:
+               auto-connecting element. Your code receives the synced
+               document and passes it to any editor that speaks Yjs:
 
                  import "yrby-client/element"
 
@@ -44,7 +44,7 @@ module Yrby
                  })
 
           --channel also generates app/channels/document_channel.rb. Implement
-          its authorized? method before using that explicit custom channel.
+          its authorized? method before using that channel.
 
           The README's Editors section links working integrations for
           Tiptap, Lexxy, Rhino Editor, and CodeMirror.

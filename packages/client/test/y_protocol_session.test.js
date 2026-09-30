@@ -268,8 +268,8 @@ test("receive: a well-framed update with corrupt contents is reported via onErro
   const peer = new Y.Doc();
   peer.getText("t").insert(0, "hello");
   const update = Y.encodeStateAsUpdate(peer);
-  // A truncated update inside a correctly length-prefixed frame: the frame is
-  // well formed, so only Yjs can notice the damage.
+  // The frame is well formed and correctly length-prefixed, but the update
+  // inside it is truncated. Only Yjs can tell.
   const reply = eng.receive(updateFrame(update.slice(0, update.length - 2)));
   assert.equal(reply, null);
   assert.ok(errors.includes("receive"), "the Yjs error reaches onError");
@@ -422,7 +422,7 @@ function step2Frame(peer) {
   return encoding.toUint8Array(e);
 }
 
-test("destroy is terminal for sync, received frames, bootstrap updates, and sends", () => {
+test("after destroy, resume, received frames, bootstrap updates, and sends are all ignored", () => {
   const { doc, eng, sent } = engine();
   const peer = new Y.Doc();
   eng.resume(); eng.receive(step2Frame(peer));
@@ -440,7 +440,7 @@ test("destroy is terminal for sync, received frames, bootstrap updates, and send
 });
 
 for (const action of ["pause", "destroy"]) {
-  test(`${action} during the opening handshake cannot resume delivery afterwards`, () => {
+  test(`${action} called from inside the handshake send stops delivery`, () => {
     const frames = [];
     const { doc, eng } = engine({ send: (frame, id) => { frames.push({ frame, id }); eng[action](); } });
     eng.resume();
@@ -452,7 +452,7 @@ for (const action of ["pause", "destroy"]) {
   });
 }
 
-test("a catch-up interrupted by a new handshake cannot sync that new cycle", () => {
+test("a catch-up interrupted by a new handshake leaves the new cycle waiting for its own step2", () => {
   const { doc, eng } = engine();
   const peer = new Y.Doc();
   peer.getText("t").insert(0, "remote");

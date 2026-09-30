@@ -42,8 +42,8 @@ module Y
       private
 
       # The row if it already exists. Reads use it, so looking at a document
-      # never creates one. Only the id and key are loaded: the row's load_state
-      # re-reads the snapshot fresh, so loading it here would fetch it twice.
+      # never creates one. Only the id and key are loaded. The row's load_state
+      # re-reads the snapshot itself, so loading it here would fetch it twice.
       def existing_row = document_class.select(:id, :key).find_by(record:, name:)
 
       def document_class = record.class.collaborative_document_class(name)

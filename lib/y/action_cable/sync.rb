@@ -64,10 +64,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       base.extend(ClassMethods)
     end
 
-    # The storage a channel gets when it declares no hooks: the gem's own
-    # models, much as Action Text defaults to its rich_texts table. It only
-    # applies when the yrby-rails models can be loaded. Outside Rails the
-    # concern still fails closed until hooks are declared.
+    # The storage a channel gets when it declares no hooks. It uses the gem's
+    # own models, like Action Text defaults to its rich_texts table. It only
+    # applies when the yrby-rails models can be loaded. Outside Rails a
+    # channel still has to declare both hooks, or subscribing raises.
     DEFAULT_STORAGE = {
       on_load: ->(key) { Y::Document.load_state(key) },
       on_change: ->(key, update) { Y::Document.append(key, update) }
@@ -81,8 +81,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # Load persisted document state. Called once per key with (key); return a
       # binary Y.js update (or nil for a fresh document). Runs in the channel
       # instance's context (instance_exec). Defaults to Y::Document storage
-      # when yrby-rails' models are present; declare a block to point storage
-      # elsewhere.
+      # when yrby-rails' models are present. Declare a block to use a
+      # different store.
       def on_load(&block)
         @on_load = block if block
         sync_storage_hook(:on_load)
@@ -129,8 +129,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       private
 
       # The default supplies both hooks or neither, so reads and writes never
-      # go to different stores. Explicit hooks are inherited as a pair, so a
-      # subclass can override one side of a pair its parent defined.
+      # go to different stores. Declared hooks are inherited, so a subclass
+      # can override one hook and keep its parent's other one.
       def sync_storage_hook(name)
         hooks = sync_storage_hooks
         hooks.empty? ? Sync.default_hook(name) : hooks[name]
@@ -243,8 +243,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     # The subscription was refused. If the refusal came from the default
-    # authorized?, log how to fix it, so a channel that never defined one is
-    # not just silently broken.
+    # authorized?, log how to fix it, so a channel that never defined one
+    # doesn't fail silently.
     def sync_reject_unauthorized
       logger.info do
         hint = if method(:authorized?).owner == Sync

@@ -22,7 +22,7 @@ class CollaborativeAttributeTest < ActionCable::Channel::TestCase
     Page.delete_all
   end
 
-  def test_bound_access_supports_native_reads_and_preserves_existing_storage_keys
+  def test_attribute_uses_the_existing_row_and_declared_storage
     stored = Y::Document.create!(record: @page, name: "body", key: "existing-room")
     name = +"body"
     attribute = @page.collaborative_document(name)

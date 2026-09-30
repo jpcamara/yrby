@@ -18,13 +18,15 @@ SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secr
 
 require_relative "../app/channels/y/document_channel"
 
-# No Rails app here: point the cable server at the test adapter by hand.
+# No Rails app boots here, so the cable server is pointed at the test adapter
+# by hand.
 ActionCable.server.config.cable = { "adapter" => "test" }
 ActionCable.server.config.logger = Logger.new(File::NULL)
 
 # The channel that ships in the gem. It takes a signed grant and stores
-# through Y::Document, and the app writes no channel. Driven through Action
-# Cable's channel test harness against a test cable adapter.
+# through Y::Document, so the app doesn't need a channel of its own. These
+# tests drive it through Action Cable's channel test harness against a test
+# cable adapter.
 class DocumentChannelTest < ActionCable::Channel::TestCase
   tests Y::DocumentChannel
 
@@ -34,7 +36,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     include Y::Collaborative
   end
 
-  # An attribute the model declared encrypted: the channel must route every
+  # An attribute the model declared encrypted. The channel must route every
   # load and append for it through Y::EncryptedDocument.
   class SecretPage < ActiveRecord::Base
     self.table_name = "pages"
@@ -137,8 +139,8 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, Y::DocumentUpdate.count
   end
 
-  # The row assertion matters: a denied subscription must not create the
-  # document. Nothing before on_load may touch the table.
+  # The row assertion matters. A denied subscription must not create the
+  # document, and nothing before on_load may touch the table.
   def test_valid_grant_does_not_bypass_policy_or_create_a_document
     stub_connection current_user: "someone else"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
@@ -206,11 +208,11 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_predicate subscription, :confirmed?
   end
 
-  # The policy runs once, at subscribe, and the subscription is the grant from
-  # then on. These tests pin that down, tradeoff included. An app that needs
-  # to cut off access before the client disconnects has to stop the
-  # subscription itself, and short-lived grants limit how long a stale one can
-  # live.
+  # The policy runs once, at subscribe. After that the subscription stays
+  # authorized until it ends. These tests check that, tradeoff included. An
+  # app that needs to cut off access before the client disconnects has to
+  # stop the subscription itself. Short-lived grants limit how long a stale
+  # one can live.
   def test_permission_changes_do_not_disturb_an_open_subscription
     stub_connection current_user: "granted"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
@@ -262,8 +264,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   # A frame that arrives without an authorized subscription is refused even
-  # when the grant is valid. The subscription holds the decision, not the
-  # grant.
+  # when the grant is valid. Only a confirmed subscription authorizes frames.
   def test_a_valid_grant_alone_does_not_authorize_a_frame
     stub_connection current_user: "granted"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
@@ -277,7 +278,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_subscription_stopped
   end
 
-  def test_policy_exception_during_subscription_fails_closed
+  def test_policy_exception_during_subscription_rejects_the_subscription
     Y::DocumentChannel.authorize_document { raise "policy unavailable" }
 
     assert_raises(RuntimeError) { subscribe grant: grant, name: "body" }
@@ -314,8 +315,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     refute_empty doc.read_text("content").to_s, "the encrypted path round-trips the document"
 
     # The recorded bytes are ciphertext at rest, so reading them through the
-    # plain classes gives back garbage, not the document. Each document has
-    # one access path.
+    # plain classes gives back garbage. Each document has one access path.
     raw = Y::DocumentUpdate.find_by!(document_id: document.document_row.id).payload
 
     refute_equal update, raw, "the stored payload must not be the plaintext delta"

@@ -34,7 +34,7 @@ function setup(t, attributes = { grant: "g", name: "body" }, consumer = fakeCons
   return { el, consumer, mount, remove, change, document };
 }
 
-test("readiness is available before async startup; no unowned document exists", async t => {
+test("whenSynced is available before startup, and no document exists until the consumer resolves", async t => {
   const actual = fakeConsumer();
   let provide;
   const { el, mount } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
@@ -55,7 +55,7 @@ test("readiness is available before async startup; no unowned document exists", 
   assert.equal(el.events[0].detail.signal.aborted, false);
 });
 
-test("removed elements cannot subscribe after the consumer resolves", async t => {
+test("an element removed before the consumer resolves does not subscribe", async t => {
   const consumer = fakeConsumer();
   let provide;
   const { el, mount, remove } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
@@ -64,7 +64,7 @@ test("removed elements cannot subscribe after the consumer resolves", async t =>
   assert.equal(el.doc, undefined);
 });
 
-test("same-turn DOM moves retain binding and document, clean delayed remounts reconstruct", async t => {
+test("a same-turn move keeps the binding and document, and a delayed remount starts fresh", async t => {
   const { el, consumer, mount, remove } = setup(t);
   await mount(); sync(consumer.created[0], "saved"); await el.whenSynced;
   const { doc, provider } = el, signal = el.events[0].detail.lease.signal;
@@ -99,7 +99,7 @@ for (const field of ["grant", "name", "channel"]) {
   });
 }
 
-test("multiple attribute changes during startup acquire only the complete current tuple", async t => {
+test("attribute changes during startup acquire the final grant and name once", async t => {
   const consumer = fakeConsumer();
   let provide;
   const { el, mount, change } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
@@ -110,7 +110,7 @@ test("multiple attribute changes during startup acquire only the complete curren
   el.destroy();
 });
 
-test("cached previews have no document or provider; promotion binds once", async t => {
+test("a cached preview has no document or provider, and the page binds once after promotion", async t => {
   const document = new EventTarget();
   let preview = true;
   document.documentElement = { hasAttribute: () => preview };
@@ -128,7 +128,7 @@ test("cached previews have no document or provider; promotion binds once", async
   assert.equal(el.events.length, 1);
 });
 
-test("before-cache releases bindings and a canceled navigation rebinds passive markup", { timeout: 5000 }, async t => {
+test("before-cache releases the binding and a canceled navigation rebinds it", { timeout: 5000 }, async t => {
   const { el, consumer, document, mount } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   const signal = el.events[0].detail.signal;
@@ -136,8 +136,8 @@ test("before-cache releases bindings and a canceled navigation rebinds passive m
   document.dispatchEvent(new Event("turbo:before-cache"));
   assert.equal(signal.aborted, true);
   assert.equal(el.doc, undefined);
-  // Wait for the observable replacement, not elapsed time: a busy event loop
-  // can run the old fixed delay before Turbo's deferred reconciliation finishes.
+  // Poll for the replacement subscription. On a busy event loop a fixed delay
+  // can run out before Turbo's deferred reconciliation finishes.
   const started = performance.now();
   while (consumer.created.at(-1) === originalSubscription && performance.now() - started < 2000) {
     await new Promise(resolve => setTimeout(resolve, 5));
@@ -147,7 +147,7 @@ test("before-cache releases bindings and a canceled navigation rebinds passive m
   assert.equal(el.events.length, 2);
 });
 
-test("rejection aborts editor cleanup, reports the recoverable session, and stays inert", async t => {
+test("a rejection runs editor cleanup, reports the session with its pending edits, and leaves the element inert", async t => {
   const { el, consumer, mount } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   const session = el.session;
@@ -162,7 +162,7 @@ test("rejection aborts editor cleanup, reports the recoverable session, and stay
   assert.equal(el.events.at(-1).detail.session, session);
 });
 
-test("an editor's abort handler no longer sees the released document", async t => {
+test("el.doc is already undefined when the editor's abort handler runs", async t => {
   const { el, consumer, mount } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   let seen = "unset";
@@ -185,7 +185,7 @@ test("reactivating an element whose session is still blocked reports it again an
   assert.equal(el.doc, undefined);
 });
 
-test("an element without a grant waits quietly until the attributes name a document", async t => {
+test("an element with no grant does nothing until it gets one", async t => {
   const { el, consumer, mount, change } = setup(t, { name: "body" });
   await mount();
   assert.equal(consumer.created.length, 0);
@@ -196,7 +196,7 @@ test("an element without a grant waits quietly until the attributes name a docum
   assert.equal(el.events.length, 1);
 });
 
-test("a stale failed initialization cannot damage a newer lease", async t => {
+test("a consumer rejection from an old mount is ignored by the newer lease", async t => {
   let reject;
   const consumer = fakeConsumer();
   const { el, mount, remove } = setup(t, undefined, new Promise((_, r) => { reject = r; }));
@@ -210,7 +210,7 @@ test("a stale failed initialization cannot damage a newer lease", async t => {
 });
 
 
-test("cached library inert state is cleared on readiness while application inert is preserved", async t => {
+test("the library's cached inert is cleared on readiness and the application's value is restored", async t => {
   for (const original of [false, true]) {
     const { el, consumer, mount } = setup(t, { grant: "g", name: "body", "data-yrby-inert": String(original) });
     el.inert = true; // clone of a suspended editor
@@ -221,7 +221,7 @@ test("cached library inert state is cleared on readiness while application inert
 });
 
 
-test("old adapter cleanup cannot unregister a replacement adapter in the same document", async t => {
+test("removing an element from an old adapter leaves the replacement adapter registered", async t => {
   const document = new EventTarget();
   const consumer = fakeConsumer();
   const old = setup(t, undefined, consumer, document);
@@ -249,7 +249,7 @@ test("the refresh attribute reaches the session and changing it does not rebind"
 });
 
 
-test("activation cannot acquire a document before DOM connection or after removal", async t => {
+test("activate() does nothing before the element is connected or after it is removed", async t => {
   const { el, consumer, mount, remove } = setup(t);
   el.activate(); await tick();
   assert.equal(consumer.created.length, 0);
@@ -262,7 +262,7 @@ test("activation cannot acquire a document before DOM connection or after remova
   assert.equal(el.doc, undefined);
 });
 
-test("a consumer resolving just before removal cannot subscribe from a queued continuation", async t => {
+test("a consumer that resolves just before removal does not subscribe", async t => {
   const consumer = fakeConsumer();
   let provide;
   const { el, mount, remove } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
@@ -274,7 +274,7 @@ test("a consumer resolving just before removal cannot subscribe from a queued co
   assert.equal(el.doc, undefined);
 });
 
-test("sync completing just before removal cannot announce an abandoned editor", async t => {
+test("a sync that completes just before removal fires no synced event", async t => {
   const { el, consumer, mount, remove } = setup(t);
   await mount();
   let ready = false;
@@ -288,7 +288,7 @@ test("sync completing just before removal cannot announce an abandoned editor", 
 });
 
 for (const field of ["grant", "name", "channel"]) {
-  test(`retargeting ${field} during a same-turn DOM move preserves the original queue but replaces the binding`, async t => {
+  test(`retargeting ${field} during a same-turn move replaces the binding and keeps the old queue`, async t => {
     const { el, consumer, mount, remove, change } = setup(t);
     await mount(); sync(consumer.created[0], "original"); await el.whenSynced;
     const session = el.session, signal = el.events[0].detail.signal;
@@ -306,7 +306,7 @@ for (const field of ["grant", "name", "channel"]) {
 }
 
 
-test("canceled consumer readiness stays abandoned after a later successful mount", async t => {
+test("whenSynced from a canceled mount stays pending after a later mount succeeds", async t => {
   const consumer = fakeConsumer();
   let provide;
   const { el, mount, remove } = setup(t, undefined, new Promise(resolve => { provide = resolve; }));
@@ -322,7 +322,7 @@ test("canceled consumer readiness stays abandoned after a later successful mount
   assert.equal(el.events.length, 1);
 });
 
-test("an inactive element preserves its initial readiness until its first lease", async t => {
+test("activate and deactivate before mounting keep the same whenSynced promise", async t => {
   const { el, consumer, mount } = setup(t);
   const ready = el.whenSynced;
   el.activate(); el.deactivate(); await tick();
@@ -332,7 +332,7 @@ test("an inactive element preserves its initial readiness until its first lease"
 });
 
 
-test("a queued retarget cannot reactivate an element suspended for caching", async t => {
+test("a retarget queued before deactivate waits for the next activate", async t => {
   const { el, consumer, mount, change } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   change("name", "other");
@@ -345,7 +345,7 @@ test("a queued retarget cannot reactivate an element suspended for caching", asy
   assert.equal(consumer.created.at(-1).params.name, "other");
 });
 
-test("retargeting inside acquisition cannot install a lease for the previous descriptor", async t => {
+test("a retarget from inside acquisition leaves one session, for the new descriptor", async t => {
   const { el, consumer, mount, change } = setup(t);
   const store = DocumentSessionStore.for(consumer);
   store.addEventListener("change", () => { change("name", "replacement"); }, { once: true });
@@ -359,7 +359,7 @@ test("retargeting inside acquisition cannot install a lease for the previous des
 });
 
 for (const action of ["deactivate", "discard"]) {
-  test(`${action} inside acquisition cannot leave an abandoned lease installed`, async t => {
+  test(`${action} from inside acquisition leaves the element unbound`, async t => {
     const { el, consumer, mount } = setup(t);
     const store = DocumentSessionStore.for(consumer);
     let abandonedReady = false;
@@ -381,7 +381,7 @@ for (const action of ["deactivate", "discard"]) {
   });
 }
 
-test("a failed consumer attempt cannot resolve its abandoned readiness on a later activation", async t => {
+test("whenSynced from a failed consumer load stays pending after a later activation succeeds", async t => {
   let fail;
   const { el, mount } = setup(t, undefined, new Promise((_, reject) => { fail = reject; }));
   let abandonedReady = false;
@@ -418,7 +418,7 @@ test("the synced event bubbles and carries the live session, document, provider,
   assert.equal(signal.aborted, false);
 });
 
-test("a session discarded under a bound editor ends the binding silently and stays down until a render", async t => {
+test("discarding a bound session ends the binding with no error event, and the element waits for a render", async t => {
   const { el, consumer, mount } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   const session = el.session, signal = el.events[0].detail.signal;
@@ -438,12 +438,12 @@ test("a session discarded under a bound editor ends the binding silently and sta
   assert.equal(synced(el).length, 2);
 });
 
-test("a block during the first sync reports it, never announces, and waits for a render after retry", async t => {
+test("a block before the first sync is reported with no synced event, and the element waits for a render even after retry", async t => {
   const { el, consumer, mount } = setup(t);
   await mount();
   const ready = settled(el.whenSynced);
   const sub = consumer.created[0];
-  // Work queued before the first sync keeps the session alive after its editor is retired.
+  // Work queued before the first sync keeps the session alive after the element releases it.
   el.session.doc.getText("content").insert(0, "early");
   sub.handlers.rejected();
   await tick();
@@ -467,7 +467,7 @@ test("a block during the first sync reports it, never announces, and waits for a
   assert.equal(el.inert, false);
 });
 
-test("discarding a blocked session leaves the stalled element quiet until a render binds a fresh one", async t => {
+test("discarding a blocked session fires nothing, and the next render binds a fresh session", async t => {
   const { el, consumer, mount } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   consumer.created[0].handlers.rejected();
@@ -494,13 +494,13 @@ test("a stalled element retries only on a render, a real attribute change, or re
   await tick();
   const reports = () => errors(el).length;
   assert.equal(reports(), 1);
-  // Not triggers: the same value, an unobserved attribute, and the refresh URL.
+  // The same value, an unobserved attribute, and the refresh URL are not triggers.
   el.attributeChangedCallback("name", "body", "body");
   change("class", "busy");
   change("refresh", "/grant");
   await tick();
   assert.equal(reports(), 1);
-  // Re-insertion retries: the session is still blocked, so it reports again.
+  // Re-insertion retries. The session is still blocked, so it reports again.
   remove(); await mount();
   assert.equal(reports(), 2);
   // A real attribute change retries against the new document.
@@ -521,7 +521,7 @@ test("a same-value attribute callback keeps a bound editor bound", async t => {
   assert.equal(el.events.length, 1);
 });
 
-test("clearing the name detaches quietly, keeps pending edits, and restoring it rebinds the same session", async t => {
+test("clearing the name detaches with no event, keeps pending edits, and restoring it rebinds the same session", async t => {
   const { el, consumer, mount, change } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   const session = el.session, signal = el.events[0].detail.signal;
@@ -540,7 +540,7 @@ test("clearing the name detaches quietly, keeps pending edits, and restoring it 
   assert.equal(synced(el).length, 2);
 });
 
-test("retargeting before the first sync closes the unsynced session and a late sync of it announces nothing", async t => {
+test("retargeting before the first sync closes the old session, and a late sync of it fires no event", async t => {
   const { el, consumer, mount, change } = setup(t);
   await mount();
   const old = el.session, oldSub = consumer.created[0];
@@ -582,7 +582,7 @@ test("the application's own inert value is parked once and restored on readiness
     await mount();
     assert.equal(el.inert, true);
     assert.equal(el.getAttribute("data-yrby-inert"), String(original));
-    // A retarget before readiness holds again; it must not park the library's own inert.
+    // A retarget before readiness holds again and keeps the application's parked value.
     change("name", "notes"); await tick();
     assert.equal(el.getAttribute("data-yrby-inert"), String(original));
     sync(consumer.created.at(-1)); await el.whenSynced;
@@ -591,7 +591,7 @@ test("the application's own inert value is parked once and restored on readiness
   }
 });
 
-test("a same-turn move keeps a live editor interactive throughout", async t => {
+test("a same-turn move keeps a live editor interactive", async t => {
   const { el, consumer, mount, remove } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   remove();
@@ -603,7 +603,7 @@ test("a same-turn move keeps a live editor interactive throughout", async t => {
   assert.equal(el.getAttribute("data-yrby-inert"), null);
 });
 
-test("a grant refresh keeps the editor bound without a second announcement", async t => {
+test("a grant refresh keeps the editor bound and fires no second synced event", async t => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ grant: "renewed" }), { status: 200 });
   t.after(() => { globalThis.fetch = original; });
@@ -620,7 +620,7 @@ test("a grant refresh keeps the editor bound without a second announcement", asy
   assert.deepEqual(el.events.map(event => event.type), ["yrby:synced"]);
 });
 
-test("destroy releases a connected element, and only re-insertion binds it again", async t => {
+test("destroy releases a connected element, which then ignores renders until it is re-inserted", async t => {
   const { el, consumer, document, mount, remove } = setup(t);
   await mount(); sync(consumer.created[0]); await el.whenSynced;
   const signal = el.events[0].detail.signal;
@@ -655,7 +655,7 @@ test("an acquisition that throws reports the error and stays stalled until a ren
   assert.equal(synced(el).length, 1);
 });
 
-test("attributes that change without a callback are still honored on the next settle", async t => {
+test("attributes changed without a callback are picked up on the next settle", async t => {
   const attributes = { grant: "g", name: "body" };
   const { el, consumer, mount } = setup(t, attributes);
   await mount(); sync(consumer.created[0]); await el.whenSynced;

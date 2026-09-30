@@ -1,14 +1,14 @@
 // Transport-agnostic reliable delivery for the yrby y-websocket protocol.
 //
-// Every local update joins an ordered queue with a sequence number and stays
-// there until the server acknowledges it. While the transport is up, the whole
-// unacknowledged tail goes out as one merged, causally complete delta (so the
-// server never sees an internal gap), and goes out again on a timer until an
-// ack arrives. Acks are cumulative: one { ack: n } retires everything up to n.
-// While the transport is down nothing is sent and nothing is dropped; the tail
-// is replayed when it comes back.
+// Every local update gets a sequence number and goes into an ordered queue,
+// where it is kept until the server acknowledges it. While the transport is
+// up, the whole unacknowledged tail is sent as one merged, causally complete
+// delta (so the server never sees an internal gap), and is sent again on a
+// timer until an ack arrives. Acks are cumulative, so one { ack: n } retires
+// everything up to n. While the transport is down nothing is sent and nothing
+// is dropped. The tail is replayed when the transport comes back.
 //
-// It touches neither the transport nor Yjs. Inject two functions: send(update,
+// It does not touch the transport or Yjs. Inject two functions. send(update,
 // id) transmits one delta plus the sequence id to acknowledge against, and
 // merge(updates) folds update byte arrays into one (usually Y.mergeUpdates).
 // Drive it from the transport lifecycle: enqueue(update) on each local edit,
@@ -43,7 +43,7 @@ export interface Pending {
 
 const DEFAULT_RESEND_INTERVAL = 1000;
 
-// "live" means the transport is up. The retransmit timer runs exactly while
+// "live" means the transport is up. The retransmit timer runs only while
 // delivery is live and something is unacknowledged.
 type Phase = "paused" | "live" | "destroyed";
 type Timer = { stop: () => void };
@@ -101,9 +101,9 @@ export class ReliableSync {
   }
 
   /**
-   * Confirm delivery through `id`: every queued update with seq <= id is
+   * Confirm delivery through `id`. Every queued update with seq <= id is
    * retired. Acks come off the wire, so a malformed value or an id beyond
-   * anything sent is ignored rather than trusted.
+   * anything sent is ignored.
    */
   acknowledge(id: number): void {
     if (this.#phase === "destroyed" || !Number.isSafeInteger(id) || id < 0) return;
@@ -130,7 +130,7 @@ export class ReliableSync {
     this.#updateTimer();
   }
 
-  /** Send the tail again if anything is unacknowledged. The internal timer calls this; a host with its own scheduler may too. */
+  /** Send the tail again if anything is unacknowledged. The internal timer calls this. A host with its own scheduler can call it too. */
   retransmit(): void {
     this.#flush();
   }
@@ -149,7 +149,7 @@ export class ReliableSync {
     this.#updateTimer();
   }
 
-  // Start or stop the retransmit timer so it runs exactly while live with work queued.
+  // Start or stop the retransmit timer so it runs only while live with work queued.
   #updateTimer(): void {
     const wanted = this.#phase === "live" && this.hasPending;
     if (wanted === (this.#timer !== undefined)) return;
@@ -160,14 +160,14 @@ export class ReliableSync {
       return;
     }
     // Installed before setInterval so a tick during that call sees its own
-    // timer. Stopping it before the handle exists does nothing; the check
+    // timer. Stopping it before the handle exists does nothing. The check
     // after setInterval returns cancels the real handle.
     const timer: Timer = this.#timer = { stop: () => {} };
     let handle: TimerHandle;
     try {
       handle = this.#setInterval(() => { if (this.#timer === timer) this.#flush(); }, this.#resendInterval);
     } catch (error) {
-      // Nothing is lost: the next resume or queue change tries again.
+      // Nothing is lost. The next resume or queue change tries again.
       if (this.#timer === timer) this.#timer = undefined;
       throw error;
     }

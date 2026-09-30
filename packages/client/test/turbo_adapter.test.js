@@ -7,7 +7,7 @@ function mount(document, deactivate = () => {}) {
     activate() { this.activated++; }, deactivate };
 }
 
-test("an adapter registered by a teardown callback survives the old adapter", t => {
+test("a mount registered during teardown is activated and stays registered", t => {
   const document = new EventTarget();
   t.after(() => disconnectTurbo(document));
   let replacement, deactivated = 0;

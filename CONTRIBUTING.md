@@ -79,34 +79,36 @@ npm run test:browser:turbolinks
 npm run test:browser:collaboration
 ```
 
-`npm ci` installs `agent-browser`. It also needs a Chrome to drive: run
+`npm ci` installs `agent-browser`. It also needs a Chrome to drive. Run
 `agent-browser install` once, or point `AGENT_BROWSER_EXECUTABLE_PATH` at an
 existing Chrome. `AB_BIN` selects a different `agent-browser` binary, and
 `PORT` defaults to 3789. The run starts a Rails/SQLite/Puma fixture and drives
 two Chrome sessions through real ActionCable, the AnyCable web client, and
 Turbo navigation. It checks pending-edit recovery, shared views, retargeting,
-presence, async startup, encrypted storage, subscribe-time
-authorization, and late callbacks from replaced subscriptions. It stops its
-server and browser sessions afterward. Logs and a screenshot go under `tmp/`.
+presence, async startup, encrypted storage, subscribe-time authorization, and
+late callbacks from replaced subscriptions. It stops its server and browser
+sessions afterward. Logs and a screenshot are written under `tmp/`.
 
 The collaboration suite runs four independent Chrome sessions for each pairing
-of Turbo/Turbolinks and the ActionCable/AnyCable JavaScript consumers. All use the
-fixture's real Rails ActionCable endpoint. Actual keyboard input continues during
-page visits, delayed acknowledgments, two-client outages, history restores, and
-held cached previews. It checks exact character counts, editor/server convergence,
-fresh-client recovery, binding lifetimes, and cleanup after awareness callbacks
-throw. The fixture applies incremental textarea edits so typing preserves other
-users' character identities.
+of Turbo or Turbolinks with the ActionCable or AnyCable JavaScript consumer.
+All of them use the fixture's real Rails ActionCable endpoint. Keyboard input
+keeps going during page visits, delayed acknowledgments, two-client outages,
+history restores, and held cached previews. It checks exact character counts,
+editor/server convergence, fresh-client recovery, binding lifetimes, and
+cleanup after awareness callbacks throw. The fixture applies incremental
+textarea edits, so typing preserves other users' character identities.
 
-`FRAMEWORK=turbo` or `FRAMEWORK=turbolinks` selects a framework;
-`CONSUMER=actioncable` or `CONSUMER=anycable` selects a consumer. Its port range
-starts at `PORT` (default 3793). The combinations run sequentially; each uses four
-browser sessions plus a fresh reader. JSON evidence, server logs, and screenshots
-are saved under `tmp/browser-collaboration/<run>/<framework-consumer>/` and uploaded
-by CI. Run browser suites sequentially so their browser daemons do not interfere.
+`FRAMEWORK=turbo` or `FRAMEWORK=turbolinks` selects a framework.
+`CONSUMER=actioncable` or `CONSUMER=anycable` selects a consumer. The port
+range starts at `PORT` (default 3793). The combinations run one after another,
+and each uses four browser sessions plus a fresh reader. JSON evidence, server
+logs, and screenshots are saved under
+`tmp/browser-collaboration/<run>/<framework-consumer>/`, and CI uploads them.
+Run the browser suites one at a time so their browser daemons don't interfere
+with each other.
 
-The fixture is local-only. It has no authentication beyond the grants being
-tested. Do not deploy it.
+The fixture is for local use. It has no authentication beyond the grants being
+tested, so don't deploy it anywhere.
 
 ### Submission checks
 

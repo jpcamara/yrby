@@ -1,11 +1,13 @@
-// Application document ownership, independent of editors and page navigation.
+// Owns a document on behalf of the application, independent of editors and
+// page navigation.
 //
-// A session lives while something still needs it: an editor attached to it,
-// or edits the server has not acknowledged. Once neither remains it closes
-// itself. After a subscription rejection, the session tries the descriptor's
-// refresh URL once, if provided. If no URL exists, the refresh fails, or the
-// new grant is rejected, it blocks: editors are released, work stays queued
-// in memory, and the application chooses between retry() and discard().
+// A session lives while something still needs it, either an editor attached
+// to it or edits the server has not acknowledged. Once neither is left it
+// closes itself. After a subscription rejection the session tries the
+// descriptor's refresh URL once, if there is one. If there is no URL, the
+// refresh fails, or the new grant is rejected, the session blocks. Its
+// editors are released, its work is kept queued in memory, and the
+// application decides between retry() and discard().
 import * as Y from "yjs";
 import { uuidv4 } from "lib0/random";
 import { ActionCableProvider, type CableConsumer, type ProviderStatus } from "./actioncable_provider.js";
@@ -21,15 +23,17 @@ export type ResolvedDescriptor = Readonly<{ channel: string; grant: string; name
 // "open" is the normal state, with or without editors attached; see hasPending
 // for whether anything is still being delivered.
 export type DocumentSessionState = "open" | "blocked" | "closed";
-// Refreshing and renewed are open substates: editors and queued work survive.
-// "renewed" waits for the transport to accept the new grant before another
-// refresh is allowed. Blocked and closed cannot have a renewal in progress.
+// Refreshing and renewed are substates of open, so editors and queued work
+// survive them. "renewed" waits for the transport to accept the new grant
+// before another refresh is allowed. A blocked or closed session has no
+// renewal in progress.
 type SessionPhase = "open" | "refreshing" | "renewed" | "blocked" | "closed";
 type SessionLifecycle = Readonly<{ phase: SessionPhase }>;
 type PhaseEvent = "refresh" | "renew" | "accept" | "block" | "retry" | "close";
-// Everything a phase decides: the state apps see, whether a new lease
-// connects right away (not while blocked, nor while waiting for a refreshed
-// grant), and the legal moves. A move not listed is ignored.
+// Each phase decides three things. The state apps see, whether a new lease
+// connects right away (it does not while blocked or while waiting for a
+// refreshed grant), and which moves are allowed. A move that is not listed
+// is ignored.
 const PHASES: Record<SessionPhase, {
   state: DocumentSessionState;
   connects: boolean;
@@ -42,7 +46,7 @@ const PHASES: Record<SessionPhase, {
   closed:     { state: "closed",  connects: false, on: {} },
 };
 // A refresh request that never answers would leave the session offline with
-// its editors attached and no way forward. After this long it blocks instead.
+// its editors attached and no way forward. After this long the session blocks.
 const REFRESH_TIMEOUT_MS = 15_000;
 const DEFAULT_CHANNEL = "Y::DocumentChannel";
 const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
@@ -76,8 +80,8 @@ export class DocumentSessionStore extends EventTarget {
   /** Acquire a lease on this document session, creating it on first use. */
   acquire(input: DocumentDescriptor): DocumentLease {
     if (!input.grant || !input.name) throw new Error("A document requires a grant and name");
-    // The refresh URL is not part of the identity: matching tuples share a
-    // session, and the first acquirer's URL is the one that session renews with.
+    // The refresh URL is not part of the identity. Matching tuples share a
+    // session, and that session renews with the URL of whoever acquired it first.
     const descriptor: ResolvedDescriptor = Object.freeze({
       channel: input.channel || DEFAULT_CHANNEL,
       grant: input.grant,
@@ -118,9 +122,9 @@ export class DocumentLease {
 }
 
 // Application commands (acquire, retry, discard) act immediately. Provider
-// callbacks and lease releases only record what happened and ask for a settle,
-// which runs once the current call stack has finished: it retires the leases
-// of a blocked session, closes a session nobody needs, and tells store
+// callbacks and lease releases write down what happened and ask for a settle.
+// Settle runs once the current call stack has finished. It releases the leases
+// of a blocked session, closes a session nobody needs, and notifies store
 // observers once.
 export class DocumentSession {
   readonly doc = new Y.Doc();
@@ -131,7 +135,7 @@ export class DocumentSession {
   // acquired while blocked is kept for retry().
   #retiring: DocumentLease[] | undefined;
   #error: unknown;
-  #dirty = false; // observers have not heard about the latest change
+  #dirty = false; // observers have not been told about the latest change
   #settleQueued = false;
 
   /** Use DocumentSessionStore.acquire to create and own sessions. */
@@ -183,7 +187,7 @@ export class DocumentSession {
   retry(): void {
     if (this.#transition("retry")) this.#connect();
   }
-  /** Explicit application decision; ordinary detach never discards pending work. */
+  /** An explicit application decision. An ordinary detach does not discard pending work. */
   discard(): void { this.#close(); }
 
   #changed(): void {
@@ -206,7 +210,7 @@ export class DocumentSession {
     if (this.state === "blocked") {
       const retiring = this.#retiring;
       this.#retiring = undefined;
-      // The queue stays until retry() or discard().
+      // The queue is kept until retry() or discard().
       for (const lease of retiring ?? []) lease.release();
       return;
     }
@@ -224,7 +228,7 @@ export class DocumentSession {
   }
   #needed(): boolean { return this.#leases.size > 0 || this.provider.hasPending; }
 
-  // The only place that changes the phase. It never calls out; #settle acts on it.
+  // The only place that changes the phase. It does not call out; #settle acts on the result.
   #transition(event: PhaseEvent, error?: unknown): boolean {
     const phase = PHASES[this.#lifecycle.phase].on[event];
     if (!phase) return false;
@@ -258,7 +262,7 @@ export class DocumentSession {
       if (this.#lifecycle === attempt) this.#transition("block", error);
       return;
     }
-    // A retry, discard, or block while the request was out owns the session now.
+    // If a retry, discard, or block happened while the request was out, that takes precedence.
     if (this.#lifecycle !== attempt) return;
     if (this.#transition("renew")) this.#connect(grant);
   }

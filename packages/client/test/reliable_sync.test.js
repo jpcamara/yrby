@@ -204,7 +204,7 @@ test("resendInterval is forwarded to setInterval", () => {
 });
 
 
-test("pausing from a replay send cannot leave a retransmission timer running", () => {
+test("pause() called from inside the replay send stops the timer and keeps the queue", () => {
   const h = harness({ send: () => h.rs.pause() });
   h.rs.enqueue(u(1));
   h.rs.resume();
@@ -212,7 +212,7 @@ test("pausing from a replay send cannot leave a retransmission timer running", (
   assert.equal(h.hasTimer(), false);
 });
 
-test("a queued tick from an earlier sending state cannot retransmit a later queue", () => {
+test("a tick left over from an old timer does not resend", () => {
   const callbacks = [];
   const h = harness({ setInterval: fn => { callbacks.push(fn); return callbacks.length; }, clearInterval() {} });
   h.rs.enqueue(u(1)); h.rs.resume();
@@ -226,7 +226,7 @@ test("a queued tick from an earlier sending state cannot retransmit a later queu
   h.rs.destroy();
 });
 
-test("destruction from merge cannot send or resurrect the merged tail", () => {
+test("destroy() called inside merge stops the send and clears the cached tail", () => {
   const h = harness({ merge: () => { h.rs.destroy(); return u(9); } });
   h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
   assert.doesNotThrow(() => h.rs.resume());
@@ -236,7 +236,7 @@ test("destruction from merge cannot send or resurrect the merged tail", () => {
   assert.equal(h.hasTimer(), false);
 });
 
-test("a timer that ticks before returning its handle is canceled when its send pauses delivery", () => {
+test("a timer that fires before setInterval returns is still canceled when its send pauses", () => {
   const active = new Set();
   const h = harness({
     send: () => h.rs.pause(),
@@ -248,7 +248,7 @@ test("a timer that ticks before returning its handle is canceled when its send p
   assert.equal(h.rs.hasPending, true);
 });
 
-test("synchronous acknowledgment during replay leaves no timer behind", () => {
+test("an ack delivered from inside the replay send stops the timer", () => {
   const h = harness({ send: (_update, id) => h.rs.acknowledge(id) });
   h.rs.enqueue(u(1)); h.rs.resume();
   assert.equal(h.rs.hasPending, false);
@@ -259,7 +259,7 @@ test("synchronous acknowledgment during replay leaves no timer behind", () => {
 });
 
 
-test("a failed timer installation can be retried without losing pending work", () => {
+test("resume() can be retried after setInterval throws and the queue is kept", () => {
   let attempts = 0, active = false;
   const h = harness({
     setInterval: () => { if (++attempts === 1) throw new Error("timer unavailable"); active = true; return 1; },
@@ -276,7 +276,7 @@ test("a failed timer installation can be retried without losing pending work", (
 });
 
 
-test("pending is a snapshot that can be sorted and edited without changing delivery", () => {
+test("pending is a copy, and edits to it do not reach the queue", () => {
   const h = harness();
   h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
   const pending = h.rs.pending;
@@ -294,7 +294,7 @@ test("pending is a snapshot that can be sorted and edited without changing deliv
   assert.equal(h.hasTimer(), false);
 });
 
-test("enqueue retains its own bytes when the caller reuses an input buffer", () => {
+test("enqueue copies the bytes, so the caller can reuse the buffer", () => {
   for (const buffer of [u(7), Buffer.from([7])]) {
     const h = harness();
     h.rs.enqueue(buffer);

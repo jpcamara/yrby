@@ -48,8 +48,9 @@ export interface YProtocolSessionOptions {
   clearInterval?: (handle: TimerHandle) => void;
 }
 
-// A cycle identifies one handshake lifetime, including its eventual catch-up.
-// Resume and pause replace it, so an interrupted receive cannot sync a later cycle.
+// A cycle is one handshake lifetime, including its eventual catch-up. Resume
+// and pause replace it, so a receive that started under an old cycle does not
+// mark a later one synced.
 type ProtocolState =
   | { phase: "unsynced" | "synced"; cycle: object }
   | { phase: "destroyed" };
@@ -192,7 +193,7 @@ export class YProtocolSession {
       switch (type) {
         case MessageType.Sync: {
           encoding.writeVarUint(encoder, MessageType.Sync);
-          // y-protocols catches a failing update itself; the handler is how we hear about it.
+          // y-protocols catches a failing update itself and reports it through this handler.
           const report = (error: Error) => { if (this.#current(cycle)) this.#onError(error, "receive"); };
           const syncType = readSyncMessage(decoder, encoder, this.doc, this, report);
           if (syncType === messageYjsSyncStep2 && this.#current(cycle)) {

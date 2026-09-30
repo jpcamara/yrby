@@ -1,6 +1,6 @@
 // Four real Chrome sessions type through the fixture editor while Turbo or
 // Turbolinks navigates, caches, and restores pages. Both consumer libraries use
-// the real Rails ActionCable endpoint; this does not emulate an AnyCable gateway.
+// the real Rails ActionCable endpoint. No AnyCable gateway is emulated.
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -84,7 +84,7 @@ async function run(framework, transport, port) {
         !value.inert && value.text === text && value.input === text) && saved.text === text &&
         text.length === expected.reduce((a, b) => a + b, 0) && expected.every((n, i) => count(text, String(i + 1)) === n);
     });
-    check(`${name}: all four editors and Ruby agree, every keystroke saved exactly once`, true);
+    check(`${name}: all four editors and Ruby agree and every keystroke is saved once`, true);
     check(`${name}: one editor binding per element`, snapshots.every(value => value.mounts - value.unmounts === 1));
     return snapshots;
   }
@@ -133,7 +133,7 @@ async function run(framework, transport, port) {
       if (server.exitCode !== null) throw new Error(`Rails exited ${server.exitCode}; see ${output}/server.log`);
       try { return (await fetch(base)).ok; } catch { return false; }
     });
-    // Start away from the editor so consumer selection precedes element binding.
+    // Start away from the editor so the consumer is chosen before any element binds.
     for (let i = 0; i < sessions.length; i++) {
       await browser(i, "open", `${base}/away`);
       await evaluate(i, `(async () => { window.stress = { context: crypto.randomUUID(), intervals: new Set(), sessions: new Set(), errors: [], navigation: [], inputs: [] };
@@ -170,7 +170,7 @@ async function run(framework, transport, port) {
       rounds([1, 2, 3], 3, 6),
       (async () => {
         await away(0);
-        check("unacknowledged session survives leaving the page", await evaluate(0, "held.hasPending && !held.doc.isDestroyed"));
+        check("the unacknowledged session is kept after leaving the page", await evaluate(0, "held.hasPending && !held.doc.isDestroyed"));
         await back(0);
         check("history restores the same pending session", await evaluate(0, "document.querySelector('#body-doc').session === held"));
         await away(0); await back(0);
@@ -182,7 +182,7 @@ async function run(framework, transport, port) {
     await Promise.all([offline(0), offline(1)]);
     const beforePartition = [...expected];
     await batch([0, 1, 2, 3], 12);
-    check("partitioned browsers retain edits absent from the server", await evaluate(0, "parked.hasPending") &&
+    check("offline browsers keep edits the server has not seen", await evaluate(0, "parked.hasPending") &&
       await evaluate(1, "parked.hasPending") && count((await state()).text, "1") === beforePartition[0] &&
       count((await state()).text, "2") === beforePartition[1]);
     await Promise.all([away(0), away(1), rounds([2, 3], 2, 8)]);
@@ -209,7 +209,7 @@ async function run(framework, transport, port) {
     await wait(0, `document.documentElement.hasAttribute('data-${framework}-preview') && !!document.querySelector('#body-doc') && !!stress.releaseFresh`);
     check("cached preview is inert and has no document or subscription", await evaluate(0, `window.preview = document.querySelector('#body-doc'); preview.inert && !preview.doc && !preview.provider`));
     await batch([1, 2, 3], 10);
-    check("outgoing offline edits survive while peers edit behind the preview", await evaluate(0, "parked.hasPending && !parked.doc.isDestroyed && !preview.doc"));
+    check("offline edits are kept while peers edit behind the preview", await evaluate(0, "parked.hasPending && !parked.doc.isDestroyed && !preview.doc"));
     await evaluate(0, "stress.releaseFresh()");
     await wait(0, `!document.documentElement.hasAttribute('data-${framework}-preview') && document.querySelector('#body-doc') !== preview`);
     await online(0);
@@ -234,16 +234,16 @@ async function run(framework, transport, port) {
     await editor(0); await batch([0, 1, 2, 3], 6);
     const final = await converge("editing after faulty editor cleanup");
     check("all page visits preserve their framework's JavaScript context", final.every((value, i) => value.context === contexts[i]));
-    check("all retired body sessions released documents, queues, and awareness timers", final.every(value => value.retired.every(old => old.state === "closed" && old.destroyed && !old.pending && !old.timerActive)));
+    check("every old body session released its document, queue, and awareness timer", final.every(value => value.retired.every(old => old.state === "closed" && old.destroyed && !old.pending && !old.timerActive)));
     check("browser 1 and 2 each completed at least eight real framework navigations", final.slice(0, 2).every(value => value.navigation.length >= 8));
     const visits = final[0].navigation;
     const overlap = visits.some((event, i) => event.path === "/away" && visits[i + 1] &&
       final.slice(1).some(peer => peer.inputs.some(at => at > event.at && at < visits[i + 1].at)));
-    check("actual peer input events occur while another user is on the away page", overlap);
+    check("peers typed while another user was on the away page", overlap);
     await browser(0, "screenshot", `${output}/converged.png`);
     await browser(reader, "open", base);
     await wait(reader, "document.querySelector('#body-doc')?.provider?.synced");
-    check("a fresh fifth browser reconstructs the exact saved result", await evaluate(reader,
+    check("a fresh fifth browser loads the saved text", await evaluate(reader,
       `document.querySelector('#body-doc').doc.getText('content').toString() === ${JSON.stringify(final[0].text)}`));
     for (let i = 0; i < sessions.length; i++) {
       const errors = await browser(i, "errors");

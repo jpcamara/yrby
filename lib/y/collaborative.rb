@@ -7,10 +7,9 @@ module Y
   # The signed token that connects a page to a channel for record-backed
   # collaborative documents.
   #
-  # The client never names its document. The server names it, signs the name,
-  # and the channel trades the token back for the record. The token is a
-  # signed GlobalID scoped to one attribute. The page mints it and the channel
-  # resolves it.
+  # The client never picks its own document. The server signs a token for the
+  # record and attribute, the page renders it, and the channel looks the
+  # record up from it. The token is a signed GlobalID scoped to one attribute.
   #
   #   # the view
   #   tag.div data: { grant: post.collaborative_sgid(:body) }
@@ -20,31 +19,30 @@ module Y
   #     record.present? && record.editable_by?(current_user)
   #   end
   #
-  #   # Not memoized: under AnyCable each command gets a fresh channel
-  #   # instance, and a cached record would go stale. Y::DocumentChannel
-  #   # resolves the grant the same way.
+  #   # Not memoized. Under AnyCable each command gets a fresh channel
+  #   # instance, so a cached record would go stale. Y::DocumentChannel
+  #   # does the same.
   #   def record
   #     Y::Collaborative.locate(params[:grant], :body)
   #   end
   #
   # The engine includes this into ActiveRecord::Base. lexxy-realtime uses the
-  # same token flow, and yrby-rails provides it so any channel's authorized?
-  # can use it.
+  # same token flow. yrby-rails provides it so any channel's authorized? can
+  # use it.
   module Collaborative
     extend ActiveSupport::Concern
 
     class << self
       # The signed-GlobalID purpose for one collaborative attribute. A token
-      # minted for one attribute only verifies against that attribute's
-      # purpose, so it cannot locate a record for any other attribute. The
-      # purpose names no channel: any channel that calls locate with the same
-      # attribute resolves the record, which is how a custom channel and the
-      # shipped one share tokens.
+      # signed for one attribute only verifies against that attribute's
+      # purpose, so it won't locate the record through any other attribute.
+      # The purpose doesn't include a channel name, so a custom channel and
+      # the shipped one can both resolve the same tokens for an attribute.
       def sgid_purpose(name) = "yrby/#{name}"
 
-      # Resolves a signed token minted by `collaborative_sgid(name)` back to
-      # its record. Returns nil for an invalid, tampered, expired, or
-      # wrong-attribute token, and for a record that no longer exists.
+      # Looks up the record for a token from `collaborative_sgid(name)`.
+      # Returns nil for an invalid, tampered, expired, or wrong-attribute
+      # token, and for a record that no longer exists.
       def locate(sgid, name)
         GlobalID::Locator.locate_signed(sgid, for: sgid_purpose(name))
       rescue ActiveRecord::RecordNotFound
@@ -66,27 +64,27 @@ module Y
         ).freeze
       end
 
-      # The model that stores this attribute's document: Y::Document, or
-      # Y::EncryptedDocument when declared encrypted. Looked up on each call
-      # rather than stored at declaration, so the engine's models are not
-      # loaded while the app's are still loading.
+      # The model that stores this attribute's document. Y::EncryptedDocument
+      # when the attribute was declared encrypted, Y::Document otherwise. It
+      # is looked up on each call, so declaring the attribute doesn't load the
+      # engine's models while the app's are still loading.
       def collaborative_document_class(name)
         encrypted = collaborative_document_options.dig(name.to_s, :encrypted)
         encrypted ? Y::EncryptedDocument : Y::Document
       end
     end
 
-    # The document for one attribute: load_state, append, y_doc, and key,
-    # using the storage the model declared.
+    # The document for one attribute, using the storage the model declared.
+    # It has load_state, append, y_doc, and key.
     def collaborative_document(name)
       Attribute.new(self, name)
     end
 
-    # A signed token a channel can trade back for this record with
-    # Y::Collaborative.locate, but only for this attribute.
-    # Pass expires_in: to bound the grant's life. Without it, GlobalID's own
-    # default applies, which is one month under Rails. The key is only passed
-    # through when given: an explicit nil would mean "never expire".
+    # A signed token a channel can pass to Y::Collaborative.locate to get this
+    # record back, for this attribute only. Pass expires_in: to limit how long
+    # the grant lasts. Without it, GlobalID's own default applies, which is
+    # one month under Rails. The option is only passed through when given,
+    # because an explicit nil would mean "never expire".
     def collaborative_sgid(name, expires_in: nil)
       options = { for: Y::Collaborative.sgid_purpose(name) }
       options[:expires_in] = expires_in if expires_in
