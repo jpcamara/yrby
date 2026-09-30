@@ -15,10 +15,8 @@ module Y
         @name = name.to_s.dup.freeze
       end
 
-      # The document as update bytes, or nil before the first write. Never
-      # creates a row. Only the id is loaded: the row's load_state re-reads the
-      # snapshot fresh, so selecting it here would fetch the largest column twice.
-      def load_state = document_class.select(:id).find_by(record:, name:)&.load_state
+      # The document as update bytes, or nil before the first write.
+      def load_state = existing_row&.load_state
 
       # Saves one change and returns once it is recorded. The channel
       # acknowledges and broadcasts only after this returns.
@@ -34,16 +32,19 @@ module Y
 
       # The document's name on the wire, such as "post/1/body". A document first
       # created by a key-only channel, before it was linked to a record, keeps
-      # its original key. Never creates a row.
-      def key
-        document_class.select(:key).find_by(record:, name:)&.key || Y::Document.key_for(record, name)
-      end
+      # its original key.
+      def key = existing_row&.key || Y::Document.key_for(record, name)
 
-      # The Y::Document (or Y::EncryptedDocument) row, created if missing, for
-      # maintenance such as compaction.
+      # The Y::Document (or Y::EncryptedDocument) row, created if missing. Writes
+      # and maintenance such as compaction use it.
       def document_row = document_class.for(record, name)
 
       private
+
+      # The row if it already exists. Reads use it, so looking at a document
+      # never creates one. Only the id and key are loaded: the row's load_state
+      # re-reads the snapshot fresh, so loading it here would fetch it twice.
+      def existing_row = document_class.select(:id, :key).find_by(record:, name:)
 
       def document_class = record.class.collaborative_document_class(name)
     end
