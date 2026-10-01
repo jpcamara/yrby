@@ -16,34 +16,34 @@ test("no acknowledged update is lost under deterministic loss", () => {
   let ackN = 0;
   const dropAck = (i) => i % 4 === 0; // drop every 4th ack
 
-  // A merged "update" is the array of seqs it covers (our fake encoding).
+  // A merged "update" contains the sequence bytes it covers (our fake encoding).
   const link = {
     send(update, id) {
       if (dropSend(++sendN)) return; // frame lost in transit
       for (const seq of update) serverHas.add(seq); // server applies (idempotent)
       if (dropAck(++ackN)) return; // ack lost on the way back
-      client.onAck(id);
+      client.acknowledge(id);
     },
   };
 
   client = new ReliableSync({
     send: link.send,
-    merge: (updates) => updates.flat(), // tail of [seq] arrays -> [seq, seq, ...]
+    merge: (updates) => Uint8Array.from(updates.flatMap(update => [...update])),
     setInterval: () => 1,
     clearInterval: () => {},
   });
-  // Our fake updates are [seq] arrays; ReliableSync queues them with its own seq,
+  // Our fake updates are single-byte Uint8Arrays; ReliableSync assigns each a seq,
   // which happens to match since we enqueue one update per seq in order.
   const TOTAL = 50;
 
-  client.onConnect();
+  client.resume();
   for (let s = 1; s <= TOTAL; s++) {
-    client.enqueue([s]);
-    client.onTick(); // a retransmit opportunity interleaved with sends
+    client.enqueue(Uint8Array.of(s));
+    client.retransmit(); // a retransmit opportunity interleaved with sends
   }
 
   // Healing phase: keep ticking; surviving acks prune, surviving sends fill gaps.
-  for (let round = 0; round < 200 && client.hasPending; round++) client.onTick();
+  for (let round = 0; round < 200 && client.hasPending; round++) client.retransmit();
 
   assert.equal(client.hasPending, false, "client queue fully drains");
   for (let s = 1; s <= TOTAL; s++) {

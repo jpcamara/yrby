@@ -75,6 +75,58 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  browser:
+    name: Element browser tests (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Runs the element and its session store in Chrome against a Rails and
+      # Action Cable server. This covers Turbo restores and previews, the async
+      # consumer import, AnyCable, and subscribe-time authorization. The
+      # headless suites drive the provider directly and never reach that code.
+      - name: Build the gem
+        run: bundle exec rake compile
+
+      - run: npm ci
+        working-directory: packages/client
+
+      - name: Run browser tests
+        working-directory: packages/client
+        run: |
+          # agent-browser fetches its native binary on first run. Point it at
+          # the Chrome that comes preinstalled on the runner.
+          export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
+          npm run test:browser
+          npm run test:browser:turbolinks
+          npm run test:browser:collaboration
+
+      - name: Upload collaboration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-collaboration
+          path: |
+            tmp/browser-collaboration/*/*/result.json
+            tmp/browser-collaboration/*/*/failure.json
+            tmp/browser-collaboration/*/*/*.png
+            tmp/browser-collaboration/*/*/server.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Print server log on failure
+        if: failure()
+        run: tail -200 tmp/browser-server.log || true
+
   demo:
     name: Demo e2e (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest
