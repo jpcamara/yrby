@@ -9,10 +9,10 @@ GlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secret")
 
-# The signed token for record-backed documents. A page renders
-# collaborative_sgid(:attr) and a channel looks the record up with
-# Y::Collaborative.locate. The purpose scope keeps a token for one attribute
-# from opening any other.
+# Tests for the signed token behind record-backed documents. A page renders
+# collaborative_sgid(:attr), and a channel looks the record up with
+# Y::Collaborative.locate. The token's purpose names the attribute, so a token
+# for one attribute can't open another.
 class CollaborativeSgidTest < Minitest::Test
   include ActiveSupport::Testing::TimeHelpers
 
@@ -35,10 +35,10 @@ class CollaborativeSgidTest < Minitest::Test
 
     assert_equal @page, Y::Collaborative.locate(sgid, :body)
     assert_nil Y::Collaborative.locate(sgid, :other_field),
-               "a token minted for :body must not locate through another attribute's purpose"
+               "a :body token must not locate the record for another attribute"
   end
 
-  def test_sgid_purpose_is_the_documented_contract
+  def test_sgid_purpose_names_the_attribute
     assert_equal "yrby/body", Y::Collaborative.sgid_purpose(:body)
     assert_equal @page, GlobalID::Locator.locate_signed(@page.collaborative_sgid(:body), for: "yrby/body")
   end
@@ -46,13 +46,13 @@ class CollaborativeSgidTest < Minitest::Test
   def test_tampered_and_missing_tokens_locate_nothing
     sgid = @page.collaborative_sgid(:body)
 
-    assert_nil Y::Collaborative.locate(sgid.reverse, :body), "a tampered token verifies as nothing"
+    assert_nil Y::Collaborative.locate(sgid.reverse, :body), "a tampered token locates nothing"
     assert_nil Y::Collaborative.locate(nil, :body)
     assert_nil GlobalID::Locator.locate_signed(sgid, for: :something_else),
-               "the raw token is purpose-scoped for any other consumer too"
+               "the token fails under any other purpose, even outside Y::Collaborative"
   end
 
-  def test_expires_in_bounds_the_grant
+  def test_expires_in_limits_the_grant_lifetime
     token = @page.collaborative_sgid(:body, expires_in: 1.minute)
 
     assert_equal @page, Y::Collaborative.locate(token, :body)
@@ -62,9 +62,9 @@ class CollaborativeSgidTest < Minitest::Test
   end
 
   def test_without_expires_in_the_default_lifetime_applies
-    # Outside Rails, GlobalID sets no default, so the token has no expiry.
-    # This checks that omitting the option doesn't pass an explicit nil
-    # through.
+    # Outside Rails GlobalID has no default expiry, so this token never
+    # expires. The test checks that leaving out the option doesn't pass an
+    # explicit nil.
     token = @page.collaborative_sgid(:body)
 
     travel 2.minutes do

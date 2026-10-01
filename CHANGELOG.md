@@ -8,51 +8,54 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- yrby-client document elements use shared, consumer-scoped document sessions.
-  A session owns pending delivery independently of editor attachments. Editor
-  bindings receive an abort signal for cleanup. A clean delayed remount
-  reloads from the server. `doc` and `provider` are unavailable before
-  acquisition or during retargeting. Turbo no longer serializes CRDT state
-  into cached HTML. Turbolinks 5 gets the same treatment. Its before-cache,
-  render, load, and preview signals are handled alongside Turbo's.
-- Managed sessions expose delivery status and keep rejected work for
-  `retry()` or `discard()`. Per-session subscription nonces isolate
-  acknowledgment sequences. Provider status events include a `pending` flag.
-- The element accepts a `refresh` attribute. When a subscription is rejected
-  and the attribute is set, the session fetches that URL once, expects
-  `{ "grant": ... }`, and resubscribes under the new grant with the same
-  document and pending edits. A failed fetch or a second rejection blocks the
-  session as before. The session does not renew on a timer.
+- yrby-client document elements now use shared document sessions scoped to
+  the consumer. A session tracks pending delivery separately from the editors
+  attached to it, and each editor binding gets an abort signal for cleanup. A
+  clean remount after a delay reloads from the server. `doc` and `provider`
+  are unavailable until the session is acquired and while it is retargeting.
+  Turbo no longer serializes CRDT state into cached HTML. Turbolinks 5 works
+  the same way, with its before-cache, render, load, and preview signals
+  handled alongside Turbo's.
+- Managed sessions expose their delivery status and hold rejected work until
+  you call `retry()` or `discard()`. Each session uses its own subscription
+  nonce, so acknowledgment sequences from different sessions don't mix.
+  Provider status events now include a `pending` flag.
+- The element accepts a `refresh` attribute. If a subscription is rejected
+  and `refresh` is set, the session fetches that URL once, expects
+  `{ "grant": ... }` back, and resubscribes with the new grant, keeping the
+  same document and pending edits. A failed fetch or a second rejection
+  blocks the session as before. The session doesn't renew grants on a timer.
 
-- `YProtocolSession` and `ReliableSync` name their transport hooks as
-  commands. `resume()`, `pause()`, and `acknowledge(id)` replace
-  `onConnect()`, `onDisconnect()`, and `ack()`/`onAck()`.
-  `ReliableSync#retransmit()` replaces `onTick()`. Only `onStatusChange` keeps
-  the `on` prefix, and it is the only one that registers a listener.
-  `ReliableSync#pending` returns an independent snapshot, including copied
-  update bytes. Enqueue copies the supplied buffer.
-- A grant refresh request times out after 15 seconds and blocks the session.
-  Before, the session stayed offline indefinitely. A consumer that throws
-  while resubscribing with a renewed grant blocks the session. Before, that
-  was an unhandled rejection.
-- A status listener that throws is reported through `onError`. Other
+- `YProtocolSession` and `ReliableSync` renamed their transport hooks to read
+  as commands. `onConnect()`, `onDisconnect()`, and `ack()`/`onAck()` are now
+  `resume()`, `pause()`, and `acknowledge(id)`, and `ReliableSync`'s
+  `onTick()` is now `retransmit()`. `onStatusChange` keeps the `on` prefix
+  because it's the only one that registers a listener. `ReliableSync#pending`
+  returns an independent snapshot with its own copy of the update bytes, and
+  enqueueing copies the buffer you pass in.
+- A grant refresh request now times out after 15 seconds and blocks the
+  session. Previously the session stayed offline indefinitely. If a consumer
+  throws while resubscribing with a renewed grant, that now blocks the
+  session too, where it used to be an unhandled rejection.
+- When a status listener throws, the error goes to `onError`, and the other
   listeners and the cable callback that fired it still run. The provider also
-  reports awareness event and unsubscribe failures. A callback exception can't
-  interrupt presence removal or leave the awareness timer running. If the
-  error handler itself throws, the error goes to the console.
+  reports failures in awareness events and unsubscribe. A throwing callback
+  can't interrupt presence removal or leave the awareness timer running. If
+  the error handler itself throws, the error goes to the console.
 
-- A four-browser regression matrix combines Turbo and Turbolinks navigation
-  with concurrent typing through the ActionCable and AnyCable JavaScript clients.
-  It covers delayed acknowledgments, offline history restore, cached previews,
-  fresh-reader persistence, and cleanup after application callbacks throw.
+- A new four-browser regression matrix types concurrently through the
+  ActionCable and AnyCable JavaScript clients while navigating with Turbo and
+  Turbolinks. It covers delayed acknowledgments, offline history restore,
+  cached previews, fresh-reader persistence, and cleanup after application
+  callbacks throw.
 
 ### Fixed
 
-- ActionCable providers ignore callbacks from superseded subscriptions, so a
-  delayed disconnect or rejection can't stop a live replacement from
-  delivering edits. Synchronous consumer callbacks wait until subscription
-  creation returns. Managed sessions use distinct subscription identifiers,
-  which keeps old ACKs separate.
+- ActionCable providers now ignore callbacks from subscriptions that have
+  been replaced, so a late disconnect or rejection can't stop the new
+  subscription from delivering edits. Synchronous consumer callbacks wait
+  until subscription creation returns, and managed sessions use distinct
+  subscription identifiers so old ACKs stay separate.
 
 ## [0.7.1] - 2026-08-19
 

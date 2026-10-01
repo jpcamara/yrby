@@ -18,15 +18,15 @@ SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secr
 
 require_relative "../app/channels/y/document_channel"
 
-# No Rails app boots here, so the cable server is pointed at the test adapter
+# No Rails app boots here, so we point the cable server at the test adapter
 # by hand.
 ActionCable.server.config.cable = { "adapter" => "test" }
 ActionCable.server.config.logger = Logger.new(File::NULL)
 
-# The channel that ships in the gem. It takes a signed grant and stores
-# through Y::Document, so the app doesn't need a channel of its own. These
-# tests drive it through Action Cable's channel test harness against a test
-# cable adapter.
+# Tests for the channel that ships with the gem, which takes a signed grant
+# and stores through Y::Document so an app doesn't need its own channel. They
+# drive it through Action Cable's channel test harness on the test cable
+# adapter.
 class DocumentChannelTest < ActionCable::Channel::TestCase
   tests Y::DocumentChannel
 
@@ -36,8 +36,8 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     include Y::Collaborative
   end
 
-  # An attribute the model declared encrypted. The channel must route every
-  # load and append for it through Y::EncryptedDocument.
+  # A model that declares body encrypted. The channel has to load and append
+  # that attribute through Y::EncryptedDocument.
   class SecretPage < ActiveRecord::Base
     self.table_name = "pages"
     include GlobalID::Identification
@@ -117,7 +117,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_predicate subscription, :rejected?
   end
 
-  def test_authorizer_requires_a_block_and_preserves_the_existing_policy
+  def test_authorizer_requires_a_block_and_keeps_the_existing_policy
     Y::DocumentChannel.authorize_document { false }
     policy = Y::DocumentChannel.document_authorizer
 
@@ -139,9 +139,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, Y::DocumentUpdate.count
   end
 
-  # The row assertion matters. A denied subscription must not create the
-  # document, and nothing before on_load may touch the table.
-  def test_valid_grant_does_not_bypass_policy_or_create_a_document
+  # The last assertion checks that a denied subscription creates no document
+  # row, since nothing before on_load should touch the table.
+  def test_policy_can_deny_a_valid_grant_without_creating_a_document
     stub_connection current_user: "someone else"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
     subscribe grant: grant, name: "body"
@@ -186,9 +186,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_nil Y::DocumentChannel.document_authorizer
   end
 
-  # The README says a subclass can override authorized? directly, with the
-  # located record available as `record`. Pin that, including that a denial
-  # there still creates no document row.
+  # The README says a subclass can override authorized? directly and use the
+  # located record as `record`. This test checks that, and that a denial there
+  # creates no document row.
   def test_a_subclass_can_override_authorized_using_the_located_record
     channel = Class.new(Y::DocumentChannel) do
       private
@@ -208,12 +208,12 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_predicate subscription, :confirmed?
   end
 
-  # The policy runs once, at subscribe. After that the subscription stays
-  # authorized until it ends. These tests check that, tradeoff included. An
-  # app that needs to cut off access before the client disconnects has to
-  # stop the subscription itself. Short-lived grants limit how long a stale
-  # one can live.
-  def test_permission_changes_do_not_disturb_an_open_subscription
+  # The policy runs once, at subscribe, and the subscription is authorized
+  # from then until it ends. These tests check that behavior. The downside is
+  # that an app that needs to cut off access before the client disconnects
+  # has to stop the subscription itself, and short-lived grants limit how
+  # long stale access can last.
+  def test_permission_changes_do_not_affect_an_open_subscription
     stub_connection current_user: "granted"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
     subscribe grant: grant, name: "body"
@@ -235,7 +235,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     refute consulted, "the policy ran on an incoming frame"
   end
 
-  def test_grant_expiry_bounds_new_subscriptions_not_open_ones
+  def test_grant_expiry_only_affects_new_subscriptions
     token = @page.to_sgid(for: Y::Collaborative.sgid_purpose(:body), expires_in: 1.minute).to_s
     subscribe grant: token, name: "body"
     travel 2.minutes do
@@ -243,7 +243,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
       assert_equal 1, Y::DocumentUpdate.count, "an open subscription keeps working"
 
-      # A new subscription with the same expired grant is refused.
+      # A new subscription with the expired grant gets rejected.
       @subscription = nil
       subscribe grant: token, name: "body"
 
@@ -263,8 +263,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_subscription_stopped
   end
 
-  # A frame that arrives without an authorized subscription is refused even
-  # when the grant is valid. Only a confirmed subscription authorizes frames.
+  # The channel refuses a frame that arrives without an authorized
+  # subscription, even when its grant is valid. Frames need a confirmed
+  # subscription.
   def test_a_valid_grant_alone_does_not_authorize_a_frame
     stub_connection current_user: "granted"
     Y::DocumentChannel.authorize_document { |record, _name| record.title == current_user }
@@ -291,7 +292,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   def test_the_storage_class_comes_from_the_declaration
     assert_equal Y::EncryptedDocument, SecretPage.collaborative_document_class(:body)
-    assert_equal Y::Document, SecretPage.collaborative_document_class(:other), "undeclared attributes stay plain"
+    assert_equal Y::Document, SecretPage.collaborative_document_class(:other), "undeclared attributes use Y::Document"
     assert_equal Y::Document, Page.collaborative_document_class(:body)
   end
 
@@ -312,14 +313,14 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     doc = Y::Doc.new
     doc.apply_update(document.load_state)
 
-    refute_empty doc.read_text("content").to_s, "the encrypted path round-trips the document"
+    refute_empty doc.read_text("content").to_s, "the document reads back through the encrypted classes"
 
-    # The recorded bytes are ciphertext at rest, so reading them through the
-    # plain classes gives back garbage. Each document has one access path.
+    # The stored bytes are ciphertext, so reading them through the plain
+    # classes fails. Each document can only be read through one set of classes.
     raw = Y::DocumentUpdate.find_by!(document_id: document.document_row.id).payload
 
     refute_equal update, raw, "the stored payload must not be the plaintext delta"
-    assert_raises(StandardError, "the plain path reads ciphertext, not a document") do
+    assert_raises(StandardError, "the plain classes can't decode the ciphertext") do
       Y::Document.load_state(document.key)
     end
   ensure
@@ -361,8 +362,8 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   private
 
-  # ActionCable::Channel::TestCase#subscribe is bound to `tests Y::DocumentChannel`.
-  # This does the same for a subclass.
+  # ActionCable::Channel::TestCase#subscribe always uses the class named in
+  # `tests Y::DocumentChannel`. This helper subscribes through a subclass.
   def subscribe_through(channel_class, params)
     @subscription = channel_class.new(connection, "subclass", params.with_indifferent_access)
     @subscription.singleton_class.include(ActionCable::Channel::ChannelStub)
@@ -378,6 +379,6 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_predicate subscription, :unsubscribed?
     assert_empty subscription.streams
     assert connection.transmissions.any? { |message| message[:type] == "reject_subscription" },
-           "the client must receive a rejection to preserve its pending edits"
+           "the client needs a rejection so it keeps its pending edits"
   end
 end

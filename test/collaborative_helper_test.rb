@@ -10,8 +10,8 @@ GlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.app ||= "yrby-collaborative-test"
 SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-collaborative-test-secret")
 
-# The view side. collaborative_document_tag renders the signed grant, channel
-# name, and attribute name a client needs.
+# Tests for collaborative_document_tag, which renders the signed grant,
+# channel name, and attribute name a client needs.
 class CollaborativeHelperTest < Minitest::Test
   include ActiveSupport::Testing::TimeHelpers
   include ActionView::Helpers::TagHelper
@@ -58,7 +58,7 @@ class CollaborativeHelperTest < Minitest::Test
     end
   end
 
-  # The tag points at a subclass of the shipped channel with one attribute.
+  # Points the tag at a one-attribute subclass of the shipped channel.
   def test_channel_option_names_the_channel_the_element_subscribes_to
     html = collaborative_document_tag(@page, :body, channel: "PostDocumentChannel")
 

@@ -1,13 +1,13 @@
-// Owns a document on behalf of the application, independent of editors and
-// page navigation.
+// Holds a document for the application, independently of editors and page
+// navigation.
 //
-// A session lives while something still needs it, either an editor attached
-// to it or edits the server has not acknowledged. Once neither is left it
-// closes itself. After a subscription rejection the session tries the
-// descriptor's refresh URL once, if there is one. If there is no URL, the
-// refresh fails, or the new grant is rejected, the session blocks. Its
-// editors are released, its work is kept queued in memory, and the
-// application decides between retry() and discard().
+// A session remains open while an editor is attached or the server has not yet
+// acknowledged some of its edits, and it closes itself when neither is true.
+// When the server rejects the subscription, the session tries the descriptor's
+// refresh URL once if it has one. If there is no URL, the refresh fails, or the
+// server rejects the new grant, the session blocks. Blocking releases its
+// editors and keeps its queued work in memory until the application calls
+// retry() or discard().
 import * as Y from "yjs";
 import { uuidv4 } from "lib0/random";
 import { ActionCableProvider, type CableConsumer, type ProviderStatus } from "./actioncable_provider.js";
@@ -16,24 +16,24 @@ export interface DocumentDescriptor {
   channel?: string;
   grant: string;
   name: string;
-  /** A same-origin URL that returns `{ "grant": "..." }` for this document. Used once per rejection. */
+  /** A same-origin URL that returns `{ "grant": "..." }` for this document. The session fetches it at most once per rejection. */
   refresh?: string;
 }
 export type ResolvedDescriptor = Readonly<{ channel: string; grant: string; name: string; refresh?: string }>;
-// "open" is the normal state, with or without editors attached; see hasPending
-// for whether anything is still being delivered.
+// "open" is the normal state, with or without editors attached. Check
+// hasPending to see whether anything is still being delivered.
 export type DocumentSessionState = "open" | "blocked" | "closed";
 // Refreshing and renewed are substates of open, so editors and queued work
-// survive them. "renewed" waits for the transport to accept the new grant
-// before another refresh is allowed. A blocked or closed session has no
-// renewal in progress.
+// persist through them. A renewed session can't refresh again until the
+// transport accepts the new grant. A blocked or closed session has no renewal
+// in progress.
 type SessionPhase = "open" | "refreshing" | "renewed" | "blocked" | "closed";
 type SessionLifecycle = Readonly<{ phase: SessionPhase }>;
 type PhaseEvent = "refresh" | "renew" | "accept" | "block" | "retry" | "close";
-// Each phase decides three things. The state apps see, whether a new lease
-// connects right away (it does not while blocked or while waiting for a
-// refreshed grant), and which moves are allowed. A move that is not listed
-// is ignored.
+// Each phase sets the state apps see, whether a new lease connects right away,
+// and which transitions are allowed. A new lease does not connect while the
+// session is blocked or waiting for a refreshed grant. Transitions that aren't
+// listed are ignored.
 const PHASES: Record<SessionPhase, {
   state: DocumentSessionState;
   connects: boolean;
@@ -45,8 +45,9 @@ const PHASES: Record<SessionPhase, {
   blocked:    { state: "blocked", connects: false, on: { retry: "open",                          close: "closed" } },
   closed:     { state: "closed",  connects: false, on: {} },
 };
-// A refresh request that never answers would leave the session offline with
-// its editors attached and no way forward. After this long the session blocks.
+// Without a limit, a refresh request that never returns would leave the
+// session offline and stuck with its editors attached. After this long, the
+// session blocks.
 const REFRESH_TIMEOUT_MS = 15_000;
 const DEFAULT_CHANNEL = "Y::DocumentChannel";
 const stores = new WeakMap<CableConsumer, DocumentSessionStore>();
@@ -58,12 +59,12 @@ export function documentKey(descriptor: DocumentDescriptor): string {
 
 // Only the factory may create a store for a consumer.
 const storeToken = Symbol("storeToken");
-// Only the store acquires leases; this symbol is not exported.
+// Not exported, so only the store can acquire leases.
 const attachLease = Symbol("attachLease");
-// Only a session publishes store changes; this symbol is not exported.
+// Not exported, so only a session can publish store changes.
 const notifyStoreChange = Symbol("notifyStoreChange");
 
-/** The sessions of one consumer. Emits "change" with the session in `detail`. */
+/** Holds one consumer's sessions and emits "change" with the session in `detail`. */
 export class DocumentSessionStore extends EventTarget {
   static for(consumer: CableConsumer): DocumentSessionStore {
     let store = stores.get(consumer);
@@ -81,7 +82,7 @@ export class DocumentSessionStore extends EventTarget {
   acquire(input: DocumentDescriptor): DocumentLease {
     if (!input.grant || !input.name) throw new Error("A document requires a grant and name");
     // The refresh URL is not part of the identity. Matching tuples share a
-    // session, and that session renews with the URL of whoever acquired it first.
+    // session, which renews with the URL from the first acquisition.
     const descriptor: ResolvedDescriptor = Object.freeze({
       channel: input.channel || DEFAULT_CHANNEL,
       grant: input.grant,
@@ -101,7 +102,7 @@ export class DocumentSessionStore extends EventTarget {
   }
 }
 
-/** A caller's hold on a session. Release it when the caller is finished. */
+/** A caller's hold on a session. Release it when you're done with the session. */
 export class DocumentLease {
   #controller = new AbortController();
   #onRelease: () => void;
@@ -113,7 +114,7 @@ export class DocumentLease {
   setPresence(state: Record<string, unknown> | null): void {
     if (!this.signal.aborted) this.session.provider.awareness.setLocalState(state);
   }
-  /** Editor cleanup runs synchronously before the final pending-work check. */
+  /** Runs editor cleanup synchronously, before the final check for pending work. */
   release(): void {
     if (this.signal.aborted) return;
     this.#controller.abort();
@@ -121,35 +122,36 @@ export class DocumentLease {
   }
 }
 
-// Application commands (acquire, retry, discard) act immediately. Provider
-// callbacks and lease releases write down what happened and ask for a settle.
-// Settle runs once the current call stack has finished. It releases the leases
-// of a blocked session, closes a session nobody needs, and notifies store
+// Application commands (acquire, retry, discard) take effect immediately.
+// Provider callbacks and lease releases record what happened and request a
+// settle, which runs after the current call stack finishes. Settle releases a
+// blocked session's leases, closes a session nobody needs, and notifies store
 // observers once.
 export class DocumentSession {
   readonly doc = new Y.Doc();
   readonly provider: ActionCableProvider;
   #lifecycle: SessionLifecycle = { phase: "open" };
   #leases = new Set<DocumentLease>();
-  // The leases held when the session blocked. Settle releases them; a lease
-  // acquired while blocked is kept for retry().
+  // Leases held when the session blocked. Settle releases these and keeps any
+  // lease acquired while blocked for retry().
   #retiring: DocumentLease[] | undefined;
   #error: unknown;
-  #dirty = false; // observers have not been told about the latest change
+  #dirty = false; // true until store observers are notified of the latest change
   #settleQueued = false;
 
-  /** Use DocumentSessionStore.acquire to create and own sessions. */
+  /** Create and hold sessions through DocumentSessionStore.acquire. */
   constructor(
     readonly store: DocumentSessionStore,
     readonly descriptor: ResolvedDescriptor,
     private readonly remove: () => void,
   ) {
-    // One provider for the session's whole life. It queues edits while offline,
-    // so blocking and retrying are just disconnect and connect.
+    // The session uses one provider for its whole life. The provider queues
+    // edits while offline, so blocking and retrying only need to disconnect and
+    // connect.
     this.provider = new ActionCableProvider(this.doc, store.consumer, descriptor.channel, {
       grant: descriptor.grant,
       name: descriptor.name,
-      // Ack sequence numbers belong to this session, not a record.
+      // Ack sequence numbers are per session, not per record.
       session_id: uuidv4(),
     }, {
       onError: (error, context) => {
@@ -160,7 +162,7 @@ export class DocumentSession {
     this.provider.awareness.setLocalState(null); // no cursor until an editor sets one
     this.provider.onStatusChange(({ status }) => {
       if (this.state !== "open") return;
-      // The server accepted the subscription, so a renewed grant is good.
+      // The server accepted the subscription, so a renewed grant is valid.
       if (status === "connected" || status === "synced") this.#transition("accept");
       this.#changed();
     });
@@ -183,11 +185,11 @@ export class DocumentSession {
     this.#changed();
     if (!this.#leases.size) this.provider.awareness.setLocalState(null);
   }
-  /** Retry with this session's current grant: the original one, or the last one a refresh returned. */
+  /** Reconnects with this session's current grant, which is the original one or the last one a refresh returned. */
   retry(): void {
     if (this.#transition("retry")) this.#connect();
   }
-  /** An explicit application decision. An ordinary detach does not discard pending work. */
+  /** Closes the session and drops pending work. The application calls this explicitly, because an ordinary detach keeps pending work. */
   discard(): void { this.#close(); }
 
   #changed(): void {
@@ -198,8 +200,8 @@ export class DocumentSession {
   }
   #settle(): void {
     this.#settleQueued = false;
-    // If editor cleanup retries or blocks during this, #changed has already
-    // queued the next settle to deal with it.
+    // If editor cleanup retries or blocks during #enforce, #changed queues
+    // another settle to handle it.
     this.#enforce();
     if (!this.#dirty) return;
     this.#dirty = false;
@@ -210,7 +212,7 @@ export class DocumentSession {
     if (this.state === "blocked") {
       const retiring = this.#retiring;
       this.#retiring = undefined;
-      // The queue is kept until retry() or discard().
+      // Leave the queue alone until retry() or discard().
       for (const lease of retiring ?? []) lease.release();
       return;
     }
@@ -228,7 +230,8 @@ export class DocumentSession {
   }
   #needed(): boolean { return this.#leases.size > 0 || this.provider.hasPending; }
 
-  // The only place that changes the phase. It does not call out; #settle acts on the result.
+  // The only method that changes the phase. It doesn't call out to other code,
+  // and #settle acts on the result.
   #transition(event: PhaseEvent, error?: unknown): boolean {
     const phase = PHASES[this.#lifecycle.phase].on[event];
     if (!phase) return false;
@@ -241,14 +244,14 @@ export class DocumentSession {
   }
   #close(): void {
     if (!this.#transition("close")) return;
-    // Leave the store first, so editor cleanup below can acquire a fresh session.
+    // Leave the store first so editor cleanup below can acquire a new session.
     this.remove();
     for (const lease of [...this.#leases]) lease.release();
     this.provider.destroy();
     this.doc.destroy();
   }
-  // Try the refresh URL once per rejection. A rejection while refreshing, or
-  // of the renewed grant, blocks.
+  // Try the refresh URL once per rejection. Block if the server rejects again
+  // while refreshing or rejects the renewed grant.
   #rejected(error: unknown): void {
     const url = this.descriptor.refresh;
     if (url && this.#transition("refresh")) void this.#refresh(url, this.#lifecycle);
@@ -262,7 +265,7 @@ export class DocumentSession {
       if (this.#lifecycle === attempt) this.#transition("block", error);
       return;
     }
-    // If a retry, discard, or block happened while the request was out, that takes precedence.
+    // A retry, discard, or block during the request takes precedence over it.
     if (this.#lifecycle !== attempt) return;
     if (this.#transition("renew")) this.#connect(grant);
   }

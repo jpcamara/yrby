@@ -8,8 +8,8 @@ require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 require "logger"
 
-# A channel that declares no storage hooks gets Y::Document storage. on_load
-# and on_change are still how you use a different store.
+# A channel that declares no storage hooks stores through Y::Document.
+# Declaring on_load and on_change switches it to a different store.
 class DefaultStorageTest < Minitest::Test
   def setup
     Y::DocumentUpdate.delete_all
@@ -47,7 +47,7 @@ class DefaultStorageTest < Minitest::Test
     assert_equal Y::ActionCable::Sync::DEFAULT_STORAGE[:on_change], klass.on_change
   end
 
-  def test_partial_storage_hooks_fail_before_subscribing_or_acknowledging
+  def test_one_declared_hook_raises_before_subscribing_or_acking
     %i[on_load on_change].each do |hook|
       channel = bare_channel
       channel.class.public_send(hook) { |*| nil }
@@ -86,7 +86,7 @@ class DefaultStorageTest < Minitest::Test
     refute_equal child.on_load, grandchild.on_load
   end
 
-  def test_declared_hooks_still_win
+  def test_a_declared_hook_replaces_the_default
     klass = Class.new do
       include Y::ActionCable::Sync
 
@@ -94,7 +94,7 @@ class DefaultStorageTest < Minitest::Test
     end
 
     refute_equal Y::ActionCable::Sync::DEFAULT_STORAGE[:on_load], klass.on_load
-    assert_nil klass.on_change, "a custom loader must not silently acquire a different recorder"
+    assert_nil klass.on_change, "a custom loader must not get paired with the default recorder"
   end
 
   def test_a_hookless_channel_records_and_serves_through_y_document
@@ -104,7 +104,7 @@ class DefaultStorageTest < Minitest::Test
     frame = Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
     channel.sync_receive({ "update" => Base64.strict_encode64(frame), "id" => 5 }, "defaults/doc-1")
 
-    assert_includes channel.transmits, { "ack" => 5 }, "recorded through the default before acking"
+    assert_includes channel.transmits, { "ack" => 5 }, "the default store recorded the update before the ack"
     doc = Y::Doc.new
     doc.apply_update(Y::Document.load_state("defaults/doc-1"))
 

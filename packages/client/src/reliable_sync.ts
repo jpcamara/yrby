@@ -1,19 +1,19 @@
 // Transport-agnostic reliable delivery for the yrby y-websocket protocol.
 //
-// Every local update gets a sequence number and goes into an ordered queue,
-// where it is kept until the server acknowledges it. While the transport is
-// up, the whole unacknowledged tail is sent as one merged, causally complete
-// delta (so the server never sees an internal gap), and is sent again on a
-// timer until an ack arrives. Acks are cumulative, so one { ack: n } retires
-// everything up to n. While the transport is down nothing is sent and nothing
-// is dropped. The tail is replayed when the transport comes back.
+// Each local update gets a sequence number and sits in an ordered queue until
+// the server acknowledges it. While the transport is up, ReliableSync sends the
+// whole unacknowledged tail as one merged, causally complete delta so the
+// server never sees an internal gap, and resends it on a timer until an ack
+// arrives. Acks are cumulative, so one { ack: n } clears everything up to n.
+// While the transport is down, ReliableSync sends nothing and drops nothing,
+// and it replays the tail when the transport reconnects.
 //
-// It does not touch the transport or Yjs. Inject two functions. send(update,
-// id) transmits one delta plus the sequence id to acknowledge against, and
-// merge(updates) folds update byte arrays into one (usually Y.mergeUpdates).
-// Drive it from the transport lifecycle: enqueue(update) on each local edit,
-// acknowledge(id) when an { ack: id } envelope arrives, resume() when the
-// transport connects, pause() when it drops.
+// It doesn't touch the transport or Yjs itself. You inject two functions.
+// send(update, id) transmits one delta with the sequence id the server should
+// acknowledge, and merge(updates) combines update byte arrays into one (usually
+// Y.mergeUpdates). Call enqueue(update) on each local edit, acknowledge(id) when
+// an { ack: id } envelope arrives, resume() when the transport connects, and
+// pause() when it drops.
 //
 // Awareness/presence stays out of scope; it's fire-and-forget in the provider.
 
@@ -35,7 +35,7 @@ export interface ReliableSyncOptions {
   clearInterval?: (handle: TimerHandle) => void;
 }
 
-/** One queued update and the sequence number an ack must reach to retire it. */
+/** One queued update and the sequence number an ack must reach to remove it. */
 export interface Pending {
   readonly seq: number;
   readonly update: Uint8Array;
@@ -58,12 +58,12 @@ export class ReliableSync {
   #nextSeq = 1;
   #phase: Phase = "paused";
   #timer: Timer | undefined;
-  // Bumped on every queue or phase change. Injected send/merge/timer functions
-  // can call back into this object, so work started before such a call checks
-  // afterwards whether anything moved underneath it.
+  // Incremented on every queue or phase change. Injected send/merge/timer
+  // functions can call back into this object, so code that calls one compares
+  // the version afterwards to detect changes made during the call.
   #version = 0;
-  // The queue merged into one delta, memoized until the queue changes, so a
-  // retransmit tick does not re-merge everything every second.
+  // The queue merged into one delta. It's memoized until the queue changes so
+  // retransmit ticks don't re-merge the whole queue every second.
   #tail: Uint8Array | undefined;
 
   constructor(opts: ReliableSyncOptions) {
@@ -101,9 +101,9 @@ export class ReliableSync {
   }
 
   /**
-   * Confirm delivery through `id`. Every queued update with seq <= id is
-   * retired. Acks come off the wire, so a malformed value or an id beyond
-   * anything sent is ignored.
+   * Confirm delivery through `id`, removing every queued update with
+   * seq <= id. Acks come off the wire, so ignore a malformed value or an id
+   * beyond anything sent.
    */
   acknowledge(id: number): void {
     if (this.#phase === "destroyed" || !Number.isSafeInteger(id) || id < 0) return;
@@ -113,7 +113,7 @@ export class ReliableSync {
     this.#queueChanged();
   }
 
-  /** The transport is up: replay the tail and keep retransmitting until it is acknowledged. */
+  /** Call when the transport is up. Replays the tail and keeps retransmitting until it is acknowledged. */
   resume(): void {
     if (this.#phase === "destroyed") return;
     this.#phase = "live";
@@ -122,7 +122,7 @@ export class ReliableSync {
     this.#flush();
   }
 
-  /** The transport is down: keep the queue, stop retransmitting. */
+  /** Call when the transport is down. Keeps the queue and stops retransmitting. */
   pause(): void {
     if (this.#phase === "destroyed") return;
     this.#phase = "paused";
@@ -130,7 +130,7 @@ export class ReliableSync {
     this.#updateTimer();
   }
 
-  /** Send the tail again if anything is unacknowledged. The internal timer calls this. A host with its own scheduler can call it too. */
+  /** Send the tail again if anything is unacknowledged. The internal timer calls this, and a host with its own scheduler can too. */
   retransmit(): void {
     this.#flush();
   }
@@ -159,15 +159,15 @@ export class ReliableSync {
       timer.stop();
       return;
     }
-    // Installed before setInterval so a tick during that call sees its own
-    // timer. Stopping it before the handle exists does nothing. The check
-    // after setInterval returns cancels the real handle.
+    // Install the timer before calling setInterval so a tick during that call
+    // finds its own timer. Stopping it before the handle exists is a no-op, and
+    // the check after setInterval returns cancels the real handle.
     const timer: Timer = this.#timer = { stop: () => {} };
     let handle: TimerHandle;
     try {
       handle = this.#setInterval(() => { if (this.#timer === timer) this.#flush(); }, this.#resendInterval);
     } catch (error) {
-      // Nothing is lost. The next resume or queue change tries again.
+      // The queue is untouched, and the next resume or queue change tries again.
       if (this.#timer === timer) this.#timer = undefined;
       throw error;
     }
@@ -179,7 +179,7 @@ export class ReliableSync {
   }
 
   // Send the whole tail as one delta, tagged with its highest seq so one ack
-  // covers all of it. Nothing goes out while disconnected.
+  // covers all of it. Does nothing while disconnected.
   #flush(): void {
     if (this.#phase !== "live" || !this.#pending.length) return;
     if (this.#tail === undefined) {

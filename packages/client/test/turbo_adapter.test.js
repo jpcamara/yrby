@@ -25,7 +25,7 @@ test("a mount registered during teardown is activated and stays registered", t =
   assert.equal(deactivated, 1);
 });
 
-test("an adapter destroyed during cache cleanup does not schedule another reconciliation", t => {
+test("an adapter destroyed during cache cleanup schedules no reconciliation", t => {
   const document = new EventTarget();
   const originalSet = globalThis.setTimeout;
   let scheduled = 0;

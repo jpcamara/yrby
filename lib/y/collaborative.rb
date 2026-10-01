@@ -19,25 +19,24 @@ module Y
   #     record.present? && record.editable_by?(current_user)
   #   end
   #
-  #   # Not memoized. Under AnyCable each command gets a fresh channel
-  #   # instance, so a cached record would go stale. Y::DocumentChannel
+  #   # Not memoized, because AnyCable gives each command a fresh channel
+  #   # instance and a cached record would go stale. Y::DocumentChannel
   #   # does the same.
   #   def record
   #     Y::Collaborative.locate(params[:grant], :body)
   #   end
   #
-  # The engine includes this into ActiveRecord::Base. lexxy-realtime uses the
-  # same token flow. yrby-rails provides it so any channel's authorized? can
-  # use it.
+  # The engine includes this into ActiveRecord::Base so any channel's
+  # authorized? can use it. lexxy-realtime uses the same token flow.
   module Collaborative
     extend ActiveSupport::Concern
 
     class << self
       # The signed-GlobalID purpose for one collaborative attribute. A token
-      # signed for one attribute only verifies against that attribute's
-      # purpose, so it won't locate the record through any other attribute.
-      # The purpose doesn't include a channel name, so a custom channel and
-      # the shipped one can both resolve the same tokens for an attribute.
+      # signed for one attribute verifies only against that attribute's
+      # purpose, so it can't locate the record through any other attribute.
+      # The purpose leaves out the channel name, so a custom channel and the
+      # shipped one can both resolve the same tokens for an attribute.
       def sgid_purpose(name) = "yrby/#{name}"
 
       # Looks up the record for a token from `collaborative_sgid(name)`.
@@ -56,34 +55,36 @@ module Y
     end
 
     class_methods do
-      # Declares how one attribute's document is stored, for both the shipped
-      # channel and Ruby reads. Undeclared attributes use plain Y::Document.
+      # Declares how one attribute's document is stored. The shipped channel
+      # and Ruby reads both follow it, and undeclared attributes use plain
+      # Y::Document.
       def has_collaborative_document(name, encrypted: false) # rubocop:disable Naming/PredicatePrefix
         self.collaborative_document_options = collaborative_document_options.merge(
           name.to_s => { encrypted: encrypted }.freeze
         ).freeze
       end
 
-      # The model that stores this attribute's document. Y::EncryptedDocument
-      # when the attribute was declared encrypted, Y::Document otherwise. It
-      # is looked up on each call, so declaring the attribute doesn't load the
-      # engine's models while the app's are still loading.
+      # Returns the model that stores this attribute's document,
+      # Y::EncryptedDocument for an attribute declared encrypted and
+      # Y::Document for the rest. It resolves the constant on every call so
+      # that declaring an attribute doesn't load the engine's models while the
+      # app's models are still loading.
       def collaborative_document_class(name)
         encrypted = collaborative_document_options.dig(name.to_s, :encrypted)
         encrypted ? Y::EncryptedDocument : Y::Document
       end
     end
 
-    # The document for one attribute, using the storage the model declared.
-    # It has load_state, append, y_doc, and key.
+    # Returns the document for one attribute, stored the way the model
+    # declared. It responds to load_state, append, y_doc, and key.
     def collaborative_document(name)
       Attribute.new(self, name)
     end
 
-    # A signed token a channel can pass to Y::Collaborative.locate to get this
-    # record back, for this attribute only. Pass expires_in: to limit how long
-    # the grant lasts. Without it, GlobalID's own default applies, which is
-    # one month under Rails. The option is only passed through when given,
+    # A signed token that a channel can pass to Y::Collaborative.locate to get
+    # this record back, for this attribute only. Pass expires_in: to limit how
+    # long the grant lasts. Without it GlobalID's own default applies, which is
+    # one month under Rails. We pass the option through only when it's given,
     # because an explicit nil would mean "never expire".
     def collaborative_sgid(name, expires_in: nil)
       options = { for: Y::Collaborative.sgid_purpose(name) }

@@ -6,8 +6,8 @@
 //
 // Call resume() when the transport connects, pause() when it drops,
 // acknowledge(id) on an { ack } envelope, and receive(frame) for an inbound
-// frame (it returns a reply to send, or null). Local doc and awareness edits
-// send themselves via the "update" events.
+// frame (it returns a reply to send, or null). The session sends local doc and
+// awareness edits from their "update" events.
 import { Doc, mergeUpdates, applyUpdate } from "yjs";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
@@ -48,9 +48,9 @@ export interface YProtocolSessionOptions {
   clearInterval?: (handle: TimerHandle) => void;
 }
 
-// A cycle is one handshake lifetime, including its eventual catch-up. Resume
-// and pause replace it, so a receive that started under an old cycle does not
-// mark a later one synced.
+// A cycle covers one handshake and its eventual catch-up. resume() and pause()
+// start a new cycle, so a receive that began under an old cycle can't mark a
+// later one synced.
 type ProtocolState =
   | { phase: "unsynced" | "synced"; cycle: object }
   | { phase: "destroyed" };
@@ -116,7 +116,7 @@ export class YProtocolSession {
     return this.#delivery.hasPending;
   }
 
-  /** The transport is up: send the opening handshake, re-announce presence, replay the unacked tail. */
+  /** Call when the transport is up. Sends the opening handshake, re-announces presence, and replays the unacked tail. */
   resume(): void {
     if (this.#state.phase === "destroyed") return;
     const cycle = {};
@@ -129,7 +129,7 @@ export class YProtocolSession {
     if (this.#current(cycle)) this.#delivery.resume();
   }
 
-  /** The transport is down: keep the queue, stop retransmits, forget peers' presence. */
+  /** Call when the transport is down. Keeps the queue, stops retransmits, and clears peers' presence. */
   pause(): void {
     if (this.#state.phase === "destroyed") return;
     this.#state = { phase: "unsynced", cycle: {} };
@@ -185,7 +185,7 @@ export class YProtocolSession {
     // A malformed/truncated frame must never take down the transport callback:
     // decode + apply defensively, drop the frame on error, keep the session live.
     try {
-      if (!validateFrame(frame)) return null; // a y-protocols type yrby doesn't speak
+      if (!validateFrame(frame)) return null; // a y-protocols type yrby doesn't use
 
       const decoder = decoding.createDecoder(frame);
       const encoder = encoding.createEncoder();
@@ -205,7 +205,7 @@ export class YProtocolSession {
           if (this.awareness) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
           break;
         default:
-          return null; // unreachable: validateFrame accepted only the two types above
+          return null; // unreachable, since validateFrame accepts only the two types above
       }
       return this.#current(cycle) && encoding.length(encoder) > 1 ? encoding.toUint8Array(encoder) : null;
     } catch (error) {
@@ -248,10 +248,10 @@ export class YProtocolSession {
   }
 }
 
-// Check a frame's structure before anything is applied, so a truncated or
+// Checks a frame's structure before anything is applied, so a truncated or
 // padded frame changes nothing. Returns false for a frame type yrby ignores
-// (auth, query-awareness) and throws for a malformed one. The contents of a
-// Yjs update are checked by Yjs itself when it is applied.
+// (auth, query-awareness) and throws for a malformed one. Yjs checks the
+// contents of an update itself when applying it.
 function validateFrame(frame: Uint8Array): boolean {
   const decoder = decoding.createDecoder(frame);
   const type = decoding.readVarUint(decoder);

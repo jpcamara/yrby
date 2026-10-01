@@ -28,7 +28,7 @@ import type { Doc } from "yjs";
  */
 export type ProviderStatus = "connecting" | "connected" | "synced" | "disconnected";
 
-/** Payload passed to onStatusChange listeners. Fires when either field changes. */
+/** Payload passed to onStatusChange listeners, which run when either field changes. */
 export interface StatusEvent {
   status: ProviderStatus;
   /** True while local edits await the server's acknowledgment. */
@@ -68,15 +68,16 @@ interface CableMessage {
   ack?: number;
 }
 
-// One connect() call. Cable callbacks carry the attempt that created them, so
-// a callback from an old subscription is ignored once a newer one exists.
+// Identifies one connect() call. Each cable callback closes over the attempt
+// that created it, so the provider can ignore a callback from an old
+// subscription once a newer one exists.
 type Attempt = object;
 type StopReason = "disconnect" | "reject" | "destroy";
 type ProviderState =
   | { phase: "disconnected" | "destroyed" }
   | { phase: "subscribing"; attempt: Attempt }
   | { phase: "connecting" | "connected"; attempt: Attempt; subscription: CableSubscription }
-  // Presence removal and unsubscribe are running. A destroy() meanwhile upgrades the reason.
+  // Removing presence and unsubscribing. A destroy() during this upgrades the reason.
   | { phase: "stopping"; attempt: Attempt; subscription: CableSubscription; reason: StopReason };
 
 export class ActionCableProvider {
@@ -88,7 +89,7 @@ export class ActionCableProvider {
   readonly session: YProtocolSession;
   #state: ProviderState = { phase: "disconnected" };
   #onError: (error: unknown, context: string) => void;
-  // The last event listeners saw. A refresh notifies only when something differs.
+  // The last event sent to listeners. A refresh notifies them only when a field differs.
   #last: StatusEvent = { status: "disconnected", pending: false };
   #statusListeners = new Set<(event: StatusEvent) => void>();
   #resolveSynced!: () => void;
@@ -136,7 +137,7 @@ export class ActionCableProvider {
       onError: this.#onError,
       send: (frame, id) => this.#send(frame, id),
     });
-    // After the session's own listener, so the queue already holds the edit.
+    // Registered after the session's listener, so the queue already has the edit.
     this.doc.on("update", this.#onDocUpdate);
   }
 
@@ -182,8 +183,8 @@ export class ActionCableProvider {
     if (this.#state.phase !== "disconnected") return;
     const attempt: Attempt = {};
     this.#state = { phase: "subscribing", attempt };
-    // A consumer may call back inside create(), before the subscription is
-    // installed. Those callbacks wait one microtask.
+    // A consumer may invoke callbacks inside create(), before the subscription
+    // is installed, so on() defers those by one microtask.
     const on = <A extends unknown[]>(callback: (...args: A) => void) => (...args: A): void => {
       const run = () => { if (this.#active(attempt)) callback(...args); };
       if (this.#state.phase === "subscribing") queueMicrotask(run);
@@ -216,9 +217,9 @@ export class ActionCableProvider {
   disconnect(): void { this.#stop("disconnect"); }
 
   /**
-   * Resubscribe with updated channel params, such as a renewed grant. Only
-   * the cable subscription is replaced. The doc, the delivery queue,
-   * awareness, and this provider's ack route all carry over. A no-op after
+   * Resubscribes with updated channel params, such as a renewed grant. This
+   * replaces only the cable subscription and keeps the doc, the delivery
+   * queue, awareness, and this provider's ack route. Does nothing after
    * destroy().
    */
   renew(params: object): void {
@@ -242,7 +243,8 @@ export class ActionCableProvider {
     const state = this.#state;
     return (state.phase === "connecting" || state.phase === "connected") && state.attempt === attempt;
   }
-  // Cable callbacks below run only for the active attempt; on() in connect() checks.
+  // The cable callbacks below run only for the active attempt, which on() in
+  // connect() checks.
   #connected(): void {
     const state = this.#state;
     if (state.phase !== "connecting") return;
@@ -270,8 +272,9 @@ export class ActionCableProvider {
       const stopping = { ...state, phase: "stopping" as const, reason };
       this.#state = stopping;
       this.#unwatchPage();
-      // The old subscription's callbacks are ignored now, but it can still
-      // send our presence removal before its deferred unsubscribe.
+      // From here the provider ignores the old subscription's callbacks, but the
+      // subscription can still send our presence removal before its deferred
+      // unsubscribe.
       this.session.removeLocalAwareness();
       this.session.pause();
       this.#unsubscribe(state.subscription);
@@ -339,9 +342,9 @@ export class ActionCableProvider {
     if (status === this.#last.status && pending === this.#last.pending) return;
     const event = this.#last = { status, pending };
     if (status === "synced") this.#resolveSynced();
-    // A throwing listener is an application bug. Report it and keep going, so
-    // one bad listener does not stop the others or break the cable callback
-    // that triggered this refresh.
+    // A throwing listener is an application bug. Report it and continue so one
+    // bad listener can't stop the others or break the cable callback that
+    // triggered this refresh.
     for (const listener of this.#statusListeners) {
       if (this.#last !== event) break; // a listener caused a newer transition
       try {
@@ -352,12 +355,12 @@ export class ActionCableProvider {
     }
   }
 
-  // Presence around the page lifecycle. `pagehide` removes our cursor while
-  // the socket is still live, so peers drop it right away and don't wait for
-  // the awareness timeout. A `pageshow` with `persisted` is a bfcache return,
-  // so the cursor is put back. Editor bindings set awareness once at setup,
-  // and without this the returning user would come back as a ghost with no
-  // cursor.
+  // Handles presence across the page lifecycle. `pagehide` removes our cursor
+  // while the socket is still live, so peers drop it without waiting for the
+  // awareness timeout. A `pageshow` with `persisted` means the user came back
+  // through the bfcache, so we restore the cursor. Editor bindings set
+  // awareness only once at setup, so without this the user would return with
+  // no cursor.
   #watchPage(): void {
     if (typeof window === "undefined" || this.#page) return;
     let stashed: Record<string, unknown> | null = null;
@@ -400,8 +403,8 @@ export class ActionCableProvider {
     // Route transport failures (sync throws, or @anycable/web's rejected
     // promises) to onError instead of letting them escape into update
     // handlers. A failed send is recoverable: reliable frames stay queued
-    // until acked, and awareness is best-effort anyway. A failure from a
-    // subscription that has since been replaced is not reported.
+    // until acked, and awareness is best-effort anyway. Failures from a
+    // subscription that has since been replaced go unreported.
     const report = (error: unknown) => {
       const current = this.#state;
       if ("subscription" in current && current.subscription === subscription) this.#onError(error, "send");
@@ -417,8 +420,9 @@ export class ActionCableProvider {
   }
 }
 
-// Awareness emits application events during presence removal and destruction.
-// A listener failure must not interrupt those operations or leave its timer alive.
+// Awareness runs application listeners during presence removal and destruction.
+// A failing listener must not interrupt either one or leave the awareness timer
+// running.
 class ProviderAwareness extends Awareness {
   constructor(doc: Doc, private readonly onError: (error: unknown, context: string) => void) {
     super(doc);

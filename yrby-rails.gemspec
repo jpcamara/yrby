@@ -48,10 +48,10 @@ Gem::Specification.new do |spec|
   # activerecord either way; listed because the gem uses it directly.
   spec.add_dependency "actioncable", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
-  # Y::Collaborative's signed tokens. Rails apps get globalid through
-  # activejob, but activerecord alone does not depend on it.
+  # Y::Collaborative signs its tokens with globalid. Rails apps get it through
+  # activejob, but activerecord alone doesn't depend on it.
   spec.add_dependency "globalid", ">= 1.0"
-  # collaborative_document_tag renders through Action View's tag builder.
+  # collaborative_document_tag uses Action View's tag builder.
   spec.add_dependency "actionview", ">= 7.1"
 
   spec.add_development_dependency "minitest", "~> 5.0"

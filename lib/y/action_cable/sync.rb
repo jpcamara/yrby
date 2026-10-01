@@ -65,9 +65,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     # The storage a channel gets when it declares no hooks. It uses the gem's
-    # own models, like Action Text defaults to its rich_texts table. It only
-    # applies when the yrby-rails models can be loaded. Outside Rails a
-    # channel still has to declare both hooks, or subscribing raises.
+    # own models, the way Action Text defaults to its rich_texts table, and
+    # only applies when the yrby-rails models can be loaded. Outside Rails a
+    # channel still has to declare both hooks or subscribing raises.
     DEFAULT_STORAGE = {
       on_load: ->(key) { Y::Document.load_state(key) },
       on_change: ->(key, update) { Y::Document.append(key, update) }
@@ -81,8 +81,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # Load persisted document state. Called once per key with (key); return a
       # binary Y.js update (or nil for a fresh document). Runs in the channel
       # instance's context (instance_exec). Defaults to Y::Document storage
-      # when yrby-rails' models are present. Declare a block to use a
-      # different store.
+      # when yrby-rails' models are present. Pass a block to use a different
+      # store.
       def on_load(&block)
         @on_load = block if block
         sync_storage_hook(:on_load)
@@ -128,9 +128,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       private
 
-      # The default supplies both hooks or neither, so reads and writes never
-      # go to different stores. Declared hooks are inherited, so a subclass
-      # can override one hook and keep its parent's other one.
+      # The default supplies both hooks or neither, so reads and writes always
+      # go to the same store. Declared hooks are inherited, so a subclass can
+      # override one hook and keep its parent's other one.
       def sync_storage_hook(name)
         hooks = sync_storage_hooks
         hooks.empty? ? Sync.default_hook(name) : hooks[name]
@@ -144,11 +144,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # Call from `subscribed`. Checks authorized?, then streams broadcasts for
     # this document and sends the server's opening handshake (SyncStep1 from
-    # the store). Rejects the subscription and returns false when authorized?
-    # returns false. The default authorized? always does, so this rejects until
-    # the channel defines it.
-    # rubocop:disable Naming/PredicateMethod -- reports whether the
-    # subscription was accepted; not a predicate.
+    # the store). When authorized? returns false, it rejects the subscription
+    # and returns false. The default authorized? always returns false, so every
+    # subscription is rejected until the channel defines its own.
+    # rubocop:disable Naming/PredicateMethod -- the boolean reports whether
+    # the subscription was accepted.
     def sync_subscribed(key)
       @sync_key = key.to_s
       sync_validate_required_hooks!
@@ -171,8 +171,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       doc = sync_load_doc
       sync_transmit(doc.sync_step1)
       sync_observe_gap if doc.pending?
-      # Return true so a caller can tell success from rejection. Without it
-      # the method returns whatever the gap check returned, usually nil.
+      # Return true so a caller can tell success from rejection. Otherwise the
+      # method would return the gap check's result, which is usually nil.
       true
     end
     # rubocop:enable Naming/PredicateMethod
@@ -228,28 +228,27 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     private
 
     # Whether this subscriber may sync the document named by `key`. The
-    # default returns false, so a channel has to define this before anything
-    # syncs. Override it:
+    # default returns false, so nothing syncs until the channel overrides it:
     #
     #   def authorized?(key)
     #     current_user&.member_of?(key)
     #   end
     #
-    # It runs before any stream is opened or state is served, and the
-    # connection's context (current_user, params) is available. Return true
-    # for public documents.
+    # It runs before the channel opens a stream or serves any state, with the
+    # connection's context (current_user, params) available. Return true for
+    # public documents.
     def authorized?(_key)
       false
     end
 
-    # The subscription was refused. If the refusal came from the default
-    # authorized?, log how to fix it, so a channel that never defined one
-    # doesn't fail silently.
+    # Logs and rejects a refused subscription. If the default authorized?
+    # refused it, the log line also says how to fix that, so a channel that
+    # never defined authorized? doesn't fail silently.
     def sync_reject_unauthorized
       logger.info do
         hint = if method(:authorized?).owner == Sync
-                 "; no authorized? defined: define authorized?(key) in this channel, " \
-                   "returning true deliberately for public documents"
+                 ". This channel needs to define authorized?(key). " \
+                   "Return true for public documents."
                end
         "[yrby] subscription rejected key=#{@sync_key.inspect}#{hint}"
       end
@@ -356,10 +355,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       return if missing.empty?
 
       raise Y::Error,
-            "Y::ActionCable::Sync requires #{missing.join(" and ")}. Updates are acked as " \
-            "durably recorded; without a loader and recorder, an ack would claim a persistence " \
-            "that never happened, and a cold load would lose the edit. (With yrby-rails' " \
-            "models installed these default to Y::Document storage.)"
+            "Y::ActionCable::Sync requires #{missing.join(" and ")} because it acks an update " \
+            "only after recording it. Declare both hooks. With yrby-rails' models installed, " \
+            "they default to Y::Document storage."
     end
 
     # Fail closed when no document key is set (typically: AnyCable rebuilt the

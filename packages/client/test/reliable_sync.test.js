@@ -204,7 +204,7 @@ test("resendInterval is forwarded to setInterval", () => {
 });
 
 
-test("pause() called from inside the replay send stops the timer and keeps the queue", () => {
+test("pausing mid-replay stops the timer and keeps the queue", () => {
   const h = harness({ send: () => h.rs.pause() });
   h.rs.enqueue(u(1));
   h.rs.resume();
@@ -212,7 +212,7 @@ test("pause() called from inside the replay send stops the timer and keeps the q
   assert.equal(h.hasTimer(), false);
 });
 
-test("a tick left over from an old timer does not resend", () => {
+test("only the current timer's tick resends", () => {
   const callbacks = [];
   const h = harness({ setInterval: fn => { callbacks.push(fn); return callbacks.length; }, clearInterval() {} });
   h.rs.enqueue(u(1)); h.rs.resume();
@@ -226,7 +226,7 @@ test("a tick left over from an old timer does not resend", () => {
   h.rs.destroy();
 });
 
-test("destroy() called inside merge stops the send and clears the cached tail", () => {
+test("destroying inside merge stops the send and empties the queue", () => {
   const h = harness({ merge: () => { h.rs.destroy(); return u(9); } });
   h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
   assert.doesNotThrow(() => h.rs.resume());
@@ -236,7 +236,7 @@ test("destroy() called inside merge stops the send and clears the cached tail", 
   assert.equal(h.hasTimer(), false);
 });
 
-test("a timer that fires before setInterval returns is still canceled when its send pauses", () => {
+test("a timer that fires synchronously is canceled when its send pauses", () => {
   const active = new Set();
   const h = harness({
     send: () => h.rs.pause(),
@@ -248,7 +248,7 @@ test("a timer that fires before setInterval returns is still canceled when its s
   assert.equal(h.rs.hasPending, true);
 });
 
-test("an ack delivered from inside the replay send stops the timer", () => {
+test("an ack during the replay send stops the timer", () => {
   const h = harness({ send: (_update, id) => h.rs.acknowledge(id) });
   h.rs.enqueue(u(1)); h.rs.resume();
   assert.equal(h.rs.hasPending, false);
@@ -259,7 +259,7 @@ test("an ack delivered from inside the replay send stops the timer", () => {
 });
 
 
-test("resume() can be retried after setInterval throws and the queue is kept", () => {
+test("a failed setInterval keeps the queue, and resume can be retried", () => {
   let attempts = 0, active = false;
   const h = harness({
     setInterval: () => { if (++attempts === 1) throw new Error("timer unavailable"); active = true; return 1; },
@@ -276,7 +276,7 @@ test("resume() can be retried after setInterval throws and the queue is kept", (
 });
 
 
-test("pending is a copy, and edits to it do not reach the queue", () => {
+test("pending returns a copy of the queue", () => {
   const h = harness();
   h.rs.enqueue(u(1)); h.rs.enqueue(u(2));
   const pending = h.rs.pending;
@@ -294,7 +294,7 @@ test("pending is a copy, and edits to it do not reach the queue", () => {
   assert.equal(h.hasTimer(), false);
 });
 
-test("enqueue copies the bytes, so the caller can reuse the buffer", () => {
+test("enqueue copies the caller's bytes", () => {
   for (const buffer of [u(7), Buffer.from([7])]) {
     const h = harness();
     h.rs.enqueue(buffer);

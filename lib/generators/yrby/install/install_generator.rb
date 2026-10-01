@@ -5,10 +5,10 @@ require "generators/yrby/tables/tables_generator"
 
 module Yrby
   module Generators
-    # `bin/rails generate yrby:install` creates the storage migration through
-    # yrby:tables. That is all it generates, since the models and
-    # Y::DocumentChannel ship in the gem. Pass --channel to also generate an
-    # application channel, for custom authorization or room-keyed documents.
+    # `bin/rails generate yrby:install` runs yrby:tables to create the storage
+    # migration. The models and Y::DocumentChannel ship in the gem, so that is
+    # the only file it generates by default. Pass --channel to also generate
+    # an application channel for custom authorization or room-keyed documents.
     class InstallGenerator < ::Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
       class_option :channel, type: :boolean, default: false, desc: "Generate a custom DocumentChannel"
@@ -32,9 +32,9 @@ module Yrby
 
                  <%= collaborative_document_tag @post, :body %>
 
-            3. Install the yrby-client npm package. The tag is an
-               auto-connecting element. Your code receives the synced
-               document and passes it to any editor that speaks Yjs:
+            3. Install the yrby-client npm package. The tag renders an
+               element that connects automatically. Once it syncs, your code
+               gets the document and can bind it to any Yjs editor:
 
                  import "yrby-client/element"
 
@@ -43,8 +43,8 @@ module Yrby
                    detail.signal.addEventListener("abort", () => editor.destroy(), { once: true })
                  })
 
-          --channel also generates app/channels/document_channel.rb. Implement
-          its authorized? method before using that channel.
+          Run with --channel to also generate app/channels/document_channel.rb,
+          and implement its authorized? method before you use it.
 
           The README's Editors section links working integrations for
           Tiptap, Lexxy, Rhino Editor, and CodeMirror.

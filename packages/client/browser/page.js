@@ -23,7 +23,7 @@ document.addEventListener("yrby:synced", ({ target: el, detail: { doc, signal, l
   update();
   input.disabled = false;
   input.addEventListener("input", () => {
-    // Replace only the edited range, so characters typed by others keep their identities.
+    // Replace only the edited range so other users' characters keep their identity.
     const diff = simpleDiffString(text.toString(), input.value);
     doc.transact(() => {
       text.delete(diff.index, diff.remove);

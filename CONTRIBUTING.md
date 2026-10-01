@@ -66,7 +66,7 @@ bin/rails s
 
 ## Pull requests
 
-### Document element browser regression
+### Browser tests for the document element
 
 After `bundle install` and `bundle exec rake compile`, run:
 
@@ -79,36 +79,37 @@ npm run test:browser:turbolinks
 npm run test:browser:collaboration
 ```
 
-`npm ci` installs `agent-browser`. It also needs a Chrome to drive. Run
-`agent-browser install` once, or point `AGENT_BROWSER_EXECUTABLE_PATH` at an
-existing Chrome. `AB_BIN` selects a different `agent-browser` binary, and
-`PORT` defaults to 3789. The run starts a Rails/SQLite/Puma fixture and drives
-two Chrome sessions through real ActionCable, the AnyCable web client, and
-Turbo navigation. It checks pending-edit recovery, shared views, retargeting,
-presence, async startup, encrypted storage, subscribe-time authorization, and
-late callbacks from replaced subscriptions. It stops its server and browser
-sessions afterward. Logs and a screenshot are written under `tmp/`.
+`npm ci` installs `agent-browser`, which also needs a Chrome to drive. Run
+`agent-browser install` once, or set `AGENT_BROWSER_EXECUTABLE_PATH` to an
+existing Chrome. Set `AB_BIN` to use a different `agent-browser` binary.
+`PORT` defaults to 3789. Each run starts a Rails/SQLite/Puma fixture app and
+drives two Chrome sessions through real ActionCable, the AnyCable web client,
+and Turbo navigation. It checks pending-edit recovery, shared views,
+retargeting, presence, async startup, encrypted storage, subscribe-time
+authorization, and late callbacks from replaced subscriptions. When it
+finishes, it shuts down its server and browser sessions and writes logs and a
+screenshot under `tmp/`.
 
-The collaboration suite runs four independent Chrome sessions for each pairing
-of Turbo or Turbolinks with the ActionCable or AnyCable JavaScript consumer.
-All of them use the fixture's real Rails ActionCable endpoint. Keyboard input
-keeps going during page visits, delayed acknowledgments, two-client outages,
-history restores, and held cached previews. It checks exact character counts,
-editor/server convergence, fresh-client recovery, binding lifetimes, and
-cleanup after awareness callbacks throw. The fixture applies incremental
-textarea edits, so typing preserves other users' character identities.
+The collaboration suite runs four independent Chrome sessions for each
+combination of Turbo or Turbolinks with the ActionCable or AnyCable
+JavaScript consumer, all against the fixture's real Rails ActionCable
+endpoint. Typing continues through page visits, delayed acknowledgments,
+two-client outages, history restores, and held cached previews. The suite
+checks exact character counts, editor/server convergence, fresh-client
+recovery, binding lifetimes, and cleanup after awareness callbacks throw.
+The fixture applies textarea edits incrementally, so typing preserves other
+users' character identities.
 
-`FRAMEWORK=turbo` or `FRAMEWORK=turbolinks` selects a framework.
-`CONSUMER=actioncable` or `CONSUMER=anycable` selects a consumer. The port
-range starts at `PORT` (default 3793). The combinations run one after another,
-and each uses four browser sessions plus a fresh reader. JSON evidence, server
-logs, and screenshots are saved under
-`tmp/browser-collaboration/<run>/<framework-consumer>/`, and CI uploads them.
-Run the browser suites one at a time so their browser daemons don't interfere
-with each other.
+Set `FRAMEWORK=turbo` or `FRAMEWORK=turbolinks` to pick a framework, and
+`CONSUMER=actioncable` or `CONSUMER=anycable` to pick a consumer. Ports start
+at `PORT` (default 3793). The combinations run one after another, each with
+four browser sessions plus a fresh reader. JSON evidence, server logs, and
+screenshots go to `tmp/browser-collaboration/<run>/<framework-consumer>/`,
+and CI uploads them. Run the browser suites one at a time so their browser
+daemons don't interfere with each other.
 
-The fixture is for local use. It has no authentication beyond the grants being
-tested, so don't deploy it anywhere.
+The fixture has no authentication beyond the grants under test, so only run
+it locally.
 
 ### Submission checks
 

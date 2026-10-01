@@ -41,7 +41,7 @@ class ReadmeExamplesTest < Minitest::Test
     post_class = Class.new(ActiveRecord::Base) do
       self.table_name = "pages"
       include Y::Collaborative
-      def self.name = "Page" # record binding derives keys from the class name
+      def self.name = "Page" # record-backed document keys use the class name
     end
     post = post_class.create!(title: "readme")
     Y::Document.for(post, :body).append(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
@@ -64,7 +64,7 @@ class ReadmeExamplesTest < Minitest::Test
       include Y::Collaborative
     end
     module Rails
-      # Run initializer examples without booting a Rails application.
+      # Lets the initializer examples run without booting a Rails application.
       def self.application = self
       def self.config = self
       def self.to_prepare(&block) = block.call

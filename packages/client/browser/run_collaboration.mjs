@@ -1,6 +1,6 @@
-// Four real Chrome sessions type through the fixture editor while Turbo or
-// Turbolinks navigates, caches, and restores pages. Both consumer libraries use
-// the real Rails ActionCable endpoint. No AnyCable gateway is emulated.
+// Four Chrome sessions type into the fixture editor while Turbo or Turbolinks
+// navigates, caches, and restores pages. Both consumer libraries talk to the
+// Rails ActionCable endpoint, with no AnyCable gateway in between.
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -84,7 +84,7 @@ async function run(framework, transport, port) {
         !value.inert && value.text === text && value.input === text) && saved.text === text &&
         text.length === expected.reduce((a, b) => a + b, 0) && expected.every((n, i) => count(text, String(i + 1)) === n);
     });
-    check(`${name}: all four editors and Ruby agree and every keystroke is saved once`, true);
+    check(`${name}: all four editors match Ruby and each keystroke is saved once`, true);
     check(`${name}: one editor binding per element`, snapshots.every(value => value.mounts - value.unmounts === 1));
     return snapshots;
   }
@@ -157,7 +157,7 @@ async function run(framework, transport, port) {
     }
     const contexts = await Promise.all(sessions.map(who => evaluate(who, "stress.context")));
     await batch([0, 1, 2, 3], 12);
-    await converge("simultaneous typing");
+    await converge("four users typing");
 
     await evaluate(0, `window.held = document.querySelector('#body-doc').session;
       const protocol = held.provider.session, ack = protocol.acknowledge.bind(protocol), ids = [];
@@ -165,35 +165,35 @@ async function run(framework, transport, port) {
       stress.releaseAcks = () => { protocol.acknowledge = ack; ids.forEach(ack); };`);
     await batch([0, 1, 2, 3], 8);
     await eventually("held edit persisted", async () => count((await state()).text, "1") === expected[0]);
-    check("real server ACKs are held while delivery remains pending", await evaluate(0, "held.hasPending") && count((await state()).text, "1") === expected[0]);
+    check("server ACKs are held and delivery stays pending", await evaluate(0, "held.hasPending") && count((await state()).text, "1") === expected[0]);
     await Promise.all([
       rounds([1, 2, 3], 3, 6),
       (async () => {
         await away(0);
-        check("the unacknowledged session is kept after leaving the page", await evaluate(0, "held.hasPending && !held.doc.isDestroyed"));
+        check("leaving the page keeps the unacknowledged session", await evaluate(0, "held.hasPending && !held.doc.isDestroyed"));
         await back(0);
-        check("history restores the same pending session", await evaluate(0, "document.querySelector('#body-doc').session === held"));
+        check("going back restores the same pending session", await evaluate(0, "document.querySelector('#body-doc').session === held"));
         await away(0); await back(0);
       })(),
     ]);
     await evaluate(0, "stress.releaseAcks()");
-    await converge("ACK delay plus repeated history navigation");
+    await converge("delayed ACKs and repeated back navigation");
 
     await Promise.all([offline(0), offline(1)]);
     const beforePartition = [...expected];
     await batch([0, 1, 2, 3], 12);
-    check("offline browsers keep edits the server has not seen", await evaluate(0, "parked.hasPending") &&
+    check("offline browsers keep their unsent edits", await evaluate(0, "parked.hasPending") &&
       await evaluate(1, "parked.hasPending") && count((await state()).text, "1") === beforePartition[0] &&
       count((await state()).text, "2") === beforePartition[1]);
     await Promise.all([away(0), away(1), rounds([2, 3], 2, 8)]);
     await back(0);
-    check("offline history restore keeps its original pending document", await evaluate(0, "document.querySelector('#body-doc').session === parked && parked.hasPending"));
+    check("going back offline restores the original pending session", await evaluate(0, "document.querySelector('#body-doc').session === parked && parked.hasPending"));
     await batch([0], 5);
     await Promise.all([online(0), online(1), batch([2, 3], 8)]);
     await wait(1, "parked.state === 'closed' && parked.doc.isDestroyed && !parked.hasPending");
-    check("pending edits drain and dispose while their editor is on another page", true);
+    check("pending edits are sent and the session closes while the editor is on another page", true);
     await editor(1);
-    await converge("two offline writers rejoin during peer edits");
+    await converge("two offline writers reconnect while peers edit");
 
     await offline(0); await type(0, 6); await away(0);
     const holdFresh = framework === "turbo" ? `const original = window.fetch;
@@ -209,12 +209,12 @@ async function run(framework, transport, port) {
     await wait(0, `document.documentElement.hasAttribute('data-${framework}-preview') && !!document.querySelector('#body-doc') && !!stress.releaseFresh`);
     check("cached preview is inert and has no document or subscription", await evaluate(0, `window.preview = document.querySelector('#body-doc'); preview.inert && !preview.doc && !preview.provider`));
     await batch([1, 2, 3], 10);
-    check("offline edits are kept while peers edit behind the preview", await evaluate(0, "parked.hasPending && !parked.doc.isDestroyed && !preview.doc"));
+    check("offline edits stay pending while peers edit behind the preview", await evaluate(0, "parked.hasPending && !parked.doc.isDestroyed && !preview.doc"));
     await evaluate(0, "stress.releaseFresh()");
     await wait(0, `!document.documentElement.hasAttribute('data-${framework}-preview') && document.querySelector('#body-doc') !== preview`);
     await online(0);
     await wait(0, "parked.state === 'closed' && parked.doc.isDestroyed && !parked.hasPending");
-    await converge("preview replacement with offline edits and active peers");
+    await converge("replacing the preview with offline edits and active peers");
 
     await Promise.all([
       rounds([2, 3], 4, 6),
@@ -223,19 +223,19 @@ async function run(framework, transport, port) {
       })()),
     ]);
     await batch([0, 1, 2, 3], 6);
-    await converge("two navigating users alongside two continuous writers");
+    await converge("two users navigating while two others type");
 
     await evaluate(0, `window.failedCleanup = document.querySelector('#body-doc').session;
       for (const event of ['change', 'update', 'destroy']) failedCleanup.provider.awareness.on(event, () => { throw new Error('expected editor cleanup failure'); });`);
     await Promise.all([away(0), batch([1, 2, 3], 8)]);
-    check("throwing awareness callbacks still close the session and cancel its browser timer", await evaluate(0,
+    check("the session closes and clears its timer when awareness callbacks throw", await evaluate(0,
       `failedCleanup.state === 'closed' && failedCleanup.doc.isDestroyed && !failedCleanup.hasPending &&
        !stress.intervals.has(failedCleanup.provider.awareness._checkInterval) && String(failedCleanup.error).includes('expected editor cleanup failure')`));
     await editor(0); await batch([0, 1, 2, 3], 6);
-    const final = await converge("editing after faulty editor cleanup");
-    check("all page visits preserve their framework's JavaScript context", final.every((value, i) => value.context === contexts[i]));
-    check("every old body session released its document, queue, and awareness timer", final.every(value => value.retired.every(old => old.state === "closed" && old.destroyed && !old.pending && !old.timerActive)));
-    check("browser 1 and 2 each completed at least eight real framework navigations", final.slice(0, 2).every(value => value.navigation.length >= 8));
+    const final = await converge("editing after a failed editor cleanup");
+    check("every page visit keeps the framework's JavaScript context", final.every((value, i) => value.context === contexts[i]));
+    check("every old body session freed its document, queue, and awareness timer", final.every(value => value.retired.every(old => old.state === "closed" && old.destroyed && !old.pending && !old.timerActive)));
+    check("browsers 1 and 2 each made at least eight framework navigations", final.slice(0, 2).every(value => value.navigation.length >= 8));
     const visits = final[0].navigation;
     const overlap = visits.some((event, i) => event.path === "/away" && visits[i + 1] &&
       final.slice(1).some(peer => peer.inputs.some(at => at > event.at && at < visits[i + 1].at)));
@@ -243,7 +243,7 @@ async function run(framework, transport, port) {
     await browser(0, "screenshot", `${output}/converged.png`);
     await browser(reader, "open", base);
     await wait(reader, "document.querySelector('#body-doc')?.provider?.synced");
-    check("a fresh fifth browser loads the saved text", await evaluate(reader,
+    check("a fifth browser loads the saved text", await evaluate(reader,
       `document.querySelector('#body-doc').doc.getText('content').toString() === ${JSON.stringify(final[0].text)}`));
     for (let i = 0; i < sessions.length; i++) {
       const errors = await browser(i, "errors");
@@ -251,7 +251,7 @@ async function run(framework, transport, port) {
     }
     await Promise.all(sessions.map((_, i) => away(i)));
     const retired = await Promise.all(sessions.map(snapshot));
-    check("leaving all editors releases every tracked body session", retired.every(value => value.retired.every(old => old.state === "closed" && old.destroyed && !old.pending && !old.timerActive)));
+    check("leaving the editor in every browser closes all tracked body sessions", retired.every(value => value.retired.every(old => old.state === "closed" && old.destroyed && !old.pending && !old.timerActive)));
     await writeFile(`${output}/result.json`, JSON.stringify({ label, source, checks,
       expectedKeystrokes: expected, totalKeystrokes: expected.reduce((a, b) => a + b, 0), final, typing,
       elapsedMs: Date.now() - started, server: await state() }, null, 2));

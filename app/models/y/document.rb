@@ -81,10 +81,10 @@ class Y::Document < ActiveRecord::Base
       (select(:id).find_by(key: key) || create_or_find_by!(key: key)).append(update)
     end
 
-    # The key for one attribute of one record, such as "post/1/body". It is
-    # built from the class name, id, and attribute, so no row is read or
-    # created. A key exists before the first write, and for custom stores
-    # that never have a row. polymorphic_name is what Rails writes to
+    # The key for one attribute of one record, such as "post/1/body". It comes
+    # from the class name, id, and attribute, so computing it reads and creates
+    # no rows. That means a key exists before the first write, and for custom
+    # stores that never have a row. polymorphic_name is what Rails writes to
     # record_type, so STI subclasses and namespaced models get the same key.
     def key_for(record, name)
       "#{record.class.polymorphic_name.underscore}/#{record.id}/#{name}"

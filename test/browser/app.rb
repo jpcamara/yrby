@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-# Local-only browser fixture. It runs real Rails with signed grants, SQLite
-# and ActionCable. packages/client/browser/run.mjs (Turbo) and
-# run_turbolinks.mjs (BROWSER_FRAMEWORK=turbolinks) start and stop it. Never
-# deploy this app.
+# A browser test fixture that runs real Rails with signed grants, SQLite, and
+# ActionCable. packages/client/browser/run.mjs (Turbo) and run_turbolinks.mjs
+# (BROWSER_FRAMEWORK=turbolinks) start and stop it. It's only for local test
+# runs and must not be deployed.
 ENV["RAILS_ENV"] = "test"
 FRAMEWORK = ENV.fetch("BROWSER_FRAMEWORK", "turbo")
 CLIENT_BUNDLE = FRAMEWORK == "turbolinks" ? "client_turbolinks.js" : "client.js"
@@ -76,15 +76,17 @@ module ApplicationCable
 end
 
 Y::DocumentChannel.authorize_document do |record, name|
-  # Fixture policy. body is restricted. The other fields let us prove that a
-  # denial doesn't close unrelated subscriptions on the same socket.
+  # Only the page's body_editor may open body. The other attributes are
+  # unrestricted, so the tests can check that denying body doesn't close
+  # unrelated subscriptions on the same socket.
   name != "body" || record.body_editor == current_user
 end
 
 class BrowserController < ActionController::Base
   def show
-    # Test-only login. The grant is exposed on purpose for the copied-grant
-    # tests. This fixture is local-only and must never be deployed.
+    # A test-only login, and the page exposes the grant because the
+    # copied-grant tests need it. Neither belongs in a deployed app, and this
+    # fixture only runs locally.
     cookies.signed[:browser_user] = params[:user].presence || "editor"
     @page = Page.find(1)
     render inline: <<~ERB, layout: false
@@ -132,8 +134,8 @@ class BrowserController < ActionController::Base
     head :no_content
   end
 
-  # The refresh endpoint. It re-runs the channel policy's rule over HTTP with
-  # the session cookie, then renders a fresh short-lived grant.
+  # The refresh endpoint. It checks the channel policy's rule again over HTTP,
+  # using the session cookie, and renders a new short-lived grant.
   def grant
     page = Page.find(1)
     name = params.require(:name)
@@ -144,8 +146,9 @@ class BrowserController < ActionController::Base
 
   def asset
     path = File.join(ENV.fetch("BROWSER_ASSETS"), File.basename(params[:file]))
-    # Exercise the default async import, including simultaneous elements and
-    # detach-before-ready. The delay only exists in this local test fixture.
+    # Slow down the Action Cable bundle so the tests exercise the default async
+    # import, including several elements loading together and an element that
+    # detaches before it's ready. Only this local fixture has the delay.
     sleep 0.3 if File.basename(path).start_with?("actioncable")
     send_file path, type: "text/javascript", disposition: "inline"
   end

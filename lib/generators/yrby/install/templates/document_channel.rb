@@ -24,9 +24,9 @@ class DocumentChannel < ApplicationCable::Channel
 
   # Everyone is denied until you fill this in. Wire it to your app's auth:
   # identify current_user on the cable connection, then check they may read
-  # and write this document. It runs once, when the client subscribes. After
-  # that the subscription stays authorized until it ends. Do not use on_change
-  # raising for access control; that path exists for store failures.
+  # and write this document. This runs once when the client subscribes, and
+  # the subscription stays authorized until it ends. Raising in on_change is
+  # for store failures, so don't use it for access control.
   def authorized?(_document_key)
     false
   end

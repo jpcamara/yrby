@@ -69,7 +69,7 @@ test("constructs with a default awareness and exposes synced/hasPending", (t) =>
   assert.equal(p.hasPending, false);
 });
 
-test("late callbacks from an old subscription are ignored after a reconnect", async (t) => {
+test("old subscription callbacks are ignored after a reconnect", async (t) => {
   const subscriptions = [];
   const consumer = { subscriptions: { create(_params, mixin) {
     const sub = { ...mixin, send() {}, unsubscribe() {} };
@@ -97,7 +97,7 @@ test("late callbacks from an old subscription are ignored after a reconnect", as
   assert.equal(p.hasPending, false);
 });
 
-test("a connected callback fired inside create sends the handshake once create returns", async (t) => {
+test("a connected callback inside create sends the handshake after create returns", async (t) => {
   const sent = [];
   const consumer = { subscriptions: { create(_params, mixin) {
     mixin.connected();
@@ -503,10 +503,10 @@ test("whenSynced stays pending when the provider is destroyed before the first s
   c.deliverConnected();
   p.destroy();
   for (let i = 0; i < 8; i++) await Promise.resolve();
-  assert.equal(settled, false, "destroyed before SyncStep2: the promise must stay pending, not resolve or reject");
+  assert.equal(settled, false, "a provider destroyed before SyncStep2 leaves whenSynced pending");
 });
 
-test("status listeners hear one event per change, including a pending flip with the same status", (t) => {
+test("status listeners get one event per change, including a pending change with the same status", (t) => {
   const c = fakeConsumer();
   const doc = new Y.Doc();
   const p = makeProvider(t, doc, c, { id: "ev1" });
@@ -516,12 +516,12 @@ test("status listeners hear one event per change, including a pending flip with 
   c.deliverConnected();
   c.deliverReceived(syncStep2Envelope(new Y.Doc()));
   assert.deepEqual(seen, ["connecting:false", "connected:false", "synced:false"]);
-  doc.getText("t").insert(0, "a"); // the queue is now non-empty, so pending flips while the status stays the same
+  doc.getText("t").insert(0, "a"); // the first queued update flips pending while the status stays the same
   doc.getText("t").insert(1, "b"); // still pending, so no second event
   assert.deepEqual(seen.slice(3), ["synced:true"]);
   const id = c.calls.send.filter((m) => m.id !== undefined).at(-1).id;
   c.deliverReceived({ ack: id });
-  assert.deepEqual(seen.slice(4), ["synced:false"], "the ack that empties the queue is announced once");
+  assert.deepEqual(seen.slice(4), ["synced:false"], "the ack that empties the queue fires one event");
   assert.equal(p.status, "synced");
 });
 
@@ -550,11 +550,11 @@ test("renew keeps the queue and awareness and replays pending edits on the new s
   c.deliverDisconnected();
   p.renew({ grant: "new" });
   assert.equal(p.awareness, awareness, "same awareness instance");
-  assert.equal(p.hasPending, true, "queue survives the resubscribe");
+  assert.equal(p.hasPending, true, "the queue is kept across the resubscribe");
   assert.equal(p.channelParams.grant, "new");
-  c.deliverConnected(); // the replacement subscription comes up
+  c.deliverConnected(); // the new subscription connects
   const replayed = c.calls.send.filter((m) => m.id !== undefined).length;
-  assert.ok(replayed > sentBefore, "the unacked tail was replayed on the new subscription");
+  assert.ok(replayed > sentBefore, "the unacked updates are replayed on the new subscription");
 });
 
 test("disconnect() removes both page lifecycle handlers", (t) => {
@@ -569,12 +569,12 @@ test("disconnect() removes both page lifecycle handlers", (t) => {
   p.connect();
   assert.ok(listeners.has("pagehide") && listeners.has("pageshow"));
   p.disconnect();
-  assert.equal(listeners.size, 0, "no page handlers left behind");
+  assert.equal(listeners.size, 0, "no page handlers remain");
   p.connect();
   assert.ok(listeners.has("pagehide") && listeners.has("pageshow"), "reconnect installs them again");
 });
 
-test("a throwing status listener is reported via onError, and the other listeners and the cable callback still run", (t) => {
+test("a throwing status listener goes to onError and the other listeners still run", (t) => {
   const c = fakeConsumer();
   const errors = [];
   const p = makeProvider(t, new Y.Doc(), c, { id: "ls1" }, { onError: (error, context) => errors.push({ error, context }) });
@@ -584,11 +584,11 @@ test("a throwing status listener is reported via onError, and the other listener
   p.connect();
   c.deliverConnected();
   c.deliverReceived(syncStep2Envelope(new Y.Doc()));
-  assert.deepEqual(seen, ["connecting", "connected", "synced"], "the second listener still hears every change");
+  assert.deepEqual(seen, ["connecting", "connected", "synced"], "the second listener gets every change");
   assert.equal(errors.length, 3);
   assert.equal(errors[0].context, "listener");
   assert.match(String(errors[0].error), /listener bug/);
-  assert.equal(p.synced, true, "the cable callback that fired the listener completed");
+  assert.equal(p.synced, true, "the cable callback that called the listener finishes");
 });
 
 test("destroy() is idempotent", (t) => {
@@ -602,7 +602,7 @@ test("destroy() is idempotent", (t) => {
 
 
 for (const action of ["disconnect", "destroy"]) {
-  test(`${action} called inside subscriptions.create unsubscribes the subscription it returns`, async t => {
+  test(`${action} inside subscriptions.create unsubscribes the returned subscription`, async t => {
     const c = fakeConsumer();
     const p = makeProvider(t, new Y.Doc(), c);
     const create = c.subscriptions.create;
@@ -626,7 +626,7 @@ for (const action of ["disconnect", "destroy"]) {
   });
 }
 
-test("connect() called from inside subscriptions.create creates only one subscription", t => {
+test("a nested connect() in subscriptions.create creates one subscription", t => {
   const c = fakeConsumer();
   const p = makeProvider(t, new Y.Doc(), c);
   const create = c.subscriptions.create;
@@ -658,7 +658,7 @@ test("connect() from a status listener during destroy throws destroyed", async t
   assert.equal(p.status, "disconnected");
 });
 
-test("when a status listener reconnects, the remaining listeners get the newer status", t => {
+test("later listeners see the latest status when one reconnects", t => {
   const c = fakeConsumer();
   const p = makeProvider(t, new Y.Doc(), c);
   const seen = [];
@@ -671,7 +671,7 @@ test("when a status listener reconnects, the remaining listeners get the newer s
   assert.equal(seen.at(-1), p.status);
 });
 
-test("destroy() called from the awareness update during disconnect runs one teardown", async t => {
+test("destroy() in an awareness update during disconnect tears down once", async t => {
   const c = fakeConsumer();
   const p = makeProvider(t, new Y.Doc(), c);
   p.connect(); c.deliverConnected();
@@ -684,7 +684,7 @@ test("destroy() called from the awareness update during disconnect runs one tear
   assert.throws(() => p.connect(), /destroyed/);
 });
 
-test("a new connection started during an old sync frame waits for its own catch-up", async t => {
+test("a connection started during an old sync frame waits for its own catch-up", async t => {
   const c = fakeConsumer(), doc = new Y.Doc(), peer = new Y.Doc();
   t.after(() => { doc.destroy(); peer.destroy(); });
   const p = makeProvider(t, doc, c);
@@ -703,7 +703,7 @@ test("a new connection started during an old sync frame waits for its own catch-
   assert.equal(p.synced, true);
 });
 
-test("a connected callback queued before subscriptions.create throws does not start the protocol", async t => {
+test("a queued connected callback is dropped when subscriptions.create throws", async t => {
   const c = fakeConsumer();
   const p = makeProvider(t, new Y.Doc(), c);
   const create = c.subscriptions.create;
@@ -754,7 +754,7 @@ test("a pageshow handler from an old connection is ignored after a reconnect", t
 
 
 for (const event of ["change", "update"]) {
-  test(`a throwing awareness ${event} listener is reported, and disconnect still completes with the queue kept`, async t => {
+  test(`disconnect completes when an awareness ${event} listener throws`, async t => {
     const c = fakeConsumer(), errors = [], doc = new Y.Doc();
     const p = makeProvider(t, doc, c, {}, { onError: (error, context) => errors.push({ error, context }) });
     p.connect(); c.deliverConnected();
@@ -786,7 +786,7 @@ for (const event of ["change", "update"]) {
   });
 }
 
-test("a throwing awareness destroy listener is reported, and the timer and doc listeners are still removed", async t => {
+test("destroy removes the timer and doc listeners when an awareness destroy listener throws", async t => {
   const c = fakeConsumer(), errors = [], doc = new Y.Doc();
   const p = makeProvider(t, doc, c, {}, { onError: (error, context) => errors.push({ error, context }) });
   p.connect(); c.deliverConnected();
@@ -804,7 +804,7 @@ test("a throwing awareness destroy listener is reported, and the timer and doc l
   assert.equal(p.status, "disconnected");
   assert.equal(p.hasPending, false);
   assert.equal(c.calls.removed, 1);
-  assert.equal(timer._destroyed, true, "Awareness's owned Node timer was canceled");
+  assert.equal(timer._destroyed, true, "the Awareness Node timer is canceled");
   assert.ok(errors.some(entry => entry.error === failure && entry.context === "awareness:destroy"));
   doc.getText("t").insert(0, "later");
   assert.equal(p.hasPending, false);
@@ -812,7 +812,7 @@ test("a throwing awareness destroy listener is reported, and the timer and doc l
   assert.doesNotThrow(() => p.destroy());
 });
 
-test("a throwing onError callback goes to console.warn, and status events, rejection, and reconnect still work", async t => {
+test("a throwing onError goes to console.warn and the provider keeps working", async t => {
   const warnings = [];
   t.mock.method(console, "warn", (...args) => warnings.push(args));
   const c = fakeConsumer(), seen = [];
@@ -827,11 +827,11 @@ test("a throwing onError callback goes to console.warn, and status events, rejec
   p.connect(); c.deliverConnected();
   assert.equal(p.status, "connected");
   assert.equal(c.calls.subscriptions.length, 2);
-  assert.ok(warnings.length >= 4, "reporter failures remain visible");
+  assert.ok(warnings.length >= 4, "reporter failures go to console.warn");
   p.destroy();
 });
 
-test("a throwing unsubscribe is reported via onError, and the replacement connection still comes up", async t => {
+test("a throwing unsubscribe goes to onError and reconnecting still works", async t => {
   const c = fakeConsumer(), errors = [];
   const p = makeProvider(t, new Y.Doc(), c, {}, { onError: (error, context) => errors.push({ error, context }) });
   p.connect(); c.deliverConnected();

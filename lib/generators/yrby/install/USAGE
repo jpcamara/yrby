@@ -1,7 +1,7 @@
 Description:
     Creates the migration for the gem's document storage (Y::Document +
     Y::DocumentUpdate). The models and Y::DocumentChannel ship in the gem,
-    so the migration is the only file added to the app.
+    so the migration is the only file this adds to your app.
 
 Example:
     bin/rails generate yrby:install

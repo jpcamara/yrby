@@ -42,9 +42,9 @@ class SyncTest < Minitest::Test
 
       define_method(:sync_distribute) { |encoded| broadcasts << encoded }
     end
-    # Most tests exercise the sync protocol and don't care about
-    # authorization, so the helper authorizes by default. authorized: false
-    # leaves the concern's default in place, which rejects.
+    # Most tests here cover the sync protocol, so the helper authorizes every
+    # key unless you pass authorized: false, which keeps the concern's
+    # rejecting default.
     klass.define_method(:authorized?) { |_key| true } if authorized
     klass.on_load(&loader)
     klass.on_change(&recorder)
@@ -74,8 +74,8 @@ class SyncTest < Minitest::Test
 
     # Outside a yrby-rails app Y::Document isn't loaded, so the hooks have no
     # default and the concern raises. The full suite loads the models into
-    # this process, so that state is stubbed by hand here. This suite has no
-    # minitest/mock.
+    # this process, so we stub default_hook by hand to recreate that. The
+    # suite doesn't use minitest/mock.
     sync = Y::ActionCable::Sync
     sync.singleton_class.alias_method(:real_default_hook, :default_hook)
     sync.define_singleton_method(:default_hook) { |_name| nil }
@@ -110,7 +110,7 @@ class SyncTest < Minitest::Test
     assert_empty helper.transmits, "no state may be served before authorization"
   end
 
-  def test_the_default_rejection_says_how_to_fix_it
+  def test_the_default_rejection_logs_how_to_fix_it
     log = StringIO.new
     helper = helper_for(authorized: false)
     helper.logger = Logger.new(log)
@@ -135,8 +135,8 @@ class SyncTest < Minitest::Test
 
     assert_equal "doc-7", seen
     assert helper.rejected
-    # A channel that defined authorized? and returned false should not get
-    # the hint about defining it.
+    # This channel defined authorized?, so the log shouldn't tell it to
+    # define one.
     refute_match(/define authorized\?/, log.string)
   end
 
@@ -146,7 +146,7 @@ class SyncTest < Minitest::Test
     helper.sync_subscribed("doc")
 
     refute helper.rejected
-    assert_equal 1, helper.transmits.length, "the opening handshake went out"
+    assert_equal 1, helper.transmits.length, "expected the opening handshake"
   end
 
   def test_max_frame_bytes_default_override_and_disable

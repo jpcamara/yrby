@@ -1,6 +1,6 @@
-// Browser policy for Turbo and Turbolinks. An editor binds only while its page
-// is the live one. A cached snapshot or preview does not own a document or a
-// delivery queue. The session store owns those.
+// Turbo and Turbolinks integration. An editor binds only while its page is
+// live. Cached snapshots and previews hold no document or delivery queue, since
+// the session store keeps those.
 export interface DocumentMount {
   readonly ownerDocument: Document;
   readonly isConnected: boolean;
@@ -8,7 +8,7 @@ export interface DocumentMount {
   deactivate(): void;
 }
 const adapters = new WeakMap<Document, TurboAdapter>();
-// Turbo (Hotwire) and Turbolinks 5 fire the same lifecycle under different names.
+// Turbo (Hotwire) and Turbolinks 5 fire the same lifecycle events under different names.
 const CACHE_EVENTS = ["turbo:before-cache", "turbolinks:before-cache"];
 const RENDER_EVENTS = ["turbo:render", "turbo:load", "turbo:fetch-request-error", "turbolinks:render", "turbolinks:load"];
 const PREVIEW_ATTRIBUTES = ["data-turbo-preview", "data-turbolinks-preview"];
@@ -24,7 +24,7 @@ export function registerDocumentMount(mount: DocumentMount): () => void {
   };
 }
 
-/** Explicit adapter teardown, useful when an application shuts down or in tests. */
+/** Tears down the adapter, for application shutdown or tests. */
 export function disconnectTurbo(document: Document): void { adapters.get(document)?.destroy(); }
 
 type AdapterState = { phase: "active"; timer?: ReturnType<typeof setTimeout> } | { phase: "destroyed" };
@@ -50,9 +50,9 @@ class TurboAdapter {
     if (state.phase !== "active") return;
     for (const mount of this.mounts) mount.deactivate();
     if (this.#state !== state) return;
-    // A canceled or failed navigation fires no render or load event, so
-    // reconcile on our own once the snapshot clone has finished. That takes
-    // two turns, hence the nested timers.
+    // A canceled or failed navigation fires no render or load event, so we
+    // reconcile ourselves after Turbo finishes cloning the snapshot. The clone
+    // takes two turns, which is why the timers are nested.
     clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       if (this.#state === state) state.timer = setTimeout(this.reconcile, 0);
@@ -63,7 +63,8 @@ class TurboAdapter {
     if (state.phase === "destroyed") return;
     this.#state = { phase: "destroyed" };
     clearTimeout(state.timer);
-    // Cleanup callbacks can register a replacement adapter in this document.
+    // Leave the registry first so cleanup callbacks can register a replacement
+    // adapter for this document.
     adapters.delete(this.document);
     for (const event of CACHE_EVENTS) this.document.removeEventListener(event, this.#beforeCache);
     for (const event of RENDER_EVENTS) this.document.removeEventListener(event, this.reconcile);
