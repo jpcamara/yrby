@@ -7,6 +7,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-01
+
 ### Added
 
 - `Y::DocumentChannel.authorize_document { |record, name| ... }` runs the

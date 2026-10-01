@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-01
+
+This release ships alongside yrby-client 0.6.0, and the client entries below
+are for that version.
+
+### Added
+
+- `Doc#read_array(name)` returns a `Y.Array` root as a JSON string, for
+  documents whose content lives in an array.
+
 ### Changed
 
 - yrby-client document elements now use shared document sessions scoped to
