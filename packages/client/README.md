@@ -60,6 +60,27 @@ session that blocks or is discarded aborts its leases, which releases each
 element's editor. Elements that name the same document share one session, and
 that session keeps their pending edits after the last element is gone.
 
+### How the element and session behave
+
+Editor cleanup, status listeners, and `yrby:*` event listeners are your code,
+and they can call back into the element or session while it's partway through
+something. Both classes follow three rules to stay consistent:
+
+1. Calls you make (`acquire`, `retry`, `discard`, and the element's
+   deactivate, retarget, and destroy) take effect right away. Turbo copies the
+   page as soon as `before-cache` returns, and a retargeted editor has to stop
+   writing to the old document immediately.
+2. Callbacks and async results (provider status and errors, lease aborts, the
+   consumer loading, the first sync) record what happened and schedule a
+   settle. A settle runs as a microtask after the current call stack, compares
+   what should exist with what does, and fixes the difference. Each object has
+   at most one settle pending, and an extra one does no harm.
+3. They update their own state before releasing any lease, because releasing a
+   lease runs your editor cleanup.
+
+The session's allowed phase transitions live in the `PHASES` table in
+`src/document_session.ts`.
+
 ## Install
 
 ```bash
