@@ -157,17 +157,13 @@ session, call `element.activate()` or remount the element to attach again.
 element is reinserted, without discarding pending edits.
 
 The `refresh` attribute names a same-origin URL that returns a new grant for
-this document as JSON, `{ "grant": "..." }`. When the server rejects the
-subscription, as it does when a grant has expired and the cable reconnects,
-the session fetches that URL with the browser's session cookies and resubscribes
-with the new grant. It keeps the same document, pending edits, and
-acknowledgment route. Your application decides whether to issue each grant, so
-every request is a fresh permission check, and the session only fetches after a
-rejection. It tries one renewal per rejection. If the refresh fails, takes
-longer than 15 seconds, or the server rejects the renewed grant too, the
-session blocks as it would without the attribute. The session reads the
-attribute when it is acquired, and changing it later does not rebind the
-editor.
+this document as `{ "grant": "..." }`. When the server rejects the
+subscription, typically because the grant expired, the session fetches that
+URL once and resubscribes with the new grant, keeping its document and
+pending edits. See [Grant lifetime and
+refresh](https://github.com/jpcamara/yrby#grant-lifetime-and-refresh) in the
+main README. The attribute is read when the session is acquired, so changing
+it later doesn't rebind the editor.
 
 The default element needs `@rails/actioncable`, `yjs`, and `y-protocols`. All
 default elements share one consumer and one import of it while that import is
@@ -184,11 +180,7 @@ YrbyDocumentElement.consumer = createConsumer();
 ## Document sessions
 
 Each consumer has its own store. Two acquisitions with the same
-`{ channel, grant, name }` share one document and one queue. The client
-compares grants as strings and does not decode them to work out whether two
-grants point at the same record. Each session adds an opaque `session_id`
-subscription parameter so the server can route acknowledgments to it. The
-server does not use that parameter to select or authorize a document.
+`{ channel, grant, name }` share one document and one queue.
 
 A headless workflow can hold a lease for as long as it runs:
 
@@ -225,8 +217,7 @@ consumer's queued work.
 
 A blocked session holds its document and pending edits in memory. `retry()`
 reconnects with the session's current grant, which is the original one or the
-last one its `refresh` URL returned. `discard()` drops the work, and cache
-eviction does not discard unsaved work. A grant that arrives any other way,
+last one its `refresh` URL returned. `discard()` drops the work. A grant that arrives any other way,
 such as a new element attribute, starts a separate session and leaves the
 blocked one blocked.
 
@@ -276,8 +267,7 @@ reconnects. Use `onStatusChange` to track the live connection.
 
 After `disconnect()` or `destroy()`, the provider ignores callbacks from the
 old subscription. If a consumer invokes callbacks while it is still creating
-the subscription, the provider holds them until creation returns. A managed
-session sets up its own acknowledgment route, separate from these guards.
+the subscription, the provider holds them until creation returns.
 
 On `disconnect()` / `destroy()` — and on browser `pagehide` — the provider
 broadcasts a presence removal so peers drop your cursor immediately instead of

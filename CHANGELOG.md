@@ -43,12 +43,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   can't interrupt presence removal or leave the awareness timer running. If
   the error handler itself throws, the error goes to the console.
 
-- A new four-browser regression matrix types concurrently through the
-  ActionCable and AnyCable JavaScript clients while navigating with Turbo and
-  Turbolinks. It covers delayed acknowledgments, offline history restore,
-  cached previews, fresh-reader persistence, and cleanup after application
-  callbacks throw.
-
 ### Fixed
 
 - ActionCable providers now ignore callbacks from subscriptions that have

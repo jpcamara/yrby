@@ -685,10 +685,11 @@ When a subscription is rejected, the element fetches that URL with the session
 cookie, and the action runs your authorization again. If the response is
 `{ "grant": ... }`, the same session resubscribes with the new grant and keeps
 its document and pending edits. Any other response, a non-2xx status, or a second
-rejection blocks the session as before. The element doesn't renew grants on a
-timer, so it won't interrupt a healthy open subscription. Every reconnect after
-expiry is a fresh permission check, which is why you'd want a short lifetime in
-the first place.
+rejection blocks the session as before, and so does a refresh that takes
+longer than 15 seconds. The element doesn't renew grants on a timer, so it
+won't interrupt a healthy open subscription. Every reconnect after expiry is a
+fresh permission check, which is why you'd want a short lifetime in the first
+place.
 
 For room-keyed collaboration or other custom channel behavior, generate a
 channel with `bin/rails generate yrby:install --channel` and implement its

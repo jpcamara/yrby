@@ -16,15 +16,8 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   state, and other subscriptions on the connection keep working. Without a
   block, a valid signed grant is enough.
 
-  The check runs once per subscription. Running it on every message would add
-  a record load and the application's own queries to every keystroke and
-  cursor move. If you revoke a permission mid-session, the change takes effect
-  the next time that client subscribes. A short `expires_in:` with a
-  `refresh:` URL limits how long that can take, and the application can stop
-  the subscription itself when it needs to cut off access immediately. The
-  channel stores the decision as channel state, so it survives AnyCable
-  creating a new channel instance for each command. A frame that arrives
-  without an authorized subscription is rejected even if its grant is valid.
+  The check runs once per subscription, so a permission you revoke
+  mid-session takes effect the next time that client subscribes.
 - `record.collaborative_document(name)` returns a bound
   `Y::Collaborative::Attribute`, which both application code and the shipped
   channel use to read and write the document. `y_doc` builds a native
