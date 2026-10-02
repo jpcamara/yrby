@@ -29,7 +29,7 @@ class MetaTest < ActionDispatch::IntegrationTest
     get "/llms.txt"
 
     assert_response :success
-    assert_includes response.body, "append .md"
+    assert_includes response.body, "Append .md to any docs page URL"
     DocPage.all.each { |entry| assert_includes response.body, "/docs/#{entry.slug}.md" }
   end
 

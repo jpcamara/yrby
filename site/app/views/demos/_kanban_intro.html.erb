@@ -1,6 +1,8 @@
 <p>
-  Shared state is a <code>Y.Array</code> of card <code>Y.Map</code>s. Add a
-  card, drag it between columns, delete it, in two windows at once. A move
-  is a single <code>map.set</code>, so two people moving different cards
-  don't conflict.
+  The board is a <code>Y.Array</code> named <code>cards</code>, and each card is
+  a <code>Y.Map</code> with an id, its text, and its column. Adding a card
+  pushes a map onto the array and deleting one removes it. Moving a card writes
+  only its <code>column</code> key, so two people can drag different cards at
+  the same time without a conflict. If both of you move the same card, the
+  last write wins. Drag cards by the handle on their left edge.
 </p>

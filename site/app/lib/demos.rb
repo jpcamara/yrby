@@ -15,43 +15,43 @@ module Demos
     Demo.new(
       slug: "lexxy",
       title: "Lexxy",
-      shape: "Y.XmlFragment",
-      blurb: "A Lexxy editor on lexxy-realtime. The server renders the document into the record's column as you type.",
+      shape: "Y.XmlText",
+      blurb: "Lexxy with lexxy-realtime. The server renders each change to HTML and saves it on a Note record.",
       read: nil
     ),
     Demo.new(
       slug: "tiptap",
       title: "Tiptap",
       shape: "Y.XmlFragment",
-      blurb: "The same document shape through Tiptap's own Collaboration extension.",
+      blurb: "ProseMirror rich text through Tiptap's Collaboration and CollaborationCursor extensions.",
       read: Reader.new(root: "default", kind: :xml)
     ),
     Demo.new(
       slug: "spreadsheet",
       title: "Spreadsheet",
-      shape: "Y.Array of row Y.Maps, cells nested",
-      blurb: "Cells merge independently, and sorting stays out of the document.",
+      shape: "Y.Array of row Y.Maps",
+      blurb: "Every cell is its own Y.Map, so edits to different cells merge. Sorting is local to each window.",
       read: Reader.new(root: "rows", kind: :array)
     ),
     Demo.new(
       slug: "whiteboard",
       title: "Whiteboard",
-      shape: "Y.Map",
-      blurb: "Draggable notes as a map of records, the same shape canvas tools use.",
+      shape: "Y.Map of Y.Maps",
+      blurb: "Sticky notes you can add, drag, and edit, stored as records keyed by id.",
       read: Reader.new(root: "shapes", kind: :map)
     ),
     Demo.new(
       slug: "kanban",
       title: "Kanban",
-      shape: "Y.Array",
-      blurb: "Cards in a list. A move is a single map write, so moves don't conflict.",
+      shape: "Y.Array of Y.Maps",
+      blurb: "Moving a card changes one key on its map, so two people can move different cards at once.",
       read: Reader.new(root: "cards", kind: :array)
     ),
     Demo.new(
       slug: "codemirror",
       title: "Code",
       shape: "Y.Text",
-      blurb: "CodeMirror 6 over a Y.Text, with remote cursors and selections.",
+      blurb: "CodeMirror 6 bound with y-codemirror.next, showing other people's cursors and selections.",
       read: Reader.new(root: "code", kind: :text)
     )
   ].freeze

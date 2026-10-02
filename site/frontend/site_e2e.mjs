@@ -208,7 +208,7 @@ const cardText = (s) => js(s, `JSON.stringify(window.__yrby.cards.toArray().map(
 check("both boards hold the seeded cards",
   !!(await converge("seeded cards", cardText, (v) => JSON.parse(v).length === 3)))
 
-await clickAt(A, '.col input[aria-label="add to To Do"]')
+await clickAt(A, '.col input[aria-label="Add a card to To Do"]')
 await ab(A, "keyboard", "type", "card from A")
 await ab(A, "press", "Enter")
 check("a card added in one window reaches the other",

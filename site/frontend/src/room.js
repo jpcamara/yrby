@@ -136,7 +136,7 @@ function setupRoomBar() {
       copy.textContent = "Copied"
     } catch {
       url.select() // clipboard permission denied; leave it selected to copy by hand
-      copy.textContent = "Press ⌘C"
+      copy.textContent = "Copy the selected link"
     }
     setTimeout(() => { copy.textContent = "Copy link" }, 2000)
   })
@@ -198,11 +198,11 @@ export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params }
   const consumer = noticeAwareConsumer(createConsumer(cableUrl()), {
     onNotice: () =>
       showNotice(
-        "This room has reached its document size cap and is no longer accepting edits. " +
-        "Open a new room to keep going.",
+        "This room has reached its size limit, so new edits won't be saved or shared. " +
+        "Open the demo again to start a new room.",
       ),
     onRejected: () =>
-      showNotice("Could not join this room. It may be full, or the site may be at capacity."),
+      showNotice("Couldn't join this room. It may be full, or the site may be busy. Try again in a minute, or open the demo again for a new room."),
   })
 
   const provider = new ActionCableProvider(ydoc, consumer, channel, params || { token: mount.dataset.token })
@@ -211,10 +211,11 @@ export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params }
 
   const status = statusEl()
   status.dataset.state = "connecting"
-  status.textContent = `connecting as ${user.name}…`
+  status.textContent = "Connecting…"
+  const STATUS_TEXT = { connecting: "Connecting…", connected: "Syncing…", disconnected: "Disconnected" }
   provider.onStatusChange(({ status: state }) => {
     status.dataset.state = state === "synced" ? "connected" : state
-    status.textContent = state === "synced" ? `synced, editing as ${user.name}` : `${state}…`
+    status.textContent = state === "synced" ? `Synced. You're editing as ${user.name}.` : (STATUS_TEXT[state] ?? state)
     // disconnect() clears this client's awareness entry, and setLocalStateField
     // is a no-op while the local state is null — so an explicit reconnect has to
     // republish the identity or this browser stays invisible to its peers.
@@ -307,9 +308,9 @@ export function wireStoredPanel(ydoc) {
     try {
       const response = await fetch(stored.dataset.url, { headers: { Accept: "application/json" } })
       const { body } = await response.json()
-      stored.firstChild.textContent = body ? pretty(body) : "(empty — edit the document first)"
+      stored.firstChild.textContent = body ? pretty(body) : "Nothing stored yet. Edit the document and this panel will update."
     } catch {
-      stored.firstChild.textContent = "(could not load)"
+      stored.firstChild.textContent = "Couldn't load the stored document."
     }
   }
 

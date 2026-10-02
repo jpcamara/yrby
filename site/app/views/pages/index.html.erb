@@ -1,12 +1,12 @@
 <% content_for :title, "yrby: real-time collaborative editing for Rails" %>
-<% content_for :description, "Real-time collaborative editing for Rails. Documents sync over Action Cable, are stored in your database through Active Record, and render back to HTML in Ruby. There is no Node process to run and no third-party service." %>
+<% content_for :description, "Real-time collaborative editing for Rails. yrby syncs Yjs documents over Action Cable, stores them in your database with Active Record, and renders them to HTML in Ruby. It needs no Node process and no third-party service." %>
 
 <% content_for :head do %>
   <%= json_ld_tag(
         "@context" => "https://schema.org",
         "@type" => "SoftwareSourceCode",
         "name" => "yrby",
-        "description" => "Real-time collaborative editing for Rails. Documents sync over Action Cable, persist to your database, and render back to HTML in Ruby, with no Node process and no third-party service.",
+        "description" => "Real-time collaborative editing for Rails. yrby syncs Yjs documents over Action Cable, stores them in your database, and renders them to HTML in Ruby. It needs no Node process and no third-party service.",
         "url" => canonical_host,
         "codeRepository" => "https://github.com/jpcamara/yrby",
         "programmingLanguage" => ["Ruby", "JavaScript"],
@@ -49,7 +49,7 @@
         <%= link_to "Read the docs", doc_path("getting-started"),
                     class: "rounded-md bg-ink px-5 py-2.5 text-[0.95rem] font-medium text-[#f4f1ea] hover:bg-rose-600" %>
         <a class="rounded-md border border-ink px-5 py-2.5 text-[0.95rem] font-medium text-zinc-100 hover:border-rose-500 hover:text-rose-500"
-           href="/examples/document">Try the quickstart</a>
+           href="/examples/document">Try the example</a>
       </div>
     </div>
   </div>
@@ -81,18 +81,18 @@
       <p class="mb-2 text-[11px] tracking-[0.14em] text-[#9c9384] uppercase">Your database</p>
       <p>y_documents <span class="text-[#9c9384]">key</span> post/42/body</p>
       <p>y_document_updates <span class="text-[#9c9384]">rows</span> <span data-rows>10</span></p>
-      <p class="text-[#9c9384]">compacted into state every 64</p>
+      <p class="text-[#9c9384]">compacts every 64 updates</p>
     </div>
     <div class="min-w-0">
       <p class="mb-2 text-[11px] tracking-[0.14em] text-[#9c9384] uppercase">rails console</p>
-      <p class="truncate text-[#9c9384]">&gt;&gt; post.collaborative_document(:body).y_doc.read_text("body")</p>
+      <p class="truncate text-[#9c9384]">&gt;&gt; post.collaborative_document(:body).y_doc.read_text("content")</p>
       <p class="truncate">=&gt; <span data-read><%= hero_read_text %></span></p>
     </div>
   </div>
   <p class="mt-3 text-sm text-zinc-500">
-    A replay. The
+    This is a scripted replay. The
     <%= link_to "demos", demos_path, class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
-    are live: open one in two windows and type in both.
+    are live, so open one in two windows and type in both.
   </p>
 </section>
 
@@ -100,17 +100,19 @@
 <section class="border-y border-zinc-800 bg-paper">
   <div class="mx-auto grid max-w-6xl items-center gap-12 px-5 py-20 lg:grid-cols-2 lg:py-24">
     <div>
-      <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">The whole integration</p>
+      <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">The Rails side</p>
       <h2 class="mt-3 font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">One line of ERB.</h2>
       <p class="mt-5 max-w-[26em] font-serif text-[1.35rem] leading-[1.5] text-zinc-300 italic">
-        Render a signed grant for this post's body, open one Action Cable
-        channel, and save every change to your database before anyone sees it.
+        The tag renders a signed grant for the post's body. The browser
+        subscribes to the gem's channel with it, and every change is saved to
+        your database before other users see it.
       </p>
       <p class="mt-5 max-w-[34em] leading-7 text-zinc-400">
-        The grant works the way <code>turbo_stream_from</code> signs its stream
-        names. The gem's channel verifies it and records each change before it
-        acknowledges it. You don't write a channel, and the page decides which
-        document the client gets.
+        Because the channel only opens the document named in the grant, the
+        authorization your controller already does decides who can edit. You
+        don't write a channel. In the browser, you import
+        <code>yrby-client/element</code> and attach your editor once the
+        document has synced.
       </p>
     </div>
     <div class="flex min-w-0 flex-col gap-4">
@@ -127,21 +129,21 @@
 <%# ---- Read back in Ruby: a ruled grid --------------------------------- %>
 <section class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
   <div class="flex flex-wrap items-end justify-between gap-6">
-    <h2 class="max-w-[14ch] font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Every Yjs shape, read back in Ruby.</h2>
+    <h2 class="max-w-[14ch] font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Read any document from Ruby.</h2>
     <p class="max-w-[30em] leading-7 text-zinc-400">
-      The server never needs a browser to know what a document says. Ruby reads
-      it straight from the stored state, so search, mailers, and read-only
-      views treat it like any other attribute.
+      Ruby reads a document straight from its stored state, with no browser
+      involved. Search indexing, mailers, exports, and read-only views can all
+      use what people typed.
     </p>
   </div>
   <div class="mt-11 grid border-t border-l border-zinc-700 sm:grid-cols-2 lg:grid-cols-3">
     <% [
-      ["01", "Y.Text", "Plain text", "Code, notes, anything typed. It comes back as a Ruby string.", 'doc.read_text("code")'],
-      ["02", "Y.Map · Y.Array", "Structured data", "Spreadsheets, boards, form state. They come back as JSON.", 'doc.read_array("cards")'],
-      ["03", "Lexxy · Tiptap", "Rich text", "The same HTML the editor saves, byte for byte. CI checks it against documents captured from real editors.", "Y::Lexxy.new(doc).to_html"],
-      ["04", "awareness", "Presence", "Cursors and names travel between peers. The server relays them and never stores them.", "lease.setPresence({ user })"],
-      ["05", "Active Record", "Your tables", "One row per document plus a compacted log of updates, in the database you already run.", "Y::Document.load_state(key)"],
-      ["06", "encryption", "Encrypted at rest", "Declare it on the model. The channel and Ruby reads both go through Active Record encryption.", "has_collaborative_document :body, encrypted: true"]
+      ["01", "Y.Text", "Plain text", "Code, notes, or any other typed text. read_text returns a Ruby string.", 'doc.read_text("code")'],
+      ["02", "Y.Map · Y.Array", "Structured data", "Spreadsheets, boards, and form state. read_map and read_array return JSON.", 'doc.read_array("cards")'],
+      ["03", "Lexxy · Tiptap", "Rich text", "HTML that matches what the editor saves. CI compares it with documents captured from real Tiptap and Lexxy editors.", "Y::Lexxy.new(doc).to_html"],
+      ["04", "awareness", "Presence", "Cursors and names are relayed between peers and never written to the database.", "lease.setPresence({ user })"],
+      ["05", "Active Record", "Your tables", "A row per document and a short log of updates, compacted as it grows, in the database you already run.", "Y::Document.load_state(key)"],
+      ["06", "encryption", "Encrypted at rest", "Declare it on the model, and both the channel and your Ruby reads go through Active Record encryption.", "has_collaborative_document :body, encrypted: true"]
     ].each do |number, tag_name, title, body, code| %>
       <div class="flex min-h-52 min-w-0 flex-col gap-3 border-r border-b border-zinc-700 p-6">
         <div class="flex justify-between font-mono text-xs text-zinc-500"><span><%= number %></span><span><%= tag_name %></span></div>
@@ -152,7 +154,7 @@
     <% end %>
   </div>
   <p class="mt-6">
-    <%= link_to "Every demo shows its server-side read, live →", demos_path,
+    <%= link_to "Each demo shows what Ruby reads as you type →", demos_path,
                 class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
   </p>
 </section>
@@ -164,17 +166,17 @@
     <h2 class="mt-3 font-serif text-4xl leading-[1.04] tracking-tight text-white sm:text-[3.5rem]">The ack comes after the write.</h2>
     <p class="mt-5 max-w-[40em] text-lg leading-8 text-[#c9c1b3]">
       The client resends each update until the server acknowledges it, and the
-      server only acknowledges after your store has recorded it. If the write
-      fails, nobody sees the change and the client tries again. An update that
-      arrives out of order waits as pending until the update it depends on
-      shows up.
+      server acknowledges only after your store has recorded it. If the write
+      fails, there's no ack and no broadcast, so the client sends the update
+      again. An update that arrives before the one it depends on is still
+      recorded, and it waits in the document until the missing update comes in.
     </p>
     <ol class="mt-12 grid overflow-hidden rounded-xl border border-[#3a342c] sm:grid-cols-2 lg:grid-cols-4">
       <% [
         ["01", "Browser", "Queues the update and sends it.", "update #42 →"],
-        ["02", "Channel", "Hands it to your store before anything else.", "on_change"],
-        ["03", "Your store", "Records it. A failure here means no ack and no broadcast.", "Y::Document.append"],
-        ["04", "Everyone", "The sender gets its ack, then the other windows get the update.", "← ack 42"]
+        ["02", "Channel", "Passes it to your store first.", "on_change"],
+        ["03", "Your store", "Records it. If this raises, nothing is acked or broadcast.", "Y::Document.append"],
+        ["04", "Everyone", "The update goes out to the other windows and the sender gets its ack.", "← ack 42"]
       ].each do |number, title, body, token| %>
         <li class="flex flex-col gap-2.5 border-b border-[#3a342c] p-6 sm:border-r">
           <span class="font-mono text-xs text-[#9c9384]"><%= number %></span>
@@ -197,14 +199,15 @@
     <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">lexxy-realtime</p>
     <h2 class="mt-3 font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Three lines, if you use Lexxy.</h2>
     <p class="mt-5 leading-7 text-zinc-400">
-      Lexxy is Basecamp's rich text editor for Rails, the successor to the
-      Action Text editor. lexxy-realtime makes it collaborative with a model
-      macro, a form helper, and a generator that creates the sync channel and
-      the document tables.
+      Lexxy is Basecamp's rich text editor for Rails. It's built on Lexical
+      and replaces Trix in Action Text forms. lexxy-realtime makes it
+      collaborative with a model macro, a form helper, and a generator that
+      adds the sync channel and the document tables.
     </p>
     <p class="mt-4 leading-7 text-zinc-400">
-      Implement <code>authorized?</code> in the channel the generator wrote.
-      Until you do, every subscriber is denied. Then open the form in two
+      Import <code>lexxy-realtime</code> next to Lexxy in your JavaScript.
+      The generated channel denies every subscriber until you implement its
+      <code>authorized?</code> method. After that, open the form in two
       browsers and type.
     </p>
     <p class="mt-5">
@@ -224,11 +227,12 @@
   <div class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
     <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Bring your editor.</h2>
     <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
-      yrby syncs Yjs updates without looking inside them, so any editor with a
-      Yjs binding works. CI drives four of them in real Chrome (Tiptap, Lexxy,
-      Rhino Editor, and CodeMirror) and checks concurrent typing, remote
-      cursors, undo, and that the server renderer matches the editor's own
-      serializer byte for byte. Each demo below is a public room.
+      The server doesn't need to understand a document's structure to sync it,
+      so any editor with a Yjs binding works. CI types into Tiptap, Lexxy,
+      Rhino Editor, and CodeMirror in real Chrome windows. Those tests cover
+      concurrent typing, remote cursors, and undo, and they check that the HTML
+      Ruby renders matches the editor's own output byte for byte. Each demo
+      below is a public room.
     </p>
     <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <% Demos::ALL.each_with_index do |demo, index| %>
@@ -251,11 +255,11 @@
 <section class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
   <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Nothing new to deploy.</h2>
   <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
-    A Node sync server is a second runtime you have to deploy, monitor, scale,
-    and authenticate against. A hosted service puts your documents on someone
-    else's servers and charges per user. yrby is a gem. Your Rails app is the
-    sync server, your database is the store, and the signed grant your page
-    renders is the auth.
+    A Node sync server is a second runtime to deploy, monitor, and scale, and
+    it has to check your app's sessions somehow. A hosted service keeps your
+    documents on another company's servers. With yrby, your Rails app is the
+    sync server and your database is the store. The signed grant your page
+    renders handles access.
   </p>
   <div class="mt-10 overflow-x-auto">
     <table class="compare min-w-full text-[0.95rem]">
@@ -273,14 +277,14 @@
           <td class="accent-col"><code>gem "yrby-rails"</code></td>
         </tr>
         <tr>
-          <td>Second runtime, own persistence, auth bridged over tokens</td>
-          <td>Documents live off-site, per-MAU pricing, another vendor in the request path</td>
-          <td class="accent-col">One gem, your Postgres, your page's signed grant</td>
+          <td>A second runtime with its own storage and its own way of checking who can edit</td>
+          <td>Documents stored off-site, and another vendor in the path of every edit</td>
+          <td class="accent-col">Your Rails app, your database, and the grant your page renders</td>
         </tr>
         <tr>
-          <td>HTML out means a headless editor</td>
-          <td>HTML out means their API</td>
-          <td class="accent-col">HTML out means <code>Y::Lexxy.new(doc).to_html</code></td>
+          <td>Server-side HTML needs a JavaScript renderer</td>
+          <td>Server-side HTML comes through their API</td>
+          <td class="accent-col">Server-side HTML is <code>Y::Lexxy.new(doc).to_html</code></td>
         </tr>
       </tbody>
     </table>
@@ -289,12 +293,12 @@
   <h3 class="mt-20 font-serif text-3xl tracking-tight text-zinc-100">Built for the deployment you already have.</h3>
   <dl class="mt-6 grid gap-x-12 border-t border-zinc-700 md:grid-cols-2">
     <% [
-      ["Thread-safe.", "A <code>Doc</code> can be shared across Puma and Action Cable threads without any locking on your side."],
-      ["Parallel on MRI.", "CRDT work runs with the GVL released. Applying large updates concurrently measured a 2x wall-clock speedup."],
-      ["Hostile input handled.", "Every frame is validated before anything processes it. A bad frame is dropped, and a native panic is raised as a Ruby exception instead of taking the process down."],
-      ["Multi-process.", "Changes are recorded before they are broadcast, across processes too. Any worker can serve any document from the shared store."],
-      ["AnyCable.", "The same channel concern, tested end to end against a real anycable-go gateway. In an authenticated app, presence can travel over AnyCable whispers and skip your Ruby process."],
-      ["Encrypted at rest.", "<code>Y::EncryptedDocument</code> stores state and updates through Active Record encryption, the way <code>ActionText::EncryptedRichText</code> does."]
+      ["Thread-safe.", "You can share a <code>Doc</code> across Puma and Action Cable threads without adding locks of your own."],
+      ["Parallel on MRI.", "CRDT work runs with the GVL released, so threads can apply updates at the same time. In the repo's benchmark, applying an update of about 900 KB concurrently ran more than twice as fast as doing it serially."],
+      ["Validated frames.", "Every frame is checked before it's processed or relayed, and malformed or oversized frames are dropped. A panic in the Rust code is caught and raised as a Ruby exception."],
+      ["Multi-process.", "Every change is recorded before it's broadcast, even when subscribers are spread across processes. Any worker can serve any document from the shared store."],
+      ["AnyCable.", "The same channel code runs on AnyCable, and CI tests it end to end against a real anycable-go gateway. When your users trust each other, presence can go over AnyCable whispers and never reach Ruby."],
+      ["Encrypted at rest.", "<code>Y::EncryptedDocument</code> stores document state and updates with Active Record encryption."]
     ].each do |title, body| %>
       <div class="grid gap-1 border-b border-zinc-700 py-5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-6">
         <dt class="font-serif text-xl text-zinc-100"><%= title %></dt>
@@ -311,7 +315,7 @@
       ["0", "Node processes to run"],
       ["1", "view helper to add"],
       ["8", "precompiled gem platforms"],
-      ["64", "updates per compaction"]
+      ["64", "updates between compactions"]
     ].each do |number, label| %>
       <div class="flex flex-col-reverse gap-2 border-zinc-700 px-5 py-9 not-last:border-r">
         <dt class="text-[0.95rem] text-zinc-400"><%= label %></dt>
@@ -324,11 +328,11 @@
 <%# ---- Start ------------------------------------------------------------- %>
 <section class="mx-auto max-w-6xl px-5 py-20">
   <p class="max-w-[22ch] font-serif text-4xl leading-[1.1] tracking-tight text-zinc-100">
-    Start with the quickstart. Keep a demo open next to it.
+    Read the getting started guide with a demo open in another tab.
   </p>
   <div class="mt-7 inline-flex flex-col gap-1 rounded-lg bg-ink px-4 py-3 font-mono text-sm leading-6 text-[#f4f1ea]">
     <div><span class="text-rose-300">$</span> bundle add yrby-rails</div>
-    <div><span class="text-rose-300">$</span> npm install yrby-client</div>
+    <div><span class="text-rose-300">$</span> npm install yrby-client yjs y-protocols @rails/actioncable</div>
     <div class="text-[#9c9384]"># using Lexxy? <span class="text-[#f4f1ea]">bundle add lexxy-realtime</span></div>
   </div>
   <nav class="mt-7 flex flex-wrap gap-x-6 gap-y-2 text-zinc-400">

@@ -43,17 +43,19 @@ class MetaController < ApplicationController
     body = <<~LLMS
       # yrby
 
-      Real-time collaborative editing that runs in Ruby and Rails, with
-      document state in your own database. Documents sync over Action Cable
-      and persist through Active Record; after every change the server renders
-      the document back into the model as HTML, byte-identical to the editor's
-      own serializer. No Node process, no third-party service. If you use
-      Lexxy, lexxy-realtime wires it up with a model macro, a form helper, and
-      a generator: #{canonical_host}/lexxy
+      yrby adds real-time collaborative editing to Rails apps. It is a Ruby
+      binding for y-crdt (the Rust implementation of Yjs) plus a Rails engine.
+      Documents sync over Action Cable or AnyCable and are stored in your own
+      database through Active Record. Ruby can read a stored document and
+      render Tiptap or Lexxy content to the same HTML the editor produces.
+      It needs no Node process and no third-party service.
 
-      For any page on this site, append .md to the URL to get a plain markdown
-      version optimized for LLMs. A concatenation of every docs page is at
-      #{canonical_host}/llms-full.txt.
+      For Lexxy, the lexxy-realtime gem adds collaboration with a model macro,
+      a form helper, and a generator, and saves the rendered HTML back to the
+      record after each change: #{canonical_host}/lexxy
+
+      Append .md to any docs page URL to get its markdown source. Every docs
+      page concatenated into one file is at #{canonical_host}/llms-full.txt.
 
       ## Docs
 

@@ -11,7 +11,7 @@
     <h1 class="font-serif text-4xl font-normal tracking-tight text-zinc-100 sm:text-5xl"><%= @demo.title %></h1>
 
     <nav class="demo-nav mt-3 mb-5 text-sm text-zinc-500">
-      Same room, different shape:
+      Switch demo:
       <% Demos::ALL.each_with_index do |demo, i| %><%= " · " if i.positive? %><%
         if demo.slug == @demo.slug %><strong class="font-semibold text-zinc-200"><%= demo.title %></strong><%
         else %><%= link_to demo.title, demo_room_path(demo.slug, @room), class: "text-zinc-400 hover:text-accent" %><% end %><% end %>
@@ -20,7 +20,7 @@
     <div class="roombar flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-panel p-2">
       <span class="pl-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">Room</span>
       <input id="room-url" type="text" readonly value="<%= demo_room_url(@demo.slug, @room) %>"
-             aria-label="room link"
+             aria-label="Room link"
              class="min-w-48 flex-[1_1_20rem] rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 font-mono text-xs text-zinc-400">
       <button id="copy-room" type="button"
               class="cursor-pointer rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:border-zinc-500 hover:text-zinc-100">Copy link</button>
@@ -28,10 +28,11 @@
               class="cursor-pointer rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500">Open a second window</button>
     </div>
     <p class="roombar-note mt-2 text-xs leading-5 text-zinc-500">
-      This room is yours until you share it. Open a second window, or send
-      someone the link, and edit in both. Rooms are public, capped at
-      <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB of
-      document, and deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours without activity.
+      Open a second window or send someone the link, then edit in both.
+      Anyone with the link can edit. A room holds up to
+      <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB per
+      document, and it's deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours with no edits and
+      no one connected.
     </p>
 
     <div class="mt-4 max-w-2xl space-y-3 text-sm leading-6 text-zinc-400 [&_a]:text-accent">
@@ -39,7 +40,7 @@
     </div>
 
     <div id="presence" class="presence mt-4 min-h-6"></div>
-    <p id="status" class="status">connecting…</p>
+    <p id="status" class="status">Connecting…</p>
     <p id="notice" class="notice" hidden></p>
   </header>
 
@@ -57,9 +58,11 @@
       </summary>
       <div class="px-4 py-3">
         <p class="mb-2 text-xs leading-5 text-zinc-500">
-          Fetched from <code>GET <%= demo_stored_path(@demo.slug, @room) %></code>
-          when you open this panel. This is the document rebuilt in Ruby with
-          <code><%= call %></code>. No browser was involved.
+          The server loads this room's stored state into a <code>Y::Doc</code>
+          and calls <code><%= call %></code>, with no browser involved. The
+          panel fetches the result from
+          <code>GET <%= demo_stored_path(@demo.slug, @room) %></code> when you
+          open it and again after each change.
         </p>
         <pre id="stored-html" class="!my-0 max-h-64 text-[0.72rem]" data-url="<%= demo_stored_path(@demo.slug, @room) %>"><code>…</code></pre>
       </div>
