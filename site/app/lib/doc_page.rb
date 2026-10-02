@@ -63,9 +63,9 @@ class DocPage
   README_URL = "https://github.com/jpcamara/yrby/blob/main/README.md".freeze
 
   # The syntect theme Commonmarker highlights fenced code with, server-side.
-  # base16-eighties.dark is a neutral dark grey whose token colors sit well on
-  # the site's panel color (the stylesheet overrides the background to match).
-  CODE_THEME = "base16-eighties.dark".freeze
+  # InspiredGitHub is a light theme whose token colors read well on the white
+  # code sheets (the stylesheet overrides the background to match).
+  CODE_THEME = "InspiredGitHub".freeze
 
   ROOT = Rails.root.join("docs")
 

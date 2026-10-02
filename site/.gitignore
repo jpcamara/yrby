@@ -15,10 +15,12 @@
 /public/kanban.js
 /public/codemirror.js
 /public/document.js
+/public/hero.js
 /public/*.js.map
 
 # Built stylesheet (Tailwind via `bun run build:css`)
 /public/site.css
+/public/fonts/
 
 # Runtime
 /log/*
