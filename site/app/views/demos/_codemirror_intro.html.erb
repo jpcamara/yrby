@@ -1,5 +1,7 @@
 <p>
-  Shared state is a <code>Y.Text</code>, bound to CodeMirror 6 with
-  <code>y-codemirror.next</code>. Remote cursors and selections come from
-  awareness. The server doesn't know this is code. It just syncs the text.
+  The document is a single <code>Y.Text</code> named <code>code</code>, bound
+  to CodeMirror 6 by <code>y-codemirror.next</code>. Other people's cursors and
+  selections come from awareness. Nothing on the server is specific to code.
+  It stores and relays these updates the same way it does for every other
+  demo. Try typing on the same line in both windows.
 </p>

@@ -2,9 +2,9 @@
 <html lang="en" class="bg-zinc-950">
   <head>
     <%
-      page_title = content_for(:title).presence || "yrby: collaborative editing that runs in Ruby and Rails"
+      page_title = content_for(:title).presence || "yrby: real-time collaborative editing for Rails"
       page_desc  = content_for(:description).presence ||
-        "Real-time collaborative editing for Rails. Documents sync over Action Cable, are stored in your database through Active Record, and render back to HTML in Ruby. There is no Node process to run and no third-party service."
+        "Real-time collaborative editing for Rails. yrby syncs Yjs documents over Action Cable, stores them in your database with Active Record, and renders them to HTML in Ruby. It needs no Node process and no third-party service."
       page_canonical = content_for(:canonical).presence || canonical_url
     %>
     <title><%= page_title %></title>
@@ -76,14 +76,15 @@
         <a class="font-serif text-2xl leading-none text-zinc-100" href="/">yrby<%= caret_mark("ml-0.5 text-rose-500") %></a>
         <div class="max-w-xl space-y-2 md:flex-1">
           <p>
-            MIT licensed. Built on y-crdt, Magnus, and rb-sys. The
-            <a class="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>
-            is the canonical reference; these pages are a copy of it.
+            MIT licensed. Built on y-crdt, Magnus, and rb-sys. The docs on
+            this site are copied from the
+            <a class="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>,
+            and if the two ever disagree, the README is correct.
           </p>
           <p>
-            Demo rooms are public and temporary: anyone with the link can edit,
-            and rooms untouched for a day are deleted. Don't put anything in them
-            you would miss.
+            Demo rooms are public. Anyone with the link can edit one, and a room
+            nobody has touched for a day is deleted, so don't type anything you
+            want to keep.
           </p>
         </div>
         <nav class="flex gap-5 text-zinc-400">

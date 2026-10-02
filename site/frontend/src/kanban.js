@@ -21,7 +21,7 @@ for (const [id, title] of COLUMNS) {
   const col = document.createElement("div")
   col.className = "col"
   col.innerHTML = `<h3>${title}</h3><div class="cards"></div>` +
-    `<form class="add"><input placeholder="+ add card" aria-label="add to ${title}"></form>`
+    `<form class="add"><input placeholder="Add a card" aria-label="Add a card to ${title}"></form>`
   board.appendChild(col)
   lists[id] = col.querySelector(".cards")
   col.querySelector("form").addEventListener("submit", (e) => {
@@ -89,9 +89,9 @@ function render() {
     if (!list) return
     const el = document.createElement("div")
     el.className = "card"
-    el.innerHTML = `<span class="grip" title="drag to move" aria-hidden="true">⠿</span>` +
+    el.innerHTML = `<span class="grip" title="Drag to move" aria-hidden="true">⠿</span>` +
       `<span class="t">${esc(m.get("text"))}</span>` +
-      `<button class="del" data-a="del" title="delete">×</button>`
+      `<button class="del" data-a="del" title="Delete card" aria-label="Delete card">×</button>`
     el.querySelector('[data-a="del"]').onclick = () => {
       const i = cards.toArray().indexOf(m)
       if (i >= 0) cards.delete(i, 1)

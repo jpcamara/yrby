@@ -17,7 +17,7 @@ const consumer = {
         ...callbacks,
         received(message) {
           if (message?.notice === "document_full") {
-            status.textContent = "This shared scratchpad is full. Unsaved changes remain in this tab."
+            status.textContent = "This shared scratchpad is full, so new edits won't be saved. Anything typed since then is only in this tab."
           } else {
             callbacks.received(message)
           }
@@ -43,9 +43,9 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
     }),
   })
   const off = detail.provider.onStatusChange(({ status: state }) => {
-    status.textContent = state === "synced" ? "Connected. Ready to edit." : "Reconnecting…"
+    status.textContent = state === "synced" ? "Synced. Ready to edit." : "Reconnecting…"
   })
-  status.textContent = "Connected. Ready to edit."
+  status.textContent = "Synced. Ready to edit."
   detail.signal.addEventListener("abort", () => {
     off()
     editor.destroy()
@@ -53,7 +53,7 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
 })
 
 document.addEventListener("yrby:error", () => {
-  status.textContent = "Unable to connect. Keep this tab open to retain any unsaved work."
+  status.textContent = "Couldn't connect. Keep this tab open so your unsaved edits aren't lost."
 })
 
 document.querySelector("#read-document").addEventListener("click", async () => {
@@ -64,7 +64,7 @@ document.querySelector("#read-document").addEventListener("click", async () => {
     const { body } = await response.json()
     output.textContent = body || "The saved document is empty."
   } catch {
-    output.textContent = "Could not read the saved document. Try again."
+    output.textContent = "Couldn't read the saved document. Try again."
   }
 })
 

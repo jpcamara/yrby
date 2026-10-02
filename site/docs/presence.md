@@ -1,12 +1,12 @@
 # Presence
 
 Presence is who is in the room, where their caret is, and what they have
-selected. In Yjs terms that is awareness, and the browser clients own it. The
-server doesn't set or hold any presence state. It relays awareness frames
-without reading them and stores nothing.
+selected. Yjs calls this awareness, and only the browsers set it. The server
+doesn't set or hold any presence state. It relays awareness frames without
+reading them and stores nothing.
 
-That's why there is no server-side cleanup for presence and no unsubscribe hook
-on the channel. There is nothing per connection to clean up.
+So the channel has no presence cleanup and no unsubscribe hook. The server
+keeps nothing per connection that would need cleaning up.
 
 ## Publishing your identity
 
@@ -14,18 +14,19 @@ on the channel. There is nothing per connection to clean up.
 provider.awareness.setLocalStateField("user", { name: "Ada", color: "#818cf8" })
 ```
 
-Do this as soon as the provider exists. Peers see you before your editor has
-mounted. If your editor binding also sets `user` (Tiptap's
-`CollaborationCursor` does), it overwrites the same field when it starts, which
-is fine.
+Do this as soon as the provider exists, so peers see you before your editor
+mounts. Some editor bindings also set `user`, such as Tiptap's
+`CollaborationCursor`. That binding overwrites the same field when it starts,
+and that's fine.
 
-With `<yrby-document>`, the session starts with no local presence. Publish it
-through the lease instead: `detail.lease.setPresence({ user: { name, color } })`
-from `yrby:synced`, and `setPresence(null)` when the editor blurs.
+With `<yrby-document>`, the session starts with no local presence. Set it
+through the lease. Call `detail.lease.setPresence({ user: { name, color } })`
+from your `yrby:synced` handler, and call `setPresence(null)` when the editor
+blurs.
 
-Any JSON-serializable value works. This site's spreadsheet demo publishes the
-cell you are focused on as a second field. Each browser then draws that cell in
-the peer's color, wherever the row sits in that browser's own sort order.
+Any JSON-serializable value works. This site's spreadsheet demo also publishes
+the cell you're focused on. Each browser draws that cell in the peer's color,
+even when the two browsers sort the rows differently.
 
 ```js
 input.addEventListener("focus", () => provider.awareness.setLocalStateField("cell", cellId))
@@ -44,16 +45,16 @@ provider.awareness.on("update", () => {
 })
 ```
 
-`getStates()` is a `Map` from client id to state. Your own entry is in there
-too. Filter it out with `awareness.clientID` if you don't want to render
-yourself twice.
+`getStates()` is a `Map` from client id to state, and it includes your own
+entry. Filter it out with `awareness.clientID` so you don't render yourself
+twice.
 
 ## Leaving
 
-`yrby-client` sends a best-effort presence-removal frame on disconnect and on
-`pagehide`, so a closed tab leaves the room quickly. When a client can't send
-that frame (a killed process, a lost network), the client-side awareness
-timeout removes it instead.
+`yrby-client` sends a presence-removal frame on disconnect and on `pagehide`,
+so a closed tab leaves the room quickly. Delivery isn't guaranteed. If the
+browser crashes or loses its network before the frame goes out, other clients
+remove the entry when its awareness timeout expires.
 
 Calling `disconnect()` clears the local awareness state. If you reconnect by
 hand, publish your identity again. See
@@ -70,28 +71,30 @@ object.
 | Tiptap v3 / Rhino | `@tiptap/extension-collaboration-caret` |
 | CodeMirror 6 | `yCollab(ytext, provider.awareness)` |
 
-They take the provider, or its `awareness`, directly. `provider.awareness` is a
-plain `y-protocols` `Awareness` instance, the same class those bindings already
-expect.
+You pass them the provider or its `awareness`. `provider.awareness` is a plain
+`y-protocols` `Awareness` instance, which is the class those bindings expect.
 
 ## Under AnyCable
 
-Under AnyCable the channel also subscribes an awareness stream with
-`whisper: true`. Whispers go from client to client, and only presence uses that
-path. Document updates still go through the server, get recorded, and get
-acked. Awareness is never recorded or acked.
+Under AnyCable the channel also subscribes to an awareness stream with
+`whisper: true`. A whisper goes from one client to the others without calling
+your Ruby code, and only presence uses it. Document updates still go through
+the server, where they're recorded and acked. Awareness is never recorded or
+acked.
 
-The browser opts in by using an AnyCable consumer. The provider only whispers
+The browser opts in by using an AnyCable consumer. The provider whispers only
 when the subscription has a `whisper` method:
 
 ```js
 import { createConsumer } from "@anycable/web"
 ```
 
-Without whispers, every pointer move is a call into your Ruby process. With
-them, presence costs the Ruby process nothing. That is worth having in an
-authenticated app where the peers trust each other. This site's demos are
-public and anonymous, so they turn whispers off and send awareness through the
-server's `send` path, which has throttling and validation in front of it. A
-whisper skips both, and a room full of strangers shouldn't get that. The
-end-to-end test checks that presence still works over `send`.
+Without whispers, every pointer move calls into your Ruby process. With them,
+presence doesn't touch Ruby at all. That's a good fit for an authenticated app
+where users trust each other.
+
+This site's demos are public and anonymous, so they turn whispers off. Awareness
+goes through the channel's `send` path instead, where the server throttles and
+validates every frame. A whisper would skip those checks, which isn't safe in a
+room full of strangers. The end-to-end test confirms that presence still works
+over `send`.
