@@ -1,0 +1,47 @@
+# The Rails half of AnyCable. The server half is anycable-go, embedded in the
+# thrust proxy by the anycable-thruster gem, and configured through ANYCABLE_*
+# environment variables (see the Dockerfile and fly.toml).
+#
+# One secret configures both halves. AnyCable derives the HTTP RPC secret and
+# the broadcast key from it on the Ruby side and the Go side alike, so they
+# agree without a second variable to keep in step.
+default: &default
+  # No Redis. One node, so Rails hands a broadcast straight to the embedded Go
+  # server over localhost HTTP. The Go server listens for broadcasts on its own
+  # port (8090 by default), separate from the one thrust serves the site on.
+  #
+  # Set here rather than through ANYCABLE_HTTP_BROADCAST_URL, because both
+  # halves read the ANYCABLE_ prefix: pointing that variable at the site's port
+  # makes the Go server bind its broadcast endpoint there and take the port away
+  # from the proxy.
+  broadcast_adapter: http
+  http_broadcast_url: <%= "http://localhost:#{ENV.fetch("ANYCABLE_HTTP_BROADCAST_PORT", "8090")}/_broadcast" %>
+
+  # RPC over HTTP, mounted in this app rather than run as a separate gRPC
+  # process. The embedded Go server is pointed at this path over localhost.
+  # https://docs.anycable.io/anycable-go/rpc?id=rpc-over-http
+  http_rpc: true
+  http_rpc_mount_path: "/_anycable"
+
+  # Development and test fall back to a committed, well-known value — fine off a
+  # laptop. Production must supply its own and is NOT allowed this fallback:
+  # config/initializers/production_boot_checks.rb refuses to boot on an unset,
+  # default, or short secret, because /_anycable authenticates callers with a
+  # bearer derived from it.
+  secret: <%= ENV.fetch("ANYCABLE_SECRET", "yrby-site-development-secret") %>
+
+  # The browser-facing URL is config.action_cable.url in config/application.rb.
+  # There is no separate anycable-go on 8080 to point at: thrust serves the
+  # pages and the cable on one port.
+
+development:
+  <<: *default
+
+test:
+  <<: *default
+
+production:
+  <<: *default
+  # No fallback here: an unset ANYCABLE_SECRET in production must fail the boot
+  # (see production_boot_checks.rb), not silently adopt the development default.
+  secret: <%= ENV.fetch("ANYCABLE_SECRET", nil) %>

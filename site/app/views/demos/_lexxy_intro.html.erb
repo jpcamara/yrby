@@ -1,0 +1,14 @@
+<p>
+  A <a href="https://github.com/basecamp/lexxy">Lexxy</a> editor running on <a
+  href="https://github.com/jpcamara/lexxy-realtime">lexxy-realtime</a>. The
+  room is a <code>Note</code> record. The client joins with a signed
+  GlobalID scoped to that record and field, and the shared state is the
+  <code>Y.XmlFragment</code> that Lexical keeps its document in.
+</p>
+<p>
+  After every update, the server renders the whole document to HTML with
+  <code>Y::Lexxy</code> and saves it into the note's plain <code>body</code>
+  column. The output matches the editor's own serializer byte for byte. The
+  panel below reads that column back over HTTP. Ruby produced it, without a
+  browser.
+</p>

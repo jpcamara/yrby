@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-zinc-950">
+  <head>
+    <%
+      page_title = content_for(:title).presence || "yrby: collaborative editing that runs in Ruby and Rails"
+      page_desc  = content_for(:description).presence ||
+        "Real-time collaborative editing for Rails. Documents sync over Action Cable, are stored in your database through Active Record, and render back to HTML in Ruby. There is no Node process to run and no third-party service."
+      page_canonical = content_for(:canonical).presence || canonical_url
+    %>
+    <title><%= page_title %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="description" content="<%= page_desc %>">
+    <meta name="theme-color" content="#09090b">
+    <link rel="canonical" href="<%= page_canonical %>">
+
+    <%# Open Graph: how the site unfurls in Slack, Discord, X, Mastodon, and
+        every link preview. og:image is the one static card in public/. %>
+    <meta property="og:site_name" content="yrby">
+    <meta property="og:title" content="<%= page_title %>">
+    <meta property="og:description" content="<%= page_desc %>">
+    <meta property="og:type" content="<%= content_for(:og_type).presence || "website" %>">
+    <meta property="og:url" content="<%= page_canonical %>">
+    <meta property="og:image" content="<%= canonical_host %>/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="<%= page_title %>">
+    <meta name="twitter:description" content="<%= page_desc %>">
+    <meta name="twitter:image" content="<%= canonical_host %>/og.png">
+
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%# Tells createConsumer() where the cable server is. %>
+    <%= action_cable_meta_tag %>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <%# Built by `bun run build:css` (Tailwind v4); served as a plain static
+        file, like the demo bundles. %>
+    <link rel="stylesheet" href="<%= busted "/site.css" %>">
+    <%= yield :head %>
+  </head>
+
+  <%# overflow-x-clip: the backstop against any residual wide element. The
+      page never scrolls horizontally; wide content scrolls inside its own
+      overflow-x-auto container. %>
+  <body class="flex min-h-dvh flex-col overflow-x-clip">
+    <a href="#main" class="skip-link">Skip to content</a>
+    <header class="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/85 backdrop-blur">
+      <div class="mx-auto flex max-w-5xl items-center gap-6 px-5 py-3">
+        <a class="wordmark font-mono text-lg font-semibold tracking-tight text-zinc-100" href="/">
+          yrby<span class="caret" aria-hidden="true">▌</span>
+        </a>
+        <nav class="flex items-center gap-5 text-sm text-zinc-400">
+          <%= link_to "Docs", doc_path("getting-started"), class: "hover:text-zinc-100" %>
+          <%= link_to "Demos", demos_path, class: "hover:text-zinc-100" %>
+          <a class="hover:text-zinc-100" href="/lexxy">Lexxy</a>
+        </nav>
+        <nav class="ml-auto flex items-center gap-5 text-sm text-zinc-400">
+          <a class="hover:text-zinc-100" href="https://github.com/jpcamara/yrby">GitHub</a>
+          <a class="hidden hover:text-zinc-100 sm:inline" href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main" class="mx-auto w-full max-w-5xl flex-1 px-5 py-10"><%= yield %></main>
+
+    <footer class="border-t border-zinc-800/80">
+      <div class="mx-auto max-w-5xl space-y-2 px-5 py-8 text-sm text-zinc-500">
+        <p>
+          yrby is MIT licensed. The
+          <a class="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>
+          is the canonical reference; these pages are a copy of it.
+        </p>
+        <p>
+          Demo rooms are public and temporary: anyone with the link can edit,
+          and rooms untouched for a day are deleted. Don't put anything in them
+          you would miss.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
