@@ -26,36 +26,61 @@
       ) %>
 <% end %>
 
-<div class="gap-12 lg:grid lg:grid-cols-[13rem_minmax(0,1fr)]">
-  <aside class="mb-10 text-sm lg:sticky lg:top-20 lg:mb-0 lg:max-h-[calc(100dvh-7rem)] lg:self-start lg:overflow-y-auto">
-    <h2 class="mb-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">Docs</h2>
-    <ul class="space-y-0.5 border-l border-zinc-800">
+<% position = DocPage.all.index { |entry| entry.slug == @page.slug } %>
+<div class="gap-10 lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] xl:grid-cols-[13rem_minmax(0,1fr)_12rem]">
+  <aside class="mb-8 text-[0.95rem] lg:sticky lg:top-20 lg:mb-0 lg:max-h-[calc(100dvh-7rem)] lg:self-start lg:overflow-y-auto">
+    <h2 class="mb-2 font-mono text-[11px] tracking-[0.14em] text-zinc-500 uppercase">Docs</h2>
+    <ul class="space-y-0.5">
       <% DocPage.all.each do |entry| %>
         <li>
-          <%= link_to entry.nav, doc_path(entry.slug),
-                      class: entry.slug == @page.slug ?
-                        "-ml-px block border-l-2 border-rose-500 py-1 pl-3 font-medium text-zinc-100" :
-                        "-ml-px block border-l-2 border-transparent py-1 pl-3 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200" %>
+          <% if entry.slug == @page.slug %>
+            <%= link_to doc_path(entry.slug), class: "flex gap-1.5 rounded-md border border-zinc-800 bg-panel px-2.5 py-1.5 font-medium text-zinc-100", aria: { current: "page" } do %>
+              <%= caret_mark("mt-1.5 shrink-0 text-rose-500") %><%= entry.nav %>
+            <% end %>
+          <% else %>
+            <%= link_to doc_path(entry.slug), class: "flex gap-1.5 rounded-md border border-transparent px-2.5 py-1.5 text-zinc-400 hover:text-zinc-100" do %>
+              <%= caret_mark("mt-1.5 shrink-0 text-transparent") %><%= entry.nav %>
+            <% end %>
+          <% end %>
         </li>
       <% end %>
     </ul>
     <% if @page.sections.any? %>
-      <h2 class="mt-8 mb-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">On this page</h2>
-      <ul class="space-y-1">
-        <% @page.sections.each do |text, anchor| %>
-          <li><a class="block text-zinc-500 hover:text-zinc-200" href="#<%= anchor %>"><%= text %></a></li>
-        <% end %>
-      </ul>
+      <div class="xl:hidden">
+        <h2 class="mt-8 mb-2 font-mono text-[11px] tracking-[0.14em] text-zinc-500 uppercase">On this page</h2>
+        <ul class="space-y-1 text-sm">
+          <% @page.sections.each do |text, anchor| %>
+            <li><a class="block text-zinc-500 hover:text-zinc-100" href="#<%= anchor %>"><%= text %></a></li>
+          <% end %>
+        </ul>
+      </div>
     <% end %>
   </aside>
 
-  <article class="docs-body min-w-0">
-    <p class="mb-8 rounded-lg border border-zinc-800 bg-panel px-4 py-3 text-[0.82rem] leading-6 text-zinc-500">
-      The <a href="<%= @page.source_url %>">repo README</a> is the canonical
-      reference for this API. This page is a copy of it. If the two disagree,
-      the README is right.
+  <article class="min-w-0 rounded-2xl border border-zinc-800 bg-panel px-5 py-8 sm:px-12 sm:py-12">
+    <div class="mb-6 flex flex-wrap justify-between gap-3 font-mono text-xs text-zinc-500">
+      <span>Docs · <%= position + 1 %> of <%= DocPage.all.size %></span>
+      <a class="hover:text-rose-500" href="<%= doc_path(@page.slug) %>.md">View as Markdown</a>
+    </div>
+    <div class="docs-body">
+      <%= @page.html %>
+    </div>
+    <p class="mt-12 border-t border-zinc-950 pt-5 text-sm leading-6 text-zinc-500">
+      <%= caret_mark %>
+      The <a class="text-accent underline decoration-rose-400/40 underline-offset-2" href="<%= @page.source_url %>">repo README</a>
+      is the canonical reference for this API. This page is a copy of it. If
+      the two disagree, the README is right.
     </p>
-
-    <%= @page.html %>
   </article>
+
+  <% if @page.sections.any? %>
+    <aside class="hidden text-sm xl:sticky xl:top-20 xl:block xl:max-h-[calc(100dvh-7rem)] xl:self-start xl:overflow-y-auto">
+      <h2 class="mb-2 font-mono text-[11px] tracking-[0.14em] text-zinc-500 uppercase">On this page</h2>
+      <ul class="space-y-1.5">
+        <% @page.sections.each do |text, anchor| %>
+          <li><a class="block text-zinc-500 hover:text-zinc-100" href="#<%= anchor %>"><%= text %></a></li>
+        <% end %>
+      </ul>
+    </aside>
+  <% end %>
 </div>
