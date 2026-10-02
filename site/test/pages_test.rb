@@ -7,7 +7,7 @@ class PagesTest < ActionDispatch::IntegrationTest
     get "/"
 
     assert_response :success
-    assert_includes response.body, "Google Docs-style editing"
+    assert_includes response.body, "Collaborative editing,"
     assert_includes response.headers["cache-control"], "public"
   end
 
