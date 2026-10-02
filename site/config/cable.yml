@@ -1,0 +1,14 @@
+# Broadcasts go through AnyCable to the embedded anycable-go server, which owns
+# every socket. There is no Redis and no async adapter here: `any_cable` posts
+# the broadcast to the Go server over localhost, and the Go server fans it out.
+#
+# The test environment keeps Action Cable's own test adapter, so the channel
+# tests drive the concern directly without a Go process.
+development:
+  adapter: any_cable
+
+test:
+  adapter: test
+
+production:
+  adapter: any_cable
