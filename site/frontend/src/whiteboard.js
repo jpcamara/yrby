@@ -11,7 +11,7 @@ const ydoc = new Y.Doc()
 const shapes = ydoc.getMap("shapes")
 const provider = connectRoom(ydoc, canvas)
 
-function addNote(x, y, text = "note") {
+function addNote(x, y, text = "New note") {
   const m = new Y.Map()
   m.set("x", x); m.set("y", y); m.set("text", text); m.set("color", user.color)
   shapes.set(uid(), m)
@@ -75,8 +75,8 @@ shapes.observeDeep(render)
 // on reconnects, so a deliberately cleared board stays cleared).
 provider.whenSynced.then(() => {
   if (shapes.size === 0) {
-    addNote(40, 40, "drag me")
-    addNote(240, 120, "double-click to add")
+    addNote(40, 40, "Drag me")
+    addNote(240, 120, "Double-click to add a note")
   }
 })
 

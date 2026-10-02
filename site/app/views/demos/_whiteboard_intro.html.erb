@@ -1,7 +1,12 @@
 <p>
-  Shared state is a <code>Y.Map</code> of shape records (x, y, text, color).
-  Double-click to add a note, drag to move it, type to edit it. Canvas tools
-  like tldraw and Excalidraw keep their document as a record store and bind
-  it to a <code>Y.Map</code> the same way, so the same provider works under
-  them.
+  The board is a <code>Y.Map</code> named <code>shapes</code>. Each note is a
+  nested <code>Y.Map</code> with x, y, text, and color, keyed by a random id.
+  Double-click the board to add a note, drag it by the strip along its top, and
+  click inside it to type. Each pointer move writes x and y in one transaction,
+  so the other window sees the note move while you drag.
+</p>
+<p>
+  A note's text is a plain string, so if two people type in the same note at
+  once, the last write wins. To merge concurrent typing, a field needs a
+  <code>Y.Text</code>, as in the Code demo.
 </p>
