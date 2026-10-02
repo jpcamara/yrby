@@ -20,8 +20,10 @@ jobs:
         with:
           # x64-mingw32 is legacy 32-bit Windows (pre-RubyInstaller-ucrt); we
           # target Ruby 3.4+, where modern Windows uses the ucrt platforms.
+          # magnus doesn't compile for 32-bit ARM musl yet (timespec bitfields),
+          # so arm-linux-musl is skipped along with arm-linux.
           supported-ruby-platforms: |
-            exclude: [arm-linux, x64-mingw32]
+            exclude: [arm-linux, arm-linux-musl, x64-mingw32]
           stable-ruby-versions: |
             exclude: [head]
 
