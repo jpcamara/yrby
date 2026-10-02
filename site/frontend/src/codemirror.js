@@ -30,7 +30,7 @@ new EditorView({
 // deliberately emptied document stays empty.
 provider.whenSynced.then(() => {
   if (ytext.length === 0) {
-    ytext.insert(0, "// Collaborative code — open this room in a second window.\n" +
+    ytext.insert(0, "// Open this room in a second window and edit this code in both.\n" +
       "function greet(name) {\n  return `Hi, ${name}!`\n}\n")
   }
 })
