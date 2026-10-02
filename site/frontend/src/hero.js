@@ -11,8 +11,11 @@ const PEERS = {
 }
 const START = "Launch checklist\n"
 const TITLE_END = "Launch checklist".length
+// you moves to the end only after ada finishes her line. Two carets at the
+// same spot would interleave their letters (a real CRDT does too, but it makes
+// for a confusing demo).
 const SCRIPT = {
-  you: [{ to: "title" }, { type: " for Friday" }, { wait: 18 }, { to: "end" }, { type: "\n• Publish yrby-client 0.6.0" }],
+  you: [{ to: "title" }, { type: " for Friday" }, { after: "ada" }, { to: "end" }, { type: "\n• Publish yrby-client 0.6.0" }],
   ada: [{ to: "end" }, { type: "• Tag the GitHub release" }],
 }
 const TICK_MS = 85
@@ -68,8 +71,8 @@ function run(root) {
       flush(who)
       sim.carets[who] = action.to === "title" ? TITLE_END : sim.text.length
       progress.i++
-    } else if (action.wait) {
-      if (++progress.c >= action.wait) Object.assign(progress, { i: progress.i + 1, c: 0 })
+    } else if (action.after) {
+      if (sim.progress[action.after].i >= SCRIPT[action.after].length) progress.i++
     } else {
       const at = sim.carets[who]
       sim.text = sim.text.slice(0, at) + action.type[progress.c] + sim.text.slice(at)
