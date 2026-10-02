@@ -86,6 +86,53 @@ module ApplicationHelper
     BASH
   end
 
+  # The proofreader's insertion caret, the site's mark. Drawn rather than set
+  # as the ‸ character, which most fonts make tiny.
+  def caret_mark(css_class = "text-rose-500")
+    stroke = { fill: "none", stroke: "currentColor", "stroke-width": 1.8,
+               "stroke-linecap": "round", "stroke-linejoin": "round" }
+    tag.svg(tag.path(d: "M1.5 8.5 6 1.5l4.5 7", **stroke),
+            viewBox: "0 0 12 10", class: "caret-mark #{css_class}", "aria-hidden": "true")
+  end
+
+  # A code block on a white sheet with a header naming the file and, when
+  # given, where the code runs.
+  CODE_SHEET_HEADER = "flex items-center gap-3 border-b border-zinc-950 bg-paper px-4 py-2 " \
+                      "font-mono text-xs text-zinc-500".freeze
+  CODE_SHEET = "overflow-hidden rounded-xl border border-zinc-800 bg-panel " \
+               "[&_pre]:m-0 [&_pre]:rounded-none [&_pre]:border-0".freeze
+
+  def code_sheet(path, runs_on = nil, &)
+    header = tag.div(class: CODE_SHEET_HEADER) do
+      safe_join([
+        tag.span(path, class: "min-w-0 flex-1 truncate"),
+        (tag.span(runs_on, class: "rounded-full border border-zinc-700 px-2 py-px") if runs_on)
+      ].compact)
+    end
+    tag.div(class: CODE_SHEET) do
+      header + capture(&)
+    end
+  end
+
+  # The hero replay's finished state, server-rendered so the picture is
+  # complete without JavaScript or with reduced motion. frontend/src/hero.js
+  # replays how two people got here.
+  HERO_TEXT = "Launch checklist for Friday\n• Tag the GitHub release\n• Publish yrby-client 0.6.0".freeze
+  HERO_CARETS = { "ada" => HERO_TEXT.index(" release") + " release".length, "you" => HERO_TEXT.length }.freeze
+
+  def hero_pane(viewer)
+    at = 0
+    parts = HERO_CARETS.sort_by(&:last).flat_map do |who, position|
+      text = HERO_TEXT[at...position]
+      at = position
+      flag = who == viewer ? "".html_safe : tag.span(who, class: "hero-flag")
+      [text, tag.span(flag, class: "hero-caret", style: "--peer: var(--color-peer-#{who})")]
+    end
+    safe_join(parts + [HERO_TEXT[at..]])
+  end
+
+  def hero_read_text = %("#{HERO_TEXT.gsub("\n") { "\\n" }}")
+
   # A JSON-LD block. Not executable script, so it is not governed by the
   # strict script-src CSP; browsers never run application/ld+json.
   def json_ld_tag(data)
