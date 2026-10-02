@@ -22,7 +22,7 @@ const COL_IDS = COLUMNS.map((c) => c[0])
 // Dark tints, not pastels: the fill is the cell's background and the text on
 // it stays the page's light zinc, so the fills have to be darker than the
 // text, not lighter.
-const FILLS = [["", "none"], ["#4a3a12", "amber"], ["#143a26", "green"], ["#1c2f57", "blue"]]
+const FILLS = [["", "No fill"], ["#f6e3b4", "Amber fill"], ["#d3ecd9", "Green fill"], ["#d8e3f8", "Blue fill"]]
 
 const grid = document.getElementById("grid")
 const toolbarEl = document.getElementById("toolbar")
@@ -138,7 +138,7 @@ function renderHeader() {
       b.className = "movecol"
       b.dataset.move = dir
       b.textContent = glyph
-      b.title = `move ${col.columnDef.header} ${dir}`
+      b.title = `Move ${col.columnDef.header} ${dir}`
       b.onclick = () => moveColumn(col.id, dir === "left" ? -1 : 1)
       th.appendChild(b)
     }
@@ -239,16 +239,16 @@ function renderToolbar() {
   const [rowId, colId] = (activeCell || ":").split(":")
   const cell = yRows.get(rowId)?.get(colId)
   toolbarEl.querySelector("#bold").classList.toggle("on", !!cell?.get("bold"))
-  toolbarEl.querySelector(".label").textContent = activeCell ? `cell ${colId}` : "no cell selected"
+  toolbarEl.querySelector(".label").textContent = activeCell ? `${Object.fromEntries(COLUMNS)[colId]} cell selected` : "Select a cell to format it"
   for (const b of toolbarEl.querySelectorAll("[data-fill]")) {
     b.classList.toggle("on", !!cell && (cell.get("fill") || "") === b.dataset.fill)
   }
 }
 
 toolbarEl.innerHTML =
-  `<button id="add-row" title="append a row">+ row</button>` +
-  `<button id="bold" title="bold the selected cell">B</button>` +
-  FILLS.map(([c, n]) => `<button data-fill="${c}" title="fill ${n}" style="background:${c || "transparent"}"></button>`).join("") +
+  `<button id="add-row" title="Add a row">+ Row</button>` +
+  `<button id="bold" title="Bold">B</button>` +
+  FILLS.map(([c, n]) => `<button data-fill="${c}" title="${n}" style="background:${c || "transparent"}"></button>`).join("") +
   `<span class="label"></span>`
 // mousedown default is what blurs the input, so the formatting buttons act on
 // the cell you are in rather than the one you just left.

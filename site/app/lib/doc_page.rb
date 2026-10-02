@@ -17,44 +17,44 @@ class DocPage
     Entry.new(
       slug: "getting-started", nav: "Getting started", source: "install",
       seo_title: "Getting started: Yjs in Rails with yrby",
-      description: "Add real-time collaborative editing to a Rails app with yrby: install " \
-                   "the gems, run the generator, render one tag, and connect a browser."
+      description: "Add real-time collaborative editing to a Rails app with yrby. Install " \
+                   "the gems, run the generator, render one tag, and bind an editor in the browser."
     ),
     Entry.new(
       slug: "document-channel", nav: "The document channel", source: "actioncable-integration",
       seo_title: "The document channel: Yjs sync over Action Cable · yrby",
-      description: "How yrby syncs Yjs documents over Action Cable: the channel " \
-                   "the gem ships, building your own, authorization, and the delivery guarantees."
+      description: "How yrby syncs Yjs documents over Action Cable. Covers the channel " \
+                   "the gem ships, writing your own, authorization, and delivery guarantees."
     ),
     Entry.new(
       slug: "storage", nav: "Storage", source: "actioncable-integration",
       seo_title: "Storage: Yjs documents in Active Record · yrby",
-      description: "How yrby persists Yjs documents in Active Record: Y::Document " \
+      description: "How yrby stores Yjs documents with Active Record. Covers Y::Document " \
                    "and Y::DocumentUpdate, compaction, encryption, and writing your own store."
     ),
     Entry.new(
       slug: "javascript-client", nav: "The JavaScript client", source: "reliable-delivery-acks",
       seo_title: "The JavaScript client: a Yjs provider for Rails · yrby",
-      description: "The yrby-client browser package: the yrby-document element, the " \
-                   "ActionCableProvider, connection status, and reliable delivery with acks."
+      description: "The yrby-client browser package. Covers the yrby-document element, " \
+                   "document sessions, ActionCableProvider, connection status, and acks."
     ),
     Entry.new(
       slug: "presence", nav: "Presence", source: "reliable-delivery-acks",
       seo_title: "Presence: live cursors and awareness in Rails · yrby",
-      description: "Live cursors and awareness with yrby: publishing identity, reading " \
-                   "the room, editor bindings, and whispering presence over AnyCable."
+      description: "Live cursors and presence with yrby. Covers publishing who is " \
+                   "editing, listing who is here, editor bindings, and AnyCable whispers."
     ),
     Entry.new(
       slug: "rendering", nav: "Server-side rendering", source: "rendering-to-html",
       seo_title: "Server-side rendering: Yjs documents to HTML in Ruby · yrby",
-      description: "Render Yjs documents to HTML in Ruby with yrby, matching the editor's " \
-                   "own serializer byte for byte, with rules for custom nodes and marks."
+      description: "Render Yjs documents to HTML in Ruby with Y::Tiptap and Y::Lexxy. " \
+                   "The output matches the editor's own, and you can add rules for custom nodes and marks."
     ),
     Entry.new(
       slug: "anycable", nav: "AnyCable and multi-process", source: "multi-process-deployments",
       seo_title: "AnyCable and multi-process deployments · yrby",
-      description: "Running yrby across processes and on AnyCable: broadcast adapters, " \
-                   "rebuilding from the store, channel state, whispers, and threads."
+      description: "Running yrby across several processes and on AnyCable. Covers " \
+                   "broadcasts, rebuilding from the store, presence whispers, and threads."
     )
   ].freeze
 

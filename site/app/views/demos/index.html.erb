@@ -1,19 +1,26 @@
-<p class="mb-6 text-zinc-400">Start with the <a class="text-accent underline" href="/examples/document">record-backed editor</a> to try the helper and element from the quickstart.</p>
 <% content_for :title, "Demos · yrby" %>
 
 <section class="mx-auto max-w-3xl">
   <h1 class="font-serif text-4xl font-normal tracking-tight text-zinc-100 sm:text-5xl">Demos</h1>
   <p class="mt-4 leading-7 text-zinc-400">
-    The shape demos run on one <code>DocumentChannel</code>, and the Lexxy
-    demo on lexxy-realtime's channel. The server
-    doesn't look inside the document. It records each CRDT update,
-    acknowledges it, and relays it. The only thing that changes from demo
-    to demo is the Yjs shape the browser binds to.
+    Each demo binds a different Yjs shape to the same Rails backend. Five of
+    them share one <code>DocumentChannel</code>, which stores every update with
+    <code>Y::Document</code> and relays it to the room. That channel has no
+    code specific to any demo. The Lexxy demo uses a <code>NoteChannel</code>
+    built from lexxy-realtime's install generator, and it also renders the
+    document to HTML on the server after each change. Every demo page has a
+    panel that reads the stored document back in Ruby.
+  </p>
+  <p class="mt-4 leading-7 text-zinc-400">
+    New to yrby? Start with the <a class="text-accent underline" href="/examples/document">record-backed editor</a>.
+    It runs the quickstart code on a single record, with
+    <code>collaborative_document_tag</code> and a CodeMirror editor.
   </p>
   <p class="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-3 text-sm leading-6 text-amber-200/90">
-    Rooms are public and temporary. Opening a demo puts you in a room of your
-    own; share the URL to collaborate. Anyone with the link can edit, and a
-    room untouched for 24 hours is deleted.
+    Each demo opens in a new room with its own URL. Share that URL to edit
+    together. Rooms are public, so anyone with the link can edit, and a room is
+    deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours with no edits and no
+    one connected. Please don't paste anything private.
   </p>
 
   <ul class="demo-list">
