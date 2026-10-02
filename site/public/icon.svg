@@ -1,0 +1,6 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="96" fill="#0B0B0F"/>
+  <!-- The named caret: yrby's mark. A ruby block cursor on the near-black surface. -->
+  <rect x="300" y="128" width="84" height="256" rx="10" fill="#FB3B5C"/>
+  <rect x="128" y="232" width="132" height="48" rx="10" fill="#EDEDF0"/>
+</svg>

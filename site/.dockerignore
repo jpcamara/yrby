@@ -1,0 +1,17 @@
+.git
+.gitignore
+.bundle
+vendor/bundle
+log/*
+tmp/*
+frontend/node_modules
+
+# Built by the assets stage inside the image, not copied from the host.
+public/tiptap.js
+public/spreadsheet.js
+public/whiteboard.js
+public/kanban.js
+public/codemirror.js
+public/assets
+
+.DS_Store
