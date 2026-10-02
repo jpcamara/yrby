@@ -1,0 +1,61 @@
+<% doc_canonical = canonical_url("/docs/#{@page.slug}") %>
+<% content_for :title, @page.seo_title %>
+<% content_for :description, @page.description %>
+<% content_for :og_type, "article" %>
+<% content_for :canonical, doc_canonical %>
+
+<% content_for :head do %>
+  <link rel="alternate" type="text/markdown" href="<%= doc_canonical %>.md">
+  <%= json_ld_tag(
+        "@context" => "https://schema.org",
+        "@type" => "TechArticle",
+        "headline" => @page.seo_title,
+        "description" => @page.description,
+        "url" => doc_canonical,
+        "author" => { "@type" => "Person", "name" => "JP Camara", "url" => "https://jpcamara.com" },
+        "isPartOf" => { "@type" => "WebSite", "name" => "yrby", "url" => canonical_host }
+      ) %>
+  <%= json_ld_tag(
+        "@context" => "https://schema.org",
+        "@type" => "BreadcrumbList",
+        "itemListElement" => [
+          { "@type" => "ListItem", "position" => 1, "name" => "yrby", "item" => canonical_host },
+          { "@type" => "ListItem", "position" => 2, "name" => "Docs", "item" => canonical_url("/docs/getting-started") },
+          { "@type" => "ListItem", "position" => 3, "name" => @page.nav, "item" => doc_canonical }
+        ]
+      ) %>
+<% end %>
+
+<div class="gap-12 lg:grid lg:grid-cols-[13rem_minmax(0,1fr)]">
+  <aside class="mb-10 text-sm lg:sticky lg:top-20 lg:mb-0 lg:max-h-[calc(100dvh-7rem)] lg:self-start lg:overflow-y-auto">
+    <h2 class="mb-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">Docs</h2>
+    <ul class="space-y-0.5 border-l border-zinc-800">
+      <% DocPage.all.each do |entry| %>
+        <li>
+          <%= link_to entry.nav, doc_path(entry.slug),
+                      class: entry.slug == @page.slug ?
+                        "-ml-px block border-l-2 border-rose-500 py-1 pl-3 font-medium text-zinc-100" :
+                        "-ml-px block border-l-2 border-transparent py-1 pl-3 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200" %>
+        </li>
+      <% end %>
+    </ul>
+    <% if @page.sections.any? %>
+      <h2 class="mt-8 mb-2 text-xs font-semibold tracking-widest text-zinc-500 uppercase">On this page</h2>
+      <ul class="space-y-1">
+        <% @page.sections.each do |text, anchor| %>
+          <li><a class="block text-zinc-500 hover:text-zinc-200" href="#<%= anchor %>"><%= text %></a></li>
+        <% end %>
+      </ul>
+    <% end %>
+  </aside>
+
+  <article class="docs-body min-w-0">
+    <p class="mb-8 rounded-lg border border-zinc-800 bg-panel px-4 py-3 text-[0.82rem] leading-6 text-zinc-500">
+      The <a href="<%= @page.source_url %>">repo README</a> is the canonical
+      reference for this API. This page is a copy of it. If the two disagree,
+      the README is right.
+    </p>
+
+    <%= @page.html %>
+  </article>
+</div>

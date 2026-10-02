@@ -1,0 +1,13 @@
+<p>
+  A <a href="https://tiptap.dev">Tiptap</a> editor using Tiptap's own
+  <code>Collaboration</code> and <code>CollaborationCursor</code>
+  extensions. The shared state is the <code>Y.XmlFragment</code> that
+  ProseMirror keeps its document in. Carets and selections travel over
+  awareness, which the server relays and doesn't store.
+</p>
+<p>
+  The editor is created after the first sync. Tiptap inserts an empty
+  paragraph into the document when it mounts, so if you bind before the
+  server's state arrives, every client adds its own competing top-level
+  node.
+</p>
