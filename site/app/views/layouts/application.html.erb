@@ -10,7 +10,7 @@
     <title><%= page_title %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="description" content="<%= page_desc %>">
-    <meta name="theme-color" content="#09090b">
+    <meta name="theme-color" content="#ece8e0">
     <link rel="canonical" href="<%= page_canonical %>">
 
     <%# Open Graph: how the site unfurls in Slack, Discord, X, Mastodon, and
@@ -44,37 +44,53 @@
       overflow-x-auto container. %>
   <body class="flex min-h-dvh flex-col overflow-x-clip">
     <a href="#main" class="skip-link">Skip to content</a>
-    <header class="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/85 backdrop-blur">
-      <div class="mx-auto flex max-w-5xl items-center gap-6 px-5 py-3">
-        <a class="wordmark font-mono text-lg font-semibold tracking-tight text-zinc-100" href="/">
-          yrby<span class="caret" aria-hidden="true">▌</span>
+    <header class="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
+      <div class="mx-auto flex max-w-6xl items-center gap-7 px-5 py-3">
+        <a class="wordmark font-serif text-[1.75rem] leading-none font-medium tracking-tight text-zinc-100" href="/">
+          yrby<%= caret_mark("ml-0.5 text-rose-500") %>
         </a>
-        <nav class="flex items-center gap-5 text-sm text-zinc-400">
+        <nav class="flex items-center gap-5 text-[0.95rem] text-zinc-400">
           <%= link_to "Docs", doc_path("getting-started"), class: "hover:text-zinc-100" %>
           <%= link_to "Demos", demos_path, class: "hover:text-zinc-100" %>
           <a class="hover:text-zinc-100" href="/lexxy">Lexxy</a>
         </nav>
-        <nav class="ml-auto flex items-center gap-5 text-sm text-zinc-400">
+        <nav class="ml-auto flex items-center gap-5 text-[0.95rem] text-zinc-400">
+          <a class="hidden rounded-full border border-zinc-700 px-2.5 py-0.5 font-mono text-xs text-zinc-500 hover:text-zinc-100 sm:inline"
+             href="https://github.com/jpcamara/yrby/blob/main/CHANGELOG.md">v<%= Y::VERSION %></a>
           <a class="hover:text-zinc-100" href="https://github.com/jpcamara/yrby">GitHub</a>
           <a class="hidden hover:text-zinc-100 sm:inline" href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
         </nav>
       </div>
     </header>
 
-    <main id="main" class="mx-auto w-full max-w-5xl flex-1 px-5 py-10"><%= yield %></main>
+    <%# A page that draws its own full-width bands sets content_for(:full_bleed)
+        and lays out its own containers. Every other page gets the standard one. %>
+    <% if content_for?(:full_bleed) %>
+      <main id="main" class="w-full flex-1"><%= yield %></main>
+    <% else %>
+      <main id="main" class="mx-auto w-full max-w-6xl flex-1 px-5 py-10"><%= yield %></main>
+    <% end %>
 
-    <footer class="border-t border-zinc-800/80">
-      <div class="mx-auto max-w-5xl space-y-2 px-5 py-8 text-sm text-zinc-500">
-        <p>
-          yrby is MIT licensed. The
-          <a class="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>
-          is the canonical reference; these pages are a copy of it.
-        </p>
-        <p>
-          Demo rooms are public and temporary: anyone with the link can edit,
-          and rooms untouched for a day are deleted. Don't put anything in them
-          you would miss.
-        </p>
+    <footer class="border-t border-zinc-800">
+      <div class="mx-auto flex max-w-6xl flex-col gap-6 px-5 py-10 text-sm text-zinc-500 md:flex-row md:items-start">
+        <a class="font-serif text-2xl leading-none text-zinc-100" href="/">yrby<%= caret_mark("ml-0.5 text-rose-500") %></a>
+        <div class="max-w-xl space-y-2 md:flex-1">
+          <p>
+            MIT licensed. Built on y-crdt, Magnus, and rb-sys. The
+            <a class="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>
+            is the canonical reference; these pages are a copy of it.
+          </p>
+          <p>
+            Demo rooms are public and temporary: anyone with the link can edit,
+            and rooms untouched for a day are deleted. Don't put anything in them
+            you would miss.
+          </p>
+        </div>
+        <nav class="flex gap-5 text-zinc-400">
+          <a class="hover:text-zinc-100" href="https://github.com/jpcamara/yrby">GitHub</a>
+          <a class="hover:text-zinc-100" href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
+          <a class="hover:text-zinc-100" href="https://www.npmjs.com/package/yrby-client">npm</a>
+        </nav>
       </div>
     </footer>
   </body>

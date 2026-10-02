@@ -63,6 +63,7 @@ const ENTRIES = [
   "src/kanban.js",       // Y.Array of card Y.Maps
   { entry: "src/document.js", external: ["@rails/actioncable"] },
   "src/codemirror.js",   // Y.Text
+  "src/hero.js",         // the home page replay; no Yjs, no cable
 ]
 
 async function buildEntry(spec) {
