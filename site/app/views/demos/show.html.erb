@@ -30,9 +30,9 @@
     <p class="roombar-note mt-2 text-xs leading-5 text-zinc-500">
       Open a second window or send someone the link, then edit in both.
       Anyone with the link can edit. A room holds up to
-      <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB per
-      document, and it's deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours with no edits and
-      no one connected.
+      <%= Limits::MAX_PEERS_PER_ROOM %> people and <%= Limits::MAX_DOCUMENT_BYTES / 1024 %> KB of
+      document. It's deleted after <%= Limits::ROOM_IDLE_TTL / 3600 %> hours with no edits and
+      nobody connected.
     </p>
 
     <div class="mt-4 max-w-2xl space-y-3 text-sm leading-6 text-zinc-400 [&_a]:text-accent">
@@ -58,11 +58,11 @@
       </summary>
       <div class="px-4 py-3">
         <p class="mb-2 text-xs leading-5 text-zinc-500">
-          The server loads this room's stored state into a <code>Y::Doc</code>
-          and calls <code><%= call %></code>, with no browser involved. The
-          panel fetches the result from
+          The server loads this room's saved state into a <code>Y::Doc</code>
+          and calls <code><%= call %></code>. No browser is involved. This
+          panel loads the result from
           <code>GET <%= demo_stored_path(@demo.slug, @room) %></code> when you
-          open it and again after each change.
+          open it, and again after each change.
         </p>
         <pre id="stored-html" class="!my-0 max-h-64 text-[0.72rem]" data-url="<%= demo_stored_path(@demo.slug, @room) %>"><code>…</code></pre>
       </div>

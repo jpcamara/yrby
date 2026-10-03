@@ -1,16 +1,15 @@
 <p>
-  A <a href="https://github.com/basecamp/lexxy">Lexxy</a> editor synced through
+  A <a href="https://github.com/basecamp/lexxy">Lexxy</a> editor synced with
   <a href="https://github.com/jpcamara/lexxy-realtime">lexxy-realtime</a>.
-  Lexical stores the document as nested <code>Y.XmlText</code> nodes. Each room
+  Lexical stores its document as nested <code>Y.XmlText</code> nodes. Each room
   has a <code>Note</code> record, which <code>NoteChannel</code> creates when
-  the first person joins. The page gives your browser a signed token for this
-  room and the note's <code>body</code> field, and the channel rejects any
-  token that wasn't issued for that field.
+  the first person joins. Your browser gets a signed token for this room's
+  <code>body</code> field, and the channel rejects any other token.
 </p>
 <p>
-  After each update, the server renders the full document to HTML with
-  <code>Y::Lexxy</code> and writes it to <code>body</code>, a plain text
-  column. yrby's tests compare that renderer's output byte for byte with HTML
-  captured from a live Lexxy editor. The panel below fetches the column over
-  HTTP, so you can watch the stored HTML change as you type.
+  After each update, the server renders the whole document to HTML with
+  <code>Y::Lexxy</code> and saves it to <code>body</code>, a plain text column.
+  yrby's tests check that this HTML matches what a live Lexxy editor produces.
+  The panel below loads the column over HTTP, so you can watch the saved HTML
+  change as you type.
 </p>
