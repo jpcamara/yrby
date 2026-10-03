@@ -338,12 +338,12 @@ every editor configures its own. `Y::Lexical` is the core Lexical base
 (paragraphs, headings, quotes, code, lists, tables, links, and the full
 text-format model), and other Lexical editors extend it with rules.
 
-It handles every node in the Lexxy 0.9.x set: paragraphs, headings, every text
-format and their combinations, links, the four list types with nesting,
-blockquotes, code blocks, tabs and soft breaks, horizontal rules, tables with
-header cells, image galleries, and ActionText attachments. Uploads and mentions
-both render as `<action-text-attachment>` elements, which ActionText can
-re-render.
+It handles every node in Lexxy 1.0, which has the same set as 0.9.x:
+paragraphs, headings, every text format and their combinations, links, the
+four list types with nesting, blockquotes, code blocks, tabs and soft breaks,
+horizontal rules, tables with header cells, image galleries, and ActionText
+attachments. Uploads and mentions both render as `<action-text-attachment>`
+elements, which ActionText can re-render.
 
 The Lexical support has the same two layers. `Y::Lexical` handles core Lexical
 structure natively, and everything Lexxy adds is in `Y::Lexxy`'s rule set,
