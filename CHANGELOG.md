@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The demo app and the render-parity test run on Lexxy 1.0. `Y::Lexxy`
+  output matches Lexxy 1.0's own `value`, including image alt text edited
+  after the document syncs.
+
 ## [0.8.0] - 2026-10-01
 
 This release ships alongside yrby-client 0.6.0, and the client entries below
