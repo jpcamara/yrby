@@ -1,9 +1,10 @@
-<% content_for :title, "Lexxy: collaborative rich text for Rails" %>
+<% content_for :title, "lexxy-realtime: collaborative Lexxy editing for Rails" %>
 <% content_for :description, "lexxy-realtime makes Basecamp's Lexxy editor collaborative with a model macro, a form helper, and a generator. Several people can edit the same rich text field in Rails, and after each change the HTML is saved back to the record. Built on yrby." %>
 <% content_for :canonical, canonical_url("/lexxy") %>
 
 <section class="pt-6 pb-14 sm:pt-14">
-  <h1 class="max-w-3xl font-serif text-5xl leading-[1.02] font-normal tracking-tight text-zinc-100 sm:text-6xl">
+  <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">lexxy-realtime · a separate gem, built on yrby</p>
+  <h1 class="mt-3 max-w-3xl font-serif text-5xl leading-[1.02] font-normal tracking-tight text-zinc-100 sm:text-6xl">
     Lexxy, collaborative.
   </h1>
   <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
@@ -11,6 +12,12 @@
     <code>lexxy-realtime</code> lets several people type in the same field
     and see each other's text and cursors as they go. You add one line to the
     model and one to the form, then run a generator.
+  </p>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    lexxy-realtime installs yrby-rails and yrby-client for you and does the
+    editor setup. If you use a different editor, or no editor, use
+    <%= link_to "yrby-rails", doc_path("getting-started"), class: "text-accent underline decoration-rose-400/40 underline-offset-2" %>
+    directly.
   </p>
 
   <div class="mt-8 max-w-2xl space-y-4">

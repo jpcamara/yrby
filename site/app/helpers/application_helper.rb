@@ -62,6 +62,20 @@ module ApplicationHelper
     RUBY
   end
 
+  # The browser half of the yrby-rails path: the code lexxy-realtime writes for
+  # you, shown next to it on the home page.
+  def hero_bind_code
+    code_block "js", <<~JS
+      import "yrby-client/element"
+
+      document.addEventListener("yrby:synced", (event) => {
+        const { doc, signal } = event.detail
+        const editor = attachEditor(event.target, doc)
+        signal.onabort = () => editor.destroy()
+      })
+    JS
+  end
+
   # The three flagship lexxy-realtime samples, rendered with the "lines you add"
   # treatment. Defined here rather than inline in the template so the ERB
   # delimiters in the form snippet (`<%= ... %>`) stay literal string content
