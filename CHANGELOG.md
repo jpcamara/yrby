@@ -8,27 +8,87 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `unknown_types` on `Y::Lexical` and `Y::ProseMirror` (inherited by
-  `Y::Lexxy` and `Y::Tiptap`): the node types a document contains that
-  neither the built-in schema nor a registered rule handles — the ones
-  `to_html` quietly degrades (an unknown container renders its children
-  without its own markup; a node whose content lives only in its
-  attributes renders nothing). The checklist companion to `node_types`:
-  render a real document from your editor and assert it comes back empty.
-- The renderer crates export `escape_text` / `escape_attr` for splice
-  callers (`lexical-yjs-html` 0.1.2, `prosemirror-yjs-html` 0.1.3).
+- `unknown_types` on `Y::Lexical` and `Y::ProseMirror`, and so on `Y::Lexxy`
+  and `Y::Tiptap`. It lists the node types in a document that neither the
+  built-in schema nor a rule handles, which are the ones `to_html` can't fully
+  render. Render a real document from your editor in a test and assert the list
+  is empty.
+- The renderer crates export `escape_text` and `escape_attr` for callers that
+  build their own markup (`lexical-yjs-html` 0.1.4, `prosemirror-yjs-html`
+  0.1.5).
+
+### Changed
+
+- The demo app and the render-parity test run on Lexxy 1.0. `Y::Lexxy`
+  output matches Lexxy 1.0's own `value`, including image alt text edited
+  after the document syncs.
 
 ### Fixed
 
-- The Lexical renderers keep the text of an unknown inline wrapper (a
-  mark-style node with no rule): it renders unwrapped, the way unknown
-  containers degrade. It previously rendered as nothing, text included.
-- `Y::Lexxy`'s list-item rule escapes the stored `__checked` and
-  `__value` attributes it interpolates. Stored attributes are collaborator
-  input, and a crafted value could break out of the attribute position.
-  Legitimate editor values (booleans, integers) render byte-identically.
-- The renderer crate READMEs' callback examples escape the values they
-  interpolate, and both READMEs state how unknown node types degrade.
+- The Lexical renderers keep the text of an unknown inline wrapper, such as a
+  mark with no rule. The text renders without the wrapper. Before, the whole
+  node rendered as nothing, so its text was missing from the HTML.
+- `Y::Lexxy`'s list-item rule escapes the stored `__checked` and `__value`
+  attributes. Collaborators write those attributes, and a crafted value could
+  break out of the HTML attribute. Normal values (booleans and integers) render
+  the same as before.
+- The crate READMEs' callback examples escape the values they insert, and both
+  READMEs describe how unknown node types render.
+
+## [0.8.0] - 2026-10-01
+
+This release ships alongside yrby-client 0.6.0, and the client entries below
+are for that version.
+
+### Added
+
+- `Doc#read_array(name)` returns a `Y.Array` root as a JSON string, for
+  documents whose content lives in an array.
+
+### Changed
+
+- yrby-client document elements now use shared document sessions scoped to
+  the consumer. A session tracks pending delivery separately from the editors
+  attached to it, and each editor binding gets an abort signal for cleanup. A
+  clean remount after a delay reloads from the server. `doc` and `provider`
+  are unavailable until the session is acquired and while it is retargeting.
+  Turbo no longer serializes CRDT state into cached HTML. Turbolinks 5 works
+  the same way, with its before-cache, render, load, and preview signals
+  handled alongside Turbo's.
+- Managed sessions expose their delivery status and hold rejected work until
+  you call `retry()` or `discard()`. Each session uses its own subscription
+  nonce, so acknowledgment sequences from different sessions don't mix.
+  Provider status events now include a `pending` flag.
+- The element accepts a `refresh` attribute. If a subscription is rejected
+  and `refresh` is set, the session fetches that URL once, expects
+  `{ "grant": ... }` back, and resubscribes with the new grant, keeping the
+  same document and pending edits. A failed fetch or a second rejection
+  blocks the session as before. The session doesn't renew grants on a timer.
+
+- `YProtocolSession` and `ReliableSync` renamed their transport hooks to read
+  as commands. `onConnect()`, `onDisconnect()`, and `ack()`/`onAck()` are now
+  `resume()`, `pause()`, and `acknowledge(id)`, and `ReliableSync`'s
+  `onTick()` is now `retransmit()`. `onStatusChange` keeps the `on` prefix
+  because it's the only one that registers a listener. `ReliableSync#pending`
+  returns an independent snapshot with its own copy of the update bytes, and
+  enqueueing copies the buffer you pass in.
+- A grant refresh request now times out after 15 seconds and blocks the
+  session. Previously the session stayed offline indefinitely. If a consumer
+  throws while resubscribing with a renewed grant, that now blocks the
+  session too, where it used to be an unhandled rejection.
+- When a status listener throws, the error goes to `onError`, and the other
+  listeners and the cable callback that fired it still run. The provider also
+  reports failures in awareness events and unsubscribe. A throwing callback
+  can't interrupt presence removal or leave the awareness timer running. If
+  the error handler itself throws, the error goes to the console.
+
+### Fixed
+
+- ActionCable providers now ignore callbacks from subscriptions that have
+  been replaced, so a late disconnect or rejection can't stop the new
+  subscription from delivering edits. Synchronous consumer callbacks wait
+  until subscription creation returns, and managed sessions use distinct
+  subscription identifiers so old ACKs stay separate.
 
 ## [0.7.1] - 2026-08-19
 

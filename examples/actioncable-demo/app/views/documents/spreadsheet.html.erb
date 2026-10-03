@@ -1,0 +1,48 @@
+<% content_for :head do %>
+<style>
+ .demo{margin:1.5rem}
+ #presence{margin:.4rem 0;min-height:1.5rem}.chip{color:#fff;padding:2px 8px;border-radius:999px;font-size:12px;margin-right:4px}
+ #toolbar{display:flex;align-items:center;gap:4px;margin:.5rem 0}
+ #toolbar button{width:26px;height:26px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer;font:600 13px system-ui}
+ #toolbar button.on{border-color:#334155;box-shadow:0 0 0 1px #334155}
+ #toolbar .label{font-size:12px;color:#6b7280;margin:0 .4rem 0 .2rem}
+ #toolbar #add-row{width:auto;padding:0 9px;border-style:dashed;font-weight:400}
+ #grid{border-collapse:separate;border-spacing:0;font:13px system-ui;background:#fff}
+ #grid th{background:#f6f7f9;border:1px solid #e5e7eb;padding:2px 4px;white-space:nowrap;text-align:left}
+ #grid th button{border:0;background:transparent;cursor:pointer;font:600 12px system-ui;color:#374151;padding:2px 4px}
+ #grid th .movecol{color:#9ca3af;font-size:9px;padding:2px 1px}
+ #grid td{border:1px solid #e5e7eb;padding:0;position:relative}
+ #grid td input{width:11rem;box-sizing:border-box;border:0;background:transparent;padding:5px 7px;font:13px system-ui}
+ #grid td input:focus{outline:2px solid #2563eb;outline-offset:-2px}
+ .peerlabel{position:absolute;top:-9px;right:-1px;color:#fff;font-size:9px;line-height:1;padding:2px 4px;border-radius:3px}
+ #add-row{margin-top:.5rem;border:1px dashed #cbd5e1;border-radius:6px;background:transparent;padding:5px 9px;font:13px system-ui;cursor:pointer}
+</style>
+<% end %>
+<div class="demo">
+  <header>
+    <h1>Collaborative spreadsheet</h1>
+    <%= render "nav" %>
+    <p>
+      Opaque state is a <code>Y.Array</code> of row <code>Y.Map</code>s, and every
+      cell is its own <code>Y.Map</code> of <code>{ value, bold, fill }</code>. So
+      edits to different cells merge, and edits to different properties of the same
+      cell merge too — bold a cell while someone else is typing in it and both land.
+      Set the same property twice and the last write wins. Values commit on Enter or
+      blur, the way a spreadsheet does.
+    </p>
+    <p>
+      Sorting and column order come from TanStack Table and are never written to the
+      document: they are your view, not shared state. Sort by Owner in one window
+      and by Qty in the other, then edit the same cell in both.
+    </p>
+    <div id="presence"></div>
+    <p id="status" class="status">connecting…</p>
+  </header>
+  <%# Above the grid on purpose: below it, adding a row moves the button. %>
+  <div id="toolbar"></div>
+  <table id="grid" data-document-id="<%= @document_id %>:spreadsheet">
+    <thead></thead>
+    <tbody></tbody>
+  </table>
+</div>
+<script src="/spreadsheet.js" defer></script>

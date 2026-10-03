@@ -2,7 +2,7 @@
 
 module Y
   # The Lexxy renderer: Y::Lexical (core Lexical) plus the Lexxy-specific
-  # schema, applied beneath the app's rules — an app rule for one of these
+  # schema, applied beneath the app's rules: an app rule for one of these
   # types simply replaces it. This is the byte-parity class: the fixture
   # tests hold `Y::Lexxy.new(doc).to_html` identical to a live editor's own
   # serialized value.
@@ -36,7 +36,7 @@ module Y
       %(<th class="lexxy-content__table-cell--header" #{style}>#{node.content}</th>)
     end
 
-    # Attribute order follows Lexxy's export — checked items put aria-checked
+    # Attribute order follows Lexxy's export: checked items put aria-checked
     # before value; items holding a nested list append the
     # lexxy-nested-listitem class after value.
     def self.list_item(node)

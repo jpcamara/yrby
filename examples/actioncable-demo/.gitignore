@@ -12,6 +12,7 @@
 /public/whiteboard.js
 /public/kanban.js
 /public/forms.js
+/public/spreadsheet.js
 .DS_Store
 /config/master.key
 /storage/

@@ -11,17 +11,29 @@ class InstallGeneratorTest < Rails::Generators::TestCase
   destination File.expand_path("../tmp/generator-destination", __dir__)
   setup :prepare_destination
 
-  def test_generates_the_channel_over_gem_owned_storage
+  def test_generates_no_app_code
     run_generator
 
+    # Y::DocumentChannel and the models ship in the gem, so install only
+    # creates the migration.
+    assert_no_file "app/channels/document_channel.rb"
+    assert_no_file "app/models/yrby_document_update.rb"
+  end
+
+  def test_optionally_generates_an_explicit_custom_channel
+    run_generator ["--channel"]
+
     assert_file "app/channels/document_channel.rb" do |channel|
-      assert_match(/include Y::ActionCable\b/, channel)
-      assert_match("Y::Document.load_state(key)", channel)
-      assert_match("Y::Document.append(key, update)", channel)
-      assert_match(/def authorized\?/, channel)
-      assert_match(/false/, channel, "authorization denies everyone by default")
+      assert_includes channel, "include Y::ActionCable"
+      assert_includes channel, "def subscribed = sync_subscribed(params[:id])"
+      assert_includes channel, "def receive(data) = sync_receive(data, params[:id])"
+      refute_includes channel, "authorized?(params[:id])"
+      assert_includes channel, "def authorized?(_document_key)"
+      assert_match(/def authorized\?\(_document_key\)\s+false/, channel)
+      assert_includes channel, "Y::Document.load_state(key)"
+      assert_includes channel, "Y::Document.append(key, update)"
     end
-    assert_no_file "app/models/yrby_document_update.rb" # models ship in the gem
+    assert_migration "db/migrate/create_y_tables.rb"
   end
 
   def test_generates_the_storage_migration
@@ -33,7 +45,9 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_match(":y_documents", migration)
       assert_match("t.string :key, null: false, index: { unique: true }", migration)
       assert_match("t.references :record, polymorphic: true, null: true", migration)
-      assert_match(/t\.binary :state, limit: 4\.gigabytes - 1/, migration)
+      # 1 GB - 1 is the largest limit every adapter accepts: Postgres
+      # raises above it; MySQL still maps it to longblob.
+      assert_match(/t\.binary :state, limit: 1\.gigabyte - 1/, migration)
       assert_match(":y_document_updates", migration)
       assert_match("t.references :document", migration)
       assert_match(/t\.binary :payload, null: false, limit: 16\.megabytes - 1/, migration)
