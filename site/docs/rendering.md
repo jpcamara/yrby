@@ -1,13 +1,12 @@
 # Server-side rendering
 
-The renderers turn a collaborative document into HTML on the server, without
-Node or a headless editor. Each renderer targets one editor and produces the
-same HTML as that editor's own serializer. `Y::Tiptap` renders ProseMirror
-documents and is built on `Y::ProseMirror`. `Y::Lexxy` renders documents from
-the [Lexxy](https://github.com/basecamp/lexxy) editor and is built on
-`Y::Lexical`. To support another editor on the same engine, extend one of those
-base classes with rules. Each renderer returns `nil` for a root written by the
-other engine.
+These classes turn a collaborative document into HTML in Ruby, with no Node or
+headless browser. Each one targets a specific editor and produces the same
+HTML that editor would. `Y::Tiptap` renders Tiptap documents and builds on
+`Y::ProseMirror`. `Y::Lexxy` renders [Lexxy](https://github.com/basecamp/lexxy)
+documents and builds on `Y::Lexical`. For another editor built on ProseMirror
+or Lexical, extend the base class with your own rules. Point a renderer at a
+document from the other engine and it returns `nil`.
 
 ## Y::Tiptap
 
@@ -17,25 +16,24 @@ tiptap.to_html            # the "default" fragment (Tiptap's default root)
 tiptap.to_html("content") # or another XML root
 ```
 
-The output matches Tiptap's own `getHTML()` byte for byte. The tests compare it
-against a document captured from a real editor. The implementation follows
-[`tiptap-php`](https://github.com/ueberdosis/tiptap-php). It reads both naming
-styles editors use: Tiptap's `bulletList` and `bold`, and
-prosemirror-schema-basic's `bullet_list` and `strong`.
+The output matches Tiptap's own `getHTML()` byte for byte, and the tests check
+it against a document captured from a real editor. It's modeled on
+[`tiptap-php`](https://github.com/ueberdosis/tiptap-php). It understands both
+naming styles, Tiptap's (`bulletList`, `bold`) and prosemirror-schema-basic's
+(`bullet_list`, `strong`).
 
 It covers paragraphs, headings, blockquotes, bullet, ordered, and task lists,
 code blocks, links, images, mentions, details, hard breaks, horizontal rules,
 tables, text styles (color and font family), and the rest of Tiptap's marks.
-Tables render as a plain `<table><tbody>`, without the column-width styling
-that Tiptap's editor view adds.
+Tables come out as a plain `<table><tbody>`. The column widths that Tiptap's
+editor adds on screen aren't included.
 
-`Y::ProseMirror` handles core ProseMirror: prosemirror-schema-basic plus the
-prosemirror-tables family. `Y::Tiptap` adds Tiptap's extension nodes (task
-lists, mentions, and the details family) as a rule set, `Y::Tiptap::NODES`,
-written with the rules API described below. Marks are handled in the base
-class. Getting marks right means nesting them in the right order, writing the
-CSS for `textStyle`, and keeping `code` from combining with other marks. Node
-rules can't express that, so the native renderer does it.
+`Y::ProseMirror` covers core ProseMirror, meaning prosemirror-schema-basic and
+the prosemirror-tables family. `Y::Tiptap` adds Tiptap's extra nodes (task
+lists, mentions, and details) as a rule set, `Y::Tiptap::NODES`, written with
+the same rules API shown below. The native renderer handles marks itself.
+They have to nest in the right order, `textStyle` needs CSS, and `code` can't
+combine with other marks, none of which node rules can express.
 
 ## Y::Lexxy
 
@@ -45,34 +43,33 @@ lexxy.to_html            # the "root" fragment (Lexical's default root name)
 lexxy.to_html("notepad") # or another XML root
 ```
 
-The HTML is the same as the `value` a `lexxy-editor` submits to Rails. The
-tests compare it against a document captured from a real editor. Stock Lexical
-has no standard serializer, because every editor configures its own. That's why
-the class is named after the editor. `Y::Lexical` covers core Lexical, and other
-Lexical editors can extend it with their own rules.
+The HTML is the same as the `value` a `lexxy-editor` submits to Rails, and the
+tests check it against a document captured from a real editor. Lexical itself
+has no standard HTML output, because each editor sets up its own, so the class
+is named after Lexxy. `Y::Lexical` covers core Lexical, and other Lexical
+editors can extend it with their own rules.
 
 It handles every node in the Lexxy 0.9.x set: paragraphs, headings, every text
 format and their combinations, links, the four list types with nesting,
 blockquotes, code blocks, tabs and soft breaks, horizontal rules, tables with
 header cells, image galleries, and ActionText attachments. Uploads and mentions
-both render as `<action-text-attachment>` elements, which ActionText can render
-again. If you configured Lexxy with a different attachment tag name, the
+both come out as `<action-text-attachment>` elements, which Action Text knows
+how to display. If you configured Lexxy with a different attachment tag name, the
 renderer uses the tag stored on each node. An upload that's still in progress
 renders nothing.
 
-In both renderers, an unknown node still renders its text and nested blocks as
-readable markup.
+If either renderer meets a node it doesn't know, it still outputs the node's
+text and nested blocks.
 
 ## Custom nodes and marks
 
-The built-in schemas match what Tiptap and Lexxy ship. Apps often add their own
-node types, and both renderers accept rules for them. The renderer checks your
-rules before its built-in schema, so a rule can add a node type or change how a
-built-in one renders.
+The built-in rules cover what Tiptap and Lexxy ship. Apps often add their own
+node types, and both renderers take rules for those. Your rules are checked
+first, so a rule can add a new node type or change how a built-in one renders.
 
-You register rules in a block, with one `rules.node` call per type. A
-declarative rule describes the markup as a tag, attributes, and a content mode,
-and the native renderer produces it.
+Register rules in a block, with one `rules.node` call per type. The simplest
+kind names a tag, its attributes, and what goes inside, and the native
+renderer does the rest.
 
 ```ruby
 tiptap = Y::Tiptap.new(doc) do |rules|
@@ -84,7 +81,7 @@ end
 
 `tag` names the element. Each value in `attrs` is a template. A string is used
 as is, a symbol reads that attribute from the node, and an array joins a mix of
-the two. An attribute that resolves to an empty value is left out. `text` takes
+the two. An attribute that comes out empty is left off. `text` takes
 the same kind of template and outputs it as text content. `contains` says what
 the node holds. Use `:inline` for formatted text, `:blocks` for child block
 nodes, or `:none` for a node with no content. `:inline` is the default.
@@ -125,9 +122,9 @@ end
 
 The block receives the node's type and stored attributes. `node.content` is the
 node's children, already rendered to HTML. `node.child_types` lists the node's
-element and block children by type, in document order. Use it for structural
-questions the attributes can't answer, such as how many images a gallery holds
-or whether a list item contains a nested list. The renderer inserts whatever
+element and block children by type, in document order. Use it for questions
+the attributes can't answer, like how many images a gallery has or whether a
+list item has a nested list. The renderer inserts whatever
 the block returns without escaping it, so escape any values you interpolate.
 `ERB::Util.html_escape` works, but it also escapes apostrophes. If your output
 has to match the editor's exactly, use `Y::RenderRules.escape_text` and
@@ -135,10 +132,10 @@ has to match the editor's exactly, use `Y::RenderRules.escape_text` and
 do. To set the content mode for a block rule, pass both:
 `rules.node "embed", contains: :blocks do |node| ... end`.
 
-Blocks never run while the document is locked. The renderer finishes its pass
-first, inside one read transaction with the GVL released. Then it runs the
-blocks and inserts their output. So a block can read the same doc, write to it,
-or query the database.
+Blocks don't run while the document is locked. The renderer does its native
+pass first, in one read transaction with the GVL released, then runs your
+blocks and inserts what they return. So a block can safely read the same doc,
+write to it, or query the database.
 
 ```ruby
 tiptap = Y::Tiptap.new(doc) do |rules|
@@ -172,8 +169,8 @@ replaces that mark's markup.
 
 ## Overriding a shipped rule
 
-This rule renders Lexxy uploads as image markup. The shipped rule outputs the
-`<action-text-attachment>` elements that ActionText renders.
+This rule renders Lexxy uploads as plain images, in place of the
+`<action-text-attachment>` elements the built-in rule outputs.
 
 ```ruby
 lexxy = Y::Lexxy.new(doc) do |rules|

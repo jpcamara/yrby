@@ -1,10 +1,10 @@
 # Getting started
 
-yrby makes Rails a Yjs backend. It binds
-[y-crdt](https://github.com/y-crdt/y-crdt), the Rust engine behind Y.js, into
-Ruby. On top of that it builds a sync server for Action Cable and AnyCable, a
-browser provider, and server-side reading and rendering of the documents. You
-get real-time collaboration in a Rails app with no Node process to run.
+yrby lets several people edit the same document in your Rails app at once. It
+wraps [y-crdt](https://github.com/y-crdt/y-crdt), the Rust version of Yjs, for
+Ruby. On top of that it adds a sync channel for Action Cable and AnyCable, a
+browser client, and tools to read and render documents in Ruby. You don't need
+to run Node.
 
 ## Install
 
@@ -28,8 +28,8 @@ matches your platform and the gem builds from source.
 
 ## Install the storage
 
-The generator adds one migration. The models and the channel ship in the gem,
-as `ActionText::RichText` ships in Action Text.
+The generator adds one migration. The models and the channel come with the gem,
+so there's nothing else to generate.
 
 ```bash
 bin/rails generate yrby:install
@@ -38,24 +38,24 @@ bin/rails db:migrate
 
 ## The server side
 
-There is no channel to write. Render the document in a view that already
-requires edit permission for the record:
+You don't need to write a channel. Render the tag in a view that only users who
+can edit the record can see:
 
 ```erb
 <%= collaborative_document_tag @post, :body %>
 ```
 
-The tag renders a signed grant for that record and attribute. When the browser
-subscribes, the gem's `Y::DocumentChannel` checks the grant and finds the
-record. It saves each change before it acknowledges it, to `Y::Document`, or to
-`Y::EncryptedDocument` for attributes declared `encrypted: true`.
+The tag includes a signed token for that record and attribute. The browser
+subscribes to the gem's `Y::DocumentChannel` with it, and the channel looks up
+the record. It saves each change before confirming it, using `Y::Document`, or
+`Y::EncryptedDocument` if the attribute is declared `encrypted: true`.
 
-The client sends only the grant. The channel rejects a grant that is missing,
-tampered with, expired, or signed for a different attribute. It also rejects
-one whose record has been deleted. Your controller already authorized the user
-when it rendered the page. The channel trusts the grant because only your
-server can sign one. To also check the user's current permissions at subscribe
-time, see [The document channel](/docs/document-channel).
+The browser only ever sends that token. The channel rejects it if it's missing,
+tampered with, expired, signed for a different attribute, or points at a
+deleted record. Only your server can sign a token, so a valid one means your
+controller already let this user see the page. To also check the user's
+current permissions when they subscribe, see
+[The document channel](/docs/document-channel).
 
 The document is stored as rows in your database, and you can read it back in
 Ruby:
@@ -65,17 +65,17 @@ doc = @post.collaborative_document(:body).y_doc
 doc.read_text("content")  # for rich text, use Y::Lexxy.new(doc).to_html
 ```
 
-Some apps need documents keyed by room, a different store, or their own
-authorization. For those, generate an application channel with
-`bin/rails generate yrby:install --channel`. It includes the same concern that
-`Y::DocumentChannel` uses, and it's a few lines long.
+If you need documents keyed by room, a different store, or your own
+authorization, generate your own channel with
+`bin/rails generate yrby:install --channel`. It's a few lines long and uses the
+same concern as `Y::DocumentChannel`.
 [The document channel](/docs/document-channel) covers it.
 
 ## The browser side
 
-The tag renders a `<yrby-document>` element that connects by itself once you
-import it. When the document has synced, your listener receives it and passes
-it to your editor binding:
+The tag renders a `<yrby-document>` element. Import it once and it connects by
+itself. When the document has synced, your listener gets it and hands it to
+your editor:
 
 ```js
 import "yrby-client/element"
@@ -86,25 +86,24 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
 })
 ```
 
-`yrby:synced` fires once per lease, after the first catch-up with the server.
-Bind the editor in that listener. Most editor bindings seed an empty document
-when they mount. If two clients bind before the server's state arrives, each
-inserts its own top-level node and the document ends up with both.
+`yrby:synced` fires once the document has caught up with the server. Attach the
+editor there and not earlier. Most editor bindings add an empty paragraph when
+they start. If two people attach before the server's copy arrives, the document
+ends up with both paragraphs.
 
-When the signal aborts, detach the editor. Your binding owns the editor and its
-listeners. yrby owns the document, the provider, and the shared consumer, so
-don't destroy those in your cleanup. The event bubbles, so one listener on
-`document` also handles elements added to the page later.
+When the signal aborts, remove the editor and its listeners. Leave the
+document, the provider, and the cable consumer alone, because yrby manages
+those. The event bubbles, so one listener on `document` also covers elements
+added to the page later.
 
-If the user leaves the page with unsent edits, the session keeps them and
-finishes delivering them. The next visit loads the saved content from Rails,
-in a new `Y.Doc` with a fresh undo history. The
-[client lifecycle](/docs/javascript-client#document-sessions-and-navigation)
-has the details. Open the [record-backed editor](/examples/document) in two
-windows to try it.
+If the user leaves the page before their edits are sent, yrby keeps sending
+them as long as the tab stays open. The next visit loads the saved content from
+Rails, with a fresh undo history. The
+[JavaScript client](/docs/javascript-client#document-sessions-and-navigation)
+page has the details, and the [record-backed editor](/examples/document) lets
+you try it in two windows.
 
-On AnyCable, give the elements an Action Cable compatible consumer before any
-of them connect:
+On AnyCable, set the consumer before any element connects:
 
 ```js
 import { YrbyDocumentElement } from "yrby-client/element"
@@ -129,8 +128,9 @@ correctness, and thread safety.
 
 ## Editors
 
-yrby syncs opaque Yjs updates, so any editor with a Yjs binding works. The demo
-app in the repo runs four of them, and CI drives each one in a real Chrome.
+yrby doesn't look inside Yjs updates, so any editor with a Yjs binding works.
+The demo app in the repo runs four of them, and CI types into each one in real
+Chrome.
 
 | Editor | Yjs binding |
 |---|---|
@@ -139,17 +139,16 @@ app in the repo runs four of them, and CI drives each one in a real Chrome.
 | [Rhino Editor](https://github.com/KonnorRogers/rhino-editor) (Tiptap 3) | `@tiptap/extension-collaboration` + `-caret` |
 | [CodeMirror 6](https://codemirror.net) | `y-codemirror.next` |
 
-The same channel also syncs Yjs shapes with no editor: a whiteboard on a
-`Y.Map`, a kanban board on a `Y.Array`, a spreadsheet on a `Y.Array` of nested
-`Y.Map`s. This site runs six [live demos](/demos). One is a Lexxy editor built
-on [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime). After every
-change, the server renders that document to HTML with `Y::Lexxy` and saves it
-to a plain column.
+The same channel also syncs documents that aren't text, such as a whiteboard
+on a `Y.Map`, a kanban board on a `Y.Array`, or a spreadsheet on a `Y.Array` of
+nested `Y.Map`s. This site has six [live demos](/demos). In the Lexxy one,
+built on [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime), the
+server renders the document to HTML with `Y::Lexxy` after every change and
+saves it to a plain column.
 
 ## Reading a document in Ruby
 
-You can rebuild a document on the server for search, exports, or emails,
-without Node:
+You can read a document on the server for search, exports, or emails:
 
 ```ruby
 doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
@@ -158,7 +157,7 @@ doc.read_map("state")         # => a Y.Map root as a JSON string
 doc.read_array("cards")       # => a Y.Array root as a JSON string
 ```
 
-To get HTML that matches the editor's own serializer, see
+For HTML that matches what the editor produces, see
 [Server-side rendering](/docs/rendering).
 
 ## Thread safety
@@ -167,6 +166,6 @@ You can share a `Doc` across Ruby threads. Puma threads, Action Cable
 connection threads, and background jobs can all use the same one at once, and
 your code doesn't need to lock it.
 
-Every method that does real CRDT work releases Ruby's Global VM Lock while the
-native code runs. On MRI, that means CRDT work runs in parallel across
-threads, and a thread applying a large update doesn't block the others.
+Methods that do real CRDT work release Ruby's Global VM Lock while the native
+code runs. So on MRI, several threads can do CRDT work in parallel, and a big
+update on one thread doesn't hold up the others.

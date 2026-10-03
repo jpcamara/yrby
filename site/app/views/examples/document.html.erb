@@ -23,14 +23,14 @@
   <pre id="stored-document" aria-live="polite">Type something, then select “Read saved text”.</pre>
   <%= code_block "ruby", "doc = @document.collaborative_document(:body).y_doc\ndoc.read_text(\"content\")" %>
   <h2>How it's wired</h2>
-  <p>The view renders <code>collaborative_document_tag</code>. When the
-    document syncs, the page's script attaches CodeMirror to it, and it
-    destroys the editor when the lease's abort signal fires. Edits that
-    haven't been acknowledged are held by the document session, so removing
-    the editor doesn't lose them.</p>
-  <p>This page runs the published gems and client. The site adds its
-    public-demo limits to the shipped channel. In your own app, check that the
-    user can edit the record before you render the tag.</p>
+  <p>The view renders <code>collaborative_document_tag</code>. Once the
+    document syncs, the page's script attaches CodeMirror to it. When the
+    lease's abort signal fires, the script removes CodeMirror again. The
+    document session keeps any edits the server hasn't confirmed yet, so
+    removing the editor doesn't lose them.</p>
+  <p>This page runs the published gems and client. The site wraps the gem's
+    channel with the same limits as the public demos. In your own app, check
+    that the user can edit the record before you render the tag.</p>
   <p><a href="/docs/getting-started">Getting started</a> ·
     <a href="/docs/javascript-client">The JavaScript client</a></p>
 </section>

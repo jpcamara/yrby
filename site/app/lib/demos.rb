@@ -16,42 +16,43 @@ module Demos
       slug: "lexxy",
       title: "Lexxy",
       shape: "Y.XmlText",
-      blurb: "Lexxy with lexxy-realtime. The server renders each change to HTML and saves it on a Note record.",
+      blurb: "Basecamp's Lexxy editor. After each change, the server renders the document to HTML " \
+             "and saves it to a record.",
       read: nil
     ),
     Demo.new(
       slug: "tiptap",
       title: "Tiptap",
       shape: "Y.XmlFragment",
-      blurb: "ProseMirror rich text through Tiptap's Collaboration and CollaborationCursor extensions.",
+      blurb: "Rich text with Tiptap's own collaboration extensions, including other people's cursors.",
       read: Reader.new(root: "default", kind: :xml)
     ),
     Demo.new(
       slug: "spreadsheet",
       title: "Spreadsheet",
       shape: "Y.Array of row Y.Maps",
-      blurb: "Every cell is its own Y.Map, so edits to different cells merge. Sorting is local to each window.",
+      blurb: "Each cell is its own Y.Map, so edits to different cells merge. Each window sorts on its own.",
       read: Reader.new(root: "rows", kind: :array)
     ),
     Demo.new(
       slug: "whiteboard",
       title: "Whiteboard",
       shape: "Y.Map of Y.Maps",
-      blurb: "Sticky notes you can add, drag, and edit, stored as records keyed by id.",
+      blurb: "Sticky notes you can add, drag, and edit together.",
       read: Reader.new(root: "shapes", kind: :map)
     ),
     Demo.new(
       slug: "kanban",
       title: "Kanban",
       shape: "Y.Array of Y.Maps",
-      blurb: "Moving a card changes one key on its map, so two people can move different cards at once.",
+      blurb: "Moving a card changes one field, so two people can move different cards at the same time.",
       read: Reader.new(root: "cards", kind: :array)
     ),
     Demo.new(
       slug: "codemirror",
       title: "Code",
       shape: "Y.Text",
-      blurb: "CodeMirror 6 bound with y-codemirror.next, showing other people's cursors and selections.",
+      blurb: "CodeMirror 6 with y-codemirror.next, including other people's cursors and selections.",
       read: Reader.new(root: "code", kind: :text)
     )
   ].freeze

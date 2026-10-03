@@ -1,14 +1,14 @@
 <p>
   The sheet is a <code>Y.Array</code> named <code>rows</code>. Each row is a
-  <code>Y.Map</code> keyed by column, and each cell in it is another
-  <code>Y.Map</code> holding <code>value</code>, <code>bold</code>, and
-  <code>fill</code>. Since those are separate keys, one person can bold a cell
-  while someone else types in it and both changes survive. Two writes to the
-  same key resolve as last write wins. A value is saved when you press Enter
-  or leave the cell, as in most spreadsheets.
+  <code>Y.Map</code> keyed by column, and each cell is another
+  <code>Y.Map</code> with <code>value</code>, <code>bold</code>, and
+  <code>fill</code>. Because those are separate keys, one person can bold a cell
+  while someone else types in it, and both changes stick. If two people change
+  the same key, the last write wins. A value saves when you press Enter or
+  leave the cell, like in most spreadsheets.
 </p>
 <p>
-  TanStack Table handles sorting and column order separately in each window,
-  and neither is written to the shared document. Sort by Owner in one window
-  and by Qty in the other, then edit the same row in both.
+  Sorting and column order are per window. TanStack Table keeps them locally
+  and never writes them to the shared document. Sort by Owner in one window and
+  by Qty in the other, then edit the same row in both.
 </p>
