@@ -269,6 +269,12 @@ class RenderingRulesTest < Minitest::Test
     assert_includes html, 'aria-checked="&quot;&gt;&lt;script&gt;x"'
     assert_includes html, 'value="1"'
     refute_includes html, %("><script>)
+
+    crafted = Y::RenderRules::Node.new(
+      type: "listitem", attrs: { "__value" => %(1" onclick="x) }, content: "item", child_types: []
+    )
+
+    assert_includes Y::Lexxy.list_item(crafted), 'value="1&quot; onclick=&quot;x"'
   end
 
   def test_rules_hold_up_under_concurrent_renders
