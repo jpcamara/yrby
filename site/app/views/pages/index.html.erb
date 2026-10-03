@@ -103,16 +103,19 @@
       <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">The Rails side</p>
       <h2 class="mt-3 font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">One line of ERB.</h2>
       <p class="mt-5 max-w-[26em] font-serif text-[1.35rem] leading-[1.5] text-zinc-300 italic">
-        The tag renders a signed grant for the post's body. The browser
-        subscribes to the gem's channel with it, and every change is saved to
-        your database before other users see it.
+        Put the tag in any view where the user is allowed to edit the post.
+        Everyone on that page edits the same document, and every change is
+        saved to your database.
       </p>
       <p class="mt-5 max-w-[34em] leading-7 text-zinc-400">
-        Because the channel only opens the document named in the grant, the
-        authorization your controller already does decides who can edit. You
-        don't write a channel. In the browser, you import
-        <code>yrby-client/element</code> and attach your editor once the
-        document has synced.
+        The tag includes a signed token for <code>@post.body</code>. The
+        browser subscribes with it, and the server refuses any other document.
+        So the permission check you already do before rendering the page is
+        the only one you need, and you don't write a channel.
+      </p>
+      <p class="mt-4 max-w-[34em] leading-7 text-zinc-400">
+        In your JavaScript, import <code>yrby-client/element</code> and attach
+        your editor once the document has synced.
       </p>
     </div>
     <div class="flex min-w-0 flex-col gap-4">
@@ -255,11 +258,12 @@
 <section class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
   <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Nothing new to deploy.</h2>
   <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
-    A Node sync server is a second runtime to deploy, monitor, and scale, and
-    it has to check your app's sessions somehow. A hosted service keeps your
-    documents on another company's servers. With yrby, your Rails app is the
-    sync server and your database is the store. The signed grant your page
-    renders handles access.
+    A Node sync server is one more thing to deploy, monitor, and scale, and it
+    needs its own way to know who's logged in. A hosted service keeps your
+    documents on another company's servers. With yrby, your Rails app does
+    the syncing and your database stores the documents. Who can edit is
+    decided the same way as everything else in your app: in the controller
+    that renders the page.
   </p>
   <div class="mt-10 overflow-x-auto">
     <table class="compare min-w-full text-[0.95rem]">
