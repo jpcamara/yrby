@@ -881,9 +881,9 @@ fn num_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<i64> {
 }
 
 /// Text-content escaping, matching the browser serializer: `&`, `<`, `>`.
-/// Public for splice callers: values read from a deferred segment's
-/// attributes came from the document — from collaborators — so escape
-/// anything you interpolate into markup.
+/// Public for splice callers. Values read from a deferred segment's
+/// attributes come from collaborators, so escape anything you put into
+/// markup.
 pub fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

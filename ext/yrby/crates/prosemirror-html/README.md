@@ -139,8 +139,8 @@ fn splice(segments: Vec<Segment>) -> String {
                         let attrs: serde_json::Value =
                             serde_json::from_str(&attrs_json).unwrap();
                         let id = attrs["id"].as_str().unwrap_or("unknown");
-                        // Attribute values are document data, written by
-                        // collaborators: escape everything you interpolate.
+                        // Collaborators write these attribute values, so
+                        // escape everything you insert.
                         format!(
                             r#"<a class="mention" href="/users/{}">@{}</a>"#,
                             escape_attr(id),
