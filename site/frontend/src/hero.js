@@ -1,6 +1,6 @@
-// The home page hero: a replay of two people editing one document, with the
-// Rails side of the sync underneath. It's a scripted animation, not a live
-// room (the demos are live), so it needs no cable and costs the server nothing.
+// The home page hero: a replay of two people editing one document. It's a
+// scripted animation (the demos are the live version), so it needs no cable
+// and costs the server nothing.
 //
 // Markup (pages/index.html.erb) renders the finished state, so a visitor
 // without JavaScript or with reduced motion sees a complete picture.
@@ -20,17 +20,12 @@ const SCRIPT = {
 }
 const TICK_MS = 85
 const PAUSE_TICKS = 50
-const UPDATE_CHARS = 5
-const LOG_LINES = 4
 
 const hero = document.querySelector("[data-hero]")
 if (hero && !matchMedia("(prefers-reduced-motion: reduce)").matches) run(hero)
 
 function run(root) {
   const panes = [...root.querySelectorAll("[data-pane]")]
-  const log = root.querySelector("[data-log]")
-  const rows = root.querySelector("[data-rows]")
-  const read = root.querySelector("[data-read]")
   let sim = fresh()
 
   setInterval(() => {
@@ -44,9 +39,6 @@ function run(root) {
       text: START,
       carets: { you: TITLE_END, ada: START.length },
       progress: { you: { i: 0, c: 0 }, ada: { i: 0, c: 0 } },
-      pending: { you: 0, ada: 0 },
-      updates: 0,
-      log: [],
       pause: 0,
     }
   }
@@ -68,7 +60,6 @@ function run(root) {
     const progress = sim.progress[who]
     const action = SCRIPT[who][progress.i]
     if (action.to) {
-      flush(who)
       sim.carets[who] = action.to === "title" ? TITLE_END : sim.text.length
       progress.i++
     } else if (action.after) {
@@ -80,37 +71,12 @@ function run(root) {
         if (other !== who && sim.carets[other] >= at) sim.carets[other]++
       }
       sim.carets[who] = at + 1
-      sim.pending[who]++
-      progress.c++
-      if (sim.pending[who] >= UPDATE_CHARS) flush(who)
-      if (progress.c >= action.type.length) {
-        flush(who)
-        Object.assign(progress, { i: progress.i + 1, c: 0 })
-      }
+      if (++progress.c >= action.type.length) Object.assign(progress, { i: progress.i + 1, c: 0 })
     }
-  }
-
-  // One Yjs update per few characters, the way an editor batches keystrokes.
-  function flush(who) {
-    if (sim.pending[who] === 0) return
-    sim.updates++
-    sim.log = [...sim.log, { n: sim.updates, who, chars: sim.pending[who] }].slice(-LOG_LINES)
-    sim.pending[who] = 0
   }
 
   function draw() {
     for (const pane of panes) drawPane(pane, pane.dataset.pane)
-    rows.textContent = sim.updates
-    read.textContent = `"${sim.text.replaceAll("\n", "\\n")}"`
-    log.replaceChildren(...sim.log.map((entry, index) => {
-      const line = document.createElement("li")
-      if (index === sim.log.length - 1) line.className = "latest"
-      const who = document.createElement("span")
-      who.style.color = entry.who === "you" ? "#8fb0ff" : "#e8b05c"
-      who.textContent = entry.who
-      line.append(who, ` update #${entry.n} · ${entry.chars} chars → recorded → ack`)
-      return line
-    }))
   }
 
   // The document with both carets placed in it. Each window shows its own
