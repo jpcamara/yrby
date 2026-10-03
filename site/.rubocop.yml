@@ -1,0 +1,80 @@
+# The site is a Rails app, not gem code. It inherits the repo root's cop set
+# (that config's AllCops/Exclude applies here whichever directory rubocop runs
+# from, so there is no getting away from it) and turns off the handful of rules
+# that only make sense for a library.
+#
+# Deliberately gem-free: no `inherit_gem`, no plugins beyond the root's. That
+# way `bundle exec rubocop` gives the same answer from the repo root and from
+# this directory, without the site's dev dependencies having to be installed at
+# the root.
+
+plugins:
+  - rubocop-minitest
+  - rubocop-rake
+
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "bin/**/*"
+    - "frontend/node_modules/**/*"
+    - "tmp/**/*"
+    - "log/**/*"
+    - "vendor/**/*"
+
+# Rails applications don't carry the magic comment; the framework and every
+# generator omit it.
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+# Controllers, channels, and config classes don't need a doc comment each.
+Style/Documentation:
+  Enabled: false
+
+# Double quotes throughout, matching the gem.
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+Layout/LineLength:
+  Max: 120
+
+# Rails' own config DSL is one long block per environment, and tests are
+# assertion-dense by nature.
+Metrics/BlockLength:
+  Exclude:
+    - "config/**/*"
+    - "db/schema.rb" # generated
+    - "test/**/*"
+
+Metrics/ClassLength:
+  Exclude:
+    - "test/**/*"
+
+Metrics/MethodLength:
+  Max: 30
+  Exclude:
+    - "test/**/*"
+
+Metrics/AbcSize:
+  Max: 32
+  Exclude:
+    - "test/**/*"
+
+Minitest/MultipleAssertions:
+  Enabled: false
+
+# `bucket.take` returns true/false but is not a predicate: it consumes a token.
+# `take?` would read as a question about a bucket that has already been changed.
+Naming/PredicateMethod:
+  AllowedMethods:
+    - take
+
+# `class Rack::Attack` is how every Rack::Attack initializer is written, and
+# `class ApplicationCable::ConnectionTest` is Rails' own generated form.
+Style/ClassAndModuleChildren:
+  Exclude:
+    - "config/initializers/**/*"
+    - "test/**/*"

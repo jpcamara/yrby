@@ -1,0 +1,274 @@
+# The JavaScript client
+
+`yrby-client` is the browser half of yrby. It has a provider for Action Cable
+and AnyCable, plus the pieces that provider is built from: a protocol session
+that works over any transport, and a queue that resends edits until the server
+confirms them. It's written in TypeScript, ships its own types, and works from
+plain JavaScript as ESM or CommonJS.
+
+```
+npm install yrby-client
+```
+
+`yjs` and `y-protocols` are optional peer dependencies, so install them
+alongside it. If you already use a Yjs editor binding, you have both.
+
+## The `<yrby-document>` element
+
+yrby-rails' `collaborative_document_tag` renders a `<yrby-document>` element
+with a signed token in it, much like `turbo_stream_from` renders a
+`<turbo-cable-stream-source>`. Import the element once and it connects by
+itself:
+
+```js
+import "yrby-client/element";
+
+document.addEventListener("yrby:synced", ({ target, detail }) => {
+  const editor = bindYourEditor(target, detail.doc, detail.provider);
+  detail.signal.addEventListener("abort", () => editor.destroy(), { once: true });
+});
+```
+
+`bindYourEditor` stands for however you attach your editor. When the signal
+aborts, remove the Yjs listeners and disable or remove the editor. Don't
+destroy the document, the provider, or the shared consumer, because yrby
+manages those. The signal fires before yrby sends any final update, and you
+should handle it even if the editor is already gone from the page.
+
+Behind each element is a document session. It holds the `Y.Doc`, the provider,
+and any edits the server hasn't confirmed. When the last editor detaches, the
+session clears your presence, and it closes if nothing is waiting to be sent.
+If edits are still waiting, it keeps sending them with the original token
+until the server confirms them. If the server rejects the subscription, the
+session stops and keeps the unsent edits in memory so you can recover them.
+
+The element works with Turbo and Turbolinks 5. A cached preview doesn't create
+a document or connect. When you go back to a page, the element picks up its
+old session if that session still has unsent edits. Otherwise it loads the
+saved content from Rails. If the page renders a new token, the element gets a
+new session, and the old session's edits reach it through the server like
+anyone else's. This all happens within one tab. Nothing is stored for offline
+use, so closing or reloading the tab loses edits the server hasn't confirmed.
+
+Moving the element in the DOM keeps its editor and document, as long as you
+remove and reinsert it in the same synchronous block of code. If you put it
+back later, it reloads the saved content, and the old `Y.Doc` and undo history
+are gone. Changing the token, name, or channel tears down the old editor right
+away and connects to the new document. The old session still finishes sending
+its unsent edits with its original token.
+
+The element exposes its current `session`, `doc`, and `provider`. They're
+undefined until it connects and while it switches documents, and reading them
+never creates one. `whenSynced` is always a promise, even before the consumer
+is set up. It resolves when the document first catches up with the server, and
+never resolves if the element gives up on that document. The `yrby:synced`
+event bubbles, fires once each time the element connects to a document, and
+includes `detail.signal` for cleanup. Synced doesn't mean the connection is up
+right now, or that every edit is confirmed. Check `provider.synced` and
+`session.hasPending` for those.
+
+If the import fails or the server rejects the subscription, the element fires
+`yrby:error` with `detail.error`. A rejection also includes `detail.session`,
+so you can retry it. While the session is blocked, the element does nothing.
+After you retry, call `element.activate()` or remount the element to attach
+again. `element.destroy()` disconnects the element until it's put back on the
+page. It doesn't throw away unsent edits.
+
+The `refresh` attribute is a same-origin URL that returns a new token for this
+document as `{ "grant": "..." }`. When the server rejects the subscription,
+usually because the token expired, the session fetches that URL once and
+subscribes again with the new token. It keeps its document and unsent edits.
+See [Grant lifetime and
+refresh](https://github.com/jpcamara/yrby#grant-lifetime-and-refresh) in the
+main README. The element reads this attribute when it connects, so changing it
+later has no effect on the current editor.
+
+By default the element needs `@rails/actioncable`, `yjs`, and `y-protocols`,
+and every element on the page shares one consumer. For AnyCable, set the
+consumer before adding any elements:
+
+```js
+import { YrbyDocumentElement } from "yrby-client/element";
+import { createConsumer } from "@anycable/web";
+
+YrbyDocumentElement.consumer = createConsumer();
+```
+
+Importing the module registers the element, and any `<yrby-document>` tags
+already on the page start right away. So if you set a custom consumer on a
+page that's already rendered, put the tag inside a `<template>`. Set the
+consumer and add your `yrby:synced` listener first, then insert the template's
+content. The [working example](/examples/document) does it in that order, and
+its source is in
+[`site/frontend/src/document.js`](https://github.com/jpcamara/yrby/blob/main/site/frontend/src/document.js).
+
+## Document sessions and navigation
+
+Each consumer has its own session store. Elements with the same channel,
+token, and name share one document and one queue of unsent edits. The store
+compares tokens as plain strings and never decodes them. Each session adds a
+random `session_id` to its subscription, so its acks don't get mixed up with
+another session's. The server doesn't use it to pick or authorize a document.
+
+Code without an editor can hold a lease for as long as it needs the document:
+
+```js
+import { DocumentSessionStore } from "yrby-client";
+
+const store = DocumentSessionStore.for(consumer);
+const lease = store.acquire({ grant, name: "body" });
+const { session } = lease;
+await session.whenSynced;
+// Work with session.doc, and hold the lease until the workflow finishes.
+lease.release(); // safe to call more than once; pending edits keep sending
+```
+
+Call `lease.setPresence(state)` when an editor gets focus and
+`lease.setPresence(null)` when it loses it. Every view of a session shares one
+presence, so the last call wins. Your editor code gets its lease from
+`detail.lease` on `yrby:synced`.
+
+`session.state` is `open`, `blocked`, or `closed`, which is separate from
+whether the provider is connected. The store fires `change` with the session
+in `event.detail`. Use it to report edits that couldn't be delivered, even
+after the page that made them is gone.
+
+```js
+store.addEventListener("change", ({ detail: session }) => {
+  if (session.state === "blocked") reportDeliveryFailure(session.error, session);
+});
+```
+
+Sessions keep their queues while the consumer is down and send them when it
+reconnects. A new consumer gets a new store and doesn't pick up another
+consumer's queued work.
+
+A blocked session keeps its document and unsent edits in memory. `retry()`
+reconnects with its current token, which is the original or the last one its
+`refresh` URL returned. `discard()` throws the edits away. A token that
+arrives any other way, such as a new element attribute, starts a separate
+session and leaves the blocked one alone.
+
+## ActionCableProvider
+
+The element uses this provider. Use it directly when you wire things up
+yourself. With a channel you wrote, the params are whatever that channel reads,
+such as a document key or a room token.
+
+```js
+const provider = new ActionCableProvider(
+  ydoc,
+  createConsumer(),
+  "DocumentChannel",
+  { id: "post/1/body" },
+)
+```
+
+The constructor takes the document, the consumer, the channel name, and the
+channel params. Consumers from `@rails/actioncable` and `@anycable/web` both
+work without adapters or type casts. On AnyCable, the provider sends presence
+as whispers, so cursor updates go straight between browsers through AnyCable
+and never reach your Ruby code. This site's demos are public, so they turn
+that off and send presence through the server, where it's rate-limited and
+checked. See [Presence](/docs/presence).
+
+## Bind after the first sync
+
+```js
+provider.connect()
+await provider.whenSynced
+// now hand ydoc to the editor binding
+```
+
+`whenSynced` resolves when the document first catches up with the server. Most
+editor bindings add an empty paragraph when they start. If you attach the
+editor before the server's copy arrives, every client adds its own empty
+paragraph to the shared document.
+
+If that already happened, `whenSynced` resolves right away, even while
+disconnected. It resolves once, and later reconnects don't trigger it again.
+That makes it a good place to add starter content, since it won't refill a
+document someone emptied on purpose.
+
+## Connection status
+
+The provider reports four states through one listener:
+
+| Status | Meaning |
+|---|---|
+| `connecting` | Subscription created, transport not up yet |
+| `connected` | Transport up and exchanging sync steps (show it as "syncing") |
+| `synced` | Caught up with the server |
+| `disconnected` | You called `disconnect()` or `destroy()` |
+
+When the connection drops and Action Cable retries, the status goes back to
+`connecting`. You only see `disconnected` after you disconnect or destroy the
+provider yourself.
+
+```js
+const off = provider.onStatusChange(({ status }) => {
+  statusEl.textContent = status
+})
+```
+
+`onStatusChange` returns an unsubscribe function. `provider.status` is the
+current value, and `provider.synced` is true once the document has caught up.
+
+## Reliable delivery
+
+`provider.hasPending` is true while local edits are waiting to be confirmed.
+The provider merges everything in its queue into one update and tags it with
+the highest sequence number in the batch. When the server replies
+`{ ack: id }`, every edit up to that id is confirmed.
+
+If the server gets an update it already has, nothing changes. On reconnect,
+the provider sends its whole queue again. That's also how the server fills
+gaps. If it's missing an update, the client that made it still hasn't had it
+confirmed, so that client keeps resending it.
+
+## Seeding from an HTTP response
+
+`applyRemoteUpdate` loads state into the document without sending it back to
+the server as a new edit. Call it for each piece of state the server already
+has, before `connect()`.
+
+```js
+provider.applyRemoteUpdate(fromBase64(initialState))
+priorUpdates.forEach((u) => provider.applyRemoteUpdate(fromBase64(u)))
+provider.connect()
+```
+
+If you call `Y.applyUpdate` directly, the provider treats the update as a local
+change and sends it to the server again.
+
+## Teardown
+
+`disconnect()` closes the subscription and clears this client's presence.
+`destroy()` does the same and then releases the provider.
+
+If you reconnect by hand, set your presence again. `disconnect()` clears it,
+and `setLocalStateField` does nothing while it's null. So after `disconnect()`
+and `connect()`, call `setLocalState` again, or other people won't see you.
+
+```js
+provider.onStatusChange(({ status }) => {
+  if (status !== "disconnected" && !provider.awareness.getLocalState()) {
+    provider.awareness.setLocalState({ user })
+  }
+})
+```
+
+## Bundling: one copy of yjs
+
+Make sure your bundle has only one copy of `yjs`. With two, the provider and
+the editor binding each get their own. Yjs warns that it was already imported,
+`instanceof` checks fail, and y-prosemirror throws "Method unimplemented" on
+remote updates. The editor never shows other people's changes, and your next
+keystroke overwrites them. None of these errors point at the duplicate
+import, so it's hard to track down.
+
+Pin the shared packages (`yjs`, `y-protocols`, `lib0`) to one path in your
+bundler config. This site's
+[`build.mjs`](https://github.com/jpcamara/yrby/blob/main/site/frontend/build.mjs)
+does it with a small Bun resolve plugin. In Vite, use `resolve.dedupe`. In
+webpack, use `resolve.alias`.

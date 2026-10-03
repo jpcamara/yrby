@@ -1,0 +1,6 @@
+# Peer auto-install is off. yrby-client declares yjs and y-protocols as optional
+# peers; this package.json lists both directly, and letting bun resolve them a
+# second time under yrby-client is how you end up with two copies of yjs in one
+# bundle (see the comment at the top of build.mjs).
+[install]
+peer = false

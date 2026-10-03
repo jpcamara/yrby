@@ -1,0 +1,107 @@
+<% content_for :title, "lexxy-realtime: collaborative Lexxy editing for Rails" %>
+<% content_for :description, "lexxy-realtime makes Basecamp's Lexxy editor collaborative with a model macro, a form helper, and a generator. Several people can edit the same rich text field in Rails, and after each change the HTML is saved back to the record. Built on yrby." %>
+<% content_for :canonical, canonical_url("/lexxy") %>
+
+<section class="pt-6 pb-14 sm:pt-14">
+  <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">lexxy-realtime · a separate gem, built on yrby</p>
+  <h1 class="mt-3 max-w-3xl font-serif text-5xl leading-[1.02] font-normal tracking-tight text-zinc-100 sm:text-6xl">
+    Lexxy, collaborative.
+  </h1>
+  <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
+    Lexxy is Basecamp's rich text editor for Action Text, built on Lexical.
+    <code>lexxy-realtime</code> lets several people type in the same field
+    and see each other's text and cursors as they go. You add one line to the
+    model and one to the form, then run a generator.
+  </p>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    lexxy-realtime installs yrby-rails and yrby-client for you and does the
+    editor setup. If you use a different editor, or no editor, use
+    <%= link_to "yrby-rails", doc_path("getting-started"), class: "text-accent underline decoration-rose-400/40 underline-offset-2" %>
+    directly.
+  </p>
+
+  <div class="mt-8 max-w-2xl space-y-4">
+    <%= code_sheet "app/models/post.rb", "model" do %><div class="px-2 py-3"><%= sample_lexxy_model %></div><% end %>
+    <%= code_sheet "app/views/posts/_form.html.erb", "view" do %><div class="px-2 py-3"><%= sample_lexxy_form %></div><% end %>
+    <%= code_sheet "terminal", nil do %><div class="px-2 py-3"><%= sample_lexxy_install %></div><% end %>
+  </div>
+
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    Import <code>lexxy-realtime</code> wherever you import Lexxy, and fill in
+    the <code>authorized?</code> method in the generated channel. It rejects
+    everyone until you do. Then open the form in two browsers and type.
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    <code>post.body</code> is still Action Text.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    While people are editing, lexxy-realtime keeps the document in yrby's
+    <code>Y::Document</code> tables. After each change, it renders the
+    document to HTML in Ruby with <code>Y::Lexxy</code> and saves the result
+    to <code>post.body</code>. That HTML matches what Lexxy would have
+    submitted itself, so search, mailers, and show pages keep working
+    unchanged.
+  </p>
+  <p class="mt-4">
+    <%= link_to "Watch the saved HTML update as you type →", demo_path("lexxy"), rel: "nofollow",
+                class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    Each field gets its own signed token.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    The form helper renders a signed GlobalID for the record and field. The
+    channel looks up the record from it, then calls your
+    <code>authorized?</code> method. A token for <code>:body</code> only
+    opens <code>:body</code>, and the channel rejects a token that has been
+    tampered with or has expired. So the browser can only join documents your
+    page gave it a token for.
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    Custom nodes and encryption.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    Any custom Lexical nodes you've registered sync like the rest of the
+    document. When <code>Y::Lexxy</code> doesn't know a node, it still writes
+    the node's text into the saved HTML.
+  </p>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    To encrypt a field, pass <code>encrypted: true</code> to
+    <code>has_collaborative_rich_text</code>. Both the Action Text body and
+    the collaborative document are then stored with Active Record
+    encryption.
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    Built on yrby.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    lexxy-realtime is a small layer on top of yrby, which the rest of this
+    site documents. yrby does the syncing, the saving, and the HTML
+    rendering, over Action Cable or AnyCable. If you use import maps, the
+    generator pins JavaScript that ships with the gem. If you use a bundler,
+    install the <code>lexxy-realtime</code> npm package. Either way, it
+    reuses the copy of Lexical that Lexxy already loads.
+  </p>
+  <div class="mt-5 space-y-1 font-mono text-sm text-zinc-500">
+    <p><span class="text-accent">bundle add lexxy-realtime</span> &nbsp;·&nbsp; <span class="text-accent">bin/rails generate lexxy_realtime:install</span></p>
+  </div>
+  <nav class="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-400">
+    <a class="hover:text-accent" href="https://github.com/jpcamara/lexxy-realtime">GitHub</a>
+    <a class="hover:text-accent" href="https://rubygems.org/gems/lexxy-realtime">RubyGems</a>
+    <a class="hover:text-accent" href="https://www.npmjs.com/package/lexxy-realtime">npm</a>
+    <%= link_to "Live demo", demo_path("lexxy"), rel: "nofollow", class: "hover:text-accent" %>
+    <%= link_to "yrby docs", doc_path("getting-started"), class: "hover:text-accent" %>
+  </nav>
+</section>

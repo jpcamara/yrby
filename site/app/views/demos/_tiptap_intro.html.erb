@@ -1,0 +1,13 @@
+<p>
+  A <a href="https://tiptap.dev">Tiptap</a> editor using Tiptap's own
+  <code>Collaboration</code> and <code>CollaborationCursor</code> extensions.
+  The ProseMirror document is a <code>Y.XmlFragment</code> named
+  <code>default</code>. Other people's carets and selections come through
+  awareness, which the server passes along without saving.
+</p>
+<p>
+  The editor isn't created until the first sync finishes. Tiptap's
+  Collaboration extension writes an empty paragraph when it starts. If it
+  starts before the server's copy arrives, every client adds its own empty
+  paragraph to the shared document.
+</p>

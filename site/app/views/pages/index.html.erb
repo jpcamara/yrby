@@ -1,0 +1,189 @@
+<% content_for :title, "yrby: real-time collaborative editing for Rails" %>
+<% content_for :description, "Real-time collaborative editing for Rails. yrby syncs Yjs documents over Action Cable, stores them in your database with Active Record, and renders them to HTML in Ruby. It needs no Node process and no third-party service." %>
+
+<% content_for :head do %>
+  <%= json_ld_tag(
+        "@context" => "https://schema.org",
+        "@type" => "SoftwareSourceCode",
+        "name" => "yrby",
+        "description" => "Real-time collaborative editing for Rails. yrby syncs Yjs documents over Action Cable, stores them in your database, and renders them to HTML in Ruby. It needs no Node process and no third-party service.",
+        "url" => canonical_host,
+        "codeRepository" => "https://github.com/jpcamara/yrby",
+        "programmingLanguage" => ["Ruby", "JavaScript"],
+        "runtimePlatform" => "Ruby on Rails",
+        "license" => "https://opensource.org/licenses/MIT",
+        "author" => {
+          "@type" => "Person",
+          "name" => "JP Camara",
+          "url" => "https://jpcamara.com",
+          "sameAs" => "https://github.com/jpcamara"
+        }
+      ) %>
+<% end %>
+
+<% content_for :full_bleed, true %>
+<% content_for :head do %>
+  <script src="<%= busted "/hero.js" %>" defer></script>
+<% end %>
+
+<%# ---- Hero ------------------------------------------------------------- %>
+<section class="mx-auto max-w-6xl px-5 pt-12 pb-8 sm:pt-16">
+  <p class="font-mono text-xs tracking-[0.14em] text-zinc-500 uppercase">Ruby · Rails · Yjs · MIT</p>
+  <h1 class="mt-4 font-serif text-[2.6rem] leading-[1] font-normal tracking-[-0.025em] text-zinc-100 sm:text-7xl lg:text-[5.5rem]">
+    Collaborative editing,<br class="hidden md:inline">
+    <em class="text-rose-500">inside your Rails app.</em>
+  </h1>
+  <div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+    <p class="max-w-[34em] text-lg leading-8 text-zinc-300 sm:text-xl">
+      Your users type in the same document and see each other's changes as
+      they happen, the way they do in Google Docs. yrby syncs it over Action
+      Cable and saves it in your database. There's no Node process to run and
+      no third-party service holding your data.
+    </p>
+    <div class="flex flex-col items-start gap-4">
+      <div class="rounded-lg bg-ink px-4 py-3 font-mono text-sm leading-6 text-[#f4f1ea]">
+        <div><span class="text-rose-300">$</span> bundle add yrby-rails</div>
+        <div><span class="text-rose-300">$</span> bin/rails generate yrby:install</div>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <%= link_to "Read the docs", doc_path("getting-started"),
+                    class: "rounded-md bg-ink px-5 py-2.5 text-[0.95rem] font-medium text-[#f4f1ea] hover:bg-rose-600" %>
+        <a class="rounded-md border border-ink px-5 py-2.5 text-[0.95rem] font-medium text-zinc-100 hover:border-rose-500 hover:text-rose-500"
+           href="https://github.com/jpcamara/yrby">View on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mx-auto max-w-6xl px-5 pb-16" data-hero>
+  <div class="grid gap-5 md:grid-cols-2">
+    <% [["you", "bg-peer-you"], ["ada", "bg-peer-ada"]].each do |viewer, color| %>
+      <div class="overflow-hidden rounded-xl border border-zinc-800 bg-panel shadow-[0_1px_0_var(--color-zinc-800),0_18px_40px_-24px_rgb(23_20_15/0.35)]">
+        <div class="flex items-center gap-2.5 border-b border-zinc-950 px-4 py-2.5 font-mono text-xs text-zinc-500">
+          <span class="size-2 rounded-full <%= color %>"></span>
+          <span class="flex-1"><%= viewer %> · /posts/42/edit</span>
+        </div>
+        <div class="min-h-40 px-6 pt-8 pb-6 font-serif text-[1.4rem] leading-[1.55] whitespace-pre-wrap text-zinc-100" data-pane="<%= viewer %>"><%= hero_pane(viewer) %></div>
+      </div>
+    <% end %>
+  </div>
+  <p class="mt-3 text-sm text-zinc-500">
+    A scripted replay. The
+    <%= link_to "demos", demos_path, class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
+    are live: open one in two windows and type in both.
+  </p>
+</section>
+
+<%# ---- How it works -------------------------------------------------------- %>
+<section class="border-y border-zinc-800 bg-paper">
+  <div class="mx-auto grid max-w-6xl items-start gap-12 px-5 py-16 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:py-20">
+    <div>
+      <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">How it works</h2>
+      <p class="mt-5 leading-7 text-zinc-400">
+        Put the tag in a view where the user is allowed to edit the post. It
+        includes a signed token for <code>@post.body</code>, and the browser
+        subscribes to the gem's channel with it. The channel saves each change
+        to your database before sending it to anyone else.
+      </p>
+      <p class="mt-4 leading-7 text-zinc-400">
+        In the browser, you import the client and attach your editor once the
+        document has synced. Any editor with a Yjs binding works. On the
+        server, Ruby can read the saved document directly, for search,
+        emails, or plain HTML.
+      </p>
+      <p class="mt-5"><%= link_to "Getting started →", doc_path("getting-started"), class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %></p>
+    </div>
+    <div class="flex min-w-0 flex-col gap-4">
+      <%= code_sheet "app/views/posts/edit.html.erb", "view" do %><div class="px-2 py-3"><%= hero_tag_line %></div><% end %>
+      <%= code_sheet "app/javascript/application.js", "browser" do %><%= hero_bind_code %><% end %>
+      <%= code_sheet "anywhere in Ruby", "server" do %><%= hero_read_back_code %><% end %>
+    </div>
+  </div>
+</section>
+
+<%# ---- Packages ------------------------------------------------------------ %>
+<section class="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+  <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">Packages</h2>
+  <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
+    The project is split into a few packages. Most Rails apps need
+    yrby-rails and yrby-client. If your editor is Lexxy, lexxy-realtime
+    installs both and does the editor setup for you.
+  </p>
+  <dl class="mt-8 border-t border-zinc-700">
+    <% [
+      ["yrby", "gem", "Ruby bindings for y-crdt, the Rust implementation of Yjs. Documents, the sync protocol, and the Tiptap and Lexxy HTML renderers.", "https://rubygems.org/gems/yrby", "https://github.com/jpcamara/yrby"],
+      ["yrby-rails", "gem", "The Rails side: the document channel, the Active Record models, the view tag, and the install generator.", "https://rubygems.org/gems/yrby-rails", "https://github.com/jpcamara/yrby"],
+      ["yrby-client", "npm", "The browser side: the yrby-document element and a Yjs provider for Action Cable and AnyCable.", "https://www.npmjs.com/package/yrby-client", "https://github.com/jpcamara/yrby/tree/main/packages/client"],
+      ["lexxy-realtime", "gem + npm", "Collaborative editing for Lexxy, Basecamp's Action Text editor. Built on the three above.", "https://rubygems.org/gems/lexxy-realtime", "https://github.com/jpcamara/lexxy-realtime"]
+    ].each do |name, kind, body, registry, source| %>
+      <div class="grid gap-2 border-b border-zinc-700 py-5 sm:grid-cols-[15rem_minmax(0,1fr)_auto] sm:gap-6">
+        <dt class="font-mono text-zinc-100"><%= name %> <span class="ml-1 text-xs text-zinc-500"><%= kind %></span></dt>
+        <dd class="leading-7 text-zinc-400"><%= body %></dd>
+        <dd class="flex gap-4 text-sm whitespace-nowrap">
+          <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="<%= registry %>"><%= kind == "npm" ? "npm" : "RubyGems" %></a>
+          <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="<%= source %>">Source</a>
+        </dd>
+      </div>
+    <% end %>
+  </dl>
+</section>
+
+<%# ---- Demos --------------------------------------------------------------- %>
+<section id="demos" class="border-t border-zinc-800 bg-paper">
+  <div class="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+    <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">Demos</h2>
+    <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
+      Each demo is a public room running on this site. Open one in two
+      windows and type in both. Every demo also shows what Ruby reads from
+      the saved document.
+    </p>
+    <ul class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <% Demos::ALL.each do |demo| %>
+        <li class="relative flex flex-col gap-2 rounded-xl border border-zinc-800 bg-panel p-6 transition-colors hover:border-zinc-600">
+          <span class="truncate font-mono text-xs text-zinc-500"><%= demo.shape %></span>
+          <%= link_to demo.title, demo_path(demo.slug), rel: "nofollow",
+                      class: "font-serif text-[1.9rem] leading-tight text-zinc-100 after:absolute after:inset-0 hover:text-rose-500" %>
+          <p class="text-[0.95rem] leading-6 text-zinc-400"><%= demo.blurb %></p>
+        </li>
+      <% end %>
+    </ul>
+  </div>
+</section>
+
+<%# ---- Status -------------------------------------------------------------- %>
+<section class="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+  <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">Status</h2>
+  <div class="mt-6 grid gap-10 lg:grid-cols-2">
+    <div class="space-y-4 leading-7 text-zinc-400">
+      <p>
+        yrby is pre-1.0. The current releases are yrby
+        <%= gem_version("yrby") %>, yrby-rails <%= gem_version("yrby-rails") %>,
+        and lexxy-realtime <%= gem_version("lexxy-realtime") %>. Minor versions
+        can still change the API, and the
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/jpcamara/yrby/blob/main/CHANGELOG.md">changelog</a>
+        marks breaking changes.
+      </p>
+      <p>
+        It needs Ruby 3.4 or newer. Precompiled gems are published for common
+        Linux, macOS, and Windows platforms, so most installs don't need Rust.
+      </p>
+    </div>
+    <div class="space-y-4 leading-7 text-zinc-400">
+      <p>
+        yrby is built on <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/y-crdt/y-crdt">y-crdt</a>,
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/matsadler/magnus">Magnus</a>, and
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/oxidize-rb/rb-sys">rb-sys</a>, and
+        it speaks the same protocol as <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://yjs.dev">Yjs</a>.
+        It's written by <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://jpcamara.com">JP Camara</a>
+        and released under the MIT license.
+      </p>
+      <p>
+        Bug reports and questions go in
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/jpcamara/yrby/issues">GitHub issues</a>.
+        Pull requests are welcome, and
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/jpcamara/yrby/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
+        explains how to run the test suites.
+      </p>
+    </div>
+  </div>
+</section>
