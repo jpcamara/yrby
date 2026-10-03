@@ -1,37 +1,34 @@
 # Storage
 
-A channel needs only two hooks, `on_load` and `on_change`, and they can use any
-store. yrby ships an Active Record store because most apps want one, but the
-protocol doesn't need a database.
+A channel only needs two hooks, `on_load` and `on_change`, and they can talk to
+any store. yrby comes with an Active Record store because most apps want one.
+You can also keep documents somewhere else, or nowhere at all.
 
 ## The bundled models
 
-The models ship in the gem, as `ActionText::RichText` ships in Action Text.
+The models come with the gem, the same way `ActionText::RichText` comes with
+Action Text.
 
-`Y::Document` stores one row per document, and you can find a row in two ways.
-Channels use `key`, a single unique string. The app can supply its own key,
-and yrby never parses it. A row can also have a polymorphic `record` and a
-`name`, which say which model attribute the document belongs to. `name` is the
-attribute name, such as `"body"`. Documents created by key alone leave
-`record` and `name` nil.
+`Y::Document` stores one row per document. Each row has a unique `key`, which
+is what channels use. Your app can pick the key, and yrby never parses it. A
+row can also point at a model attribute through a polymorphic `record` and a
+`name`, such as `"body"`. Rows created by key alone leave those two nil.
 
-Either one can come first. `Y::Document.for(record, name)` finds or creates
-the row for a record's attribute and gives it a readable key such as
-`post/1/body`. If a channel already created a row under that key, `for` links
-that row to the record. A channel that writes first and a record binding
-created later end up on the same document.
+Either can come first. `Y::Document.for(record, name)` finds or creates the
+row for a record's attribute, with a readable key like `post/1/body`. If a
+channel already created a row with that key, `for` links it to the record, so
+both end up on the same document.
 
-The row also holds the merged `state` snapshot, which contains only CRDT
-state. Your app handles derived data such as rendered HTML or search text,
-usually in the channel's `on_change`. By default the channel concern calls
-`.load_state(key)` to read the store and `.append(key, update)` to write it.
+The row also holds `state`, the merged snapshot of the document, and nothing
+else. If you want rendered HTML or search text, compute it yourself, usually
+in the channel's `on_change`. By default the channel reads with
+`.load_state(key)` and writes with `.append(key, update)`.
 
-`Y::DocumentUpdate` holds the changes not yet compacted, one delta per row.
-When there are `compact_every` of them (64 by default), yrby merges them into
-`state` and deletes the rows. A load reads the snapshot plus any remaining
-update rows. When there are none, it returns `state` as is. Compactions of one
-document run one at a time under a row lock. Rows that belong to an open
-causal gap aren't compacted or deleted. yrby marks them pending and keeps them
+`Y::DocumentUpdate` holds the changes that haven't been compacted yet, one per
+row. Once there are `compact_every` of them (64 by default), yrby merges them
+into `state` and deletes the rows. Loading a document reads the snapshot plus
+any remaining rows. A row lock keeps two compactions of the same document from
+running at once. Rows that belong to an open gap are marked pending and kept
 until the gap closes. Destroying a document deletes its update rows too.
 
 The migration creates `y_documents` and `y_document_updates`. To rename them,
@@ -40,10 +37,9 @@ edit the generated migration and set `Y::Document.table_name` and
 
 ## Encrypted storage
 
-`Y::EncryptedDocument` writes `state` and update payloads through Active Record
-encryption, on the same tables, as `ActionText::EncryptedRichText` does.
-You declare encryption on the model, so neither a page nor a client can turn
-it off:
+`Y::EncryptedDocument` uses the same tables and encrypts `state` and the
+updates with Active Record encryption. You turn it on in the model, so no page
+or client can switch it off:
 
 ```ruby
 class Post < ApplicationRecord
@@ -51,21 +47,20 @@ class Post < ApplicationRecord
 end
 ```
 
-`Y::DocumentChannel` reads that declaration and sends every load and append
-for the attribute through the encrypted class. Attributes without it use plain
-`Y::Document`. In a channel of your own, point `on_load` and `on_change` at
-`Y::EncryptedDocument`. In both cases, configure your app's Active Record
-encryption keys, and always read a document through the same class. The plain
-classes return encrypted rows as ciphertext.
+`Y::DocumentChannel` sees that and loads and saves the attribute through the
+encrypted class. Other attributes use plain `Y::Document`. In your own channel,
+point `on_load` and `on_change` at `Y::EncryptedDocument`. Either way, you need
+Active Record encryption keys set up, and you should always read a document
+through the same class. Reading an encrypted row through the plain class gives
+you ciphertext.
 
 ## Record-backed access
 
 `post.collaborative_document(:body)` returns a `Y::Collaborative::Attribute`
-for that record and attribute. It has `load_state`, `append(update)`, `key`,
-and `y_doc`. `y_doc` builds a new native `Y::Doc` that you can read and render
-in Ruby. For row operations such as compaction, call
-`post.collaborative_document(:body).document_row.compact!`. The channel and
-your app code both use this object, and it handles encryption for both.
+with `load_state`, `append(update)`, `key`, and `y_doc`. `y_doc` builds a fresh
+`Y::Doc` you can read and render in Ruby. For row-level work like compaction,
+call `post.collaborative_document(:body).document_row.compact!`. The channel
+uses this same object, so encryption works the same way in both places.
 
 An attribute's key is the key its row was saved under. Before a row exists,
 the key is `Y::Document.key_for(record, name)`. Computing it doesn't create a
@@ -80,10 +75,10 @@ Your store needs to do two things.
 
 ### Load without losing pending updates, and accept duplicates
 
-`on_load` should return state that keeps pending updates. Use
-`encode_state_as_update`, or replay the raw append log. Don't compact with
+`on_load` has to return state that still includes pending updates. Use
+`encode_state_as_update`, or replay the raw log. Don't compact with
 `compacted_state_update` while `doc.pending?` is true. That drops the pending
-struct, and with it an edit the server already acknowledged.
+struct, and with it an edit the server already confirmed.
 
 When an ack gets lost, the client resends an update the store already has.
 Replaying the log still produces the same document, because applying a CRDT
@@ -129,26 +124,24 @@ handshake also asks the client for everything the server is missing. Use the
 
 ## Pending structs and gap-free state
 
-When a doc applies an update whose dependency is missing, yrs holds it as a
-pending struct. The integrated state vector doesn't move. yrs keeps the
-pending struct and integrates it if the missing dependency arrives later.
-`Doc#pending?` returns true while a doc is in this state.
+When a doc gets an update whose dependency is missing, yrs holds it as a
+pending struct and applies it if the dependency arrives later. Until then, the
+doc's state vector doesn't include it, and `Doc#pending?` returns true.
 
 Pending updates are stored and sent like any other state. Don't fold them into
 a compacted snapshot.
 
-- `Doc#compacted_state_update` returns a full-state update without pending
-  structs, for compaction. A compacted snapshot that included them would keep
-  them pending forever. The call doesn't change the doc, which keeps its
-  pending structs.
+- `Doc#compacted_state_update` returns the full state without pending
+  structs. Use it for compaction, since a snapshot that included them would
+  leave them pending forever. It doesn't change the doc.
 - `encode_state_as_update` includes pending structs. Use it for persistence
   and for sending state, so a gap can still close.
 
 ## Ephemeral documents (no database)
 
-Some documents only need to last for a session: a scratchpad, live form state,
-a draft you save on submit. For those, the channel can keep the document in
-connection state.
+Some documents only need to last for one session, like a scratchpad, live form
+state, or a draft you save on submit. For those, the channel can keep the
+document on the connection.
 
 ```ruby
 class ScratchpadChannel < ApplicationCable::Channel
@@ -180,13 +173,13 @@ instance for each message. There, declare the store as channel state with
 serializes that state as JSON in every RPC call to `anycable-go`, so keep
 these documents small.
 
-Each connection has its own store, which limits what this pattern is good
-for. A single writer gets the full delivery contract with no database. When
-several people edit at once, one client's update can depend on edits its own
-connection has never seen. The server saves that update as pending. The next
-handshake with that client supplies the missing state and closes the gap. The
-document still converges, but heavy concurrent editing leaves more pending
-updates between handshakes than a shared store would.
+Each connection has its own copy, which limits where this fits. With one
+person editing, you get every delivery guarantee and no database. With
+several people, one client's update can depend on edits its connection hasn't
+seen. The server saves it as pending, and the next handshake with that client
+fills the gap. Everyone still ends up with the same document, but with heavy
+editing, more updates sit pending between handshakes than they would with a
+shared store.
 
 The connection and the browsers hold the only copies. After a server restart,
 a reconnecting client sends its state back through the normal sync handshake.
@@ -206,14 +199,14 @@ class DocumentChannel < ApplicationCable::Channel
 end
 ```
 
-The models don't depend on SQLite. Around the hooks, the site adds caps on
-peers per room, documents on disk, and bytes per document. A sweeper deletes
-rooms that nobody has edited for a day, because public, anonymous documents
-should be temporary.
+SQLite isn't required; it's just what this site uses. On top of the hooks, the
+site caps people per room, documents on disk, and bytes per document. A
+sweeper deletes rooms nobody has edited for a day, since public, anonymous
+documents shouldn't stick around.
 
-The site runs under AnyCable, so it also shows the constraint described in
+The site runs on AnyCable, so it follows the rule from
 [AnyCable and multi-process](/docs/anycable). Each command gets a new channel
-instance, and anything that has to last between commands goes in
+instance, so anything that has to last between commands goes in
 `state_attr_accessor`.
 
 The full site, including every rate and size limit, is in

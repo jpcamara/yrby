@@ -1,7 +1,7 @@
 # AnyCable and multi-process
 
-Most Rails apps run several processes, and any of them might handle messages
-for a given document. Two things keep them consistent.
+Most Rails apps run several processes, and any of them might handle a given
+document. Two things keep them in sync.
 
 ## Broadcasts have to cross processes
 
@@ -20,24 +20,25 @@ receives a change writes it to the store before any client sees it.
 You don't need sticky routing, per-document ownership, or any coordination
 between processes.
 
-In the demo app, `bun multiprocess.mjs` runs clients across two processes. It
-checks that the documents converge, that fresh reads work on both processes,
-that presence reaches clients on the other process, and that both processes
-write to one shared log.
+The demo app's `multiprocess.mjs` test runs clients against two processes. It
+checks that every client ends up with the same document, that both processes
+read the latest state, that presence reaches clients on the other process, and
+that both processes write to the same log.
 
 ## AnyCable
 
-yrby supports AnyCable end to end. The demo app tests it against a real
-anycable-go server and RPC server in `frontend/anycable_probe.mjs` and
-`frontend/anycable_concurrent.mjs`. Those scripts check liveness, reads from a
-different process, and convergence under concurrent editing.
+yrby works on AnyCable. The demo app tests it against a real anycable-go
+server and RPC server in `frontend/anycable_probe.mjs` and
+`frontend/anycable_concurrent.mjs`. Those scripts check that the connection
+stays up, that a different process can read the latest state, and that
+concurrent edits end up the same everywhere.
 
-This site runs on AnyCable in its smallest setup.
-[anycable-thruster](https://github.com/anycable/thruster) embeds anycable-go in
-the Thruster proxy, so `thrust bin/serve` is the whole deployment. The Go
-server handles `/cable` and calls Rails over HTTP RPC at a path that AnyCable
-mounts in the app. Rails sends broadcasts back to it over localhost. A single
-node needs no Redis and no separate RPC process. The
+This site runs the smallest AnyCable setup.
+[anycable-thruster](https://github.com/anycable/thruster) bundles anycable-go
+into the Thruster proxy, so `thrust bin/serve` starts everything. The Go
+server handles `/cable` and calls Rails over HTTP at a path AnyCable mounts in
+the app, and Rails sends broadcasts back over localhost. On one machine there's
+no Redis and no separate RPC process. The
 [site README](https://github.com/jpcamara/yrby/blob/main/site/README.md) has the
 configuration.
 
@@ -55,18 +56,17 @@ def subscribed    = sync_subscribed(params[:id])
 def receive(data) = sync_receive(data, params[:id])
 ```
 
-Every channel example in these docs passes the key to `sync_receive` for this
-reason. The gem's `Y::DocumentChannel` declares its authorized document key as
-channel state when anycable-rails is loaded, and looks the record up again from
-the grant when it needs it. On plain Action Cable an instance variable would
+That's why every channel example in these docs passes the key to
+`sync_receive`. When anycable-rails is loaded, the gem's `Y::DocumentChannel`
+stores the authorized key as channel state, and looks the record up again from
+the token when it needs it. On plain Action Cable an instance variable would
 work, but the examples are written to run on both.
 
 ### Connection-scoped state has to be declared
 
-If you keep an ephemeral document on the connection and not in a database,
-declare it as channel state with `state_attr_accessor` from anycable-rails.
-Base64-encode the bytes, because that state is serialized as JSON into every
-RPC exchange with `anycable-go`:
+If you keep a temporary document on the connection, declare it as channel
+state with `state_attr_accessor` from anycable-rails. Base64-encode the bytes,
+because AnyCable sends that state as JSON with every RPC call:
 
 ```ruby
 class ScratchpadChannel < ApplicationCable::Channel
@@ -97,45 +97,45 @@ small documents.
 
 ## Awareness whispers
 
-Under AnyCable the channel subscribes to a second stream for awareness with
-`whisper: true`. A whisper goes from one client to the others through
-anycable-go, and only presence uses it. Document updates still go through the
-server, where they're recorded and acked.
+On AnyCable, the channel opens a second stream for presence with
+`whisper: true`. A whisper goes from one browser to the others through
+anycable-go. Only presence uses it. Document edits still go through the
+server, which saves and confirms them.
 
-Plain Action Cable has no whispers, so presence and document updates both go
-through the server. Your channel code is the same on both. The concern checks
-whether the transport supports whispers.
+Plain Action Cable has no whispers, so presence goes through the server too.
+Your channel code doesn't change, because the concern checks whether whispers
+are available.
 
-The browser opts in by using an AnyCable consumer. The `yrby-client` provider
-whispers awareness when `subscription.whisper` exists. `@anycable/web` provides
-it and `@rails/actioncable` doesn't. The provider accepts either consumer, so
-switching takes one import:
+In the browser, the provider whispers presence when the subscription has a
+`whisper` method. Consumers from `@anycable/web` have one, and
+`@rails/actioncable` consumers don't. The provider takes either, so switching
+is one import:
 
 ```js
 import { createConsumer } from "@anycable/web"
 ```
 
-Cursor and selection traffic grows with every pointer move. With whispers, the
-Go server relays it between clients and it never becomes an RPC call into Ruby.
+Every cursor move sends presence. With whispers, the Go server relays those
+between browsers, and none of them turn into a call into Ruby.
 
 ## Threads and the GVL
 
 You can share a `Doc` across Ruby threads (Puma threads, Action Cable
-connection threads, background jobs) without adding your own locks.
-`test/thread_safety_test.rb` runs shared docs, the full sync handshake, and
-fan-in sync across 8 threads at once, and checks that the interleaving doesn't
-change convergence.
+connection threads, background jobs) without adding locks.
+`test/thread_safety_test.rb` runs shared docs and full sync handshakes from 8
+threads at once, and checks that every thread still ends up with the same
+document.
 
-Every method that does real CRDT work releases the Global VM Lock while the
-native code runs. That means CRDT work runs in parallel across Ruby threads on
-MRI, and you don't need JRuby or TruffleRuby to get it.
-`bench/parallelism_bench.rb` measures more than a 2x wall-clock speedup when
-applying a roughly 900 KB update concurrently. A thread applying a large update
-holds the doc's write lock but not the GVL, so other Ruby threads keep running.
+Methods that do real CRDT work release the Global VM Lock while the native
+code runs. So CRDT work runs in parallel on plain MRI, without JRuby or
+TruffleRuby. `bench/parallelism_bench.rb` shows more than a 2x speedup when
+applying a roughly 900 KB update on several threads at once. A thread applying
+a large update holds the doc's write lock but not the GVL, so other Ruby
+threads keep running.
 
-Each of those methods follows the same steps. It copies the Ruby byte strings,
-releases the GVL, and does the yrs work, taking and releasing the native locks
-inside that step. Then it takes the GVL back and builds the Ruby objects. Ruby
-APIs are only called while holding the GVL, and no native lock is held while
-reacquiring it, so the locks can't deadlock. A panic in native code is caught
-and re-raised as a Ruby exception.
+Each of those methods works the same way. It copies the Ruby strings it needs,
+releases the GVL, and does the yrs work, taking and releasing native locks
+along the way. Then it takes the GVL back and builds the Ruby objects. Ruby is
+only called while holding the GVL, and no native lock is held while waiting
+for it, so the two can't deadlock. If the native code panics, Ruby raises an
+exception.
