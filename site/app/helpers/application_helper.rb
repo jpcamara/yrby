@@ -62,8 +62,7 @@ module ApplicationHelper
     RUBY
   end
 
-  # The browser half of the yrby-rails path: the code lexxy-realtime writes for
-  # you, shown next to it on the home page.
+  # The browser half of the home page's how-it-works sample.
   def hero_bind_code
     code_block "js", <<~JS
       import "yrby-client/element"
@@ -145,7 +144,8 @@ module ApplicationHelper
     safe_join(parts + [HERO_TEXT[at..]])
   end
 
-  def hero_read_text = %("#{HERO_TEXT.gsub("\n") { "\\n" }}")
+  # A loaded gem's version, for the home page's status section.
+  def gem_version(name) = Gem.loaded_specs[name]&.version.to_s
 
   # A JSON-LD block. Not executable script, so it is not governed by the
   # strict script-src CSP; browsers never run application/ld+json.

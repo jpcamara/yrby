@@ -26,9 +26,9 @@
   <script src="<%= busted "/hero.js" %>" defer></script>
 <% end %>
 
-<%# ---- Hero: the claim, then two windows on one document over the Rails side %>
+<%# ---- Hero ------------------------------------------------------------- %>
 <section class="mx-auto max-w-6xl px-5 pt-12 pb-8 sm:pt-16">
-  <p class="font-mono text-xs tracking-[0.14em] text-zinc-500 uppercase">Ruby · Rails · Yjs</p>
+  <p class="font-mono text-xs tracking-[0.14em] text-zinc-500 uppercase">Ruby · Rails · Yjs · MIT</p>
   <h1 class="mt-4 font-serif text-[2.6rem] leading-[1] font-normal tracking-[-0.025em] text-zinc-100 sm:text-7xl lg:text-[5.5rem]">
     Collaborative editing,<br class="hidden md:inline">
     <em class="text-rose-500">inside your Rails app.</em>
@@ -49,222 +49,98 @@
         <%= link_to "Read the docs", doc_path("getting-started"),
                     class: "rounded-md bg-ink px-5 py-2.5 text-[0.95rem] font-medium text-[#f4f1ea] hover:bg-rose-600" %>
         <a class="rounded-md border border-ink px-5 py-2.5 text-[0.95rem] font-medium text-zinc-100 hover:border-rose-500 hover:text-rose-500"
-           href="/examples/document">Try the example</a>
+           href="https://github.com/jpcamara/yrby">View on GitHub</a>
       </div>
     </div>
   </div>
 </section>
 
-<section class="mx-auto max-w-6xl px-5 pb-20" data-hero>
+<section class="mx-auto max-w-6xl px-5 pb-16" data-hero>
   <div class="grid gap-5 md:grid-cols-2">
     <% [["you", "bg-peer-you"], ["ada", "bg-peer-ada"]].each do |viewer, color| %>
       <div class="overflow-hidden rounded-xl border border-zinc-800 bg-panel shadow-[0_1px_0_var(--color-zinc-800),0_18px_40px_-24px_rgb(23_20_15/0.35)]">
         <div class="flex items-center gap-2.5 border-b border-zinc-950 px-4 py-2.5 font-mono text-xs text-zinc-500">
           <span class="size-2 rounded-full <%= color %>"></span>
           <span class="flex-1"><%= viewer %> · /posts/42/edit</span>
-          <span>● synced</span>
         </div>
         <div class="min-h-40 px-6 pt-8 pb-6 font-serif text-[1.4rem] leading-[1.55] whitespace-pre-wrap text-zinc-100" data-pane="<%= viewer %>"><%= hero_pane(viewer) %></div>
       </div>
     <% end %>
   </div>
-
-  <div class="mt-5 grid gap-6 rounded-xl bg-ink px-5 py-5 font-mono text-[13px] leading-6 text-[#e9e4da] md:grid-cols-3">
-    <div class="min-w-0">
-      <p class="mb-2 text-[11px] tracking-[0.14em] text-[#9c9384] uppercase">Y::DocumentChannel</p>
-      <ol class="hero-log" data-log>
-        <li><span class="text-[#e8b05c]">ada</span> update #9 · 4 chars → recorded → ack</li>
-        <li class="latest"><span class="text-[#8fb0ff]">you</span> update #10 · 2 chars → recorded → ack</li>
-      </ol>
-    </div>
-    <div class="min-w-0">
-      <p class="mb-2 text-[11px] tracking-[0.14em] text-[#9c9384] uppercase">Your database</p>
-      <p>y_documents <span class="text-[#9c9384]">key</span> post/42/body</p>
-      <p>y_document_updates <span class="text-[#9c9384]">rows</span> <span data-rows>10</span></p>
-      <p class="text-[#9c9384]">compacts every 64 updates</p>
-    </div>
-    <div class="min-w-0">
-      <p class="mb-2 text-[11px] tracking-[0.14em] text-[#9c9384] uppercase">rails console</p>
-      <p class="truncate text-[#9c9384]">&gt;&gt; post.collaborative_document(:body).y_doc.read_text("content")</p>
-      <p class="truncate">=&gt; <span data-read><%= hero_read_text %></span></p>
-    </div>
-  </div>
   <p class="mt-3 text-sm text-zinc-500">
-    This is a scripted replay. For the real thing, open any of the
+    A scripted replay. The
     <%= link_to "demos", demos_path, class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
-    in two windows and type in both.
+    are live: open one in two windows and type in both.
   </p>
 </section>
 
-<%# ---- One line of ERB ------------------------------------------------- %>
+<%# ---- How it works -------------------------------------------------------- %>
 <section class="border-y border-zinc-800 bg-paper">
-  <div class="mx-auto grid max-w-6xl items-center gap-12 px-5 py-20 lg:grid-cols-2 lg:py-24">
+  <div class="mx-auto grid max-w-6xl items-start gap-12 px-5 py-16 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:py-20">
     <div>
-      <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">The Rails side</p>
-      <h2 class="mt-3 font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">One line of ERB.</h2>
-      <p class="mt-5 max-w-[26em] font-serif text-[1.35rem] leading-[1.5] text-zinc-300 italic">
-        Put the tag in any view where the user is allowed to edit the post.
-        Everyone on that page edits the same document, and every change is
-        saved to your database.
+      <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">How it works</h2>
+      <p class="mt-5 leading-7 text-zinc-400">
+        Put the tag in a view where the user is allowed to edit the post. It
+        includes a signed token for <code>@post.body</code>, and the browser
+        subscribes to the gem's channel with it. The channel saves each change
+        to your database before sending it to anyone else.
       </p>
-      <p class="mt-5 max-w-[34em] leading-7 text-zinc-400">
-        The tag includes a signed token for <code>@post.body</code>. The
-        browser subscribes with it, and the server refuses any other document.
-        So the permission check you already do before rendering the page is
-        the only one you need. You don't write a channel either.
+      <p class="mt-4 leading-7 text-zinc-400">
+        In the browser, you import the client and attach your editor once the
+        document has synced. Any editor with a Yjs binding works. On the
+        server, Ruby can read the saved document directly, for search,
+        emails, or plain HTML.
       </p>
-      <p class="mt-4 max-w-[34em] leading-7 text-zinc-400">
-        In your JavaScript, import <code>yrby-client/element</code> and attach
-        your editor once the document has synced.
-      </p>
+      <p class="mt-5"><%= link_to "Getting started →", doc_path("getting-started"), class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %></p>
     </div>
     <div class="flex min-w-0 flex-col gap-4">
-      <%= code_sheet "app/views/posts/edit.html.erb", "view" do %>
-        <div class="px-2 py-5 [&_pre]:text-sm sm:[&_pre]:text-base"><%= hero_tag_line %></div>
-      <% end %>
-      <%= code_sheet "the same document, read back in Ruby", "server" do %>
-        <%= hero_read_back_code %>
-      <% end %>
-    </div>
-  </div>
-</section>
-
-<%# ---- Read back in Ruby: a ruled grid --------------------------------- %>
-<section class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
-  <div class="flex flex-wrap items-end justify-between gap-6">
-    <h2 class="max-w-[14ch] font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Read any document from Ruby.</h2>
-    <p class="max-w-[30em] leading-7 text-zinc-400">
-      The server can read any document without a browser. Use it for search
-      indexing, emails, exports, and read-only pages.
-    </p>
-  </div>
-  <div class="mt-11 grid border-t border-l border-zinc-700 sm:grid-cols-2 lg:grid-cols-3">
-    <% [
-      ["01", "Y.Text", "Plain text", "Code, notes, or any other typed text. read_text returns a Ruby string.", 'doc.read_text("code")'],
-      ["02", "Y.Map · Y.Array", "Structured data", "Spreadsheets, boards, and form state. read_map and read_array return JSON.", 'doc.read_array("cards")'],
-      ["03", "Lexxy · Tiptap", "Rich text", "You get the same HTML the editor would save. CI checks this against output from real Tiptap and Lexxy editors.", "Y::Lexxy.new(doc).to_html"],
-      ["04", "awareness", "Presence", "Cursors and names go to everyone in the room. The server passes them along and never saves them.", "lease.setPresence({ user })"],
-      ["05", "Active Record", "Your tables", "Each document is a row in your database, plus a log of recent updates that gets compacted as it grows.", "Y::Document.load_state(key)"],
-      ["06", "encryption", "Encrypted at rest", "Add encrypted: true to the model. The channel and your Ruby code then read and write through Active Record encryption.", "has_collaborative_document :body, encrypted: true"]
-    ].each do |number, tag_name, title, body, code| %>
-      <div class="flex min-h-52 min-w-0 flex-col gap-3 border-r border-b border-zinc-700 p-6">
-        <div class="flex justify-between font-mono text-xs text-zinc-500"><span><%= number %></span><span><%= tag_name %></span></div>
-        <h3 class="font-serif text-[1.75rem] leading-tight text-zinc-100"><%= title %></h3>
-        <p class="flex-1 text-[0.95rem] leading-6 text-zinc-400"><%= body %></p>
-        <code class="block rounded-md border border-zinc-800 bg-paper px-2.5 py-2 text-[13px] break-words whitespace-pre-wrap"><%= code %></code>
-      </div>
-    <% end %>
-  </div>
-  <p class="mt-6">
-    <%= link_to "Every demo has a panel showing what Ruby reads →", demos_path,
-                class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
-  </p>
-</section>
-
-<%# ---- Delivery: the ink band ------------------------------------------- %>
-<section class="bg-ink text-[#e9e4da]">
-  <div class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
-    <p class="font-mono text-xs tracking-[0.14em] text-rose-300 uppercase">Delivery</p>
-    <h2 class="mt-3 font-serif text-4xl leading-[1.04] tracking-tight text-white sm:text-[3.5rem]">Nothing is confirmed until it's saved.</h2>
-    <p class="mt-5 max-w-[40em] text-lg leading-8 text-[#c9c1b3]">
-      The browser keeps sending each edit until the server confirms it. The
-      server only confirms an edit after your database has saved it. If the
-      save fails, nobody else sees the edit and the browser tries again. Edits
-      can also arrive out of order. The server saves those too, and they show
-      up in the document once the edit they depend on arrives.
-    </p>
-    <ol class="mt-12 grid overflow-hidden rounded-xl border border-[#3a342c] sm:grid-cols-2 lg:grid-cols-4">
-      <% [
-        ["01", "Browser", "Sends the edit and holds on to it until it's confirmed.", "update #42 →"],
-        ["02", "Channel", "Calls on_change with the edit before doing anything else.", "on_change"],
-        ["03", "Your store", "Saves it. If saving raises an error, the edit goes no further.", "Y::Document.append"],
-        ["04", "Everyone", "The other windows get the edit, and the sender gets its confirmation.", "← ack 42"]
-      ].each do |number, title, body, token| %>
-        <li class="flex flex-col gap-2.5 border-b border-[#3a342c] p-6 sm:border-r">
-          <span class="font-mono text-xs text-[#9c9384]"><%= number %></span>
-          <span class="font-serif text-2xl text-white"><%= title %></span>
-          <span class="leading-6 text-[#c9c1b3]"><%= body %></span>
-          <span class="font-mono text-[13px] text-rose-300"><%= token %></span>
-        </li>
-      <% end %>
-    </ol>
-    <p class="mt-7">
-      <%= link_to "Delivery guarantees →", doc_path("document-channel", anchor: "delivery-guarantees"),
-                  class: "text-white underline decoration-white/30 underline-offset-2 hover:decoration-white" %>
-    </p>
-  </div>
-</section>
-
-<%# ---- Which gem: yrby-rails or lexxy-realtime --------------------------- %>
-<section id="lexxy" class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
-  <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">Choosing a gem</p>
-  <h2 class="mt-3 font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Which gem do you need?</h2>
-  <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
-    yrby-rails works with any editor, and you connect the editor yourself. If
-    your editor is Lexxy, use lexxy-realtime. It's a separate gem built on
-    yrby-rails that does the editor setup for you.
-  </p>
-
-  <div class="mt-10 grid gap-5 lg:grid-cols-2">
-    <div class="flex min-w-0 flex-col gap-4 rounded-xl border border-zinc-800 bg-panel p-6 sm:p-8">
-      <p class="font-mono text-xs text-zinc-500">gem "yrby-rails" · npm yrby-client</p>
-      <h3 class="font-serif text-3xl leading-tight text-zinc-100">Any editor, or no editor</h3>
-      <p class="leading-7 text-zinc-400">
-        You get a synced Yjs document and attach whatever you want to it:
-        Tiptap, CodeMirror, a spreadsheet, a whiteboard. You write the few
-        lines of JavaScript that connect your editor to the document.
-      </p>
       <%= code_sheet "app/views/posts/edit.html.erb", "view" do %><div class="px-2 py-3"><%= hero_tag_line %></div><% end %>
       <%= code_sheet "app/javascript/application.js", "browser" do %><%= hero_bind_code %><% end %>
-      <p class="mt-auto"><%= link_to "Getting started →", doc_path("getting-started"),
-            class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %></p>
+      <%= code_sheet "anywhere in Ruby", "server" do %><%= hero_read_back_code %><% end %>
     </div>
-
-    <div class="flex min-w-0 flex-col gap-4 rounded-xl border border-zinc-800 bg-panel p-6 sm:p-8">
-      <p class="font-mono text-xs text-zinc-500">gem "lexxy-realtime" · built on yrby-rails</p>
-      <h3 class="font-serif text-3xl leading-tight text-zinc-100">Lexxy in your Action Text forms</h3>
-      <p class="leading-7 text-zinc-400">
-        You swap one line in the model and one in the form. lexxy-realtime
-        connects Lexxy for you and saves the HTML back to your Action Text
-        field after each change. It installs yrby-rails and yrby-client
-        itself.
-      </p>
-      <%= code_sheet "app/models/post.rb", "model" do %><div class="px-2 py-3"><%= sample_lexxy_model %></div><% end %>
-      <%= code_sheet "app/views/posts/_form.html.erb", "view" do %><div class="px-2 py-3"><%= sample_lexxy_form %></div><% end %>
-      <p class="mt-auto"><%= link_to "lexxy-realtime →", "/lexxy",
-            class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %></p>
-    </div>
-  </div>
-
-  <div class="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-sm text-zinc-500" aria-label="How the packages stack">
-    <span class="rounded-md border border-zinc-700 bg-panel px-2.5 py-1 text-zinc-100">lexxy-realtime</span>
-    <span>builds on</span>
-    <span class="rounded-md border border-zinc-700 bg-panel px-2.5 py-1 text-zinc-100">yrby-rails + yrby-client</span>
-    <span>builds on</span>
-    <span class="rounded-md border border-zinc-700 bg-panel px-2.5 py-1 text-zinc-100">yrby</span>
   </div>
 </section>
 
-<%# ---- Demos: sheets ------------------------------------------------------ %>
+<%# ---- Packages ------------------------------------------------------------ %>
+<section class="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+  <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">Packages</h2>
+  <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
+    The project is split into a few packages. Most Rails apps need
+    yrby-rails and yrby-client. If your editor is Lexxy, lexxy-realtime
+    installs both and does the editor setup for you.
+  </p>
+  <dl class="mt-8 border-t border-zinc-700">
+    <% [
+      ["yrby", "gem", "Ruby bindings for y-crdt, the Rust implementation of Yjs. Documents, the sync protocol, and the Tiptap and Lexxy HTML renderers.", "https://rubygems.org/gems/yrby", "https://github.com/jpcamara/yrby"],
+      ["yrby-rails", "gem", "The Rails side: the document channel, the Active Record models, the view tag, and the install generator.", "https://rubygems.org/gems/yrby-rails", "https://github.com/jpcamara/yrby"],
+      ["yrby-client", "npm", "The browser side: the yrby-document element and a Yjs provider for Action Cable and AnyCable.", "https://www.npmjs.com/package/yrby-client", "https://github.com/jpcamara/yrby/tree/main/packages/client"],
+      ["lexxy-realtime", "gem + npm", "Collaborative editing for Lexxy, Basecamp's Action Text editor. Built on the three above.", "https://rubygems.org/gems/lexxy-realtime", "https://github.com/jpcamara/lexxy-realtime"]
+    ].each do |name, kind, body, registry, source| %>
+      <div class="grid gap-2 border-b border-zinc-700 py-5 sm:grid-cols-[15rem_minmax(0,1fr)_auto] sm:gap-6">
+        <dt class="font-mono text-zinc-100"><%= name %> <span class="ml-1 text-xs text-zinc-500"><%= kind %></span></dt>
+        <dd class="leading-7 text-zinc-400"><%= body %></dd>
+        <dd class="flex gap-4 text-sm whitespace-nowrap">
+          <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="<%= registry %>"><%= kind == "npm" ? "npm" : "RubyGems" %></a>
+          <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="<%= source %>">Source</a>
+        </dd>
+      </div>
+    <% end %>
+  </dl>
+</section>
+
+<%# ---- Demos --------------------------------------------------------------- %>
 <section id="demos" class="border-t border-zinc-800 bg-paper">
-  <div class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
-    <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Bring your editor.</h2>
+  <div class="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+    <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">Demos</h2>
     <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
-      yrby works with any editor that has a Yjs binding. The server syncs a
-      document without needing to understand it. CI opens Tiptap, Lexxy, Rhino
-      Editor, and CodeMirror in real Chrome windows and types into them.
-      Between them, those tests check concurrent typing, remote cursors, undo,
-      and that Ruby renders the same HTML as the editor. Each demo below is a
-      public room you can try.
+      Each demo is a public room running on this site. Open one in two
+      windows and type in both. Every demo also shows what Ruby reads from
+      the saved document.
     </p>
-    <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <% Demos::ALL.each_with_index do |demo, index| %>
-        <% peer, peer_class = index.even? ? ["ada", "text-peer-ada"] : ["you", "text-peer-you"] %>
+    <ul class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <% Demos::ALL.each do |demo| %>
         <li class="relative flex flex-col gap-2 rounded-xl border border-zinc-800 bg-panel p-6 transition-colors hover:border-zinc-600">
-          <div class="flex justify-between gap-3 font-mono text-xs text-zinc-500">
-            <span class="truncate"><%= demo.shape %></span>
-            <span class="<%= peer_class %>"><%= caret_mark %> <%= peer %></span>
-          </div>
+          <span class="truncate font-mono text-xs text-zinc-500"><%= demo.shape %></span>
           <%= link_to demo.title, demo_path(demo.slug), rel: "nofollow",
                       class: "font-serif text-[1.9rem] leading-tight text-zinc-100 after:absolute after:inset-0 hover:text-rose-500" %>
           <p class="text-[0.95rem] leading-6 text-zinc-400"><%= demo.blurb %></p>
@@ -274,95 +150,40 @@
   </div>
 </section>
 
-<%# ---- Nothing new to deploy ---------------------------------------------- %>
-<section class="mx-auto max-w-6xl px-5 py-20 lg:py-24">
-  <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-[3.5rem]">Nothing new to deploy.</h2>
-  <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
-    A Node sync server is one more thing to deploy, monitor, and scale, and it
-    needs its own way to know who's logged in. A hosted service keeps your
-    documents on another company's servers. With yrby, your Rails app does
-    the syncing and your database stores the documents. You decide who can
-    edit the way you decide everything else, in the controller that renders
-    the page.
-  </p>
-  <div class="mt-10 overflow-x-auto">
-    <table class="compare min-w-full text-[0.95rem]">
-      <thead>
-        <tr>
-          <th>Node sidecar</th>
-          <th>Hosted service</th>
-          <th class="accent-col">yrby</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>y-websocket or Hocuspocus next to Rails</td>
-          <td>Liveblocks and similar</td>
-          <td class="accent-col"><code>gem "yrby-rails"</code></td>
-        </tr>
-        <tr>
-          <td>A second runtime with its own storage and its own way of checking who can edit</td>
-          <td>Documents stored off-site, and another vendor in the path of every edit</td>
-          <td class="accent-col">Your app, your database, and the permission checks you already have</td>
-        </tr>
-        <tr>
-          <td>Rendering HTML on the server needs JavaScript</td>
-          <td>Rendering HTML goes through their API</td>
-          <td class="accent-col">Rendering HTML is <code>Y::Lexxy.new(doc).to_html</code> in Ruby</td>
-        </tr>
-      </tbody>
-    </table>
+<%# ---- Status -------------------------------------------------------------- %>
+<section class="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+  <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">Status</h2>
+  <div class="mt-6 grid gap-10 lg:grid-cols-2">
+    <div class="space-y-4 leading-7 text-zinc-400">
+      <p>
+        yrby is pre-1.0. The current releases are yrby
+        <%= gem_version("yrby") %>, yrby-rails <%= gem_version("yrby-rails") %>,
+        and lexxy-realtime <%= gem_version("lexxy-realtime") %>. Minor versions
+        can still change the API, and the
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/jpcamara/yrby/blob/main/CHANGELOG.md">changelog</a>
+        marks breaking changes.
+      </p>
+      <p>
+        It needs Ruby 3.4 or newer. Precompiled gems are published for common
+        Linux, macOS, and Windows platforms, so most installs don't need Rust.
+      </p>
+    </div>
+    <div class="space-y-4 leading-7 text-zinc-400">
+      <p>
+        yrby is built on <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/y-crdt/y-crdt">y-crdt</a>,
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/matsadler/magnus">Magnus</a>, and
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/oxidize-rb/rb-sys">rb-sys</a>, and
+        it speaks the same protocol as <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://yjs.dev">Yjs</a>.
+        It's written by <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://jpcamara.com">JP Camara</a>
+        and released under the MIT license.
+      </p>
+      <p>
+        Bug reports and questions go in
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/jpcamara/yrby/issues">GitHub issues</a>.
+        Pull requests are welcome, and
+        <a class="text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" href="https://github.com/jpcamara/yrby/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
+        explains how to run the test suites.
+      </p>
+    </div>
   </div>
-
-  <h3 class="mt-20 font-serif text-3xl tracking-tight text-zinc-100">Built for the deployment you already have.</h3>
-  <dl class="mt-6 grid gap-x-12 border-t border-zinc-700 md:grid-cols-2">
-    <% [
-      ["Thread-safe.", "You can share a <code>Doc</code> across Puma and Action Cable threads without locking it yourself."],
-      ["Parallel on MRI.", "The native code releases the GVL, so several threads can apply updates at once. In the repo's benchmark, applying a 900 KB update on several threads was more than twice as fast as doing it on one."],
-      ["Validated frames.", "The server checks every message before using or forwarding it, and drops anything malformed or too large. If the Rust code panics, Ruby raises an exception and the process keeps running."],
-      ["Multi-process.", "Each change is saved before anyone else sees it, whichever process received it. Any worker can serve any document, because they all read from the same database."],
-      ["AnyCable.", "The same channel runs on AnyCable, and CI tests it against a real anycable-go server. If your users trust each other, cursor updates can skip Ruby entirely by going over AnyCable whispers."],
-      ["Encrypted at rest.", "<code>Y::EncryptedDocument</code> stores document state and updates with Active Record encryption."]
-    ].each do |title, body| %>
-      <div class="grid gap-1 border-b border-zinc-700 py-5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-6">
-        <dt class="font-serif text-xl text-zinc-100"><%= title %></dt>
-        <dd class="leading-7 text-zinc-400"><%= body.html_safe %></dd>
-      </div>
-    <% end %>
-  </dl>
-</section>
-
-<%# ---- Facts strip ------------------------------------------------------- %>
-<section class="border-y border-zinc-700">
-  <dl class="mx-auto grid max-w-6xl grid-cols-2 lg:grid-cols-4">
-    <% [
-      ["0", "Node processes to run"],
-      ["1", "view helper to add"],
-      ["8", "precompiled gem platforms"],
-      ["64", "updates between compactions"]
-    ].each do |number, label| %>
-      <div class="flex flex-col-reverse gap-2 border-zinc-700 px-5 py-9 not-last:border-r">
-        <dt class="text-[0.95rem] text-zinc-400"><%= label %></dt>
-        <dd class="font-serif text-6xl leading-none tracking-tight text-zinc-100"><%= number %></dd>
-      </div>
-    <% end %>
-  </dl>
-</section>
-
-<%# ---- Start ------------------------------------------------------------- %>
-<section class="mx-auto max-w-6xl px-5 py-20">
-  <p class="max-w-[22ch] font-serif text-4xl leading-[1.1] tracking-tight text-zinc-100">
-    Read the getting started guide with a demo open in another tab.
-  </p>
-  <div class="mt-7 inline-flex flex-col gap-1 rounded-lg bg-ink px-4 py-3 font-mono text-sm leading-6 text-[#f4f1ea]">
-    <div><span class="text-rose-300">$</span> bundle add yrby-rails</div>
-    <div><span class="text-rose-300">$</span> npm install yrby-client yjs y-protocols @rails/actioncable</div>
-    <div class="text-[#9c9384]"># using Lexxy? <span class="text-[#f4f1ea]">bundle add lexxy-realtime</span></div>
-  </div>
-  <nav class="mt-7 flex flex-wrap gap-x-6 gap-y-2 text-zinc-400">
-    <%= link_to "Docs", doc_path("getting-started"), class: "hover:text-rose-500" %>
-    <%= link_to "Demos", demos_path, class: "hover:text-rose-500" %>
-    <a class="hover:text-rose-500" href="https://github.com/jpcamara/yrby">GitHub</a>
-    <a class="hover:text-rose-500" href="https://github.com/jpcamara/yrby/blob/main/CHANGELOG.md">Changelog</a>
-  </nav>
 </section>
