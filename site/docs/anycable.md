@@ -13,11 +13,9 @@ never see edits made on the other.
 
 ## Every process rebuilds from the store
 
-yrby never treats a process's memory as the source of truth for a document.
-Every process rebuilds the document from your durable store through `on_load`.
-Each change is recorded before it's broadcast, and that holds across processes
-too. Whichever process receives a change writes it to the shared store before
-any client sees it.
+yrby doesn't keep documents in process memory between messages. Every process
+loads the document from your store through `on_load`. Whichever process
+receives a change writes it to the store before any client sees it.
 
 You don't need sticky routing, per-document ownership, or any coordination
 between processes.

@@ -118,11 +118,11 @@ See [The JavaScript client](/docs/javascript-client) for the rest of the API.
 ## What yrby covers
 
 `yrby` binds the parts of `y-crdt` you need to sync and persist collaborative
-documents: a `Doc`, awareness, and the y-websocket protocol primitives. By
-default the Ruby side treats a document as opaque CRDT state. It applies
-updates, answers sync handshakes, and records deltas without reading the
-contents. The browser editor decides what shape the document has. When you
-need to look inside, `Doc#read_text` and `Doc#read_map` rebuild it in Ruby.
+documents: a `Doc`, awareness, and the y-websocket protocol primitives. The
+server doesn't need to know what's in a document to sync it. It applies
+updates, answers sync handshakes, and saves changes without reading them. The
+editor in the browser defines the document's structure. When you want to read
+the contents in Ruby, use `Doc#read_text` or `Doc#read_map`.
 
 The API is small. Most of the work went into durability, delivery guarantees,
 correctness, and thread safety.
