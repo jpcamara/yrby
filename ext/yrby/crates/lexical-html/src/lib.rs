@@ -699,9 +699,9 @@ fn render_inline<T: ReadTxn>(
                 } else if ruled_inline && !is_builtin(&ty) {
                     match rules.nodes.get(ty.as_str()) {
                         Some(rule) => render_rule_inline(txn, &child, &ty, rule, depth, em, rules),
-                        // An unknown inline wrapper (a mark-style node) with
-                        // no rule renders its text unwrapped, the way unknown
-                        // blocks degrade. User text is never dropped.
+                        // An unknown inline wrapper, such as a mark with no
+                        // rule, renders its text without the wrapper, the same
+                        // way unknown blocks do. Its text is kept.
                         None if depth < MAX_INLINE_DEPTH => {
                             render_inline(txn, &child, depth + 1, ruled_inline, em, rules);
                         }
@@ -964,9 +964,8 @@ fn elem_type<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> String {
 
 /// Text-content escaping, matching what the browser's serializer emits:
 /// `&`, `<`, `>` escaped; quotes left alone in text. Public for splice
-/// callers: values read from a deferred segment's attributes came from the
-/// document — from collaborators — so escape anything you interpolate into
-/// markup.
+/// callers. Values read from a deferred segment's attributes come from
+/// collaborators, so escape anything you put into markup.
 pub fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
