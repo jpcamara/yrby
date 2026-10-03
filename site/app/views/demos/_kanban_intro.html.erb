@@ -1,8 +1,8 @@
 <p>
-  The board is a <code>Y.Array</code> named <code>cards</code>, and each card is
-  a <code>Y.Map</code> with an id, its text, and its column. Adding a card
-  pushes a map onto the array and deleting one removes it. Moving a card writes
-  only its <code>column</code> key, so two people can drag different cards at
-  the same time without a conflict. If both of you move the same card, the
-  last write wins. Drag cards by the handle on their left edge.
+  The board is a <code>Y.Array</code> named <code>cards</code>. Each card is a
+  <code>Y.Map</code> with an id, its text, and its column. Adding a card adds a
+  map to the array, and deleting one removes it. Moving a card only changes its
+  <code>column</code>, so two people can drag different cards at once without
+  conflicts. If you both move the same card, the last move wins. Drag a card by
+  the handle on its left edge.
 </p>
