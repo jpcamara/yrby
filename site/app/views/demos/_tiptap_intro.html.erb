@@ -1,13 +1,13 @@
 <p>
   A <a href="https://tiptap.dev">Tiptap</a> editor using Tiptap's own
   <code>Collaboration</code> and <code>CollaborationCursor</code> extensions.
-  ProseMirror's document is stored in a <code>Y.XmlFragment</code> named
-  <code>default</code>. Other people's carets and selections come from
-  awareness, which the server relays to the room without saving.
+  The ProseMirror document is a <code>Y.XmlFragment</code> named
+  <code>default</code>. Other people's carets and selections come through
+  awareness, which the server passes along without saving.
 </p>
 <p>
-  The editor is created only after the first sync finishes. When Tiptap's
-  Collaboration extension mounts, it writes an empty paragraph into the
-  document. If that happens before the server's state arrives, every client
-  adds its own starting paragraph to the shared document.
+  The editor isn't created until the first sync finishes. Tiptap's
+  Collaboration extension writes an empty paragraph when it starts. If it
+  starts before the server's copy arrives, every client adds its own empty
+  paragraph to the shared document.
 </p>

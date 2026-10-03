@@ -2,13 +2,13 @@
 
 ## The one the gem ships
 
-Most apps never write a channel. `Y::DocumentChannel` ships in `yrby-rails`,
-as `Turbo::StreamsChannel` ships in turbo-rails. A client subscribes with the
-signed grant that `collaborative_document_tag` rendered. The channel finds the
-record from the grant and saves every change through that attribute's storage
-before it acknowledges the change. It rejects a grant that is missing, tampered
-with, expired, or signed for a different attribute, and one whose record has
-been deleted. See [Getting started](/docs/getting-started).
+Most apps never write a channel. yrby-rails includes `Y::DocumentChannel`,
+much like turbo-rails includes `Turbo::StreamsChannel`. The browser subscribes
+with the signed token that `collaborative_document_tag` rendered. The channel
+looks up the record from that token and saves every change before confirming
+it. It rejects a token that's missing, tampered with, expired, signed for a
+different attribute, or points at a deleted record.
+[Getting started](/docs/getting-started) shows the setup.
 
 By default, a valid grant is enough. To also check the connected user's
 current permissions, register a block in `config.to_prepare`:
@@ -20,23 +20,21 @@ Y::DocumentChannel.authorize_document do |record, name|
 end
 ```
 
-The block runs in the channel, so `current_user` is available. `editable_by?`
-is your app's method. yrby doesn't define it. If the block returns false or
-nil, the channel rejects the subscription before it opens a stream or sends
-any state.
+The block runs inside the channel, so `current_user` works. `editable_by?`
+stands for your own permission check; yrby doesn't define it. If the block
+returns false or nil, the channel rejects the subscription before sending
+anything.
 
-The rest of this page covers building your own channel with the concern that
-`Y::DocumentChannel` uses. You'd do that for documents keyed by room with no
-record behind them, for a different store, or for your own authorization
-scheme.
+The rest of this page covers writing your own channel with the same concern.
+You'd do that for documents keyed by room with no record behind them, to use a
+different store, or to handle authorization yourself.
 
 ## Build your own
 
-`include Y::ActionCable`, from the `yrby-rails` gem, adds the y-websocket
-protocol to a channel: document sync, awareness, and presence, over Action
-Cable or AnyCable. A key names one document. Pick whatever scheme fits your
-app: one per record and attribute (`post/42/body`), one per room, or anything
-else.
+Including `Y::ActionCable` from yrby-rails gives a channel the y-websocket
+protocol, which covers document sync and presence, over Action Cable or
+AnyCable. Each document has a key. Use whatever scheme fits your app, such as
+one per record and attribute (`post/42/body`) or one per room.
 
 ```ruby
 # app/channels/document_channel.rb
@@ -80,11 +78,11 @@ document. `on_change` receives a key and the CRDT delta, and it saves that
 delta. Both run in the channel instance through `instance_exec`, so they can
 call `params`, `current_user`, and any other channel method.
 
-The concern reads and writes through your store. It answers each handshake
-from `on_load`. It passes each document change to `on_change` and then
-broadcasts it. Action Cable processes hold no document state in memory, so
-AnyCable RPC workers, Puma workers, and separate dynos can all handle messages
-for the same document. They need to share the store and the cable adapter.
+The concern loads the document through `on_load` whenever a client syncs, and
+saves each change through `on_change` before broadcasting it. It keeps no
+document in memory, so AnyCable RPC workers, Puma workers, and separate dynos
+can all handle the same document, as long as they share the store and the
+cable adapter.
 
 Pass the key on every action: `sync_receive(data, params[:id])`. AnyCable
 builds a new channel instance for each RPC command, so an instance variable
@@ -108,18 +106,18 @@ def authorized?(key)
 end
 ```
 
-For a public document, write `def authorized?(_key) = true`. Then the decision
-is in the code, where a reviewer can find it.
+For a public document, write `def authorized?(_key) = true`, so anyone reading
+the code can see it's public on purpose.
 
 `authorized?` runs once, when the client subscribes. The subscription is
 authorized until it ends. To cut off access during a session, stop the
 subscription yourself. Short grant lifetimes also help, because every new
 subscription checks the grant again.
 
-For documents that belong to a record, `Y::Collaborative` provides the token
-that `authorized?` needs. The engine includes it in Active Record. The page
-renders a signed GlobalID scoped to one attribute, and the channel looks up the
-record from it. The client never names a document.
+For documents that belong to a record, use `Y::Collaborative`, which the engine
+adds to every Active Record model. The page renders a signed GlobalID for one
+attribute, and the channel looks up the record from it. The browser never gets
+to pick a document.
 
 ```erb
 <%# the view picks the document and signs it %>
@@ -136,16 +134,16 @@ def record = Y::Collaborative.locate(params[:grant], :body)
 A token signed for `:body` verifies only under the `"yrby/body"` purpose.
 `locate` returns nil for a tampered, expired, or wrong-attribute token.
 
-You can use the same approach without records. The live demos on this site
-sign the room with `Rails.application.message_verifier`, because their rooms
-are created on first use and there's no record to sign when the page renders.
-Their `authorized?` accepts only the key the token verifies to. This works
-well for anonymous subscribers.
+The same idea works without records. This site's demo rooms don't exist until
+someone opens one, so there's no record to sign. Instead, the page signs the
+room name with `Rails.application.message_verifier`, and `authorized?` only
+accepts the key that token decodes to. This works well when subscribers are
+anonymous.
 
-## Record before distribute
+## Save before broadcast
 
-The concern passes every document change to `on_change` before it broadcasts
-the change. Your block saves it durably.
+The concern calls `on_change` with every change before broadcasting it. Your
+block should save it durably.
 
 ```ruby
 on_change do |key, update|
@@ -154,60 +152,51 @@ on_change do |key, update|
 end
 ```
 
-If the block raises, the server rejects the change. It doesn't apply it or
-send it to anyone. The cost is one synchronous write for every change. The gem
-takes no per-document lock, so two concurrent writes to one document can both
-be saved. Applying the same CRDT update twice has no effect, so the duplicate
-is harmless.
+If the block raises, the server rejects the change and doesn't send it to
+anyone. The price is one synchronous write per change. The gem doesn't lock
+documents, so concurrent writes can save the same update twice. That's
+harmless, because applying a CRDT update twice has no effect.
 
 ## Delivery guarantees
 
 These guarantees hold whether you run one process or hundreds across many
 servers.
 
-- The document always converges. CRDT updates are commutative and idempotent,
-  so out-of-order, duplicate, and concurrent delivery all produce the same
-  document. No coordination is needed.
-- An acknowledged update is durable, including one that arrived out of order.
-  The server saves and acknowledges an update with a missing dependency like
-  any other, and the update waits as pending in the document. Some client
-  still holds the missing update unacknowledged. That client resends it until
-  the server saves it, and then the gap closes.
-- `on_change` runs at least once for every update, before the server
-  acknowledges or broadcasts it. Replaying what it saved rebuilds the
-  document. If you need exactly-once behavior, make `on_change` idempotent.
-  The CRDT handles duplicates either way.
-- When `on_change` raises, the update is rejected without a reply. The server
-  doesn't acknowledge or broadcast it, and there is no negative ack. The
-  client keeps the update and resends it on a timer and on reconnect. That
-  works for transient failures, such as a store that was down for a moment.
-  A block that raises every time for the same edit gets retried forever,
-  because nothing tells the client to stop. Enforce hard rejections in the
-  channel's authorization at subscribe time, before an edit reaches
-  `on_change`.
-- An oversized frame is dropped the same way. The server drops any frame
-  larger than `max_frame_bytes` (8 MiB by default) before decoding it, with
-  no ack and no broadcast. This limits the work one client can force on the
-  server. A real document update over the cap gets the same treatment as a
-  raising `on_change`. Normal typing never comes near the cap, but a large
-  paste, an embedded image, or a big initial `SyncStep2` can exceed it. The
-  server logs each drop with the document key and update id. Override
-  `sync_log_context` on the channel to add a user or connection id to that
-  log line.
+- Every copy of the document ends up the same. Updates can arrive out of
+  order, twice, or at the same time, and the result doesn't change.
+- Once the server confirms an update, it's saved, even if it arrived before an
+  update it depends on. That early update waits in the document. The client
+  that sent the missing one hasn't had it confirmed, so it keeps resending it
+  until the server saves it.
+- `on_change` runs at least once for every update, before the server confirms
+  or broadcasts it. Replaying what it saved rebuilds the document. If you need
+  exactly-once behavior, make `on_change` idempotent. The CRDT handles
+  duplicates either way.
+- If `on_change` raises, the server drops the update without replying. The
+  client keeps it and resends it on a timer and on reconnect. That's what you
+  want when the store was down for a moment. But if the block raises every
+  time for the same edit, the client retries forever, because nothing tells it
+  to stop. Put permanent rejections in the channel's authorization, which runs
+  when the client subscribes.
+- Messages larger than `max_frame_bytes` (8 MiB by default) are dropped the
+  same way, before the server decodes them. This caps how much work one client
+  can cause. Typing never gets close, but a big paste, an embedded image, or a
+  large first sync can. A real edit over the limit gets retried forever, like
+  one that makes `on_change` raise. The server logs each drop with the
+  document key and update id. To add a user or connection id to that line,
+  override `sync_log_context` on the channel.
 
 ## Frame validation
 
-The server checks that each incoming frame is a single well-formed protocol
-message before it processes or relays it. It drops malformed, truncated,
-multi-message, oversized, and unknown frames. A Rust panic in the native code
-is caught and raised as a Ruby exception, so a bad frame can't crash the
-process. One client can't relay garbage that breaks the other clients in a
-room.
+Before the server uses or forwards a message, it checks that it's one
+complete, well-formed protocol message. It drops anything malformed,
+truncated, oversized, of an unknown type, or holding more than one message. If
+the Rust code panics, Ruby raises an exception and the process keeps running.
+One client can't send something that breaks everyone else in the room.
 
-Validation checks each frame's shape, and it doesn't limit how many frames a
-client sends. A client that sends valid frames as fast as it can needs a rate
-limit. This site's channels put token buckets in front of `sync_receive` for
-that reason. The site's
+Validation doesn't limit how many messages a client sends. A client sending
+valid messages as fast as it can still needs a rate limit. This site's
+channels put token buckets in front of `sync_receive` for that, and the site's
 [README](https://github.com/jpcamara/yrby/blob/main/site/README.md) describes
 them.
 
@@ -221,35 +210,32 @@ client -> server   { "update": "<base64 update>", "id": 42 }
 server -> client   { "ack": 42 }     # saved; the client can drop update 42
 ```
 
-`yrby-client`'s `ActionCableProvider` handles this for you. It queues local
-updates until they're acknowledged and sends the queue merged into one
-causally complete delta. The id is the highest sequence number in the batch,
-so one ack confirms everything up to it. If the server already has a resent
-update, applying it again has no effect and the server acknowledges it again.
-Awareness is ephemeral, and the server doesn't acknowledge it.
+`yrby-client`'s `ActionCableProvider` does this for you. It queues local
+updates until they're confirmed and sends them merged into one update. The id
+is the highest sequence number in the batch, so one ack confirms all of them.
+If the server gets an update it already has, applying it changes nothing, and
+the server acks it again. Presence updates aren't acked.
 
 ## Causal gaps
 
-Yjs updates can arrive out of order, so an update can reach the server before
-the update it depends on. yrby treats that as normal. The server saves and
-acknowledges the update like any other. The update waits in the document as a
-pending struct, and Yjs integrates it when the missing dependency arrives. The
-write path appends, relays, and acknowledges without rebuilding the document,
-so an update with a gap costs the same as any other.
+An update can reach the server before the update it depends on. That's
+normal, and the server saves and confirms it like any other. Yjs holds it in
+the document as a pending struct and applies it once the missing update
+arrives. It costs the same as any other update, because the server appends
+it, forwards it, and acks it without rebuilding the document.
 
-The server also sends pending structs to other clients. `handle_sync_message`
-answers with the full state, pending structs included. A client that receives
-it holds the same pending struct and integrates it the same way. Closing the
-gap needs no special handling. The missing update is still unacknowledged on
-the client that sent it, and that client keeps resending it. Only compaction
-leaves pending structs out, because folding them into the base snapshot would
-make them impossible to integrate.
+Other clients get pending structs too, because `handle_sync_message` answers
+with the full state. They hold the same pending struct and apply it the same
+way. Nothing special has to happen to close the gap. The client that sent the
+missing update hasn't had it confirmed, so it keeps resending it. Compaction
+is the one place that leaves pending structs out, because once they're folded
+into the base snapshot they could never be applied.
 
-An open gap is easy to miss. The pending edit doesn't appear in the document
-until its dependency arrives. The gap worth alerting on is one that no
-connected client can fill. The `on_gap` hook reports it. Whenever the server
-loads a document to send its state and a gap is open, it calls `on_gap` with
-the document key.
+Gaps are easy to miss, because the pending edit doesn't show up in the
+document until its dependency arrives. The one worth an alert is a gap that no
+connected client can fill. Use the `on_gap` hook for that. Whenever the server
+loads a document to send its state and finds a gap, it calls `on_gap` with the
+document key.
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
@@ -292,9 +278,8 @@ Y::MSG_SYNC_UPDATE     # 2 - incremental update
 
 ## Protocol codec
 
-Classifying and unwrapping a frame needs no state, so these are module
-functions on `Y`. The server routes frames without holding presence or
-document state.
+These are module functions on `Y`, because classifying and unwrapping a
+message doesn't need any state.
 
 ```ruby
 Y.message_kind(frame)         # => 0 drop / 1 step1 / 2 update / 3 awareness / 4 query
