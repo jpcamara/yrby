@@ -42,8 +42,8 @@ module Y
     def self.list_item(node)
       out = +"<li"
       checked = node.attrs["__checked"]
-      out << %( aria-checked="#{checked}") unless checked.nil?
-      out << %( value="#{node.attrs["__value"] || 1}")
+      out << %( aria-checked="#{RenderRules.escape_attr(checked)}") unless checked.nil?
+      out << %( value="#{RenderRules.escape_attr(node.attrs["__value"] || 1)}")
       out << %( class="lexxy-nested-listitem") if node.child_types.include?("list")
       "#{out}>#{node.content}</li>"
     end

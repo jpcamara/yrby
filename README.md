@@ -401,6 +401,13 @@ attribute names your templates and blocks will read, and `children` and `text`
 tell you which `contains:` to pick. Child block types mean `:blocks`, and text
 means `:inline`.
 
+`unknown_types` lists the types whose `handled` is nil. `to_html` still
+renders them as well as it can. An unknown container or inline wrapper renders
+its children without its own markup, so its text stays. A node that keeps its
+content only in its attributes renders nothing. Either way, the node's markup is
+missing from the HTML, and nothing raises. When you add editor nodes, add a test
+that renders a real document and asserts `unknown_types` is empty.
+
 When a declarative rule can't express the markup, give the node a block:
 
 ```ruby

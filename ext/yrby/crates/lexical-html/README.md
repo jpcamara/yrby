@@ -90,7 +90,7 @@ it returns.
 
 ```rust,no_run
 use yrs::{Doc, Transact, ReadTxn};
-use lexical_yjs_html::{render_segments, Rules, Segment};
+use lexical_yjs_html::{escape_attr, escape_text, render_segments, Rules, Segment};
 
 fn splice(segments: Vec<Segment>) -> String {
     segments
@@ -104,9 +104,13 @@ fn splice(segments: Vec<Segment>) -> String {
                         let attrs: serde_json::Value =
                             serde_json::from_str(&attrs_json).unwrap();
                         let id = attrs["__id"].as_str().unwrap_or("unknown");
-                        // Look the user up, build trusted markup, escape
-                        // anything you interpolate.
-                        format!(r#"<a class="mention" href="/users/{id}">@{id}</a>"#)
+                        // Collaborators write these attribute values, so
+                        // escape everything you insert.
+                        format!(
+                            r#"<a class="mention" href="/users/{}">@{}</a>"#,
+                            escape_attr(id),
+                            escape_text(id)
+                        )
                     }
                     _ => children,
                 }
@@ -149,8 +153,12 @@ for (node_type, info) in collect_node_types(&txn, &fragment).unwrap_or_default()
 }
 ```
 
-Anything where `is_builtin` is false needs a rule. Without one, the node
-still renders its text and child blocks, just unwrapped.
+Any type where `is_builtin` is false needs a rule. Without one, the renderer
+still outputs what it can. An unknown container or inline wrapper, such as a
+mark, renders its children without its own markup, so its text stays. An
+unknown decorator renders nothing, so content kept only in its attributes is
+missing from the HTML. To find the types that still need rules, render a real
+document through `collect_node_types`.
 
 ## License
 

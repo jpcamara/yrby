@@ -6,11 +6,34 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `unknown_types` on `Y::Lexical` and `Y::ProseMirror`, and so on `Y::Lexxy`
+  and `Y::Tiptap`. It lists the node types in a document that neither the
+  built-in schema nor a rule handles, which are the ones `to_html` can't fully
+  render. Render a real document from your editor in a test and assert the list
+  is empty.
+- The renderer crates export `escape_text` and `escape_attr` for callers that
+  build their own markup (`lexical-yjs-html` 0.1.4, `prosemirror-yjs-html`
+  0.1.5).
+
 ### Changed
 
 - The demo app and the render-parity test run on Lexxy 1.0. `Y::Lexxy`
   output matches Lexxy 1.0's own `value`, including image alt text edited
   after the document syncs.
+
+### Fixed
+
+- The Lexical renderers keep the text of an unknown inline wrapper, such as a
+  mark with no rule. The text renders without the wrapper. Before, the whole
+  node rendered as nothing, so its text was missing from the HTML.
+- `Y::Lexxy`'s list-item rule escapes the stored `__checked` and `__value`
+  attributes. Collaborators write those attributes, and a crafted value could
+  break out of the HTML attribute. Normal values (booleans and integers) render
+  the same as before.
+- The crate READMEs' callback examples escape the values they insert, and both
+  READMEs describe how unknown node types render.
 
 ## [0.8.0] - 2026-10-01
 

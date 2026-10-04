@@ -217,6 +217,66 @@ class RenderingRulesTest < Minitest::Test
     assert_nil Y::Lexical.new(Y::Doc.new).node_types("nope")
   end
 
+  # unknown_types is node_types filtered to the entries whose "handled" is
+  # nil: the types no built-in schema or rule renders.
+  def test_unknown_types_lists_types_without_a_renderer
+    assert_includes Y::Lexical.new(lexical_doc).unknown_types, "action_text_attachment"
+    assert_empty Y::Lexxy.new(lexical_doc).unknown_types,
+                 "Y::Lexxy's schema covers its own fixture"
+
+    pm = Y::ProseMirror.new(prosemirror_doc("prosemirror_mention"))
+
+    assert_includes pm.unknown_types, "mention"
+    refute_includes pm.unknown_types, "paragraph"
+    assert_empty Y::Tiptap.new(prosemirror_doc("prosemirror_mention")).unknown_types
+
+    covered = Y::Lexical.new(lexical_doc, nodes: { "action_text_attachment" => { tag: "div" } })
+
+    refute_includes covered.unknown_types, "action_text_attachment"
+
+    assert_empty Y::Lexical.new(Y::Doc.new).unknown_types("nope"),
+                 "a missing or non-Lexical root renders nothing, so it lists nothing"
+  end
+
+  # A real capture from two Lexxy editors: "Collab #ruby rocks and #peer
+  # too", with "rocks" wrapped in @lexical/mark's MarkNode and the hashtags
+  # as @lexical/hashtag text runs. Y::Lexxy has no rule for the mark.
+  def test_lexxy_keeps_the_text_of_an_unknown_inline_wrapper
+    doc = lexical_doc("mark_hashtag")
+
+    assert_equal "<p>Collab #ruby rocks and #peer too</p>", Y::Lexxy.new(doc).to_html,
+                 "the mark's text renders without its wrapper"
+    assert_equal ["mark"], Y::Lexxy.new(doc).unknown_types
+
+    marked = Y::Lexxy.new(doc, nodes: { "mark" => { tag: "mark" } })
+
+    assert_includes marked.to_html, "<mark>rocks</mark>", "a rule restores the wrapper"
+    assert_empty marked.unknown_types
+  end
+
+  # Collaborators write stored attributes, so the built-in rules escape what
+  # they insert. Normal values (booleans and integers) render the same as
+  # before, which the parity fixtures check.
+  def test_lexxy_list_items_escape_stored_attributes
+    node = Y::RenderRules::Node.new(
+      type: "listitem",
+      attrs: { "__checked" => %("><script>x), "__value" => 1 },
+      content: "item",
+      child_types: []
+    )
+    html = Y::Lexxy.list_item(node)
+
+    assert_includes html, 'aria-checked="&quot;&gt;&lt;script&gt;x"'
+    assert_includes html, 'value="1"'
+    refute_includes html, %("><script>)
+
+    crafted = Y::RenderRules::Node.new(
+      type: "listitem", attrs: { "__value" => %(1" onclick="x) }, content: "item", child_types: []
+    )
+
+    assert_includes Y::Lexxy.list_item(crafted), 'value="1&quot; onclick=&quot;x"'
+  end
+
   def test_rules_hold_up_under_concurrent_renders
     renderer = Y::Lexical.new(
       lexical_doc,
