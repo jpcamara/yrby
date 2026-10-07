@@ -1,22 +1,22 @@
-/* The site's whole stylesheet: Tailwind v4, built by bun (`bun run build:css`)
+/* The site's stylesheet. It's Tailwind v4, built by bun (`bun run build:css`)
  * into public/site.css and served as a plain static file, like the demo
  * bundles.
  *
- * Architecture: utilities in the ERB templates for page structure and chrome;
- * the component layer below for two kinds of thing utilities can't reach —
- * DOM the demo JS builds at runtime (cards, chips, notes, grid cells) and the
- * rendered markdown of the docs pages.
+ * The ERB templates use utilities for page structure and layout. The component
+ * layer below covers two things utilities can't reach: DOM the demo JS builds
+ * at runtime (cards, chips, notes, grid cells), and the docs pages' rendered
+ * markdown.
  *
- * The look is a shared manuscript: newsprint ground, documents on white
- * sheets, ink text, and one red-pencil accent. The proofreader's insertion
- * caret (‸) is the motif. Newsreader sets headings, IBM Plex Sans the body,
- * IBM Plex Mono the code. The fonts are copied into public/fonts by
- * `bun run build:fonts`, because the CSP allows nothing from other origins.
+ * The design looks like a shared manuscript: a newsprint background, documents
+ * on white sheets, ink-colored text, and one red accent. The proofreader's
+ * insertion caret (‸) is the site's mark. Headings use Newsreader, body text
+ * IBM Plex Sans, and code IBM Plex Mono. `bun run build:fonts` copies the font
+ * files into public/fonts, because the CSP doesn't allow other origins.
  *
- * The templates were written against Tailwind's zinc and rose scales on a dark
- * page. The theme below remaps both: zinc runs from newsprint (950) to ink
- * (100), and rose is the red pencil. So `text-zinc-100` is still "the
- * strongest text" and `bg-zinc-950` is still "the page".
+ * The templates use Tailwind's zinc and rose classes. The theme below remaps
+ * both scales: zinc runs from newsprint (950) to ink (100), and rose is the red
+ * accent. So `text-zinc-100` is the strongest text and `bg-zinc-950` is the
+ * page background.
  */
 @import "tailwindcss";
 
@@ -95,7 +95,7 @@
   --color-zinc-900: #f7f4ee;
   --color-zinc-950: #ece8e0;
 
-  /* Rose is the red pencil. 400 is link text (5.5:1 on the page), 500 the
+  /* Rose is the red accent. 400 is link text (5.5:1 on the page), 500 the
    * caret and focus ring, 600 a solid button under white text. */
   --color-rose-300: #e0707f;
   --color-rose-400: #b31b34;
@@ -121,16 +121,15 @@
  * Base
  * ------------------------------------------------------------------------ */
 @layer base {
-  /* No scroll-smooth, deliberately. Animated scrolling makes any automated
-   * click race the animation — coordinates get computed while the page is
-   * still moving — which broke the e2e's scroll-then-click sequences, and it
-   * is the same race a screen-reader or keyboard user hits. Anchor jumps just
-   * jump.
+  /* No scroll-smooth. With animated scrolling, an automated click computes
+   * its coordinates while the page is still moving. That broke the e2e's
+   * scroll-then-click steps, and screen-reader and keyboard users hit the same
+   * problem. Anchor links jump straight to their target.
    *
-   * The header is sticky, so anything scrolled "into view" — anchor jumps and
-   * the e2e harness's scrollintoview-before-click alike — needs clearance or
-   * it lands underneath the header (and a click at that point hits the header,
-   * not the target). */
+   * The header is sticky, so anything scrolled into view needs space above
+   * it. That covers anchor links and the e2e's scrollintoview before each
+   * click. Without the margin, the target ends up under the header, and a
+   * click there hits the header. */
   * {
     scroll-margin-top: 4.5rem;
   }
@@ -150,18 +149,18 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Code blocks — the hero of a docs site.
+ * Code blocks.
  *
- * Commonmarker highlights fenced blocks server-side (syntect,
- * base16-eighties.dark) and stamps its own background color inline; the
- * override keeps every block on the one panel color, and the token colors
- * were designed for a background this dark.
+ * Commonmarker highlights fenced blocks on the server (syntect, with the
+ * InspiredGitHub theme, DocPage::CODE_THEME) and sets its own background
+ * color inline. The !important override keeps every block on the white panel
+ * color. InspiredGitHub's token colors are made for a light background.
  * ------------------------------------------------------------------------ */
 @layer components {
   pre {
     background-color: var(--color-panel) !important;
-    /* max-w-full + the smaller phone size keep a long line scrolling inside
-       the block instead of stretching the page. */
+    /* max-w-full and the smaller phone text size make a long line scroll
+       inside the block, so the page doesn't get wider. */
     @apply my-5 max-w-full overflow-x-auto rounded-xl border border-zinc-800
            px-5 py-4 text-[0.7rem] leading-relaxed sm:text-[0.8rem];
   }
@@ -182,8 +181,8 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Docs prose (rendered markdown). Hand-styled rather than a typography
-   * plugin: the markdown is ours, so the surface area is known.
+   * Docs prose (rendered markdown). Styled by hand without a typography
+   * plugin, since we write the markdown and know which elements it uses.
    * ---------------------------------------------------------------------- */
   .docs-body {
     @apply max-w-[70ch] text-[1.02rem] leading-[1.75];
@@ -236,8 +235,8 @@
   }
 
   .docs-body table {
-    /* block + overflow: a wide table scrolls inside itself on a phone
-       instead of stretching the page. */
+    /* block and overflow make a wide table scroll inside itself on a phone,
+       so the page doesn't get wider. */
     @apply my-5 block w-full border-collapse overflow-x-auto text-sm;
   }
 
@@ -259,13 +258,13 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Shared demo chrome the JS builds or updates at runtime. Every class and
-   * id here is load-bearing: the demo bundles and the e2e harness select on
-   * them, so they are styled, never renamed.
+   * Demo page elements that the JS builds or updates at runtime. The demo
+   * bundles and the e2e scripts select on every class and id here, so style
+   * them but don't rename them.
    * ---------------------------------------------------------------------- */
 
   /* Presence chips (room.js renders these). Peer colors are light 400-level
-   * pastels, so the readable text on them is dark, not white. */
+   * pastels, so the chip text is dark. */
   .chip {
     @apply mr-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold
            text-ink;
@@ -351,10 +350,10 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Rich text (Lexxy). The editor's stylesheet is driven by an ink scale of
-   * CSS custom properties (lexxy-variables.css), designed light. Mapping the
-   * scale onto the site's zinc keeps the editor on the same paper and ink as
-   * everything else.
+   * Rich text (Lexxy). The editor's stylesheet uses an ink scale of CSS
+   * custom properties (lexxy-variables.css) with light defaults. Mapping that
+   * scale onto the site's zinc gives the editor the same paper and ink colors
+   * as the rest of the site.
    * ---------------------------------------------------------------------- */
   lexxy-editor {
     --lexxy-color-ink: var(--color-zinc-200);
@@ -377,8 +376,8 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Code demo (CodeMirror mounts into #editor; oneDark carries the editor's
-   * own colors, this is just the frame).
+   * Code demo (CodeMirror mounts into #editor). The oneDark theme sets the
+   * editor's colors, and this only styles the frame.
    * ---------------------------------------------------------------------- */
   #editor:has(.cm-editor) {
     @apply overflow-hidden rounded-xl border border-zinc-800;
@@ -393,9 +392,8 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Whiteboard (#canvas; notes are JS-built). Notes keep their light sticky
-   * colors — dark text on them stays readable, and they pop on the dark
-   * canvas.
+   * Whiteboard (#canvas; the JS builds the notes). Notes keep their light
+   * sticky-note colors, so dark text on them stays readable.
    * ---------------------------------------------------------------------- */
   #canvas {
     @apply relative h-104 touch-none overflow-hidden rounded-xl border
@@ -407,14 +405,14 @@
   }
 
   .note {
-    /* touch-action: none, or the browser claims touch pointer-moves for
-       scrolling and dragging a note on a phone loses a tug-of-war. */
+    /* touch-action: none. Otherwise the browser uses touch moves to scroll,
+       and dragging a note on a phone doesn't work. */
     @apply absolute h-20 w-30 cursor-grab touch-none rounded-lg shadow-lg
            shadow-black/40;
   }
 
-  /* The drag affordance. The textarea is exempt from dragging (it is for
-     typing), so without a handle only the note's edges drag. */
+  /* The drag handle. The textarea doesn't start a drag because it's for
+     typing, so without a handle only the note's edges would drag. */
   .note-grip {
     @apply flex h-4 cursor-grab items-center justify-center rounded-t-lg
            bg-black/10;
@@ -431,12 +429,12 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Kanban (#board; columns and cards are JS-built).
+   * Kanban (#board; the JS builds the columns and cards).
    * ---------------------------------------------------------------------- */
   #board {
-    /* On a phone three columns don't fit: the board scrolls sideways within
-       itself (the body clips overflow, so a too-wide board would otherwise
-       leave its third column cut off and unreachable). */
+    /* Three columns don't fit on a phone, so the board scrolls sideways
+       inside itself. The body clips overflow, so without this the third
+       column would be cut off and unreachable. */
     @apply flex items-start gap-4 overflow-x-auto pb-2;
   }
 
@@ -459,8 +457,9 @@
            bg-zinc-900 px-2 py-2 text-sm text-zinc-200;
   }
 
-  /* The drag handle. touch-action: none so a touch drag doesn't scroll the
-     page instead; only the grip drags, so the card body still scrolls. */
+  /* The drag handle. touch-action: none keeps a touch drag from scrolling
+     the page. Only the grip drags, so touching the card body still
+     scrolls. */
   .card .grip {
     @apply cursor-grab touch-none select-none text-zinc-600 hover:text-zinc-400;
   }
@@ -487,7 +486,7 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Spreadsheet (#grid, #toolbar; rows and cells are JS-built).
+   * Spreadsheet (#grid, #toolbar; the JS builds the rows and cells).
    * ---------------------------------------------------------------------- */
   #toolbar {
     @apply my-2 flex items-center gap-1;
@@ -512,8 +511,8 @@
   }
 
   #grid {
-    /* block + overflow: the grid scrolls sideways within itself on a phone
-       (the body clips overflow, so extra columns would otherwise be cut off). */
+    /* block and overflow make the grid scroll sideways inside itself on a
+       phone. The body clips overflow, so extra columns would be cut off. */
     @apply block overflow-x-auto border-separate border-spacing-0 bg-panel
            text-[13px];
   }
@@ -551,7 +550,7 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Demo/docs list cards (server-rendered, shared by the home page and the
+   * Demo and docs list cards (server-rendered, used on the home page and the
    * demo index).
    * ---------------------------------------------------------------------- */
   .demo-list {
@@ -581,11 +580,10 @@
   }
 
   /* -------------------------------------------------------------------------
-   * "The lines you add." The flagship samples (hero, Lexxy quickstart) render
-   * context dimmed and the lines you actually type at full brightness with a
-   * 2px accent gutter — so a sample answers "what do I type?" at a glance.
-   * Near-monochrome on purpose: the one accent belongs on the gutter, not
-   * scattered across syntax tokens.
+   * Annotated code samples (the hero and the Lexxy quickstart). Context lines
+   * are dimmed, and the lines you type are full strength with a 2px accent
+   * line on the left, so a reader can see what to add at a glance. The
+   * samples skip syntax colors so the accent only marks those lines.
    * ---------------------------------------------------------------------- */
   .code-annotated {
     @apply my-0 text-zinc-500;
@@ -601,8 +599,7 @@
   }
 
   /* -------------------------------------------------------------------------
-   * The wire-flow diagram (home, "Acked means stored"): mono type, not an
-   * illustration.
+   * A wire-flow diagram set in monospace type.
    * ---------------------------------------------------------------------- */
   .wire {
     background-color: var(--color-panel) !important;
@@ -611,8 +608,8 @@
   }
 
   /* -------------------------------------------------------------------------
-   * The plain three-way comparison (home, "Nothing new to deploy"): factual,
-   * no logos, no red Xs. The yrby column carries the accent.
+   * A plain comparison table, with no logos or red Xs. The yrby column gets
+   * the accent color.
    * ---------------------------------------------------------------------- */
   .compare {
     @apply border-collapse;
@@ -636,9 +633,9 @@
   }
 
   /* -------------------------------------------------------------------------
-   * The named caret — the wordmark's mark, and the presence carets in the demo
-   * still. Accent by default; the peer caret's sky is caged to demo panes.
-   * `prefers-reduced-motion` stops the blink.
+   * Carets: the wordmark's caret mark and blinking text carets. They use the
+   * accent color by default, and .peer-caret uses --color-peer-you
+   * (blue). `prefers-reduced-motion` turns off the blink.
    * ---------------------------------------------------------------------- */
   .caret {
     color: var(--color-accent-strong);
@@ -646,7 +643,7 @@
     animation: caret-blink 1.1s step-end infinite;
   }
 
-  /* caret_mark: sits just under the baseline, like a proofreader's caret. */
+  /* caret_mark sits just under the baseline, like a proofreader's caret. */
   .caret-mark {
     @apply inline-block h-[0.42em] w-[0.5em] align-[-0.12em];
   }
@@ -673,8 +670,8 @@
 
   /* -------------------------------------------------------------------------
    * The home page hero (frontend/src/hero.js): two windows on one document.
-   * A caret is a 2px bar in the collaborator's color; the other person's
-   * carries a name flag.
+   * A caret is a 2px bar in the collaborator's color, and the other person's
+   * caret has a name flag.
    * ---------------------------------------------------------------------- */
   .hero-caret {
     @apply relative -mx-px inline-block h-[1.1em] w-0.5 align-[-0.18em];
@@ -697,9 +694,9 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Skip-to-content: off-screen until focused, then a normal accent chip at the
-   * top-left. Keyboard and screen-reader users get past the header nav in one
-   * tab.
+   * Skip-to-content link. It's off-screen until focused, then shows as an
+   * accent chip at the top left, so keyboard and screen-reader users can skip
+   * the header nav with one tab.
    * ---------------------------------------------------------------------- */
   .skip-link {
     @apply sr-only;

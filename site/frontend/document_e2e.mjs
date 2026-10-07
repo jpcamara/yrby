@@ -1,4 +1,4 @@
-// Execute the record-backed quickstart in two real browsers against the site.
+// Runs the record-backed example in two real browsers against the site.
 import assert from "node:assert/strict"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"

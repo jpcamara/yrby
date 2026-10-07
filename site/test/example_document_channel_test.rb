@@ -12,7 +12,7 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
     subscribe grant: @document.collaborative_sgid(:body), name: "body", session_id: "example-session"
   end
 
-  test "the shipped channel syncs the example and releases its room seat" do
+  test "the gem's channel syncs the example and releases its room seat" do
     join_example
 
     assert_predicate subscription, :confirmed?
@@ -28,7 +28,7 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal 0, Rooms.current.peers(key)
   end
 
-  test "invalid and wrong-attribute grants cannot allocate storage" do
+  test "a grant used with the wrong attribute name creates no storage" do
     assert_no_difference "Y::Document.count" do
       subscribe grant: @document.collaborative_sgid(:body), name: "secret"
     end
@@ -36,14 +36,14 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
     assert_predicate subscription, :rejected?
   end
 
-  test "even a valid grant for another record cannot bypass the public example policy" do
+  test "a valid grant for another record is rejected" do
     other = ExampleDocument.create!
     subscribe grant: other.collaborative_sgid(:body), name: "body"
 
     assert_predicate subscription, :rejected?
   end
 
-  test "the shipped channel also enforces the site's room cap" do
+  test "the gem's channel also enforces the site's room cap" do
     Rooms.current = Rooms.new(max_peers: 0)
     assert_no_difference "Y::Document.count" do
       join_example
@@ -62,7 +62,7 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
     assert(transmissions.any? { |message| message["notice"] == "document_full" })
   end
 
-  test "receive rechecks the policy before calling the recorder" do
+  test "receive checks authorization again before storing" do
     join_example
     subscription.params[:name] = "secret"
     perform :receive, "update" => Updates.frame(Updates::HELLO), "id" => 5

@@ -1,10 +1,10 @@
 // A collaborative spreadsheet. The shared state is a Y.Array of row Y.Maps,
-// keyed by column id. A cell is not a scalar — it is its own Y.Map of
-// { value, bold, fill }, so bolding a cell and typing in it are writes to
-// different keys and both survive. The same property written twice is
-// last-writer-wins. Sorting and column order come from TanStack Table and are
-// deliberately NOT shared: they are this browser's view of the same rows. The
-// server knows nothing about "cells" or "columns" either way.
+// keyed by column id. Each cell is its own Y.Map of { value, bold, fill }, so
+// bolding a cell and typing in it write different keys and both are kept. If
+// two people write the same property, the last write wins. Sorting and column
+// order come from TanStack Table and aren't shared. Each browser keeps its own
+// view of the same rows. The server doesn't know anything about cells or
+// columns.
 import * as Y from "yjs"
 import {
   constructTable,
@@ -19,9 +19,8 @@ import { connectRoom, uid, user, wireStoredPanel } from "./room.js"
 
 const COLUMNS = [["item", "Item"], ["qty", "Qty"], ["owner", "Owner"], ["notes", "Notes"]]
 const COL_IDS = COLUMNS.map((c) => c[0])
-// Dark tints, not pastels: the fill is the cell's background and the text on
-// it stays the page's light zinc, so the fills have to be darker than the
-// text, not lighter.
+// Light tints. The fill is the cell's background behind the page's dark text,
+// so the fills have to stay light enough to read on.
 const FILLS = [["", "No fill"], ["#f6e3b4", "Amber fill"], ["#d3ecd9", "Green fill"], ["#d8e3f8", "Blue fill"]]
 
 const grid = document.getElementById("grid")
@@ -31,9 +30,8 @@ const ydoc = new Y.Doc()
 const rows = ydoc.getArray("rows")
 const provider = connectRoom(ydoc, grid)
 
-// A row is a Y.Map of column id -> cell Y.Map. Cells are created with the row so
-// every column has one from the start; getCell backfills if a row arrives
-// without one.
+// A row is a Y.Map of column id -> cell Y.Map. Each row is created with all of
+// its cells. getCell adds a missing cell if a row arrives without one.
 function newRow(values = {}) {
   const row = new Y.Map()
   row.set("id", uid())
@@ -61,8 +59,8 @@ const addRow = () => rows.push([newRow()])
 window.__yrby = { provider, ydoc, rows, user, newRow, getCell, addRow }
 
 // --- TanStack Table: view state only -----------------------------------------
-// The table is fed a plain snapshot of the Y.Array (rebuilt on every change) and
-// owns sorting + column order. Neither is written back to the doc, so two
+// The table gets a plain snapshot of the Y.Array, rebuilt on every change, and
+// handles sorting and column order. Neither is written back to the doc, so two
 // browsers can sort the same rows differently while editing the same cells.
 const features = tableFeatures({
   coreReactivityFeature: storeReactivityBindings(),
@@ -74,8 +72,8 @@ const features = tableFeatures({
 const columnDefs = COLUMNS.map(([id, header]) => ({ id, accessorKey: id, header, sortFn: "text" }))
 const view = { sorting: [], columnOrder: [] }
 
-// Snapshot the Y.Array as the table's `data`, plus a rowId -> row Y.Map index so
-// a rendered cell can write back to the shared type it came from.
+// Snapshots the Y.Array as the table's `data`, plus a rowId -> row Y.Map index
+// so a rendered cell can write back to its shared type.
 let yRows = new Map()
 function snapshot() {
   yRows = new Map()
@@ -115,11 +113,11 @@ const moveColumn = (colId, dir) => {
 }
 
 // --- Rendering ---------------------------------------------------------------
-// The header is rebuilt every render; body <tr>s are pooled by row id and
-// updated in place, so a remote edit elsewhere in the sheet doesn't destroy the
-// input you are typing in.
+// The header is rebuilt on every render. Body <tr>s are reused by row id and
+// updated in place, so a remote edit elsewhere in the sheet doesn't replace
+// the input you're typing in.
 const trs = new Map()
-let activeCell = null // "<rowId>:<colId>" — the toolbar's target, kept after blur
+let activeCell = null // "<rowId>:<colId>", the cell the toolbar acts on, kept after blur
 
 function renderHeader() {
   const tr = document.createElement("tr")
@@ -155,11 +153,11 @@ function buildRow(rowId) {
     td.dataset.cell = `${rowId}:${colId}`
     const input = document.createElement("input")
     input.dataset.cell = td.dataset.cell
-    // Spreadsheet semantics: the shared value is written on commit (Enter or
-    // blur), not per keystroke. `change` fires for both.
+    // Like a spreadsheet, the shared value is written when you press Enter or
+    // leave the cell, not on each keystroke. `change` fires for both.
     input.addEventListener("change", () => getCell(yRows.get(rowId), colId).set("value", input.value))
-    // Enter commits and leaves the cell. preventDefault because a bare Enter in
-    // a text input is an implicit form submission, which navigates the page.
+    // Enter saves and leaves the cell. preventDefault is needed because Enter
+    // in a text input submits the form, which reloads the page.
     input.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return
       e.preventDefault()
@@ -177,9 +175,9 @@ function buildRow(rowId) {
   return tr
 }
 
-// Moving a <tr> or <td> that contains the focused input blurs it, so every
-// structural move is conditional and the caret is put back if one still lands
-// on the cell you are typing in.
+// Moving a <tr> or <td> that holds the focused input blurs it. So render only
+// moves elements when the order changed, and if a move blurred the cell
+// you're typing in, it puts the focus and caret back.
 function render() {
   const focused = document.activeElement?.dataset?.cell
   const caret = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null
@@ -226,8 +224,8 @@ rows.observeDeep(() => {
 })
 
 // --- Toolbar: bold / fill on the selected cell --------------------------------
-// These write single properties immediately — the counterpart to the deferred
-// `value` commit.
+// These write one property right away, unlike `value`, which waits for Enter
+// or blur.
 function withActiveCell(fn) {
   if (!activeCell) return
   const [rowId, colId] = activeCell.split(":")
@@ -250,8 +248,8 @@ toolbarEl.innerHTML =
   `<button id="bold" title="Bold">B</button>` +
   FILLS.map(([c, n]) => `<button data-fill="${c}" title="${n}" style="background:${c || "transparent"}"></button>`).join("") +
   `<span class="label"></span>`
-// mousedown default is what blurs the input, so the formatting buttons act on
-// the cell you are in rather than the one you just left.
+// The default mousedown action blurs the input. Preventing it means the
+// formatting buttons act on the cell you're in, not the one you just left.
 for (const b of toolbarEl.querySelectorAll("#bold,[data-fill]")) {
   b.addEventListener("mousedown", (e) => e.preventDefault())
 }
@@ -262,9 +260,10 @@ for (const b of toolbarEl.querySelectorAll("[data-fill]")) {
 toolbarEl.querySelector("#add-row").onclick = addRow
 
 // --- Presence -----------------------------------------------------------------
-// The room bar renders the name chips. This adds the part only a sheet has: each
-// peer publishes the cell it is focused in, and that cell gets their color and
-// name in this browser, wherever their row happens to sit in *this* sort order.
+// The room bar shows the name chips. This adds the part only a sheet has. Each
+// peer shares the cell they're focused on, and this browser outlines that cell
+// with their color and name, wherever their row is in this browser's sort
+// order.
 function renderPeerCells() {
   for (const el of grid.querySelectorAll("td.peer")) {
     el.classList.remove("peer")
@@ -287,8 +286,8 @@ function renderPeerCells() {
 }
 provider.awareness.on("update", renderPeerCells)
 
-// Seed the starter rows only on the FIRST catch-up (whenSynced doesn't re-fire
-// on reconnects, so a deliberately emptied sheet stays empty).
+// Add the starter rows only on the first sync. whenSynced doesn't fire again
+// on reconnect, so a sheet someone emptied stays empty.
 provider.whenSynced.then(() => {
   if (rows.length) return
   ydoc.transact(() => {

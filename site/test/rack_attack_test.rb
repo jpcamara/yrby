@@ -2,10 +2,9 @@ require "test_helper"
 
 # Layer 1: per-IP HTTP throttling.
 class RackAttackTest < ActionDispatch::IntegrationTest
-  # Rack::Attack counts in fixed windows keyed by the clock, so a run that
-  # straddles a period boundary loses its count and the request that should be
-  # the one over the limit comes back unthrottled. Freeze the clock: these
-  # tests are about the rule, not about when the window rolls over.
+  # Rack::Attack counts in fixed time windows. If a test run crosses into a
+  # new window, the count resets and the request that should be over the limit
+  # gets through. Freezing the clock keeps every request in one window.
   setup do
     Rack::Attack.cache.store.clear
     freeze_time
@@ -32,23 +31,23 @@ class RackAttackTest < ActionDispatch::IntegrationTest
   end
 
   test "an unauthenticated hit on the RPC path is blocked with a 404" do
-    # thrust would forward /_anycable to Falcon like any other path; an outside
-    # client that can't present the bearer must not reach the RPC endpoint.
+    # thrust forwards /_anycable to Falcon like any other path, so an outside
+    # client without the bearer token must be blocked here.
     post "/_anycable/connect"
 
     assert_response :not_found
     assert_equal "Not found\n", response.body
   end
 
-  test "the authenticated RPC endpoint is reached and never throttled" do
-    # Every WebSocket command arrives here from the embedded Go server carrying
-    # the bearer, so this path carries the cable's whole message volume.
-    # Throttling it by IP would throttle the site itself, so it is safelisted,
-    # and a flood of it must not consume a visitor's page budget either.
+  test "the authenticated RPC endpoint is reachable and not throttled" do
+    # The embedded Go server sends every WebSocket command here with the bearer
+    # token, so all cable traffic goes through this path. Throttling it by IP
+    # would throttle the site itself, so it's safelisted. Heavy RPC traffic
+    # also must not use up a visitor's page budget.
     headers = { "Authorization" => Rack::Attack.rpc_bearer }
     (Limits::PAGE_REQUESTS + 5).times { post "/_anycable/connect", headers: headers }
 
-    # It reached the RPC handler (empty body => 422), not the block (404).
+    # The RPC handler answered (an empty body gets 422). A block would be 404.
     assert_response :unprocessable_entity
 
     get "/docs/getting-started"
@@ -57,8 +56,8 @@ class RackAttackTest < ActionDispatch::IntegrationTest
   end
 
   test "an asset-lookalike path is still throttled" do
-    # The anchored ASSET match must not let /assetsjunk or /x.js/attack past the
-    # throttle just for containing an asset-ish segment.
+    # The ASSET pattern is anchored, so /assetsjunk and /x.js/attack are still
+    # throttled even though they look like asset paths.
     %w[/assetsjunk /x.js/attack].each do |path|
       Rack::Attack.cache.store.clear
       Limits::PAGE_REQUESTS.times { get path }
@@ -86,13 +85,13 @@ class RackAttackTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
-  test "the discoverability endpoints are served and not throttled" do
-    # The redesign's SEO routes must keep working past the page limit (they are
-    # cacheable meta, matched by the anchored asset rule).
+  test "robots, sitemap, and llms files are not throttled" do
+    # These routes match the anchored asset rule, so they keep working past the
+    # page limit.
     %w[/robots.txt /sitemap.xml /llms.txt /llms-full.txt].each do |path|
       (Limits::PAGE_REQUESTS + 2).times { get path }
 
-      assert_response :success, "#{path} should stay served"
+      assert_response :success, "#{path} should still be served"
     end
   end
 

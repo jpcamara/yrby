@@ -45,9 +45,7 @@ class TokenBucketTest < ActiveSupport::TestCase
     assert_equal 600, allowed
   end
 
-  test "a bucket round-trips through the state the RPC exchange carries" do
-    # Sockets terminate in anycable-go, so the bucket is rebuilt from channel
-    # state on every message rather than living in the channel object.
+  test "a bucket can be dumped and loaded" do
     bucket = TokenBucket.new(capacity: 3, refill_per_second: 0, now: 0)
     2.times { bucket.take(0) }
 
@@ -65,7 +63,7 @@ class TokenBucketTest < ActiveSupport::TestCase
     assert_not bucket.take
   end
 
-  test "drops survive the round trip, so a flooder is still recognised" do
+  test "drops are kept through dump and load" do
     bucket = TokenBucket.new(capacity: 1, refill_per_second: 0, now: 0)
     3.times { bucket.take(0) }
 

@@ -1,11 +1,11 @@
 <% content_for :title, "lexxy-realtime: collaborative Lexxy editing for Rails" %>
-<% content_for :description, "lexxy-realtime makes Basecamp's Lexxy editor collaborative with a model macro, a form helper, and a generator. Several people can edit the same rich text field in Rails, and after each change the HTML is saved back to the record. Built on yrby." %>
+<% content_for :description, "lexxy-realtime makes Basecamp's Lexxy editor collaborative with a model macro, a form helper, and a generator. Several people can edit the same rich text field, and the gem saves the HTML back to the record after each change. It's built on yrby." %>
 <% content_for :canonical, canonical_url("/lexxy") %>
 
 <section class="pt-6 pb-14 sm:pt-14">
   <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">lexxy-realtime · a separate gem, built on yrby</p>
   <h1 class="mt-3 max-w-3xl font-serif text-5xl leading-[1.02] font-normal tracking-tight text-zinc-100 sm:text-6xl">
-    Lexxy, collaborative.
+    Collaborative editing for Lexxy
   </h1>
   <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
     Lexxy is Basecamp's rich text editor for Action Text, built on Lexical.
@@ -28,8 +28,9 @@
 
   <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
     Import <code>lexxy-realtime</code> wherever you import Lexxy, and fill in
-    the <code>authorized?</code> method in the generated channel. It rejects
-    everyone until you do. Then open the form in two browsers and type.
+    the <code>authorized?</code> method in the generated channel. The
+    generated method returns false, so the channel rejects everyone until you
+    change it. Then open the form in two browsers and type.
   </p>
 </section>
 
@@ -42,8 +43,8 @@
     <code>Y::Document</code> tables. After each change, it renders the
     document to HTML in Ruby with <code>Y::Lexxy</code> and saves the result
     to <code>post.body</code>. That HTML matches what Lexxy would have
-    submitted itself, so search, mailers, and show pages keep working
-    unchanged.
+    submitted itself, so search, mailers, and show pages work without
+    changes.
   </p>
   <p class="mt-4">
     <%= link_to "Watch the saved HTML update as you type →", demo_path("lexxy"), rel: "nofollow",
@@ -90,7 +91,7 @@
     lexxy-realtime is a small layer on top of yrby, which the rest of this
     site documents. yrby does the syncing, the saving, and the HTML
     rendering, over Action Cable or AnyCable. If you use import maps, the
-    generator pins JavaScript that ships with the gem. If you use a bundler,
+    generator pins the JavaScript included in the gem. If you use a bundler,
     install the <code>lexxy-realtime</code> npm package. Either way, it
     reuses the copy of Lexical that Lexxy already loads.
   </p>

@@ -9,7 +9,8 @@ const status = document.querySelector("#document-status")
 const cableUrl = new URL(document.querySelector('meta[name="action-cable-url"]').content, location.href)
 cableUrl.protocol = location.protocol === "https:" ? "wss:" : "ws:"
 const cable = createConsumer(cableUrl.href)
-// The site's public rooms route awareness through the guarded server path.
+// These rooms are public, so awareness goes through the server's checked
+// receive path. Clearing `whisper` makes the provider send it that way.
 const consumer = {
   subscriptions: {
     create(params, callbacks) {
@@ -68,8 +69,8 @@ document.querySelector("#read-document").addEventListener("click", async () => {
   }
 })
 
-// The element registers on import. Keep server-rendered markup in a template
-// until the AnyCable consumer and delegated editor listener are configured.
+// The element registers itself on import. The markup stays in a template until
+// the AnyCable consumer and the editor listener above are set up.
 document.querySelector("#document-container").append(
   document.querySelector("#document-template").content.cloneNode(true),
 )

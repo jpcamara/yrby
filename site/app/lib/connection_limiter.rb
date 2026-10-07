@@ -1,25 +1,24 @@
-# Concurrent WebSocket connections, counted per IP and process-wide.
+# Counts open WebSocket connections per IP and for the whole process.
 #
-# Rack::Attack throttles how fast an address can *open* connections. This caps
-# how many it can *hold*, which is the resource that actually runs out: each open
-# connection is a fiber, a socket, and an Action Cable connection object for as
-# long as the client keeps it.
+# Rack::Attack limits how fast an address can open connections. This limits
+# how many it can keep open, which is the resource that actually runs out.
+# Each open connection uses a fiber, a socket, and an Action Cable connection
+# object for as long as the client keeps it.
 #
-# Each slot has a token, minted by `acquire` and released by that exact token.
-# Identity matters: `disconnect` releases the slot its own `connect` took, not
-# "the oldest one for this IP", without the token, releasing the wrong slot
-# lets the running count drift away from the real socket count, past both caps.
+# `acquire` gives each slot a token, and `release` frees the slot for that
+# token. `disconnect` has to release the slot its own `connect` took. If it
+# released some other slot for the same IP, the count would drift from the
+# real number of sockets and go past both caps.
 #
-# This is a pure token ledger: it counts, it does not decide when a slot is
-# stale. A slot is freed by `release` (from the Disconnect RPC) or, when that RPC
-# never arrives, by the ConnectionGuard sweep, which reaps a connection by
-# LIVENESS, the last server-visible frame, and releases the exact slot token.
-# Age is deliberately not a signal here: expiring a slot purely because it is old
-# would reap a connection that is genuinely still open (a long reader), which is
-# the leak the guard's liveness clock avoids.
+# This class only counts. It doesn't decide when a slot is stale. `release`
+# frees a slot when the Disconnect RPC arrives. If that RPC never arrives, the
+# ConnectionGuard sweep frees the slot's token based on when the server last
+# saw a frame from it. Age alone isn't used. Expiring old slots would cut off
+# connections that are still open, like someone reading a long document.
 #
-# The real ceiling on sockets is ANYCABLE_MAX_CONN on the Go process, which owns
-# them; this limiter is the per-IP and soft process-wide cap in front of it.
+# The real limit on sockets is ANYCABLE_MAX_CONN on the Go process, which
+# holds the sockets. This class adds a per-IP cap and a softer process-wide
+# cap in front of it.
 class ConnectionLimiter
   class << self
     attr_writer :current
@@ -33,14 +32,14 @@ class ConnectionLimiter
                  max_total: Limits::MAX_CONNECTIONS)
     @max_per_ip = max_per_ip
     @max_total = max_total
-    @slots = Hash.new { |h, k| h[k] = {} } # ip => Set of tokens
+    @slots = Hash.new { |h, k| h[k] = {} } # ip => { token => true }
     @total = 0
     @mutex = Mutex.new
   end
 
-  # Returns [:ok, token], [:too_many_for_ip, nil], or [:too_many_connections,
-  # nil]. On :ok the caller owns the slot named by `token` and must call
-  # `release(ip, token)` when the connection closes.
+  # Returns [:ok, token], [:too_many_for_ip, nil], or
+  # [:too_many_connections, nil]. On :ok the caller holds the slot for `token`
+  # and must call `release(ip, token)` when the connection closes.
   def acquire(ip)
     @mutex.synchronize do
       next [:too_many_connections, nil] if @total >= @max_total
@@ -53,9 +52,9 @@ class ConnectionLimiter
     end
   end
 
-  # Release the exact slot `acquire` handed out. A token that isn't held (already
-  # reaped as leaked, or a double disconnect) is a no-op, so the count can't go
-  # negative or free a slot that belongs to another live connection.
+  # Releases the slot `acquire` returned. A token that isn't held does nothing.
+  # That covers a slot the sweep already freed and a second disconnect, so the
+  # count can't go negative or free another connection's slot.
   def release(ip, token)
     @mutex.synchronize do
       slots = @slots[ip]

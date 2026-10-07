@@ -5,7 +5,7 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
   def status(result) = result.first
   def token(result) = result.last
 
-  test "one address may hold up to the per-IP cap" do
+  test "one address can hold connections up to the per-IP cap" do
     limiter = ConnectionLimiter.new(max_per_ip: 2, max_total: 100)
 
     assert_equal :ok, status(limiter.acquire("1.2.3.4"))
@@ -37,8 +37,7 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
     limiter.acquire("1.2.3.4")
     limiter.release("1.2.3.4", "not-a-real-token")
 
-    # The live slot is untouched: no wrongful decrement, no freeing another
-    # connection's slot.
+    # The live slot is still held and the count is unchanged.
     assert_equal 1, limiter.count("1.2.3.4")
     assert_equal 1, limiter.total
   end
@@ -55,9 +54,9 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
     a = token(limiter.acquire("1.2.3.4"))
     limiter.acquire("1.2.3.4")
     limiter.release("1.2.3.4", a)
-    limiter.release("1.2.3.4", a) # the disconnect fired twice
+    limiter.release("1.2.3.4", a) # the disconnect arrived twice
 
-    assert_equal 1, limiter.count("1.2.3.4"), "the second release must not free the other connection's slot"
+    assert_equal 1, limiter.count("1.2.3.4"), "the second release leaves the other connection's slot alone"
     assert_equal 1, limiter.total
   end
 
@@ -70,7 +69,7 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
     assert_equal :too_many_connections, status(limiter.acquire("1.1.1.1"))
   end
 
-  test "acquiring from many threads never exceeds the cap" do
+  test "acquiring from many threads stays within the cap" do
     limiter = ConnectionLimiter.new(max_per_ip: 1000, max_total: 50)
     results = Array.new(8) { Thread.new { Array.new(20) { limiter.acquire("1.2.3.4").first } } }.flat_map(&:value)
 
@@ -78,17 +77,17 @@ class ConnectionLimiterTest < ActiveSupport::TestCase
     assert_equal 50, limiter.total
   end
 
-  test "the limiter never reaps a slot by age: a held slot stays held" do
-    # A slot is a leak only when its connection is silent past the TTL, and that
-    # liveness lives in the ConnectionGuard, not here (which cannot see frames).
-    # This ledger frees a slot only on release; a long-open reader is never
-    # expired out from under itself. See ConnectionGuard for the leak sweep.
+  test "the limiter keeps a held slot regardless of age" do
+    # A slot has leaked only when its connection is silent past the TTL.
+    # ConnectionGuard sees frames and tracks that. The limiter doesn't. The
+    # limiter frees a slot only on release, so a reader with a page open for a
+    # long time keeps their slot. See ConnectionGuard for the leak sweep.
     limiter = ConnectionLimiter.new(max_per_ip: 1, max_total: 100)
 
     assert_equal :ok, status(limiter.acquire("1.2.3.4"))
 
-    assert_equal :too_many_for_ip, status(limiter.acquire("1.2.3.4")), "the slot is still held; no age reaping"
+    assert_equal :too_many_for_ip, status(limiter.acquire("1.2.3.4")), "the slot is still held"
     assert_equal 1, limiter.total
-    assert_not_respond_to limiter, :sweep, "leak reaping is the ConnectionGuard's job now"
+    assert_not_respond_to limiter, :sweep, "ConnectionGuard handles leaked slots"
   end
 end

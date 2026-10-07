@@ -41,7 +41,7 @@ class MetaTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "# Getting started"
   end
 
-  test "a demo room page is noindexed and canonicalizes to the demos index" do
+  test "a demo room page is noindex and its canonical URL is the demos index" do
     get "/demos/tiptap/room1"
 
     assert_includes response.body, %(<meta name="robots" content="noindex, nofollow">)

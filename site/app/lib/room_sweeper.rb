@@ -1,19 +1,19 @@
 # Deletes stale documents from the store.
 #
-# With SQLite behind the channel, eviction is no longer about memory: an idle
-# room costs a few rows on disk and nothing in RAM. What it is about now is
-# content: these are public, anonymous, unmoderated documents, and "temporary"
-# is a promise the site makes about them. The TTL is that promise. A room
-# untouched for ROOM_IDLE_TTL is deleted, rows and all.
+# An idle room costs a few rows on disk and no RAM, so this isn't about
+# memory. It's about content. These documents are public, anonymous, and
+# unmoderated, and the site tells visitors they're temporary. ROOM_IDLE_TTL
+# sets how long that is. A room that nobody touches for ROOM_IDLE_TTL is
+# deleted along with its rows.
 #
-# "Untouched" means no write and no compaction inside the TTL: appends stamp
-# y_document_updates.created_at and compaction stamps y_documents.updated_at,
-# so a document is stale only when both are old. Occupied rooms are never
-# evicted, however quiet: someone is looking at them.
+# A room counts as untouched when it has no write and no compaction inside the
+# TTL. Appends set y_document_updates.created_at and compaction sets
+# y_documents.updated_at, so a document is stale only when both are old. A room
+# with someone in it is never deleted, however quiet it is.
 #
-# One plain Ruby thread in the server process, started once at boot. It does
-# nothing but sleep between sweeps; under Falcon it runs alongside the fiber
-# reactor, and a sleeping thread is free either way.
+# This runs as one plain Ruby thread in the server process, started once at
+# boot. It sleeps between sweeps. Under Falcon it runs next to the fiber
+# reactor, and a sleeping thread costs nothing.
 module RoomSweeper
   class << self
     def start(interval: Limits::SWEEP_INTERVAL)
@@ -40,27 +40,28 @@ module RoomSweeper
       reap_leaked_connections
       evicted
     rescue StandardError => e
-      # A sweep failure must never take the thread down with it; the next tick
-      # tries again.
+      # Keep the thread alive after a failed sweep. The next tick tries again.
       Rails.logger.error("room-sweeper: #{e.class}: #{e.message}")
-      # The connection reap is the caps' only leak backstop; a failure in the
-      # room sweep above must not skip it, so run it in its own rescue.
+      # The connection cleanup is the only thing that frees leaked slots and seats,
+      # so a failed room sweep shouldn't skip it. It has its own rescue.
       reap_leaked_connections
       []
     end
 
-    # Delete stale documents without racing a join or a write.
+    # Deletes stale documents without racing a join or a write.
     #
-    # `occupied_keys` was a snapshot: a join or an append could commit between
-    # selecting the stale set and destroying it, deleting a document out from
-    # under a live session (and cascading to update rows written in that window).
-    # So eviction is now a claim. The stale set is only a *candidate* list; the
-    # room bookkeeping decides, atomically with its seat check, which candidates
-    # have no occupant and no reservation, and marks them evicting, after which
-    # a racing join is refused (:evicting) and a racing write can't re-open them.
-    # We then re-read the database for the claimed keys (a write that landed
-    # after the candidate query but before the claim leaves a fresh update row)
-    # and delete only those still stale, dropping the mark on every claimed key.
+    # `occupied_keys` is a snapshot. A join or an append could commit between
+    # finding the stale set and deleting it, which would delete a document out
+    # from under a live session, along with update rows written in that window.
+    # So the stale set is only a list of candidates. Rooms#claim_evictions
+    # checks seats and claims, in one locked step, the candidates with no
+    # occupant and no reservation. After that, a join gets :evicting and a
+    # write can't reopen them.
+    #
+    # Then this reads the database again for the claimed keys, because a write
+    # between the candidate query and the claim leaves a new update row. It
+    # deletes only the keys that are still stale and clears the mark on every
+    # claimed key.
     def sweep_documents(rooms, ttl)
       cutoff = Time.current - ttl
       candidates = stale_document_keys(cutoff, exclude: rooms.occupied_keys)
@@ -68,27 +69,23 @@ module RoomSweeper
       return [] if claimed.empty?
 
       begin
-        # Under the claim no new join or write can touch these keys, so this
-        # freshness re-read is stable: it only catches writes that slipped in
-        # before the claim.
+        # Nothing can join or write to these keys while they're claimed, so this
+        # second read is stable. It only catches writes from before the claim.
         evictable = stale_document_keys(cutoff, only: claimed)
-        # destroy_all, not delete_all: Y::Document owns its update rows
-        # (dependent: :delete_all), and destroying through the model keeps that
-        # in one place.
+        # Use destroy_all so Y::Document's `dependent: :delete_all` removes the
+        # update rows, and that rule stays in the model.
         Y::Document.where(key: evictable).destroy_all if evictable.any?
         evictable
       ensure
-        # Drop the evicting mark on every claimed key, deleted ones and the
-        # ones the freshness re-read spared alike, so a spared room is joinable
-        # again.
+        # Clear the evicting mark on every claimed key, deleted or not, so a
+        # room the second read kept can be joined again.
         claimed.each { |key| rooms.forget(key) }
       end
     end
 
     # Keys whose document is stale: no compaction (updated_at) and no append
-    # (a fresh update row) inside the TTL. `exclude` drops occupied rooms from
-    # the candidate pass; `only` narrows to the claimed keys for the freshness
-    # re-read.
+    # (a new update row) inside the TTL. `exclude` leaves out occupied rooms on
+    # the first pass. `only` limits the second read to the claimed keys.
     def stale_document_keys(cutoff, exclude: nil, only: nil)
       scope = Y::Document.where(updated_at: ...cutoff)
                          .where.not(id: Y::DocumentUpdate.where(created_at: cutoff..).select(:document_id))
@@ -97,22 +94,23 @@ module RoomSweeper
       scope.pluck(:key)
     end
 
-    # Reap connections whose Disconnect RPC never fired, on the sweep cadence.
-    # The guard is this node's liveness record: reaping one silent past the TTL
-    # releases its room seats (freeing peer slots and occupied_keys, so an
-    # abandoned room becomes evictable) and its connection slot, in one pass.
+    # Cleans up connections whose Disconnect RPC never arrived, on each sweep.
+    # ConnectionGuard tracks which connections on this server are alive. When
+    # it removes one that's been silent past the TTL, it frees its room seats
+    # and its connection slot. Freeing the seats also lets an abandoned room be
+    # deleted.
     def reap_leaked_connections
       ConnectionGuard.current.sweep
     rescue StandardError => e
-      Rails.logger.error("room-sweeper (connection reap): #{e.class}: #{e.message}")
+      Rails.logger.error("room-sweeper (connection cleanup): #{e.class}: #{e.message}")
     end
 
-    # The Lexxy demo's Note records follow the same TTL. A note is touched
-    # by every materialization (refresh_collaborative_rich_text saves it), so
-    # updated_at tracks writes; a note whose document still exists is left to
-    # the document sweep above (deleting the note would destroy a document the
-    # occupancy check may be protecting). Once the document is gone, swept
-    # above, or never created, a stale note is just an orphaned row.
+    # The Lexxy demo's Note records use the same TTL. Every render saves the
+    # note (refresh_collaborative_rich_text), so updated_at tracks writes. If
+    # a note's document still exists, the document sweep above handles it,
+    # because deleting the note would delete a document someone may be using.
+    # Once the document is gone, or if it was never created, a stale note is
+    # just an orphaned row.
     def sweep_notes(cutoff)
       stale = Note.where(updated_at: ...cutoff).where.missing(:collaborative_document_body)
       keys = stale.pluck(:room).map { |room| "note:#{room}" }

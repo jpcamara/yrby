@@ -1,25 +1,23 @@
-# The collaborative document channel behind the shape demos (spreadsheet,
+# The collaborative document channel for the shape demos (spreadsheet,
 # whiteboard, kanban, code, Tiptap).
 #
-# The yrby half is exactly what the docs teach: `include Y::ActionCable` (via
-# RoomGuarded) and the two hooks pointed at the gem's own storage models on
-# SQLite. RoomGuarded carries the throttle layers, because these rooms are
-# public and anonymous.
+# The yrby part matches the docs: `include Y::ActionCable` (through
+# RoomGuarded) and two hooks that use the gem's storage models on SQLite.
+# RoomGuarded adds the throttles, because these rooms are public and anonymous.
 #
-# Sockets terminate in the anycable-go embedded in thrust, which calls this
-# channel over HTTP RPC served by Falcon, a fresh channel instance per
-# command, so params ride along on every call and per-subscription state
-# lives in `state_attr_accessor` (see RoomGuarded).
+# Sockets terminate in the anycable-go server embedded in thrust. It calls this
+# channel over HTTP RPC served by Falcon, with a new channel instance for each
+# command. Params come with every call, and per-subscription state is kept with
+# `state_attr_accessor` (see RoomGuarded).
 class DocumentChannel < ApplicationCable::Channel
   include RoomGuarded
 
-  # The canonical store, verbatim from the README. Y::Document keeps nothing
-  # authoritative in process memory: load replays the snapshot plus the tail,
-  # append records one delta, and the gem's own compaction (every 64 rows by
-  # default) folds the tail with pending rows quarantined, not dropped. The
-  # site's size cap is charged before the write (RoomGuarded#refuse_write?
-  # reserves the bytes through Rooms#reserve_write), so there is no size
-  # bookkeeping to do here.
+  # The same store the README shows. Y::Document keeps nothing important in
+  # process memory. `load_state` replays the snapshot and the rows after it,
+  # and `append` records one update. The gem compacts every 64 rows by default,
+  # and it sets pending rows aside during compaction without dropping them.
+  # RoomGuarded#refuse_write? reserves the bytes through Rooms#reserve_write
+  # before the write, so this channel doesn't track sizes.
   on_load { |key| Y::Document.load_state(key) }
   on_change { |key, update| Y::Document.append(key, update) }
 
@@ -40,18 +38,18 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # The gem's fail-closed seam (sync_subscribed rejects unless this returns
-  # true; subscribed also asks first, so a refused client never takes a seat).
-  # The access model is the Lexxy demo's: clients never name a document;
-  # they present the signed grant the page rendered, and the key is whatever
-  # that token verifies to. Nothing connects without one.
+  # sync_subscribed rejects the subscription unless this returns true.
+  # `subscribed` also checks it first, so a refused client never takes a seat.
+  # Access works like the Lexxy demo. The client never names a document. It
+  # sends the signed grant the page rendered, and the key is whatever that
+  # grant verifies to. Without a grant, nothing connects.
   def authorized?(_key = nil)
     key.present?
   end
 
-  # Derived from the token on every command: each RPC call builds a fresh
-  # channel instance, and verifying the signature is cheaper than carrying the
-  # key as channel state.
+  # Read from the token on every command. Each RPC call builds a new channel
+  # instance, and verifying the signature is cheaper than storing the key as
+  # channel state.
   def key
     @key ||= Demos.verified_key(params[:token])
   end

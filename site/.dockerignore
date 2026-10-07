@@ -6,7 +6,7 @@ log/*
 tmp/*
 frontend/node_modules
 
-# Built by the assets stage inside the image, not copied from the host.
+# The assets stage builds these inside the image.
 public/tiptap.js
 public/spreadsheet.js
 public/whiteboard.js
