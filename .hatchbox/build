@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Hatchbox runs this to build the site: gems, the bun frontend bundles and
+# stylesheet, then the SQLite database.
+set -euo pipefail
+
+cd "$RELEASE_DIR/site"
+bundle config set --local path "$DIR/shared/bundle"
+bundle config set --local deployment true
+bundle config set --local without "development test"
+bundle install
+(cd frontend && bun install --frozen-lockfile && bun run build)
+bin/rails db:prepare
