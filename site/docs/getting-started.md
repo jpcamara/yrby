@@ -47,8 +47,9 @@ can edit the record can see:
 
 The tag includes a signed token for that record and attribute. The browser
 subscribes to the gem's `Y::DocumentChannel` with it, and the channel looks up
-the record. It saves each change before confirming it, using `Y::Document`, or
-`Y::EncryptedDocument` if the attribute is declared `encrypted: true`.
+the record. The channel saves each change before it confirms it. It uses
+`Y::Document`, or `Y::EncryptedDocument` when the attribute is declared with
+`encrypted: true`.
 
 The browser only ever sends that token. The channel rejects it if it's missing,
 tampered with, expired, signed for a different attribute, or points at a
@@ -86,8 +87,8 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
 })
 ```
 
-`yrby:synced` fires once the document has caught up with the server. Attach the
-editor there and not earlier. Most editor bindings add an empty paragraph when
+`yrby:synced` fires once the document has caught up with the server. Wait for
+it before you attach the editor. Most editor bindings add an empty paragraph when
 they start. If two people attach before the server's copy arrives, the document
 ends up with both paragraphs.
 
@@ -123,8 +124,8 @@ updates, answers sync handshakes, and saves changes without reading them. The
 editor in the browser defines the document's structure. When you want to read
 the contents in Ruby, use `Doc#read_text` or `Doc#read_map`.
 
-The API is small. Most of the work went into durability, delivery guarantees,
-correctness, and thread safety.
+The API is small. Most of the gem's code deals with saving changes, delivering
+them reliably, and thread safety.
 
 ## Editors
 

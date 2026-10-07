@@ -1,15 +1,15 @@
-// Load test for the yrby site. Raw ActionCable WebSocket clients (far lighter
-// than browsers) against DocumentChannel, spread across rooms, driving a
-// sustained edit rate. Measures connections held, throughput (edits acked/sec
-// — the channel acks every recorded update), fan-out (remote updates seen),
-// propagation latency (edit -> visible on a peer), saturation (sent vs acked),
-// and errors.
+// Load test for the yrby site. Runs raw Action Cable WebSocket clients, which
+// are much lighter than browsers, against DocumentChannel across several rooms
+// at a steady edit rate. Reports connections held, throughput (acked edits per
+// second; the channel acks every saved update), fan-out (remote updates seen),
+// latency from an edit to a peer seeing it, the share of sent frames acked, and
+// errors.
 //
 //   BASE=http://192.168.1.10:4321 CLIENTS=200 ROOMS=20 DURATION=30 RATE=2 \
 //     node loadtest_site.mjs
 //
-// RATE = edits/sec PER client. Keys use a real demo slug so the channel's
-// key validation accepts them. Latency uses a Y.Map "ping" (O(1) to observe).
+// RATE is edits per second per client. Keys use a real demo slug so the
+// channel accepts them. Latency uses a Y.Map "ping", which is cheap to observe.
 import * as Y from "yjs"
 import * as syncProtocol from "y-protocols/sync"
 import * as encoding from "lib0/encoding"
@@ -54,8 +54,8 @@ class Client {
       encoding.writeVarUint(e, MSG_SYNC); syncProtocol.writeUpdate(e, u)
       this._send(e)
     })
-    // Origin rides along explicitly: the deploy enforces allowed origins at
-    // the socket, and Node sends none by default.
+    // Send an Origin, because a deploy with ALLOWED_ORIGINS checks it at the
+    // socket and Node sends none by default.
     this.ws = new WebSocket(WS, { protocols: ["actioncable-v1-json"], headers: { Origin: BASE } })
     this.ws.onopen = () => { m.opened++ }
     this.ws.onmessage = (ev) => this._msg(JSON.parse(ev.data))
@@ -86,9 +86,8 @@ class Client {
   }
   _send(e) {
     if (this.ws.readyState !== WebSocket.OPEN) return
-    // yrby's reliable delivery acks frames that carry an id; document updates
-    // get one so acked/s measures recorded throughput. Sync-protocol replies
-    // (SyncStep1) go without an id — they are answered, not recorded.
+    // yrby acks frames that carry an id. Every frame here gets one, so acked/s
+    // tracks how many updates the server saved.
     this.ws.send(JSON.stringify({ command: "message", identifier: this.identifier,
       data: JSON.stringify({ update: toB64(encoding.toUint8Array(e)), id: ++this.frameId }) }))
     m.sent++
@@ -105,8 +104,8 @@ const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) =>
 
 async function main() {
   console.log(`load: ${CLIENTS} clients / ${ROOMS} rooms / ${RATE} edits/s/client / ${DURATION / 1000}s -> ${WS}`)
-  // DocumentChannel subscribes by signed grant: one page fetch per room lifts
-  // the token every client in that room presents.
+  // DocumentChannel subscribes with a signed grant. Fetch each room's page once
+  // and share its token with every client in that room.
   const tokens = []
   for (let r = 0; r < ROOMS; r++) {
     const page = await fetch(`${BASE}/demos/${SLUG}/lt-${r}`).then((res) => res.text())
@@ -117,7 +116,7 @@ async function main() {
   for (let i = 0; i < CLIENTS; i++) {
     // the first client in each room is its pinger; the rest time the pings
     clients.push(new Client(`lt-${i % ROOMS}`, i, i < ROOMS, tokens[i % ROOMS]))
-    if (i % 25 === 24) await sleep(60) // ramp, don't SYN-flood the accept queue
+    if (i % 25 === 24) await sleep(60) // ramp up slowly so the accept queue isn't flooded
   }
   await Promise.race([Promise.all(clients.map((c) => c.subscribed)), sleep(20000)])
   console.log(`connected: ${m.opened} opened, ${m.subscribed} subscribed, ${m.rejected} rejected`)

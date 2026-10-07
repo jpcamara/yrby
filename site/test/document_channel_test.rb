@@ -1,6 +1,6 @@
 require "test_helper"
 
-# Layers 3-6 of the throttle stack, driven through the real channel.
+# Throttle layers 3-6 of config/limits.rb, tested through the real channel.
 class DocumentChannelTest < ActionCable::Channel::TestCase
   tests DocumentChannel
 
@@ -18,8 +18,8 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   def notices = transmissions.filter_map { |m| m["notice"] }
 
-  # Signs an arbitrary key, bypassing room_token's slug/room shape, so tests
-  # can prove the channel re-validates what a token carries.
+  # Signs any key, skipping room_token's slug and room checks, so tests can
+  # check that the channel validates the key in a token again.
   def token_for(key) = Demos.verifier.generate(key)
 
   def send_update(update, id:)
@@ -34,7 +34,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert transmissions.any? { |m| m["update"].present? }, "expected a SyncStep1 handshake"
   end
 
-  test "a raw document key is rejected: clients cannot name documents" do
+  test "a subscription with a raw document key is rejected" do
     subscribe id: KEY
 
     assert_predicate subscription, :rejected?
@@ -93,8 +93,9 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   test "a connection over its subscription cap is refused" do
-    # Saturate this connection's guard (connection_id "c1" from setup), then a
-    # further subscribe is refused before it can take a seat or mint a document.
+    # Fill this connection's subscription cap (connection_id "c1" from setup).
+    # The next subscribe is refused before it takes a seat or creates a
+    # document.
     ConnectionGuard.current = ConnectionGuard.new(max_subscriptions: 1)
     ConnectionGuard.current.admit_subscription("c1", "tiptap/elsewhere")
 
@@ -102,10 +103,10 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
     assert_predicate subscription, :rejected?
     assert_equal 0, Rooms.current.peers(KEY), "no seat taken"
-    assert_equal 0, Y::Document.count, "no document minted"
+    assert_equal 0, Y::Document.count, "no document created"
   end
 
-  test "the room cap refuses a subscription that would mint a new document" do
+  test "the room cap refuses a subscription that would create a new document" do
     Rooms.current = Rooms.new(max_rooms: 1)
     Y::Document.append("tiptap/taken", Updates::HELLO)
 
@@ -147,28 +148,28 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   test "frames past the token bucket are dropped" do
     subscribe token: Demos.room_token("tiptap", "room1")
-    # Three times the burst, sent as fast as the test can. The bucket refills
-    # while that runs, so the exact number that gets through depends on the wall
-    # clock; what is fixed is that the burst is honoured and the rest is not.
+    # Send three times the burst as fast as the test can. The bucket refills
+    # while this runs, so the exact number that gets through depends on the
+    # clock. The whole burst gets through and some of the rest doesn't.
     total = Limits::FRAME_BURST * 3
     total.times { |i| send_update(Updates::HELLO, id: i) }
 
-    assert_operator acks.length, :>=, Limits::FRAME_BURST, "the burst should have been honoured"
-    assert_operator acks.length, :<, total, "everything past the burst should not have got through"
+    assert_operator acks.length, :>=, Limits::FRAME_BURST, "the whole burst should get through"
+    assert_operator acks.length, :<, total, "some frames past the burst should be dropped"
   end
 
   test "a client that keeps flooding has its connection closed" do
     subscribe token: Demos.room_token("tiptap", "room1")
-    # The burst is spent first, then every frame is a drop. One short of the
-    # threshold the connection is still up. (The bucket refills as the test
-    # runs, so the count can only lag, never lead.)
+    # The burst goes through first, and then frames are dropped. One drop short
+    # of the threshold, the connection is still open. The bucket refills as the
+    # test runs, so the drop count can only be lower than expected here.
     short = Limits::FRAME_BURST + Limits::FRAME_DROPS_BEFORE_CLOSE - 1
     short.times { |i| send_update(Updates::HELLO, id: i) }
 
     assert_empty @closes, "not yet at the drop threshold"
 
-    # Refill means the exact frame that trips the threshold depends on the wall
-    # clock, so keep sending until it does.
+    # Because of the refill, which frame reaches the threshold depends on the
+    # clock, so keep sending until the connection closes.
     (short...(short * 4)).each do |i|
       break if @closes.any?
 
@@ -193,7 +194,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, Y::DocumentUpdate.count, "the refused update must not be recorded"
   end
 
-  test "the full-room notice is sent once, not on every dropped frame" do
+  test "the full-room notice is sent once" do
     Rooms.current = Rooms.new(max_document_bytes: 1)
     subscribe token: Demos.room_token("tiptap", "room1")
     3.times { |i| send_update(Updates::HELLO, id: i) }
@@ -201,7 +202,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, notices.length
   end
 
-  test "presence still flows in a room that has stopped accepting writes" do
+  test "presence still works in a room that stopped accepting writes" do
     Rooms.current = Rooms.new(max_document_bytes: Updates::HELLO.bytesize)
     subscribe token: Demos.room_token("tiptap", "room1")
     send_update(Updates::HELLO, id: 1)

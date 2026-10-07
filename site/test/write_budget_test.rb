@@ -1,6 +1,6 @@
 require "test_helper"
 
-# The process-wide document-write shelf in front of SQLite.
+# The process-wide limit on document writes before they reach SQLite.
 class WriteBudgetTest < ActiveSupport::TestCase
   test "writes within the burst are admitted" do
     budget = WriteBudget.new(capacity: 3, refill_per_second: 1, now: 0)
@@ -10,7 +10,7 @@ class WriteBudgetTest < ActiveSupport::TestCase
     assert budget.admit(0)
   end
 
-  test "writes past the burst are shed at one instant" do
+  test "writes past the burst at one instant are dropped" do
     budget = WriteBudget.new(capacity: 3, refill_per_second: 1, now: 0)
     3.times { budget.admit(0) }
 

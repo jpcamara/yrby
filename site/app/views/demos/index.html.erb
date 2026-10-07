@@ -6,9 +6,10 @@
     Each demo syncs a different kind of Yjs document through the same Rails
     app. Five of them use one <code>DocumentChannel</code>. It saves every
     update with <code>Y::Document</code>, sends it to everyone in the room,
-    and has no code for any particular demo. The Lexxy demo uses the
-    <code>NoteChannel</code> that lexxy-realtime's generator creates, which
-    also renders the document to HTML after each change. Every demo page has
+    and has no code for any particular demo. The Lexxy demo uses
+    <code>NoteChannel</code>, which is the channel lexxy-realtime's generator
+    writes, adapted for public rooms. It also renders the document to HTML
+    after each change. Every demo page has
     a panel that shows what Ruby reads from the saved document.
   </p>
   <p class="mt-4 leading-7 text-zinc-400">
@@ -26,8 +27,8 @@
   <ul class="demo-list">
     <% @demos.each do |demo| %>
       <li>
-        <%# nofollow: each launch mints a fresh, per-visitor room, not a page
-            for a crawler to follow (robots.txt disallows the room paths too). %>
+        <%# nofollow because each click creates a new room for that visitor.
+            robots.txt also disallows the room paths. %>
         <%= link_to demo.title, demo_path(demo.slug), rel: "nofollow" %>
         <code><%= demo.shape %></code>
         <span><%= demo.blurb %></span>

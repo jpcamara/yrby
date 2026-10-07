@@ -1,10 +1,10 @@
 module ApplicationHelper
-  # The bundles are plain public/ files (no asset pipeline), served with
-  # max-age=3600: without a fingerprint a deploy leaves browsers running last
-  # hour's JS. This appends a content digest, memoized per process in
-  # production: the files can only change across a restart, which resets the
-  # memo. In development the digest is recomputed so the watch rebuild shows up
-  # on reload.
+  # The bundles are plain files in public/ with no asset pipeline, served with
+  # max-age=3600. Without a fingerprint, browsers keep running the old JS for
+  # up to an hour after a deploy. This appends a content digest. In production
+  # each process memoizes the digest, because the files only change on a
+  # deploy and a deploy restarts the process. In development the digest is
+  # recomputed on every call so the watch rebuild shows up on reload.
   BUNDLE_DIGESTS = Hash.new do |cache, path|
     file = Rails.public_path.join(path.delete_prefix("/"))
     digest = File.exist?(file) ? Digest::MD5.file(file).hexdigest.first(8) : "missing"
@@ -13,42 +13,40 @@ module ApplicationHelper
 
   def busted(path) = "#{path}?v=#{BUNDLE_DIGESTS[path]}"
 
-  # A server-highlighted code block for hand-written snippets (the home page's
-  # hero and showcase). Same pipeline and theme as the docs pages, so every
-  # code block on the site is the one surface.
+  # A server-highlighted code block for the hand-written snippets on the home
+  # page. It uses the same pipeline and theme as the docs pages, so every code
+  # block on the site looks the same.
   def code_block(lang, source)
     Commonmarker.to_html(
       "```#{lang}\n#{source.strip}\n```",
       options: { render: { unsafe: false } },
       plugins: { syntax_highlighter: { theme: DocPage::CODE_THEME } }
-    ).html_safe # unsafe: false escapes raw HTML; the source is our own literals
+    ).html_safe # unsafe: false escapes raw HTML, and the source is our own string literals
   end
 
-  # The "lines you add" treatment for the flagship samples (hero, Lexxy
-  # quickstart). Context renders dimmed; the lines you actually type carry a
-  # 2px accent gutter and full-brightness text, so a sample answers "what do I
-  # type?" at a glance. Deliberately not syntax-highlighted: near-monochrome
-  # code reads as typography, and the one accent belongs on the gutter, not
-  # scattered across tokens.
+  # Renders the home page and Lexxy page samples with the lines you add marked.
+  # Context lines are dimmed. Added lines get a 2px accent gutter and
+  # full-brightness text, so you can see at a glance what to type. These
+  # samples skip syntax highlighting so the gutter is the only accent color.
   #
-  # `add:` is a list of substrings; any source line containing one is an added
-  # line. Substrings, not line numbers, so the marking survives edits.
+  # `add:` is a list of substrings, and any line containing one counts as
+  # added. Matching on substrings keeps the marking correct when a sample's
+  # lines move.
   def added_lines_code(source, add:)
     lines = source.strip.split("\n").map do |line|
       added = add.any? { |needle| line.include?(needle) }
       klass = added ? "cl add" : "cl"
       %(<span class="#{klass}">#{ERB::Util.html_escape(line.empty? ? " " : line)}</span>)
     end
-    # Each `.cl` is a block, so lines are joined with nothing: a literal newline
-    # between them would render as a blank line under white-space: pre.
+    # Each `.cl` is a block, so the lines are joined with no separator. A
+    # newline between them would render as a blank line under white-space: pre.
     %(<pre class="code-annotated"><code>#{lines.join}</code></pre>).html_safe
   end
 
-  # The hero's samples. Defined here rather than inline: an ERB template
-  # compiles its text into escaped string appends, and a heredoc inside an
-  # output tag captures those compiled lines: apostrophes come out as \' and
-  # any inner ERB delimiter leaks compiler internals. In a plain Ruby file
-  # the heredoc is just a string.
+  # The home page samples live in Ruby because a heredoc inside an ERB output
+  # tag picks up the template's compiled code. Apostrophes come out as \', and
+  # an inner ERB delimiter exposes the compiler's generated Ruby. In a plain
+  # Ruby file the heredoc is just a string.
   def hero_tag_line
     added_lines_code(<<~ERB, add: ["collaborative_document_tag"])
       <%= collaborative_document_tag @post, :body %>
@@ -62,7 +60,7 @@ module ApplicationHelper
     RUBY
   end
 
-  # The browser half of the home page's how-it-works sample.
+  # The browser code in the home page's "How it works" section.
   def hero_bind_code
     code_block "js", <<~JS
       import "yrby-client/element"
@@ -75,10 +73,8 @@ module ApplicationHelper
     JS
   end
 
-  # The three flagship lexxy-realtime samples, rendered with the "lines you add"
-  # treatment. Defined here rather than inline in the template so the ERB
-  # delimiters in the form snippet (`<%= ... %>`) stay literal string content
-  # and are never seen by the template's own ERB parser.
+  # The three samples on the Lexxy page. They live in Ruby so the template's
+  # ERB parser never sees the `<%= ... %>` in the form snippet.
   def sample_lexxy_model
     added_lines_code(<<~RUBY, add: ["has_collaborative_rich_text"])
       class Post < ApplicationRecord
@@ -99,8 +95,8 @@ module ApplicationHelper
     BASH
   end
 
-  # The proofreader's insertion caret, the site's mark. Drawn rather than set
-  # as the ‸ character, which most fonts make tiny.
+  # The proofreader's insertion caret, used as the site's logo mark. It's an
+  # SVG because most fonts draw the ‸ character too small.
   def caret_mark(css_class = "text-rose-500")
     stroke = { fill: "none", stroke: "currentColor", "stroke-width": 1.8,
                "stroke-linecap": "round", "stroke-linejoin": "round" }
@@ -127,9 +123,9 @@ module ApplicationHelper
     end
   end
 
-  # The hero replay's finished state, server-rendered so the picture is
-  # complete without JavaScript or with reduced motion. frontend/src/hero.js
-  # replays how two people got here.
+  # The final text of the hero replay, rendered on the server so the panes
+  # look right without JavaScript or with reduced motion. frontend/src/hero.js
+  # animates the typing that leads up to it.
   HERO_TEXT = "Launch checklist for Friday\n• Tag the GitHub release\n• Publish yrby-client 0.6.0".freeze
   HERO_CARETS = { "ada" => HERO_TEXT.index(" release") + " release".length, "you" => HERO_TEXT.length }.freeze
 
@@ -147,8 +143,8 @@ module ApplicationHelper
   # A loaded gem's version, for the home page's status section.
   def gem_version(name) = Gem.loaded_specs[name]&.version.to_s
 
-  # A JSON-LD block. Not executable script, so it is not governed by the
-  # strict script-src CSP; browsers never run application/ld+json.
+  # A JSON-LD block. Browsers never run application/ld+json, so the strict
+  # script-src CSP doesn't apply to it.
   def json_ld_tag(data)
     content_tag(:script, JSON.pretty_generate(data).html_safe, type: "application/ld+json")
   end

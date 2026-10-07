@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# Vendored from `bin/rails generate yrby:tables` (yrby-rails), matching the
-# template on yrby main: the state column is capped at 1 gigabyte - 1 so the
-# same migration runs on Postgres (SQLite ignores binary limits entirely).
+# Copied from `bin/rails generate yrby:tables` (yrby-rails), matching the
+# template on yrby main. The state column is capped at 1 gigabyte - 1 so the
+# same migration runs on Postgres. SQLite ignores binary limits.
 class CreateYTables < ActiveRecord::Migration[8.1]
   def change
     create_table :y_documents do |t|

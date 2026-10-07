@@ -1,68 +1,74 @@
-# The throttle layers every collaborative channel on this site shares, the
-# rooms are public and anonymous, so `receive` is an open write surface
-# whichever channel it reaches (layers 2-6 of config/limits.rb).
+# Throttles shared by every collaborative channel on this site. The rooms are
+# public and anonymous, so any client can send frames to `receive` on any of
+# these channels (layers 2-6 of config/limits.rb).
 #
-# Includers call `take_seat(key)` from `subscribed` (after their own
-# authorization), `release_seat(key)` from `unsubscribed`, and route `receive`
-# through `guarded_receive(data, key)`, which enforces, in order: the
-# per-connection frame bucket (with the flooding close), the encoded frame size
-# cap, the process-wide document-write budget, and the per-room document byte
-# cap (document frames only; a full room goes read-only with a one-time notice,
-# and awareness keeps flowing). Frames that pass go to yrby's `sync_receive`.
+# Channels that include this call `take_seat(key)` from `subscribed` after
+# their own authorization, call `release_seat(key)` from `unsubscribed`, and
+# send `receive` through `guarded_receive(data, key)`. That method checks, in
+# order:
 #
-# The subscription itself is admitted by the connection guard first
-# (subscription count, subscribe rate, one seat per room per connection), then a
-# room seat is taken. Both the frame bucket and the subscription budget live on
-# the CONNECTION, not the subscription, so a socket can't reset a burst or
-# multiply a rate by re-subscribing.
+# 1. the per-connection frame bucket, closing the socket if it keeps flooding
+# 2. the encoded frame size
+# 3. the process-wide document write budget
+# 4. the per-room document byte cap
 #
-# Everything that must survive between commands is channel state, because
-# sockets terminate in anycable-go and every command builds a fresh channel
-# instance.
+# Steps 3 and 4 apply only to document frames. When a room hits its byte cap
+# it goes read-only, the client gets one notice, and awareness keeps working.
+# Frames that pass all four go to yrby's `sync_receive`.
+#
+# Before a seat is taken, the connection guard admits the subscription. It
+# checks the subscription count, the subscribe rate, and that the connection
+# has at most one seat per room. The frame bucket and the subscription budget
+# are tracked per connection, so a socket can't reset a burst or multiply its
+# rate by subscribing again.
+#
+# Sockets terminate in anycable-go and every command builds a new channel
+# instance, so anything that has to last between commands is channel state.
 module RoomGuarded
   extend ActiveSupport::Concern
 
-  # Y.message_kind's code for a frame carrying document state (an Update or a
-  # SyncStep2), as opposed to a handshake or an awareness frame.
+  # The Y.message_kind code for a frame with document state (an Update or a
+  # SyncStep2). Handshake and awareness frames have other codes.
   DOCUMENT_FRAME = 2
 
-  # Same bound yrby applies to the encoded form before it decodes: base64 is
-  # about 4/3 of the payload. Checked here too, because the channel decodes a
-  # frame itself to classify it, and that decode has to be bounded as well.
+  # The same limit yrby applies to the encoded frame before decoding it. Base64
+  # is about 4/3 the size of the payload. The channel decodes frames itself to
+  # classify them, so it needs its own check before that decode.
   MAX_ENCODED_BYTES = ((Limits::MAX_FRAME_BYTES * 4) / 3) + 4
 
   included do
     include Y::ActionCable
 
-    # Largest frame the channel will decode. yrby drops anything bigger before
-    # base64 decode and again after. anycable-go refuses larger frames at the
-    # socket (ANYCABLE_MAX_MESSAGE_SIZE); this is the same bound in Ruby, for
-    # the tests and for anyone running the app without the Go server.
+    # The largest frame the channel will decode. yrby drops anything bigger,
+    # before and after the base64 decode. anycable-go also rejects larger
+    # frames at the socket (ANYCABLE_MAX_MESSAGE_SIZE). This setting applies the
+    # same limit in Ruby for the tests and for anyone running the app without
+    # the Go server.
     max_frame_bytes Limits::MAX_FRAME_BYTES
 
-    # Per-subscription state, carried across RPC calls:
+    # Per-subscription state, kept across RPC calls:
     #   seat      this subscription holds a place in the room
-    #   notified  the "room is full" notice has already been sent
-    # The frame bucket and subscription budget are per-CONNECTION now
-    # (ConnectionGuard), not here.
+    #   notified  the "room is full" notice was already sent
+    # ConnectionGuard tracks the frame bucket and subscription budget per
+    # connection.
     state_attr_accessor :seat, :notified
   end
 
-  # The demo does not use AnyCable whispers, and this is where it opts out.
+  # This demo turns off AnyCable whispers.
   #
-  # yrby's sync_subscribed enables a whisper stream for awareness under AnyCable
-  # (`stream_from awareness, whisper: true`). A whisper relays client-to-client
-  # through anycable-go and never reaches Rails, so on this public, anonymous,
-  # mutually-untrusting surface a raw client could whisper a `{update: <document
-  # frame>}` straight to its peers, past the token bucket, the size caps,
-  # persistence, and every validation the receive path runs. Stripping the
-  # whisper option means anycable-go never whisper-enables any of this channel's
-  # streams, so it drops every whisper on them (a malicious one included).
-  # Awareness instead rides the guarded `send` path: the client sends it, it
-  # reaches guarded_receive, and the server relays it to the room like any other
-  # frame (see guarded_receive). Whisper stays a first-class feature of the
-  # published yrby-client and yrby-rails for real authenticated apps; only the
-  # demo turns it off.
+  # Under AnyCable, yrby's sync_subscribed streams awareness with
+  # `stream_from awareness, whisper: true`. A whisper goes from client to client
+  # through anycable-go and never reaches Rails. On a public, anonymous site, a
+  # raw client could whisper `{update: <document frame>}` to its peers and skip
+  # the token bucket, the size caps, persistence, and every check in the
+  # receive path. Removing the whisper option means anycable-go doesn't enable
+  # whispers on any of this channel's streams, so it drops every whisper sent
+  # to them.
+  #
+  # The client sends awareness through the normal `send` path, so it goes
+  # through guarded_receive and the server relays it to the room like any other
+  # frame. yrby-client and yrby-rails still support whispers for authenticated
+  # apps. Only this demo turns them off.
   def stream_from(broadcasting, *args, **opts)
     opts.delete(:whisper)
     super
@@ -136,10 +142,10 @@ module RoomGuarded
     sync_receive(data, key)
   end
 
-  # Document frames (an Update or a SyncStep2) are charged against the write
-  # budget and the room byte cap before yrby sees them. Awareness and handshake
-  # frames are not writes and pass straight through. Returns true when the frame
-  # must be dropped here.
+  # Charges document frames (an Update or a SyncStep2) against the write budget
+  # and the room byte cap before yrby sees them. Awareness and handshake frames
+  # aren't writes, so they pass through. Returns true when the frame should be
+  # dropped.
   def refuse_document_write?(encoded, key)
     bytes = safe_decode(encoded)
     return false unless bytes && document_frame?(bytes)
@@ -150,15 +156,17 @@ module RoomGuarded
     refuse_write?(key, update.bytesize)
   end
 
-  # A document write has to clear two aggregate gates before it is recorded: the
-  # process-wide write budget (shed a flood before it reaches SQLite) and the
-  # per-room byte cap (a room at MAX_DOCUMENT_BYTES goes read-only). Both drop
-  # the frame here, before it reaches `on_change`, so the update is never
-  # recorded half-way: raising from `on_change` would reject without acking,
-  # and an unacked update is retransmitted forever. Awareness frames never reach
-  # this path, so presence keeps working in a shed or frozen room. The client
-  # keeps a dropped update queued and retries it; the notice below is how the
-  # page knows a room is full and to open a new one.
+  # A document write has to pass two checks before it's recorded. The
+  # process-wide write budget stops a flood before it reaches SQLite. The
+  # per-room byte cap makes a room read-only once it reaches MAX_DOCUMENT_BYTES.
+  #
+  # Both checks drop the frame here, before `on_change` runs, so an update is
+  # never half recorded. Raising from `on_change` would reject the update
+  # without acking it, and the client resends an unacked update forever.
+  # Awareness frames never come through here, so presence keeps working in a
+  # throttled or full room. The client keeps a dropped update queued and
+  # retries it. The notice below tells the page that the room is full so it
+  # can offer a new one.
   def refuse_write?(key, bytes)
     return true unless WriteBudget.current.admit
 
@@ -181,10 +189,10 @@ module RoomGuarded
     Y.message_kind(bytes) == DOCUMENT_FRAME
   end
 
-  # Dropped frames are normal in bursts (a fast pointer drag emits awareness
-  # at event rate). A client that keeps going well past the bucket is not a
-  # person using a browser, so the socket goes. The drop count is the
-  # connection's, across every subscription it holds.
+  # Some dropped frames are normal during bursts. A fast pointer drag sends
+  # awareness at event rate. A client that keeps sending well past the bucket
+  # isn't a person in a browser, so the server closes the socket. The drop
+  # count is per connection, across all its subscriptions.
   def close_if_flooding(key)
     return if ConnectionGuard.current.frame_drops(connection.connection_id) < Limits::FRAME_DROPS_BEFORE_CLOSE
 

@@ -1,20 +1,17 @@
-# A token bucket, one per subscription, in front of the channel's receive path.
+# A token bucket for rate limits. ConnectionGuard keeps two per connection (for
+# frames and for subscribes), and WriteBudget keeps one for the whole process.
 #
-# yrby validates every frame before anything touches it, so a malformed or
-# oversized frame is already dropped. This is about volume: a well-formed client
-# sending ten thousand valid updates a second is still a denial of service, and
-# validity says nothing about rate.
+# yrby validates every frame first and drops malformed or oversized ones. This
+# limits volume. A well-formed client sending ten thousand valid updates a
+# second is still a denial of service.
 #
-# `capacity` tokens accumulate at `refill_per_second`, one token per frame. A
-# client under the rate never notices. A client over it has frames dropped,
-# which for a document update means the client keeps it queued and retries,
-# the same shape as any other dropped frame in the protocol.
+# The bucket holds up to `capacity` tokens and refills at `refill_per_second`.
+# Each frame takes one token. A client under the rate never notices. A client
+# over it has frames dropped. For a document update, the client keeps the
+# update queued and retries it, the same as for any other dropped frame.
 #
-# The bucket does not live in the channel object. Sockets terminate in
-# anycable-go and every command arrives as a fresh RPC call with a fresh channel
-# instance, so the bucket travels as channel state: `dump` is three numbers and
-# `load` rebuilds from them. Small enough to serialize on every message, and it
-# needs no cleanup because it dies with the subscription.
+# `dump` returns three numbers and `load` rebuilds a bucket from them, in case
+# a bucket needs to be stored between RPC calls.
 class TokenBucket
   attr_reader :drops
 
@@ -31,8 +28,8 @@ class TokenBucket
     @drops = 0
   end
 
-  # True when the frame is allowed. False when the bucket is empty, and the
-  # caller should drop the frame.
+  # Returns true when the frame is allowed, and false when the bucket is empty
+  # and the caller should drop the frame.
   def take(now = monotonic)
     @tokens = [@capacity, @tokens + ((now - @updated_at) * @refill)].min
     @updated_at = now

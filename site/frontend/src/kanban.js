@@ -1,8 +1,8 @@
 // A collaborative kanban board. The shared state is a flat Y.Array of card
-// Y.Maps ({ id, text, column }). Adding a card pushes a Y.Map; moving a card is
-// a single map.set("column", ...), so two people moving different cards never
-// conflict; deleting splices the array. The server knows nothing about "cards"
-// or "columns".
+// Y.Maps ({ id, text, column }). Adding a card pushes a Y.Map, and deleting
+// one splices the array. Moving a card is one map.set("column", ...), so two
+// people moving different cards never conflict. The server doesn't know
+// anything about cards or columns.
 import * as Y from "yjs"
 import { connectRoom, uid, user, wireStoredPanel } from "./room.js"
 
@@ -47,10 +47,9 @@ const columnUnder = (x, y) =>
 const clearDropTargets = () =>
   ORDER.forEach((id) => lists[id].parentElement.classList.remove("drop-target"))
 
-// Drag a card between columns from its grip. Moving a card is one
-// map.set("column", ...), so two people dragging different cards never
-// conflict. The grip carries touch-action: none so a touch drag doesn't fight
-// page scrolling; the card body still scrolls and selects.
+// Drag a card between columns by its grip. The grip has touch-action: none so
+// a touch drag doesn't scroll the page. The card body still scrolls and
+// selects text normally.
 function makeCardDraggable(el, grip, m) {
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault()
@@ -75,7 +74,7 @@ function makeCardDraggable(el, grip, m) {
       clearDropTargets()
       const over = columnUnder(ev.clientX, ev.clientY)
       if (over && over !== m.get("column")) m.set("column", over)
-      else render() // dropped outside a column: snap back
+      else render() // dropped outside a column, so put it back
     }
     el.addEventListener("pointermove", onMove)
     el.addEventListener("pointerup", onUp)
@@ -102,8 +101,8 @@ function render() {
 }
 cards.observeDeep(render)
 
-// Seed the starter cards only on the FIRST catch-up (whenSynced doesn't re-fire
-// on reconnects, so a deliberately emptied board stays empty).
+// Add the starter cards only on the first sync. whenSynced doesn't fire again
+// on reconnect, so a board someone emptied stays empty.
 provider.whenSynced.then(() => {
   if (cards.length) return
   ydoc.transact(() => {

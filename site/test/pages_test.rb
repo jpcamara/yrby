@@ -15,14 +15,14 @@ class PagesTest < ActionDispatch::IntegrationTest
     get "/lexxy"
 
     assert_response :success
-    assert_includes response.body, "Lexxy, collaborative."
+    assert_includes response.body, "Collaborative editing for Lexxy"
     assert_includes response.body, "has_collaborative_rich_text"
     assert_includes response.body, "collaborative_rich_textarea"
     assert_includes response.body, %(<link rel="canonical" href="https://yrby.example.com/lexxy">)
     assert_includes response.headers["cache-control"], "public"
   end
 
-  test "the home page carries the canonical, Open Graph, and JSON-LD tags" do
+  test "the home page has canonical, Open Graph, and JSON-LD tags" do
     get "/"
 
     assert_includes response.body, %(<link rel="canonical")
@@ -31,7 +31,7 @@ class PagesTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %("@type": "SoftwareSourceCode")
   end
 
-  test "the flagship sample marks the lines you add" do
+  test "the home page code sample marks the lines you add" do
     get "/"
 
     assert_includes response.body, "code-annotated"
@@ -47,7 +47,7 @@ class PagesTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "docs pages are aggressively cacheable" do
+  test "docs pages have long public cache headers" do
     get "/docs/storage"
 
     cache_control = response.headers["cache-control"]
@@ -93,7 +93,7 @@ class PagesTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "# Storage"
   end
 
-  test "the docs page carries its markdown alternate and TechArticle JSON-LD" do
+  test "a docs page links its markdown version and has TechArticle JSON-LD" do
     get "/docs/storage"
 
     assert_includes response.body, %(rel="alternate" type="text/markdown")

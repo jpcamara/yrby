@@ -1,19 +1,19 @@
-// Raw-WebSocket security check for the demo's whisper opt-out.
+// Raw WebSocket security check for the demo's whisper opt-out.
 //
 //   PORT=3888 node raw_ws_whisper_check.mjs
 //
-// Speaks the AnyCable/Action Cable wire protocol directly (no yrby-client), so
-// it can do what a hostile client would: whisper a document frame to a room's
-// peers, bypassing Ruby. On this demo the channels strip the whisper option, so
-// anycable-go never whisper-enables the stream and drops the whisper. This
-// asserts that:
+// Speaks the AnyCable and Action Cable wire protocol directly, without
+// yrby-client, so it can do what a hostile client would: whisper a document
+// frame to a room's peers without going through Ruby. The demo channels remove
+// the whisper option, so anycable-go never enables whispers on the stream and
+// drops the whisper. This checks that:
 //
-//   1. a whispered { update: <document frame> } does NOT reach a second client
-//      in the room, and creates no document in the store (the injection is dead);
-//   2. the SAME frame sent normally IS relayed to the peer and IS persisted (the
-//      transport works — it is specifically whisper that is dropped);
-//   3. an awareness frame sent normally IS relayed to the peer (presence works
-//      over the guarded send path, at the raw protocol level).
+//   1. A whispered { update: <document frame> } doesn't reach a second client in
+//      the room, and doesn't add anything to the store.
+//   2. The same frame sent normally is relayed to the peer and saved. The
+//      transport works, and only the whisper is dropped.
+//   3. An awareness frame sent normally is relayed to the peer, so presence
+//      works over the guarded send path at the raw protocol level.
 //
 // Uses Node's built-in global WebSocket (Node 22+). No browser needed.
 import { execFile } from "node:child_process"
@@ -26,16 +26,16 @@ const ORIGIN = BASE
 const ROOM_ID = `rawws-${Date.now().toString(36)}`
 const ROOM = `tiptap/${ROOM_ID}`
 
-// DocumentChannel subscribes by signed grant, not by key: fetch the demo page
-// the way a browser would and lift the token it rendered. Even this hostile
-// client has to go through the front door to name a document.
+// DocumentChannel subscribes with a signed grant. Fetch the demo page the way a
+// browser would and take the token it rendered. A hostile client has to load
+// the page too before it can name a document.
 const page = await fetch(`${BASE}/demos/tiptap/${ROOM_ID}`).then((r) => r.text())
 const TOKEN = page.match(/data-token="([^"]+)"/)?.[1]
 if (!TOKEN) { console.log("FAIL: could not lift a room token from the demo page"); process.exit(1) }
 const IDENTIFIER = JSON.stringify({ channel: "DocumentChannel", token: TOKEN })
 
-// A real HELLO document sync frame (messageSync/Update), and a real awareness
-// frame (messageAwareness) — the exact base64 payloads a browser puts on the wire.
+// A real document sync frame (messageSync/Update) and a real awareness frame
+// (messageAwareness), as the base64 payloads a browser sends.
 const DOC_FRAME = "AAIbAQEBAAQBB2NvbnRlbnQLaGVsbG8gd29ybGQA"
 const AWARENESS_FRAME = "AS0BKgEpeyJjdXJzb3IiOnsieCI6MTAsInkiOjIwfSwidXNlciI6ImFsaWNlIn0="
 
@@ -69,7 +69,7 @@ function client(name) {
     message(payload) { this.send({ command: "message", identifier: IDENTIFIER, data: JSON.stringify(payload) }) },
     whisper(data) { this.send({ command: "whisper", identifier: IDENTIFIER, data }) },
     close() { ws.close() },
-    // Any inbound frame whose data carries this exact base64 update.
+    // True if any inbound frame has this base64 update.
     got(update) {
       return this.received.some((m) => m.message && m.message.update === update)
     },
@@ -97,7 +97,7 @@ B.subscribe()
 await sleep(800)
 check("both raw clients subscribed", A.confirmed() && B.confirmed())
 
-// --- 1) A whispered document frame must NOT reach B, and must persist nothing ---
+// --- 1) A whispered document frame doesn't reach B and isn't saved -----------
 const before = await storedUpdateCount()
 A.whisper({ update: DOC_FRAME })
 await sleep(1200)
@@ -105,7 +105,7 @@ check("a whispered document frame does not reach the peer", !B.got(DOC_FRAME))
 const afterWhisper = await storedUpdateCount()
 check(`the store is unchanged by the whisper (updates ${before} -> ${afterWhisper})`, afterWhisper === before)
 
-// --- 2) The same frame sent normally IS relayed and IS persisted -----------------
+// --- 2) The same frame sent normally is relayed and saved ----------------------
 A.message({ update: DOC_FRAME, id: 1 })
 await sleep(1200)
 check("the same frame sent via send reaches the peer", B.got(DOC_FRAME))
@@ -113,7 +113,7 @@ check("...and A gets an ack", A.received.some((m) => m.message && m.message.ack 
 const afterSend = await storedUpdateCount()
 check(`...and it is persisted (updates ${afterWhisper} -> ${afterSend})`, afterSend === afterWhisper + 1)
 
-// --- 3) Awareness sent normally IS relayed (presence over the guarded path) ------
+// --- 3) Awareness sent normally is relayed (presence over the guarded path) ----
 A.message({ update: AWARENESS_FRAME })
 await sleep(1000)
 check("an awareness frame sent via send reaches the peer", B.got(AWARENESS_FRAME))

@@ -1,11 +1,11 @@
-// Two real Chrome windows on this site's demo rooms, proving the pages actually
-// sync against the in-memory store.
+// Opens two real Chrome windows on this site's demo rooms and checks that the
+// pages sync through the server and its SQLite store.
 //
 //   PORT=3888 node site_e2e.mjs
 //
 // Needs agent-browser (local install or AB_BIN) and a Chromium it can drive.
-// The two browsers are compared against each other rather than against expected
-// strings, so a converged-but-wrong page still fails.
+// Most checks compare the two browsers with each other and also check for the
+// typed text, so two pages that agree on the wrong content still fail.
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { dirname, resolve } from "node:path"
@@ -45,9 +45,9 @@ async function waitFor(label, fn, ms = 30000) {
   return false
 }
 
-// Poll until both browsers report the same thing AND it satisfies `ok`, then
-// hand that agreed value back — so the assertions run on the state the poll
-// actually saw, not on a re-read that can land mid-render.
+// Polls until both browsers report the same value and it passes `ok`, then
+// returns that value. The assertions run on the state the poll saw, because a
+// second read could happen mid-render.
 async function converge(label, read, ok, ms = 30000) {
   const end = Date.now() + ms
   let last = []
@@ -57,22 +57,22 @@ async function converge(label, read, ok, ms = 30000) {
     if (pair[0] !== undefined && pair[0] === pair[1] && ok(pair[0])) return pair[0]
     await sleep(400)
   }
-  check(`TIMEOUT: ${label} — A=${last[0]} B=${last[1]}`, false)
+  check(`TIMEOUT: ${label}: A=${last[0]} B=${last[1]}`, false)
   return undefined
 }
 
-// A click lands on a viewport point, and these pages carry a header, a room bar,
-// and an explanation above the thing being clicked — so on a short window the
-// target is below the fold and the click misses silently (the keystrokes then go
-// to the body). Scroll first, always.
+// A click goes to a point in the viewport. These pages have a header, a room
+// bar, and an explanation above the click target, so in a short window the
+// target is below the fold and the click misses without an error. The
+// keystrokes then go to the body. So always scroll the target into view first.
 const clickAt = async (session, selector) => {
   await ab(session, "scrollintoview", selector)
   return ab(session, "click", selector)
 }
 
-// Fixed, and deliberately short. A CI runner's default window is smaller than a
-// laptop's, and that difference is exactly what decides whether a click lands —
-// so pin it rather than inherit it.
+// A fixed, short viewport. A CI runner's default window is smaller than a
+// laptop's, and that difference decides whether a click hits its target, so
+// the test sets the size itself.
 const VIEWPORT = ["1280", "720"]
 
 const synced = (s) => js(s, `!!(window.__yrby && window.__yrby.provider.synced)`)
@@ -84,10 +84,10 @@ const openBoth = async (path) => {
   for (const s of SESSIONS) await waitFor(`${s} synced on ${path}`, async () => (await synced(s)) === true)
 }
 
-// --- 0) Rich text (Lexxy, the flagship): two browsers through NoteChannel ----
-// This leg exercises the published lexxy-realtime stack end to end: sgid auth,
-// the record-based document, and — the part no other demo has — the server
-// rendering the document into the note's plain body column via Y::Lexxy.
+// --- 0) Rich text (Lexxy): two browsers through NoteChannel -----------------
+// This part runs the published lexxy-realtime stack end to end: sgid auth, the
+// record-based document, and the server rendering the document into the note's
+// plain body column with Y::Lexxy. No other demo renders on the server.
 await openBoth(`/demos/lexxy/${ROOM}`)
 
 const lexxyText = (s) => js(s, `JSON.stringify(document.querySelector("lexxy-editor [contenteditable]")?.innerText ?? null)`)
@@ -109,9 +109,9 @@ const lexxyChips = (s) => js(s, `document.querySelectorAll("#presence .chip").le
 await waitFor("lexxy presence lists two people", async () => (await lexxyChips(B)) === 2)
 check("B sees two people in the lexxy room", (await lexxyChips(B)) === 2)
 
-// The materialized column: poll the GET endpoint until the server-rendered
-// note.body catches up with what was typed. This HTML came from Y::Lexxy in
-// Ruby — no browser serialized it.
+// The stored HTML column. Poll the GET endpoint until the server-rendered
+// note.body includes what was typed. Y::Lexxy produced this HTML in Ruby, and
+// no browser serialized it.
 const storedBody = async () => {
   const res = await fetch(`${BASE}/demos/lexxy/${ROOM}/body`)
   return (await res.json()).body || ""
@@ -148,11 +148,11 @@ const chips = (s) => js(s, `JSON.stringify([...document.querySelectorAll("#prese
 await waitFor("presence lists two people", async () => JSON.parse((await chips(B)) || "[]").length === 2)
 check("B sees two people in the room", JSON.parse(await chips(B)).length === 2)
 
-// ...and it got there over `send`, the guarded server path — NOT an AnyCable
+// Presence went over `send`, the guarded server path, and not as an AnyCable
 // whisper. This public demo hides whisper from the provider (see room.js), so
-// awareness rides the same throttled, validated path as document updates rather
-// than relaying client-to-client past the Rails guard. Presence still reaching
-// two chips (above) is the end-to-end proof it works over send.
+// awareness takes the same throttled, validated path as document updates and
+// doesn't skip the Rails guard by going client to client. The two chips above
+// show that presence works over send.
 const transport = (s) => js(s, `JSON.stringify(window.__yrbyTransport)`)
 const counts = JSON.parse(await transport(A))
 check("whisper is not offered to the provider on the public demo", counts.canWhisper === false)
@@ -181,17 +181,17 @@ const cellInput = (s, row, col) =>
 check("both browsers hold the same seeded rows",
   !!(await converge("seeded rows", rowIds, (v) => JSON.parse(v).length === 3)))
 
-// A blank row to type into: clicking an input drops the caret wherever the click
-// lands, so the typed cases use cells that start empty.
+// Add a blank row to type into. Clicking an input puts the caret wherever the
+// click hits, so the typing checks use cells that start empty.
 const seeded = JSON.parse(await rowIds(A)).length
 await clickAt(A, "#add-row")
 check("the added row reaches both browsers",
   !!(await converge("row add", rowIds, (v) => JSON.parse(v).length === seeded + 1)))
 const ROW = seeded
 
-// A types a value while B bolds the same cell. Different keys of the cell's
-// Y.Map, so both survive — a scalar cell would have lost one. `press` is a
-// top-level agent-browser command and cannot be chained.
+// A types a value while B bolds the same cell. They change different keys of
+// the cell's Y.Map, so both survive. With a scalar cell, one would be lost.
+// `press` is a top-level agent-browser command and cannot be chained.
 await clickAt(A, await cellInput(A, ROW, "item"))
 await ab(A, "keyboard", "type", "VALUE-A")
 await ab(A, "press", "Enter")
@@ -217,4 +217,4 @@ check("a card added in one window reaches the other",
 await ab(A, "close", "--all")
 console.log("")
 if (failures > 0) { console.log(`FAILED: ${failures} check(s) failed`); process.exit(1) }
-console.log("PASS: site demos — lexxy + materialized column, tiptap, room isolation, cell-level merges, kanban")
+console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban")

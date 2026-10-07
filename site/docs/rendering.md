@@ -31,9 +31,9 @@ editor adds on screen aren't included.
 `Y::ProseMirror` covers core ProseMirror, meaning prosemirror-schema-basic and
 the prosemirror-tables family. `Y::Tiptap` adds Tiptap's extra nodes (task
 lists, mentions, and details) as a rule set, `Y::Tiptap::NODES`, written with
-the same rules API shown below. The native renderer handles marks itself.
-They have to nest in the right order, `textStyle` needs CSS, and `code` can't
-combine with other marks, none of which node rules can express.
+the same rules API shown below. The native renderer handles marks itself,
+because node rules can't express how marks work. Marks have to nest in a fixed
+order, `textStyle` needs CSS, and `code` can't combine with other marks.
 
 ## Y::Lexxy
 
@@ -49,7 +49,7 @@ has no standard HTML output, because each editor sets up its own, so the class
 is named after Lexxy. `Y::Lexical` covers core Lexical, and other Lexical
 editors can extend it with their own rules.
 
-It handles every node in the Lexxy 0.9.x set: paragraphs, headings, every text
+It handles every node in Lexxy 1.0, which has the same nodes as 0.9.x: paragraphs, headings, every text
 format and their combinations, links, the four list types with nesting,
 blockquotes, code blocks, tabs and soft breaks, horizontal rules, tables with
 header cells, image galleries, and ActionText attachments. Uploads and mentions
@@ -63,7 +63,7 @@ text and nested blocks.
 
 ## Custom nodes and marks
 
-The built-in rules cover what Tiptap and Lexxy ship. Apps often add their own
+The built-in rules cover the nodes that come with Tiptap and Lexxy. Apps often add their own
 node types, and both renderers take rules for those. Your rules are checked
 first, so a rule can add a new node type or change how a built-in one renders.
 
@@ -167,7 +167,7 @@ built-in mark. When several custom marks cover the same text, they nest in
 alphabetical order by name. A rule for a built-in mark name like `"bold"`
 replaces that mark's markup.
 
-## Overriding a shipped rule
+## Overriding a built-in rule
 
 This rule renders Lexxy uploads as plain images, in place of the
 `<action-text-attachment>` elements the built-in rule outputs.
