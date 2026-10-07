@@ -61,10 +61,8 @@ is removed from the page. `site_e2e.mjs` tests the other editor and shape demos.
 
 ## Running it
 
-The app pins Ruby 3.4.5 in `.ruby-version`, so rbenv picks it up when you run
-commands inside this directory. The maintainer's parent directory pins 3.4.7,
-which isn't installed there, so commands run from above `site/` need
-`RBENV_VERSION=3.4.5` in front of them.
+The app pins Ruby 3.4.5 in `.ruby-version`, so rbenv and asdf pick it up when
+you run commands inside this directory.
 
 ```bash
 bundle install
@@ -609,17 +607,9 @@ the site, so they stay in sync:
   home page has a `SoftwareSourceCode` block, and docs pages have `TechArticle`
   and `BreadcrumbList`. The JSON-LD is inline `application/ld+json`. The strict
   `script-src` CSP doesn't apply to it, because browsers never execute it.
-- **`public/og.png`.** One 1200×630 dark social card. To regenerate it, open
-  the card template in a headless browser at that size and take a screenshot.
-  The template is a small standalone HTML page: a dark background, the `yrby▌`
-  wordmark, the headline, and the main code sample with the accent gutter.
-
-Two launch tasks need the real domain and aren't code changes here. Add a
-prominent link to this site from the repo root `README.md` (the site's first
-high-authority backlink), and point the gemspec `homepage` and
-`documentation_uri` at it. JP still has to write a tutorial-style
-"collaborative rich text in Rails" landing page (plan item R9) and handle
-newsletter distribution (R10).
+- **`public/og.png`.** A 1200×630 social card in the site's light design. Its
+  source is `frontend/og/card.html`. To change it, edit that page and run
+  `bun run build:og` from `frontend/`, which renders it with agent-browser.
 
 ## Demos
 
