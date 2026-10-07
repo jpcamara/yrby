@@ -14,10 +14,11 @@ is what channels use. Your app can pick the key, and yrby never parses it. A
 row can also point at a model attribute through a polymorphic `record` and a
 `name`, such as `"body"`. Rows created by key alone leave those two nil.
 
-Either can come first. `Y::Document.for(record, name)` finds or creates the
-row for a record's attribute, with a readable key like `post/1/body`. If a
-channel already created a row with that key, `for` links it to the record, so
-both end up on the same document.
+You can create a row by key or by record, in either order.
+`Y::Document.for(record, name)` finds or creates the row for a record's
+attribute, with a readable key like `post/1/body`. If a channel already
+created a row with that key, `for` links it to the record, so both end up on
+the same document.
 
 The row also holds `state`, the merged snapshot of the document, and nothing
 else. If you want rendered HTML or search text, compute it yourself, usually
@@ -185,7 +186,7 @@ The connection and the browsers hold the only copies. After a server restart,
 a reconnecting client sends its state back through the normal sync handshake.
 The document survives as long as some client still has it.
 
-## The store this site runs on
+## The store this site uses
 
 This site's shape demos (spreadsheet, whiteboard, kanban, code, and Tiptap)
 use the same store this page describes, on SQLite:
@@ -199,15 +200,14 @@ class DocumentChannel < ApplicationCable::Channel
 end
 ```
 
-SQLite isn't required; it's just what this site uses. On top of the hooks, the
+SQLite isn't required. It's just what this site uses. On top of the hooks, the
 site caps people per room, documents on disk, and bytes per document. A
 sweeper deletes rooms nobody has edited for a day, since public, anonymous
 documents shouldn't stick around.
 
-The site runs on AnyCable, so it follows the rule from
-[AnyCable and multi-process](/docs/anycable). Each command gets a new channel
-instance, so anything that has to last between commands goes in
-`state_attr_accessor`.
+The site runs on AnyCable, where each command gets a new channel instance. So
+anything that has to last between commands goes in `state_attr_accessor`, as
+[AnyCable and multi-process](/docs/anycable) describes.
 
 The full site, including every rate and size limit, is in
 [`site/`](https://github.com/jpcamara/yrby/tree/main/site). Its

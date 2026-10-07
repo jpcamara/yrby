@@ -3,7 +3,7 @@
 `yrby-client` is the browser half of yrby. It has a provider for Action Cable
 and AnyCable, plus the pieces that provider is built from: a protocol session
 that works over any transport, and a queue that resends edits until the server
-confirms them. It's written in TypeScript, ships its own types, and works from
+confirms them. It's written in TypeScript, includes its own types, and works from
 plain JavaScript as ESM or CommonJS.
 
 ```
@@ -32,8 +32,8 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
 `bindYourEditor` stands for however you attach your editor. When the signal
 aborts, remove the Yjs listeners and disable or remove the editor. Don't
 destroy the document, the provider, or the shared consumer, because yrby
-manages those. The signal fires before yrby sends any final update, and you
-should handle it even if the editor is already gone from the page.
+manages those. The signal fires before yrby sends any final update. Handle it even if the
+editor is already gone from the page.
 
 Behind each element is a document session. It holds the `Y.Doc`, the provider,
 and any edits the server hasn't confirmed. When the last editor detaches, the
@@ -128,7 +128,7 @@ Call `lease.setPresence(state)` when an editor gets focus and
 presence, so the last call wins. Your editor code gets its lease from
 `detail.lease` on `yrby:synced`.
 
-`session.state` is `open`, `blocked`, or `closed`, which is separate from
+`session.state` is `open`, `blocked`, or `closed`. It doesn't tell you
 whether the provider is connected. The store fires `change` with the session
 in `event.detail`. Use it to report edits that couldn't be delivered, even
 after the page that made them is gone.

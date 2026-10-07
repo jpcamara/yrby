@@ -33,7 +33,7 @@ server and RPC server in `frontend/anycable_probe.mjs` and
 stays up, that a different process can read the latest state, and that
 concurrent edits end up the same everywhere.
 
-This site runs the smallest AnyCable setup.
+This site runs the smallest possible AnyCable setup.
 [anycable-thruster](https://github.com/anycable/thruster) bundles anycable-go
 into the Thruster proxy, so `thrust bin/serve` starts everything. The Go
 server handles `/cable` and calls Rails over HTTP at a path AnyCable mounts in
@@ -127,8 +127,8 @@ threads at once, and checks that every thread still ends up with the same
 document.
 
 Methods that do real CRDT work release the Global VM Lock while the native
-code runs. So CRDT work runs in parallel on plain MRI, without JRuby or
-TruffleRuby. `bench/parallelism_bench.rb` shows more than a 2x speedup when
+code runs. So CRDT work runs in parallel on regular MRI, and you don't need JRuby or
+TruffleRuby for it. `bench/parallelism_bench.rb` shows more than a 2x speedup when
 applying a roughly 900 KB update on several threads at once. A thread applying
 a large update holds the doc's write lock but not the GVL, so other Ruby
 threads keep running.

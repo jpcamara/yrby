@@ -1,6 +1,6 @@
 # The document channel
 
-## The one the gem ships
+## The built-in channel
 
 Most apps never write a channel. yrby-rails includes `Y::DocumentChannel`,
 much like turbo-rails includes `Turbo::StreamsChannel`. The browser subscribes
@@ -10,8 +10,8 @@ it. It rejects a token that's missing, tampered with, expired, signed for a
 different attribute, or points at a deleted record.
 [Getting started](/docs/getting-started) shows the setup.
 
-By default, a valid grant is enough. To also check the connected user's
-current permissions, register a block in `config.to_prepare`:
+By default, any valid token lets the browser subscribe. To also check the
+connected user's current permissions, register a block in `config.to_prepare`:
 
 ```ruby
 # config/initializers/yrby.rb, inside Rails.application.config.to_prepare
@@ -21,7 +21,7 @@ end
 ```
 
 The block runs inside the channel, so `current_user` works. `editable_by?`
-stands for your own permission check; yrby doesn't define it. If the block
+stands for your own permission check. yrby doesn't define it. If the block
 returns false or nil, the channel rejects the subscription before sending
 anything.
 
@@ -29,11 +29,12 @@ The rest of this page covers writing your own channel with the same concern.
 You'd do that for documents keyed by room with no record behind them, to use a
 different store, or to handle authorization yourself.
 
-## Build your own
+## Writing your own channel
 
-Including `Y::ActionCable` from yrby-rails gives a channel the y-websocket
-protocol, which covers document sync and presence, over Action Cable or
-AnyCable. Each document has a key. Use whatever scheme fits your app, such as
+Your channel includes the `Y::ActionCable` concern from yrby-rails. The
+concern implements the y-websocket protocol, which covers document sync and
+presence, and it works on both Action Cable and AnyCable. Each document has a
+key. Use whatever scheme fits your app, such as
 one per record and attribute (`post/42/body`) or one per room.
 
 ```ruby
@@ -47,7 +48,7 @@ class DocumentChannel < ApplicationCable::Channel
 
   private
 
-  # This denies everyone until you wire it to your app's auth.
+  # Rejects everyone until you replace it with your app's check.
   # sync_subscribed rejects the subscription unless this returns true.
   def authorized?(_document_key) = false
 end
@@ -61,8 +62,9 @@ point it somewhere else:
   on_change { |key, update| Y::Document.append(key, update) }    # save the change, then broadcast
 ```
 
-`bin/rails generate yrby:install --channel` generates this channel for you.
-Without `--channel`, the generator adds only the storage migration.
+`bin/rails generate yrby:install --channel` generates this channel for you,
+with both hooks written out. Without `--channel`, the generator adds only the
+storage migration.
 
 ## The two hooks
 
@@ -111,8 +113,8 @@ the code can see it's public on purpose.
 
 `authorized?` runs once, when the client subscribes. The subscription is
 authorized until it ends. To cut off access during a session, stop the
-subscription yourself. Short grant lifetimes also help, because every new
-subscription checks the grant again.
+subscription yourself. Short token lifetimes also help, because the server
+checks the token again on every new subscription.
 
 For documents that belong to a record, use `Y::Collaborative`, which the engine
 adds to every Active Record model. The page renders a signed GlobalID for one
@@ -153,7 +155,7 @@ end
 ```
 
 If the block raises, the server rejects the change and doesn't send it to
-anyone. The price is one synchronous write per change. The gem doesn't lock
+anyone. The cost is one synchronous write per change. The gem doesn't lock
 documents, so concurrent writes can save the same update twice. That's
 harmless, because applying a CRDT update twice has no effect.
 
@@ -176,11 +178,11 @@ servers.
   client keeps it and resends it on a timer and on reconnect. That's what you
   want when the store was down for a moment. But if the block raises every
   time for the same edit, the client retries forever, because nothing tells it
-  to stop. Put permanent rejections in the channel's authorization, which runs
-  when the client subscribes.
+  to stop. Put permanent rejections in `authorized?`, which runs when the client
+  subscribes.
 - Messages larger than `max_frame_bytes` (8 MiB by default) are dropped the
-  same way, before the server decodes them. This caps how much work one client
-  can cause. Typing never gets close, but a big paste, an embedded image, or a
+  same way, before the server parses them. This limits how much work one
+  client can cause. Typing never gets close, but a big paste, an embedded image, or a
   large first sync can. A real edit over the limit gets retried forever, like
   one that makes `on_change` raise. The server logs each drop with the
   document key and update id. To add a user or connection id to that line,
@@ -192,7 +194,7 @@ Before the server uses or forwards a message, it checks that it's one
 complete, well-formed protocol message. It drops anything malformed,
 truncated, oversized, of an unknown type, or holding more than one message. If
 the Rust code panics, Ruby raises an exception and the process keeps running.
-One client can't send something that breaks everyone else in the room.
+So one client can't send a message that breaks the room for everyone else.
 
 Validation doesn't limit how many messages a client sends. A client sending
 valid messages as fast as it can still needs a rate limit. This site's
@@ -228,12 +230,12 @@ Other clients get pending structs too, because `handle_sync_message` answers
 with the full state. They hold the same pending struct and apply it the same
 way. Nothing special has to happen to close the gap. The client that sent the
 missing update hasn't had it confirmed, so it keeps resending it. Compaction
-is the one place that leaves pending structs out, because once they're folded
-into the base snapshot they could never be applied.
+is the exception. It leaves pending structs out of the snapshot, because a
+pending struct folded into the snapshot could never be applied.
 
 Gaps are easy to miss, because the pending edit doesn't show up in the
-document until its dependency arrives. The one worth an alert is a gap that no
-connected client can fill. Use the `on_gap` hook for that. Whenever the server
+document until its dependency arrives. A gap is worth an alert when no connected
+client can fill it. Use the `on_gap` hook for that. Whenever the server
 loads a document to send its state and finds a gap, it calls `on_gap` with the
 document key.
 

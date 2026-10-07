@@ -4,8 +4,8 @@ class ExamplesController < ApplicationController
     @document = ExampleDocument.find(1)
   end
 
-  # This record is deliberately public. In an app, authorize editing here
-  # before rendering collaborative_document_tag.
+  # Anyone can edit this record. In your own app, check that the user can
+  # edit the record here before rendering collaborative_document_tag.
   def document; end
 
   def stored

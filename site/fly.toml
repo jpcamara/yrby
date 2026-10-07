@@ -4,10 +4,10 @@
 #   fly secrets set SECRET_KEY_BASE=$(openssl rand -hex 64)
 #   fly deploy
 #
-# ONE machine, on purpose. Documents live in SQLite on the volume below, and a
-# volume attaches to one machine — two machines would mean two databases and a
-# visitor landing on whichever the proxy picked. This app scales up, not out.
-# Scaling it out means moving the store to a shared database first.
+# Run one machine. Documents live in SQLite on the volume below, and a volume
+# attaches to one machine. Two machines would mean two databases, with each
+# visitor landing on whichever one the proxy picked. To scale this app out,
+# move the store to a shared database first.
 
 app = "yrby-site"
 primary_region = "iad"
@@ -15,21 +15,22 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
-# Everything the container needs is baked into the Dockerfile's ENV. What is
-# left here is the one secret and the one optional lock-down.
+# The Dockerfile's ENV lines set everything else the container needs. Set the
+# two secrets with:
 #
 #   fly secrets set SECRET_KEY_BASE=$(openssl rand -hex 64)
 #   fly secrets set ANYCABLE_SECRET=$(openssl rand -hex 32)
 #
-# ANYCABLE_SECRET configures both halves of AnyCable at once: the embedded Go
-# server and Rails each derive the HTTP RPC key and the broadcast key from it.
+# The embedded Go server and Rails both derive the HTTP RPC key and the
+# broadcast key from ANYCABLE_SECRET.
 [env]
   RAILS_ENV = "production"
-  # REQUIRED in production — the app refuses to boot without it (see
-  # config/initializers/production_boot_checks.rb). Locks the WebSocket origin on
-  # BOTH halves of the cable from one value: the entrypoint derives
-  # ANYCABLE_ALLOWED_ORIGINS for the embedded Go server by stripping the scheme,
-  # and Rails re-checks on the Connect RPC. Set it to this app's real origin.
+  # Required in production. The app won't boot without it (see
+  # config/initializers/production_boot_checks.rb). This one value sets the
+  # allowed WebSocket origins for both halves of the cable. The entrypoint
+  # strips the scheme to build ANYCABLE_ALLOWED_ORIGINS for the embedded Go
+  # server, and Rails checks the origin again on the Connect RPC. Set it to
+  # this app's real origin.
   ALLOWED_ORIGINS = "https://yrby.dev"
 
 [http_service]
@@ -39,20 +40,19 @@ primary_region = "iad"
   # Scale to zero between visitors. The site is a demo, and most of the time
   # nobody is on it.
   #
-  # With SQLite on the volume, a stopped machine no longer loses rooms: the
-  # documents are on disk, and a returning visitor's link still works. What
-  # empties a room now is the sweeper's TTL (24 hours idle), which is a content
-  # decision, not a memory one. "suspend" keeps the memory image for a faster
-  # resume. An open WebSocket counts as an active connection, so a machine with
-  # people in a room is not stopped underneath them.
+  # The documents are in SQLite on the volume, so a stopped machine keeps its
+  # rooms and a returning visitor's link still works. The sweeper deletes a
+  # room after 24 hours idle, whether or not the machine stopped. "suspend"
+  # keeps the memory image so the machine resumes faster. An open WebSocket
+  # counts as an active connection, so Fly won't stop a machine while people
+  # are in a room.
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 0
 
-  # One machine, so the concurrency numbers are this box's ceiling, not a
-  # load-balancing hint. 500 is MAX_CONNECTIONS from config/limits.rb; the app
-  # refuses connections past it rather than degrading. The sockets are held by
-  # the Go server inside thrust, not by Ruby.
+  # There's one machine, so these numbers are its ceiling. 500 is
+  # MAX_CONNECTIONS from config/limits.rb, and the app refuses connections past
+  # it. The Go server inside thrust holds the sockets.
   [http_service.concurrency]
     type = "connections"
     soft_limit = 400
@@ -65,9 +65,9 @@ primary_region = "iad"
     method = "GET"
     path = "/up"
 
-# The SQLite database lives here; Fly creates the volume on first deploy
-# (`fly volumes create yrby_site_data --size 1`). 1 GB fits the room cap with
-# room to spare: 2000 documents x 512 KB is the configured ceiling.
+# The SQLite database lives here. Fly creates the volume on the first deploy
+# (`fly volumes create yrby_site_data --size 1` makes it by hand). 1 GB fits
+# the room cap: 2000 documents x 512 KB is the configured ceiling.
 [mounts]
   source = "yrby_site_data"
   destination = "/rails/storage"
@@ -75,8 +75,7 @@ primary_region = "iad"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1gb"
-  # RAM is no longer where documents live — idle rooms cost rows on the
-  # volume, not memory. What remains resident is Rails plus the yrby native
-  # extension (150-200 MB), the Go server's held sockets (5-10 MB at the
-  # connection cap), and working memory for the CRDT applies and loads in
-  # flight. 1 GB keeps comfortable headroom for those spikes.
+  # Documents live on the volume, so idle rooms use disk and no memory. What
+  # stays in memory is Rails plus the yrby native extension (150-200 MB), the
+  # Go server's sockets (5-10 MB at the connection cap), and working memory for
+  # CRDT loads and applies in progress. 1 GB leaves room for those spikes.

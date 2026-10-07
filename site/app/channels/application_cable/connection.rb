@@ -1,13 +1,13 @@
 module ApplicationCable
-  # No authentication: rooms are anonymous and public. What the connection does
-  # enforce is how many sockets one address may hold at once (layer 2 of the
-  # throttle stack in config/limits.rb).
+  # Rooms are anonymous and public, so there's no authentication. The
+  # connection only limits how many sockets one address can hold at once
+  # (layer 2 of the throttles in config/limits.rb).
   #
-  # The socket itself lives in anycable-go, not here. `connect` and `disconnect`
-  # arrive as separate RPC calls with separate connection instances, so the
-  # address a slot was taken for AND the slot's token are kept as connection
-  # state rather than instance variables. Nil means this connection never took a
-  # slot, which is how a rejected connect avoids releasing somebody else's.
+  # The socket lives in anycable-go. `connect` and `disconnect` arrive as
+  # separate RPC calls on separate connection instances, so the client address
+  # and the slot token are stored as connection state. Instance variables
+  # wouldn't survive between the two calls. A nil address means this connection
+  # never took a slot, so a rejected connect doesn't release someone else's.
   class Connection < ActionCable::Connection::Base
     identified_by :connection_id
 
@@ -21,9 +21,9 @@ module ApplicationCable
       self.connection_id = SecureRandom.uuid
       self.client_ip = ip
       self.slot_token = token
-      # Register the connection's identity with the guard now, so if its
-      # Disconnect RPC never arrives the guard's liveness sweep can free this
-      # exact slot (and any room seats), see ConnectionGuard.
+      # Register with the guard now. If the Disconnect RPC never arrives, the
+      # guard's liveness sweep can still free this slot and any room seats.
+      # See ConnectionGuard.
       ConnectionGuard.current.register(connection_id, ip, token)
     end
 
@@ -38,19 +38,19 @@ module ApplicationCable
 
     private
 
-    # The real client address, derived with the app's trusted-proxy set, NOT
-    # `request.remote_ip`.
+    # The real client address, worked out with the app's trusted proxies.
+    # Don't use `request.remote_ip` here.
     #
-    # On the AnyCable connect path the request env is built by the RPC handler,
-    # not by the Rack middleware stack, so ActionDispatch::RemoteIp never runs
-    # and `request.remote_ip` falls back to Rack's default IP logic, which
-    # trusts every private range, including 192.168/16. That is exactly the range
-    # trusted_proxies deliberately excludes (a home or office LAN), so on Rack's defaults
-    # a LAN client could forge an X-Forwarded-For and land as any address it
-    # likes, defeating the per-IP cap. Re-deriving here with TrustedProxies::
-    # RANGES applies the same rule the HTTP layer uses: a forwarded IP is only
-    # honored past a hop we actually trust, otherwise the socket's own address
-    # (REMOTE_ADDR, set by anycable-go from the real peer) wins.
+    # On the AnyCable connect path, the RPC handler builds the request env and
+    # the Rack middleware stack never runs. ActionDispatch::RemoteIp is skipped,
+    # and `request.remote_ip` falls back to Rack's default, which trusts every
+    # private range including 192.168/16. TrustedProxies leaves that range out
+    # on purpose, because it's a home or office LAN. With Rack's default, a
+    # client on that LAN could send a forged X-Forwarded-For, pick any address,
+    # and get around the per-IP cap. TrustedProxies.client_ip applies the same
+    # rule as the HTTP layer. It only accepts a forwarded IP behind a proxy we
+    # trust. Otherwise it uses REMOTE_ADDR, which anycable-go sets from the
+    # real peer.
     def client_ip!
       TrustedProxies.client_ip(request)
     end

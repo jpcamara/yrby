@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# The record behind the Rich text (Lexxy) demo: one Note per room, holding the
-# materialized HTML in a plain column (no Action Text). The collaborative CRDT
-# state lives in y_documents, bound to the note polymorphically.
+# The record behind the Rich text (Lexxy) demo. There's one Note per room, and
+# it stores the rendered HTML in a plain column (the app has no Action Text).
+# The CRDT state is in y_documents, linked to the note polymorphically.
 class CreateNotes < ActiveRecord::Migration[8.1]
   def change
     create_table :notes do |t|

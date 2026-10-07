@@ -3,7 +3,7 @@ require "test_helper"
 class ExampleDocumentTest < ActionDispatch::IntegrationTest
   setup { @document = ExampleDocument.find_or_create_by!(id: 1) }
 
-  test "seeding provisions the example once on a fresh database" do
+  test "seeding creates the example record once on a new database" do
     @document.destroy!
     load Rails.root.join("db/seeds.rb")
 
@@ -27,7 +27,7 @@ class ExampleDocumentTest < ActionDispatch::IntegrationTest
     assert_nil Y::Collaborative.locate(element["grant"], :secret)
   end
 
-  test "Ruby read-back handles a new document and persisted edits" do
+  test "the stored endpoint reads a new document and saved edits" do
     get "/examples/document/stored"
 
     assert_response :success

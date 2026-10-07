@@ -1,6 +1,6 @@
-# Real Y.js update bytes, so the store and the channel are exercised with frames
-# yrby will actually decode rather than random strings. Captured from Y.js the
-# same way test/fixtures/yjs_fixtures.rb in the repo root was.
+# Real Y.js update bytes, so the store and channel tests use frames yrby can
+# decode. They were captured from Y.js the same way as
+# test/fixtures/yjs_fixtures.rb in the repo root.
 module Updates
   def self.b64(str) = str.unpack1("m0")
 
@@ -8,16 +8,16 @@ module Updates
   HELLO = b64("AQEBAAQBB2NvbnRlbnQLaGVsbG8gd29ybGQA")
 
   # Three causally dependent inserts from one client: "A", then "B", then "C".
-  # U3 cannot integrate unless U2 has been applied, so applying U1 and U3 alone
-  # parks U3 as a pending struct.
+  # U3 can't integrate until U2 is applied, so applying only U1 and U3 leaves
+  # U3 as a pending struct.
   CHAIN = [
     b64("AQEBAAQBB2NvbnRlbnQBQQA="),
     b64("AQEBAYQBAAFCAA=="),
     b64("AQEBAoQBAQFDAA==")
   ].freeze
 
-  # Five independent from-scratch updates from distinct clients. No
-  # cross-dependencies, so any order integrates.
+  # Five independent updates from different clients, each starting from an
+  # empty document. They don't depend on each other, so any order works.
   INDEPENDENT = [
     b64("AQEBAAQBB2NvbnRlbnQQY2xpZW50LTEtY29udGVudAA="),
     b64("AQECAAQBB2NvbnRlbnQQY2xpZW50LTItY29udGVudAA="),
@@ -26,11 +26,11 @@ module Updates
     b64("AQEFAAQBB2NvbnRlbnQQY2xpZW50LTUtY29udGVudAA=")
   ].freeze
 
-  # One full document state per shape demo's root, for the server-side read
-  # endpoint (DemosController#stored). Captured from Y.js the same way as the
-  # rest of this file. The root name matches each demo's getText/getMap/
-  # getArray/getXmlFragment call.
-  # Captured base64 fixtures: one constant per line, not wrappable.
+  # One full document state for each shape demo's root, for the server-side
+  # read endpoint (DemosController#stored). Captured from Y.js like the rest of
+  # this file. Each root name matches the demo's getText, getMap, getArray, or
+  # getXmlFragment call.
+  # Base64 fixtures, one constant per line, so the lines can't be wrapped.
   # rubocop:disable Layout/LineLength
   CODE_TEXT = b64("AQGd1uTEAQAEAQRjb2RlC2NvbnN0IHggPSAxAA==") # Y.Text "code"
   SHAPES_MAP = b64("AQSsl66fCwAnAQZzaGFwZXMCbjEBKACsl66fCwABeAF9KCgArJeunwsAAXkBfSgoAKyXrp8LAAR0ZXh0AXcHZHJhZyBtZQA=") # Y.Map "shapes"
@@ -39,9 +39,8 @@ module Updates
   PROSEMIRROR_DEFAULT = b64("AQPi5JewCAAHAQdkZWZhdWx0AwlwYXJhZ3JhcGgHAOLkl7AIAAYEAOLkl7AIAQVoZWxsbwA=") # Y.XmlFragment "default"
   # rubocop:enable Layout/LineLength
 
-  # A complete awareness frame (client 42, a user and a cursor). Presence is
-  # relayed opaquely and never originated by the server, so this is a canned
-  # frame rather than something built here.
+  # A complete awareness frame (client 42, a user and a cursor). The server
+  # only relays presence and never creates it, so this is a captured frame.
   AWARENESS_FRAME = b64("AS0BKgEpeyJjdXJzb3IiOnsieCI6MTAsInkiOjIwfSwidXNlciI6ImFsaWNlIn0=")
 
   # The wire envelope a browser sends: a sync Update frame, base64 in JSON.

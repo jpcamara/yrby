@@ -1,12 +1,10 @@
-# The site is a Rails app, not gem code. It inherits the repo root's cop set
-# (that config's AllCops/Exclude applies here whichever directory rubocop runs
-# from, so there is no getting away from it) and turns off the handful of rules
-# that only make sense for a library.
+# The site is a Rails app. It inherits the repo root's cops (the root config's
+# AllCops/Exclude applies here from either directory) and turns off the few
+# rules that only make sense for a library.
 #
-# Deliberately gem-free: no `inherit_gem`, no plugins beyond the root's. That
-# way `bundle exec rubocop` gives the same answer from the repo root and from
-# this directory, without the site's dev dependencies having to be installed at
-# the root.
+# This file uses no `inherit_gem` and no plugins beyond the root's. That way
+# `bundle exec rubocop` gives the same answer from the repo root and from this
+# directory, and the root doesn't need the site's dev dependencies.
 
 plugins:
   - rubocop-minitest
@@ -41,8 +39,8 @@ Style/StringLiteralsInInterpolation:
 Layout/LineLength:
   Max: 120
 
-# Rails' own config DSL is one long block per environment, and tests are
-# assertion-dense by nature.
+# Rails config is one long block per environment, and tests have a lot of
+# assertions.
 Metrics/BlockLength:
   Exclude:
     - "config/**/*"
@@ -66,8 +64,8 @@ Metrics/AbcSize:
 Minitest/MultipleAssertions:
   Enabled: false
 
-# `bucket.take` returns true/false but is not a predicate: it consumes a token.
-# `take?` would read as a question about a bucket that has already been changed.
+# `bucket.take` returns true or false, but it consumes a token, so it isn't a
+# predicate. `take?` would read like a question that doesn't change the bucket.
 Naming/PredicateMethod:
   AllowedMethods:
     - take

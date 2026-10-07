@@ -1,16 +1,16 @@
 require "test_helper"
 
-# The demo opts out of AnyCable whispers by stripping the `whisper:` option from
-# every stream_from before it reaches the channel's real one (and thus anycable-
-# go). yrby enables the whisper on the awareness stream under AnyCable; this
-# override removes it, so Go never whisper-enables the stream and drops every
-# whisper on it. The end-to-end proof against a live anycable-go is the raw-ws
-# check in frontend/raw_ws_whisper_check.mjs; this pins the method's contract.
+# The demo turns off AnyCable whispers by removing the `whisper:` option from
+# every stream_from call before it reaches the channel's real stream_from and
+# anycable-go. Under AnyCable, yrby turns on whispers for the awareness stream.
+# This override removes that, so anycable-go drops every whisper on the
+# stream. frontend/raw_ws_whisper_check.mjs tests this against a live
+# anycable-go. These tests check the method itself.
 class RoomGuardedTest < ActiveSupport::TestCase
-  # A probe with a stream_from that records its calls, and RoomGuarded's own
-  # stream_from spliced in above it, so a call lands on the override first and
-  # falls through to `super` here, exactly as it does on a real channel. Built
-  # this way to exercise the one method without the channel/Concern machinery.
+  # A test object whose stream_from records its calls, with RoomGuarded's
+  # stream_from prepended. A call goes to the override first and then to
+  # `super`, the same as on a real channel. This tests the one method without
+  # setting up a channel.
   def probe
     override = Module.new
     override.send(:define_method, :stream_from, RoomGuarded.instance_method(:stream_from))
@@ -25,15 +25,15 @@ class RoomGuardedTest < ActiveSupport::TestCase
     klass.new
   end
 
-  test "the whisper option is stripped before it reaches the real stream_from" do
+  test "the whisper option is removed before the real stream_from" do
     p = probe
     p.stream_from("yrby:tiptap/x:awareness", whisper: true)
 
     assert_equal [{ broadcasting: "yrby:tiptap/x:awareness", opts: {} }], p.calls,
-                 "whisper: true must be removed, so anycable-go never whisper-enables the stream"
+                 "whisper: true must be removed so anycable-go does not enable whispers on the stream"
   end
 
-  test "a plain stream_from is passed through untouched" do
+  test "a plain stream_from is passed through unchanged" do
     p = probe
     p.stream_from("yrby:tiptap/x")
 

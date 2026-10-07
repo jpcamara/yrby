@@ -1,67 +1,70 @@
 # yrby site
 
 The documentation and live-demo site for [yrby](https://github.com/jpcamara/yrby).
-A Rails app whose demo rooms run the exact storage stack the docs teach:
-`Y::Document.load_state` / `Y::Document.append` — the gem's own models — on a
-SQLite file. No Postgres, no Redis, and nothing authoritative in process memory
-between messages.
+It's a Rails app, and its demo rooms use the same storage the docs describe:
+`Y::Document.load_state` and `Y::Document.append`, the gem's own models, on a
+SQLite file. There's no Postgres or Redis, and the server keeps no document
+state in process memory between messages.
 
-WebSockets are served by [anycable-thruster](https://github.com/anycable/thruster):
-Thruster with anycable-go embedded in the proxy. `thrust bin/serve` runs the
-proxy, the AnyCable server, and Falcon as one command. Go holds every socket and
-calls back into Rails over HTTP RPC, so the Ruby side only ever handles a short
-request.
+WebSockets go through [anycable-thruster](https://github.com/anycable/thruster),
+which is Thruster with anycable-go embedded in the proxy. `thrust bin/serve`
+starts the proxy, the AnyCable server, and Falcon with one command. The Go
+server holds every socket and calls Rails over HTTP RPC, so Ruby only ever
+handles short requests.
 
 ```
 site/
-├── app/lib/           the caps, the limiters, the demo list, the docs model
-├── app/channels/      DocumentChannel and the connection
-├── config/limits.rb   every rate, size, and count limit, with its reasoning
-├── db/                the vendored yrby:tables migration + schema
+├── app/lib/           room caps, rate limiters, the demo list, the docs model
+├── app/channels/      DocumentChannel, NoteChannel, and the connection
+├── config/limits.rb   every rate, size, and count limit, with the reasoning for each
+├── db/                the vendored yrby:tables migration and the schema
 ├── docs/              the documentation pages, as markdown
-├── frontend/          bun build for the demo bundles + the e2e harness
+├── frontend/          bun build for the demo bundles, plus the e2e scripts
 └── test/              caps, throttles, sweeper, controllers
 ```
 
-## The record-backed working example
+## The record-backed example
 
-The site runs the published gems and `yrby-client` from npm, the same
-packages the docs tell a reader to install.
+The site uses the published gems and `yrby-client` from npm, the same
+packages the docs tell you to install.
 
-From `site/frontend`, run `bun install --frozen-lockfile` and `bun run build`.
+To build the frontend, run `bun install --frozen-lockfile` and `bun run build`
+from `site/frontend`.
 
-`/examples/document` uses a pre-provisioned `ExampleDocument` record, created
-by its migration (or idempotent seeds on a fresh database). Anonymous page reads create no records. The view renders
-`collaborative_document_tag`; CodeMirror mounts on `yrby:synced` and is destroyed
-when `detail.signal` aborts. A template defers attaching the helper markup until
-the AnyCable consumer and delegated listener are configured. The read panel calls
-`collaborative_document(:body).y_doc.read_text("content")` in Rails.
+`/examples/document` uses a single `ExampleDocument` record. Its migration
+creates it, and `db/seeds.rb` creates it on a fresh database (running the seeds
+again is safe). Reading the page anonymously creates no records. The view
+renders `collaborative_document_tag`. CodeMirror mounts on `yrby:synced` and is
+destroyed when `detail.signal` aborts. The helper markup stays in a template
+until the AnyCable consumer and the delegated listener are set up. The read
+panel calls `collaborative_document(:body).y_doc.read_text("content")` in Rails.
 
-`ExampleDocumentGuard` wraps the shipped `Y::DocumentChannel` itself: only this
-example's body is admitted, and `RoomGuarded` supplies the same seats, frame
-limits, write budget and awareness restrictions as the room demos. Guarding
-the shipped class prevents a client from bypassing an application subclass
-by changing the channel name. These anonymous-demo limits are site policy,
-not required integration boilerplate.
+`ExampleDocumentGuard` is prepended to the gem's own `Y::DocumentChannel`, and
+it only lets this example's body through. `RoomGuarded` gives the channel the
+same seats, frame limits, write budget, and awareness rules as the room demos.
+The guard goes on the gem's class because a guard on an app subclass could be
+skipped by a client that subscribes to `Y::DocumentChannel` by name. These
+limits are this site's policy for an anonymous demo. Your app doesn't need them
+to use yrby.
 
-The existing idle-document sweeper expires this example's CRDT content; its
-one record stays provisioned. It deliberately shares one document across
-visitors. The other demos still offer separate room URLs.
+The idle-document sweeper clears this example's CRDT content like any other
+room, and the record itself stays. Every visitor shares this one document. The
+other demos give each visitor a separate room URL.
 
-`bin/rails test` executes the docs' scratchpad hooks with out-of-order updates,
-the storage-aware Ruby read example, and the example's controller/channel
-policy. `PORT=3888 node document_e2e.mjs` (from `frontend`, after
-`./boot_server.sh`) drives two agent-browser windows through editing, Ruby
-read-back, clean remount and detached pending delivery. `site_e2e.mjs` continues
-testing the other editor and shape demos.
+`bin/rails test` runs the docs' scratchpad hooks with out-of-order updates, the
+Ruby read example that goes through storage, and the example's controller and
+channel policy. `PORT=3888 node document_e2e.mjs`, run from `frontend` after
+`./boot_server.sh`, opens two agent-browser windows and checks editing, the
+Ruby read-back, a clean remount, and delivery of pending edits after the element
+is removed from the page. `site_e2e.mjs` tests the other editor and shape demos.
 
 
 ## Running it
 
-The app pins Ruby 3.4.5 in `.ruby-version`, so rbenv resolves it from inside
-this directory with no prefix. (The repo's parent directory pins 3.4.7, which is
-not installed on this machine; if you run a command from above `site/` you will
-need `RBENV_VERSION=3.4.5` in front of it.)
+The app pins Ruby 3.4.5 in `.ruby-version`, so rbenv picks it up when you run
+commands inside this directory. The maintainer's parent directory pins 3.4.7,
+which isn't installed there, so commands run from above `site/` need
+`RBENV_VERSION=3.4.5` in front of them.
 
 ```bash
 bundle install
@@ -70,17 +73,16 @@ PORT=3000 frontend/boot_server.sh
 ```
 
 `boot_server.sh` sets the AnyCable environment, runs `thrust bin/serve`, waits
-until both the pages and the cable answer, and writes a pidfile. `bin/serve` is
-the upstream half of the thrust contract: thrust sets `PORT` to its
-`TARGET_PORT` before spawning its command, and the script translates that into
-Falcon's `--bind`. Running Falcon on its own gets you the pages and no
-WebSocket: Rails' own `/cable` mount is turned off, because the cable belongs to
-the Go server in the proxy.
+until both the pages and the cable respond, and writes a pidfile. thrust sets
+`PORT` to its `TARGET_PORT` before it starts its command, and `bin/serve` turns
+that into Falcon's `--bind`. If you run Falcon by itself you get the pages but
+no WebSocket. Rails' own `/cable` mount is turned off, because the Go server in
+the proxy handles the cable.
 
-On macOS, export `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` first if you boot by
-hand. Falcon forks its worker from the controller process, and macOS refuses to
-fork after certain Objective-C runtime initialization; without it the worker
-dies at boot and every request comes back as a connection reset.
+On macOS, export `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` before you boot by
+hand. Falcon forks its worker from the controller process, and macOS won't
+allow that fork after certain Objective-C runtime setup. Without the variable
+the worker dies at boot and every request gets a connection reset.
 `boot_server.sh` sets it for you.
 
 Tests:
@@ -90,8 +92,8 @@ bin/rails test
 cd frontend && bun run lint
 ```
 
-Two-browser end to end, against the full stack — proxy, embedded AnyCable, and
-Falcon, exactly as deployed:
+The two-browser end-to-end test runs against the same stack as production:
+the proxy, embedded AnyCable, and Falcon.
 
 ```bash
 cd frontend
@@ -100,44 +102,43 @@ PORT=3888 node site_e2e.mjs
 kill "$(cat /tmp/site.pid)"
 ```
 
-Nothing here needs Postgres or Redis, including the tests — the database is a
-SQLite file under `storage/`, created by `db:prepare` (boot_server.sh runs it).
+None of this needs Postgres or Redis, tests included. The database is a SQLite
+file under `storage/`, created by `db:prepare`, which `boot_server.sh` runs.
 
-## The store
+## Document storage
 
-The store is the one the docs teach, verbatim:
+`DocumentChannel` uses the hooks from the docs as written:
 
 ```ruby
 on_load { |key| Y::Document.load_state(key) }
-on_change do |key, update|
-  Y::Document.append(key, update)
-  Rooms.current.note_append(key, update.bytesize) # the site's size cap
-end
+on_change { |key, update| Y::Document.append(key, update) }
 ```
 
-`Y::Document` and `Y::DocumentUpdate` ship in the yrby-rails gem; the vendored
-`yrby:tables` migration in `db/migrate` creates their tables on SQLite (one
-file under `storage/`, on a mounted volume in production). Everything that used
-to be hand-rolled here is now the gem's: loads are lossless (a causally-gapped
-update rides along as a pending struct and heals), compaction folds the tail
-every 64 rows with gapped rows quarantined rather than dropped, and nothing
-authoritative is held in process memory between messages — an idle room costs a
-few rows on disk and ~zero RAM.
+The site's size cap is checked before the update reaches `on_change`.
+`RoomGuarded` reserves the bytes through `Rooms#reserve_write` (see
+[Measuring room size](#measuring-room-size)).
 
-That last property is the point of the change. The store-backed concern
-rebuilds state from the database per message, so the number of rooms is bounded
-by disk, not by what one Ruby process can hold. It also makes the site a live
-demonstration of the documented API instead of a bespoke store: what the
-[Storage](/docs/storage) page describes is literally what is running.
+`Y::Document` and `Y::DocumentUpdate` come with the yrby-rails gem. The
+vendored `yrby:tables` migration in `db/migrate` creates their tables in
+SQLite: one file under `storage/`, on a mounted volume in production. Loads
+don't lose anything. An update that arrives before an update it depends on is
+kept as a pending struct and applied once the missing update shows up.
+Compaction folds the tail every 64 rows, and it sets gapped rows aside without
+dropping them. The server keeps no document state in memory between messages,
+so an idle room costs a few rows on disk and almost no RAM.
 
-What the site adds around the hooks lives in `app/lib/rooms.rb` — seats, caps,
-and a cached size check — and `app/lib/room_sweeper.rb`, the TTL eviction.
+The channel rebuilds state from the database on each message, so the number of
+rooms is limited by disk space and not by what one Ruby process can hold. It
+also means the [Storage](/docs/storage) page describes the code running here.
 
-Rooms are temporary by policy, not by accident of memory. Documents survive
-restarts and deploys now (they are rows on a volume); the sweeper deletes rooms
-untouched for 24 hours. That TTL is a content decision — these are public,
-anonymous, unmoderated documents, and "temporary" is a promise the site makes
-about them — so it stays even though RAM no longer forces it.
+The site's own code around the hooks is in `app/lib/rooms.rb` (seats, caps, and
+a cached size check) and `app/lib/room_sweeper.rb` (deleting idle rooms).
+
+Rooms are temporary on purpose. Documents survive restarts and deploys because
+they're rows on a volume. The sweeper deletes rooms nobody has touched for 24
+hours. These are public, anonymous, unmoderated documents, and the site tells
+visitors they're temporary. That's why the TTL exists, even though memory isn't
+a constraint.
 
 ## The stack
 
@@ -147,523 +148,606 @@ browser ──ws──► thrust (Go) ──HTTP RPC──► Falcon ──► D
                     └──► Falcon (pages)
 ```
 
-`thrust bin/serve` is one command and one container. Inside it, anycable-go owns
-`/cable`, proxies everything else to Falcon, and calls Rails back at
-`/_anycable` — the HTTP RPC endpoint AnyCable mounts in the app — for connect,
-subscribe, and every message. Rails hands broadcasts back to the Go server over
-localhost. No Redis in either direction, because there is one node.
+`thrust bin/serve` is one command in one container. Inside it, anycable-go
+handles `/cable` and proxies everything else to Falcon. For connect, subscribe,
+and every message, it calls Rails at `/_anycable`, the HTTP RPC endpoint
+AnyCable mounts in the app. Rails sends broadcasts back to the Go server over
+localhost. There's one node, so neither direction needs Redis.
 
-The split matters for what this site costs to run. Ruby holds nothing between
-messages: a connected-but-idle client is a goroutine in Go, not a thread or an
-object in Ruby. And awareness never reaches Ruby at all — see Presence below.
+This split keeps the site cheap to run. Ruby holds nothing between messages. A
+client that's connected but idle is a goroutine in Go, with no thread or object
+in Ruby. Awareness frames do reach Ruby on this site, because the demo sends
+them through the guarded `send` path (see
+[Presence goes through send](#presence-goes-through-send)).
 
-### Why Falcon behind the proxy
+### Why Falcon
 
-The Ruby side's whole workload is short HTTP requests — page renders and RPC
-calls — which is the fiber reactor's home ground: no thread pool to size, and a
-request that blocks on IO yields instead of holding a worker. It also dogfoods
-the server yrby's own CI proves the native extension under. The demo app's e2e
-suite boots under both Puma and Falcon deliberately, and this site is the Falcon
-deployment of that pair, running the same extension inside the fiber scheduler
-in production shape.
+The Ruby side only serves short HTTP requests: page renders and RPC calls.
+Falcon's fiber reactor suits that work. There's no thread pool to size, and a
+request that waits on IO lets other requests run. yrby's CI also tests the
+native extension under Falcon. The demo app's e2e suite boots under both Puma
+and Falcon, and this site runs the Falcon setup in production, with the
+extension inside the fiber scheduler.
 
-### Why one process (by default)
+### Why one process by default
 
-Falcon runs with `--count 1` unless told otherwise. Worth saying plainly:
-**with SQLite behind the hooks, single-process is not a correctness
-requirement for the documents.** The store is shared on disk, broadcasts
-already fan out through the embedded Go server, and WAL-mode SQLite handles
-concurrent processes on one box — the gem's store-backed design is exactly
-what makes scaling out possible. What still assumes one process is the
-throttle bookkeeping: Rooms' seats and size cache, ConnectionLimiter, and
-Rack::Attack's counters are all process memory, and N workers each enforce
-their own copy, loosening the effective caps toward N×. One process keeps the
-accounting honest, and a demo site does not need more. `FALCON_COUNT` opts
-into forked workers, and `FALCON_THREADS` with it selects Falcon's hybrid
-container (forks × threads) — for load tests and deployments that accept
-approximate caps. Scaling out with exact caps means moving those counters to
-a shared cache (and probably the database to Postgres).
+Falcon runs with `--count 1` unless you set otherwise. With SQLite behind the
+hooks, the documents don't need a single process. The store is shared on disk,
+broadcasts already go through the embedded Go server, and SQLite in WAL mode
+handles several processes on one box.
 
-Because sockets terminate in Go, a fresh channel instance is built for every
-command and instance variables do not survive between them. Everything the
-channel has to remember — its seat in the room, its token bucket, whether it has
-sent the full-room notice — is declared with `state_attr_accessor` and travels
-as JSON in the RPC exchange. The key is passed to `sync_receive` on every call
-for the same reason. This is the AnyCable shape yrby's README documents, and the
-site is a working example of it.
+The throttle bookkeeping is what assumes one process. The seats and size cache
+in `Rooms`, `ConnectionLimiter`, `ConnectionGuard`, `WriteBudget`, and
+Rack::Attack's counters all live in process memory. With N workers, each one
+enforces its own copy, so the caps can get up to N times looser. The site runs
+one process by default, so each limit is counted in one place. A demo site
+doesn't need more.
 
-### Concurrency safety
+`FALCON_COUNT` (or `WEB_CONCURRENCY`) turns on forked workers. Setting
+`FALCON_THREADS` as well switches Falcon to its hybrid container, with forks
+times threads. Use these for load tests, or for deployments where approximate
+caps are acceptable. To scale out with exact caps, move those counters to a
+shared cache, and probably move the database to Postgres.
 
-Under Falcon the RPC requests are fibers, mostly on one thread, switching at IO
-and scheduler yields rather than preemptively. Document writes are the
-database's problem now — SQLite in WAL mode with Rails' busy timeout — but the
-site's own bookkeeping (`Rooms`' seats and size cache, `ConnectionLimiter`)
-still takes explicit locks: a fiber can yield anywhere IO happens, the reactor
-is free to serve requests concurrently, the sweeper is a real `Thread`, and an
-uncontended mutex costs nothing. DB reads happen outside the locks so a fiber
-never yields into SQLite while holding one. The code is correct under
-preemptive threads too, which is what the test suite runs it under.
+Sockets end in Go, so Rails builds a fresh channel instance for every command,
+and instance variables don't survive between commands. Anything the channel
+needs to remember, such as whether it holds a seat in the room or has already
+sent the full-room notice, is declared with `state_attr_accessor` and sent back
+and forth as JSON in the RPC exchange. The channel passes the key to
+`sync_receive` on every call for the same reason. This is the AnyCable setup
+yrby's README describes. The per-connection frame bucket and subscription
+budget are different: they live in `ConnectionGuard`, in process memory.
+
+### Concurrency
+
+Under Falcon, RPC requests run as fibers, mostly on one thread. They switch at
+IO and scheduler yields, not preemptively. SQLite handles concurrent document
+writes, in WAL mode with Rails' busy timeout.
+
+The site's own bookkeeping (the seats and size cache in `Rooms`, and
+`ConnectionLimiter`) still takes explicit locks. A fiber can yield wherever IO
+happens, the reactor can serve requests concurrently, the sweeper runs on a real
+`Thread`, and an uncontended mutex is cheap. Database reads happen outside the
+locks, so a fiber never waits on SQLite while it holds one. The code is also
+correct under preemptive threads, and the test suite runs it that way.
 
 ## Throttling
 
-A public collaborative demo is an open write surface: anyone can open a socket
-and send frames, with no account and no rate limit of their own. Eight layers
-bound it. Every number lives in `config/limits.rb` with the reasoning next to
-it; the table below is the summary.
+On a public collaborative demo, anyone can open a socket and send frames
+without an account. Eight layers limit what one visitor can do. Every number
+is in `config/limits.rb` with the reasoning next to it. The table below
+summarizes them.
 
 | Layer | Limit | Value | Why |
 |---|---|---|---|
-| 0. anycable-go | bytes per WebSocket message | 192 KiB | Refused at the socket, in Go, so an over-size frame never becomes an RPC call. `ANYCABLE_MAX_MESSAGE_SIZE`. Bounds the whole *encoded* message, so it sits above the 128 KiB *decoded* cap below (base64 is ~4/3, plus the JSON envelope). |
-| 0. anycable-go | concurrent sockets, process-wide | 500 | The hard ceiling on the process that actually owns the sockets. `ANYCABLE_MAX_CONN`. The Ruby caps below are the per-IP and soft cap in front of it. |
-| 1. Rack::Attack | page requests per IP | 60 / minute | A reader loads a page every few seconds. Static files and `/up` are not counted. `/_anycable` is blocked from the public listener and safelisted for the authenticated Go RPC. |
-| 2. Connection | concurrent sockets per IP | 8 | "Open a second window" is the demo, and a visitor may open one per page. Past that it is a script. Keyed to the real client IP (trusted-proxy aware), and each slot has a token so a disconnect frees its own slot, not the oldest. |
-| 2. Connection guard | subscriptions per socket | 20 | One socket, many subscriptions: each takes a room seat and can mint a document. This bounds one socket's reach (with the per-IP cap, 160 rooms). |
-| 2. Connection guard | subscribe commands per socket | 5 / s, burst 20 | Stops a socket churning subscribe/unsubscribe to cycle through rooms. |
-| 3. Token bucket | frames per second, per socket | 40, burst 120 | Typing plus awareness at pointer-event rate is well under this. One bucket **per connection** (not per subscription), so re-subscribing can't reset the burst and multiple subscriptions can't multiply the rate. |
-| 3. Token bucket | dropped frames before the socket closes | 200 | Bursts of drops are normal during a fast drag. A client that keeps going past this is not a person. |
-| 3. Write budget | document writes per second, process-wide | 400, burst 800 | The aggregate shelf in front of single-writer SQLite: past it, document frames are shed so a flood degrades throughput instead of wedging the database with `SQLITE_BUSY`. Awareness is never counted. |
-| 4. Frame size | bytes per frame | 128 KiB | yrby's own default is 8 MiB, sized for a real app's initial `SyncStep2`. Demo documents are tiny. This is the *decoded* cap; see the Go message cap in layer 0. |
-| 5. Document size | bytes per room | 512 KiB | About ten times a realistic demo document. Reserved **prospectively** — the update that would cross the cap is the one refused — so a room can't be pushed one update past the cap. At the cap the room goes read-only and says so. |
-| 6. Room caps | peers per room | 12 | More than a dozen carets is unreadable, and each peer is another fan-out target. One connection may hold at most one seat in a room. |
-| 6. Room caps | documents on disk | 2000 | 2000 x 512 KiB bounds the database file at about 1 GB — a disk cap now, not RAM. Counts persisted rows **plus live reservations**: a seated-but-not-yet-written room already consumes capacity, so a flood of `subscribe`s can't slip past the cap before minting its documents. |
-| 7. Eviction | idle time before a room is deleted | 24 hours | A content decision: rooms are public and anonymous, and "temporary" is a promise. A link shared in the morning still works after dinner. Eviction is coordinated with joins and writes (a claim under lock) so the sweeper can't delete a room out from under an active session. |
+| 0. anycable-go | bytes per WebSocket message | 192 KiB | Go refuses an oversized frame at the socket, so it never becomes an RPC call. Set with `ANYCABLE_MAX_MESSAGE_SIZE`. This limit covers the whole *encoded* message, so it's higher than the 128 KiB *decoded* cap below (base64 adds about a third, plus the JSON envelope). |
+| 0. anycable-go | concurrent sockets, process-wide | 500 | The hard ceiling, enforced by the process that holds the sockets. Set with `ANYCABLE_MAX_CONN`. The Ruby caps below add a per-IP limit and a soft cap in front of it. |
+| 1. Rack::Attack | page requests per IP | 60 / minute | A reader loads a page every few seconds. Static files and `/up` don't count. Public requests to `/_anycable` are blocked, and the Go server's authenticated RPC calls skip the throttle. |
+| 2. Connection | concurrent sockets per IP | 8 | Opening a second window is the point of the demo, and a visitor may open one per page. More than that is a script. The count uses the real client IP (it accounts for trusted proxies), and each slot has a token, so a disconnect frees its own slot and not the oldest one. |
+| 2. Connection guard | subscriptions per socket | 20 | Each subscription takes a room seat and can create a document. This limits how many rooms one socket can reach (160 per IP, with the per-IP cap). |
+| 2. Connection guard | subscribe commands per socket | 5 / s, burst 20 | Stops a socket from cycling through rooms with repeated subscribe and unsubscribe. |
+| 3. Token bucket | frames per second, per socket | 40, burst 120 | Typing plus awareness at pointer-event rate stays well under this. There's one bucket **per connection**, so re-subscribing doesn't reset the burst, and extra subscriptions don't add rate. |
+| 3. Token bucket | dropped frames before the socket closes | 200 | Short runs of dropped frames are normal during a fast drag. A client that keeps going past 200 isn't a person. |
+| 3. Write budget | document writes per second, process-wide | 400, burst 800 | A shared limit in front of single-writer SQLite. Past it, the server drops document frames, so a flood slows writes down without locking up the database with `SQLITE_BUSY`. Awareness frames don't count. |
+| 4. Frame size | bytes per frame | 128 KiB | yrby's default is 8 MiB, sized for a real app's initial `SyncStep2`. Demo documents are tiny. This is the *decoded* cap. See the Go message cap in layer 0. |
+| 5. Document size | bytes per room | 512 KiB | About ten times a realistic demo document. The server reserves the bytes before it accepts an update, so the update that would cross the cap is the one refused. At the cap the room becomes read-only and the page says so. |
+| 6. Room caps | peers per room | 12 | More than a dozen carets is unreadable, and each peer is another target for every broadcast. One connection can hold at most one seat in a room. |
+| 6. Room caps | documents on disk | 2000 | 2000 x 512 KiB keeps the database file to about 1 GB of disk. The count includes **reservations**: rooms with a seated visitor that haven't been written yet. That way a flood of `subscribe`s can't get past the cap before their documents exist. |
+| 7. Eviction | idle time before a room is deleted | 24 hours | Rooms are public and anonymous, and the site says they're temporary. A link shared in the morning still works after dinner. The sweeper claims a room under a lock before deleting it, so it can't delete a room that someone is joining or writing to. |
 
-There is no cable-handshake throttle in Rack::Attack. `/cable` never passes
-through Rack — the embedded Go server answers it in the proxy — so a limit there
-would count nothing. What bounds handshakes instead is the per-IP connection cap,
-which runs in Ruby on the Connect RPC. The RPC endpoint (`/_anycable`) is blocked
-from the public listener (an outside client can't present the bearer the Go
-server carries) and safelisted for the authenticated Go RPC, which arrives on
-that path with the whole cable's message volume.
+Rack::Attack has no throttle for cable handshakes. `/cable` never passes
+through Rack, because the Go server answers it in the proxy, so a limit there
+would count nothing. The per-IP connection cap limits handshakes instead, and
+it runs in Ruby on the Connect RPC. Public requests to the RPC endpoint
+(`/_anycable`) are blocked, because an outside client doesn't have the Go
+server's bearer token. The Go server's authenticated calls skip the throttle,
+since every message on the cable goes through them.
 
-A few of these are worth explaining rather than tabulating.
+The sections below cover the limits that need more explanation than a table
+row.
 
-**The caps count more than they used to.** Two holes closed with the store move.
-A room is not a database row until its first write, but a subscription takes a
-seat the moment it joins — so a burst of `subscribe`s for distinct keys would all
-be admitted (no rows yet) and then mint a document each, past the room cap. So a
-brand-new seated key is a *reservation* that counts against the cap until it is
-written or its last occupant leaves. Likewise the frame bucket and the subscribe
-budget live on the connection, not the subscription: a per-subscription bucket
-resets on every subscribe and multiplies with the number of subscriptions, so one
-socket could reset its burst by re-subscribing or run several buckets' worth of
-rate at once. One bucket per socket has neither hole.
+### Reservations and per-connection buckets
 
-**The RPC endpoint is not public.** `/_anycable` authenticates callers with a
-bearer derived from `ANYCABLE_SECRET`, and the embedded Go server reaches it
-directly over loopback. thrust's public proxy would otherwise forward it to
-Falcon like any other path (both land on Falcon's one port), so it is blocked at
-the edge — an outside request without the bearer gets a 404 — while the
-authenticated Go RPC passes. In production `ANYCABLE_SECRET` must be set to a
-strong value: with the committed development default anyone could compute the
-bearer and drive RPCs directly, past the socket boundary and every limit. The app
-refuses to boot in production on an unset, default, or short secret.
+A room has no database row until its first write, but a subscription takes a
+seat as soon as it joins. Without extra accounting, a burst of `subscribe`s for
+different keys would all be admitted (there are no rows yet) and then each
+create a document, going past the room cap. So the first seat in a brand-new
+room counts as a *reservation* against the cap until the room is written or its
+last occupant leaves.
 
-**Rate limiting is not frame validation.** yrby already validates every frame as
-a single well-formed protocol message and drops anything malformed, truncated,
-multi-message, or oversized. That says nothing about volume. A client sending
-perfectly valid updates as fast as it can is still a denial of service, so the
-token bucket sits in `receive` in front of `sync_receive`.
+The frame bucket and the subscribe budget belong to the connection for a
+similar reason. A bucket per subscription would reset on every subscribe, and a
+socket with several subscriptions would get several buckets' worth of rate. One
+bucket per socket avoids both problems.
 
-**A full room goes read-only, it does not raise.** The obvious way to enforce a
-document size cap is to raise from `on_change`. That is wrong here: a raising
-`on_change` rejects the update without acking it, and an unacked update is
-retransmitted forever, because the protocol has no negative ack. So the channel
-checks the cap *before* handing the frame to yrby, drops it there, and transmits
-a one-time `{ "notice": "document_full" }` that the page turns into "open a new
-room". Awareness frames still flow in a frozen room, so presence keeps working.
+### The RPC endpoint
 
-The cap's implementation changed with the store. The true size — snapshot bytes
-plus tail bytes — is a SUM over rows, too expensive per frame and too slow to
-poll (a flood could append megabytes between polls). So `Rooms` keeps a cached
-size per room that `note_append` bumps the moment each update is recorded,
-which holds the cap tight at any write rate with no query on the hot path; the
-database is re-read only when the cache entry is stale (30 s), to pick up
+`/_anycable` checks callers for a bearer token derived from `ANYCABLE_SECRET`.
+The embedded Go server calls it directly over loopback. thrust's public proxy
+would forward that path to Falcon like any other, since both reach Falcon on
+the same port. So Rack::Attack blocks it at the edge. A request without the
+bearer gets a 404, and the Go server's authenticated calls go through.
+
+In production, set `ANYCABLE_SECRET` to a strong value. With the committed
+development default, anyone could compute the bearer and send RPC calls
+directly, skipping the socket and every limit. The app won't boot in
+production if the secret is unset, the default, or too short.
+
+### Rate limits and frame validation
+
+yrby already checks that every frame is a single well-formed protocol message,
+and drops anything malformed, truncated, multi-message, or oversized. That
+doesn't limit volume. A client sending valid updates as fast as it can is still
+a denial of service, so the channel's `receive` runs the token bucket before it
+calls `sync_receive`.
+
+### Full rooms
+
+The obvious way to enforce a document size cap is to raise from `on_change`.
+That doesn't work here. When `on_change` raises, the update is rejected without
+an ack, and the client retransmits an unacked update forever because the
+protocol has no negative ack.
+
+So the channel checks the cap before it hands the frame to yrby. If the room is
+full, it drops the frame and transmits a one-time
+`{ "notice": "document_full" }`. The page shows that as a prompt to open a new
+room. Awareness frames still go through in a full room, so presence keeps
+working.
+
+### Measuring room size
+
+The true size of a room is its snapshot bytes plus its tail bytes, which takes
+a SUM over rows. That's too expensive to run on every frame. Polling it would
+leave a gap where a flood could append megabytes between polls.
+
+So `Rooms` keeps a cached size per room. `Rooms#reserve_write` adds each
+update's bytes to the cache when it admits the update, which keeps the cap
+accurate at any write rate without a query on the hot path. The server re-reads
+the database only when a cache entry is older than 30 seconds, to pick up
 compaction. Compaction only shrinks the true size, so between refreshes the
-cache can only over-estimate — the safe direction for a cap. Worst case, a
-just-compacted room stays read-only a few extra seconds.
+cache can only overestimate, which is the safe direction for a cap. At worst, a
+room that was just compacted stays read-only for a few extra seconds.
 
-**Idle eviction is what keeps ordinary traffic away from the room cap.** Every
-visitor mints a room and most are abandoned within a minute. Without the sweeper
-(`app/lib/room_sweeper.rb`, one thread, a sweep every five minutes) the
-2000-document ceiling would be reached by normal use rather than by abuse. A
-room is stale when it has no write inside the TTL and nobody in it; occupied
-rooms are never evicted. Eviction is a *claim*, not a snapshot delete: the stale
-set is only a candidate list, and the room bookkeeping marks — atomically with
-its seat check — which candidates have no occupant and no reservation, after
-which a racing join is refused and a racing write can't re-open them. Only then,
-after a freshness re-read, are the still-stale ones deleted. A snapshot delete
-could otherwise race a join or an append and delete a document out from under an
-active session.
+### Idle eviction
 
-The same sweep reaps leaked connections. A seat and a connection slot are freed
-on the Disconnect RPC, but that RPC can fail to arrive (a dropped socket, a
-partition), and a leaked seat is worse than a leaked slot: it keeps a room
-occupied, so the sweeper won't evict it, and holds a peer slot forever. The
-backstop is *liveness*, not age. The per-connection guard records the last
-server-visible frame from each connection, and a connection silent past the TTL
-(an hour) is reaped — its room seats released (freeing the peer slots and
-`occupied_keys`, so an abandoned room becomes evictable) and its connection slot
-released by its exact token. The clock is refreshed by any frame, document or
-awareness — which is the point of routing awareness through `send` (below):
-yrby-client re-emits awareness on a heartbeat, so even an idle-but-open reader
-stays visibly alive and is never reaped, while a genuinely dead connection is.
-Reaping only ever loosens the caps, never rejects wrongly, and the hard ceiling
-on real sockets is `ANYCABLE_MAX_CONN` on the Go process, which owns them.
+Most visitors create a room and leave within a minute. Without the sweeper
+(`app/lib/room_sweeper.rb`, one thread, a sweep every five minutes), normal use
+would reach the 2000-document cap. A room is stale when it has had no write
+within the TTL and nobody is in it. The sweeper never evicts an occupied room.
 
-**Awareness rides the guarded server path, not a whisper.** Under AnyCable,
-yrby-client can relay presence as a *whisper* — client-to-client through
-anycable-go, never touching Ruby — which is the right trade in an authenticated
-app where peers trust each other. This demo turns it off (the demo channels
-strip the whisper option, so anycable-go never whisper-enables a stream, and the
-page hides `whisper` from the provider so awareness leaves over `send`). The
-rooms are public and anonymous: a whisper would let one peer inject a raw
-`{ update: … }` document frame straight to the others, past the token bucket, the
-size caps, persistence, and every validation the receive path runs. Over `send`,
-every frame — awareness included — passes the guard; awareness is cheap there (a
-frame-bucket token, not a document write) and is what lets the leak reaper above
-see per-connection liveness. Whisper stays a first-class feature of the published
-`yrby-client` and `yrby-rails`; only the anonymous demo declines it.
+The sweeper can't just delete a snapshot of stale rooms. A join or an append
+could happen in between, and it would delete a document out from under an
+active session. So the stale set is only a list of candidates. `Rooms` then
+checks seats and marks, in one locked step, the candidates that have no
+occupant and no reservation. After that, a join is refused and a write can't
+reopen them. The sweeper reads the database again and deletes only the rooms
+that are still stale.
 
-**No uploads, anywhere.** The site accepts no files. A public, anonymous write
-surface plus a file endpoint is a free file host, and every one of the throttles
-above is about bounding what a stranger can spend — bytes on disk or in an
-object store are not a resource this app should be handing out at all. So the
-policy is structural rather than a limit to tune:
+### Leaked connections
 
-- Active Storage is not installed. The Gemfile lists the Rails frameworks this
-  app requires — Active Record among them, for the document store — instead of
-  the `rails` meta-gem, so there is no upload engine in the image and nothing
-  to mount by accident.
+The same sweep cleans up leaked connections. The Disconnect RPC frees a seat
+and a connection slot, but that RPC might never arrive (a dropped socket, a
+network partition). A leaked seat is worse than a leaked slot. It keeps a room
+occupied, so the sweeper won't evict it, and it holds a peer slot forever.
+
+So the sweep cleans up a connection based on when the server last heard from it.
+`ConnectionGuard` records the last frame the server saw from each connection.
+When a connection has been silent longer than the TTL (an hour), the sweep
+releases its room seats and its connection slot (by the slot's token). Releasing
+the seats frees the peer slots and lets an abandoned room be evicted.
+
+Any frame resets the clock, whether it's a document update or awareness. That's
+one reason awareness goes through `send` (see below). yrby-client re-sends
+awareness on a heartbeat, so a reader with an idle tab open stays connected.
+If the sweep cleans up a connection that's still open, the caps get looser for
+a while, and nobody is turned away. `ANYCABLE_MAX_CONN` on the Go process is the hard ceiling on real
+sockets.
+
+### Presence goes through send
+
+Under AnyCable, yrby-client can send presence as a *whisper*, which anycable-go
+relays from client to client without reaching Ruby. That works well in an
+authenticated app where peers trust each other.
+
+This demo turns whispers off. The demo channels remove the whisper option, so
+anycable-go never enables whispers on a stream. The page hides `whisper` from
+the provider, so awareness goes out over `send`. The rooms are public and
+anonymous. With whispers on, one peer could send a raw `{ update: … }` document
+frame straight to the others, skipping the token bucket, the size caps,
+persistence, and every check the receive path runs.
+
+Over `send`, every frame goes through the guard, awareness included. Awareness
+is cheap there (a frame-bucket token, no document write), and it's how the sweep
+above can tell a connection is alive. Whispers are still fully supported
+in the published `yrby-client` and `yrby-rails`. Only this anonymous demo turns
+them off.
+
+### No uploads
+
+The site accepts no files. A public, anonymous write surface with a file
+endpoint is a free file host. The throttles above all limit what a stranger can
+use up, and this app has no reason to hand out disk or object storage at all.
+So the app has no upload path to configure:
+
+- Active Storage isn't installed. The Gemfile lists the Rails frameworks the
+  app needs, including Active Record for document storage, and leaves out the
+  `rails` meta-gem. There's no upload engine in the image to mount by accident.
 - There are no upload routes, no direct-upload endpoints, and no multipart
   handling.
-- The rich-text demo is Tiptap's StarterKit only. There is no Image extension,
-  so the editor's schema has no node a file could become. The Lexxy page in
-  `examples/actioncable-demo`, which does wire up Active Storage and
-  direct upload, was deliberately not ported.
-- Files are refused before any editor sees them. `frontend/src/room.js`
-  cancels `paste`, `drop`, and `dragover` events carrying files, in the capture
-  phase on `document`, on every demo page; the Tiptap editor additionally
-  returns "handled" from its own `handlePaste`/`handleDrop` for the same events.
-  Text pastes are untouched.
+- The Tiptap demo uses StarterKit only. It has no Image extension, so the
+  editor's schema has no node a file could become. The Lexxy demo mounts its
+  editor with `attachments="false"`, which removes Lexxy's upload buttons and
+  its file paste and drop handlers. Lexxy's upload code imports
+  `@rails/activestorage`, which the app doesn't install, and `build.mjs` marks
+  that import as external.
+- `frontend/src/room.js` refuses files before any editor sees them. On every
+  demo page it cancels `paste`, `drop`, and `dragover` events that carry files,
+  in the capture phase on `document`. The Tiptap editor also returns "handled"
+  from its own `handlePaste` and `handleDrop` for those events. Text pastes
+  work normally.
 
-**The counters are process-local**, which is correct here for the same reason
-the store is: one process. Rack::Attack's cache is an
-`ActiveSupport::Cache::MemoryStore`. In front of several processes all of this
-would have to move to a shared cache — and, honestly, most of it should move to
-the CDN.
+### Process-local counters
+
+Rack::Attack's cache is an `ActiveSupport::Cache::MemoryStore`, so its counters
+live in this process like the rest of the throttle bookkeeping. That works
+because the site runs one process. With several processes, all of this would
+need a shared cache, and most of it would be better handled at the CDN.
 
 ## Caching
 
-Docs pages are server-rendered markdown with nothing per-visitor in them, so
-they are sent as
+Docs pages are server-rendered markdown with nothing specific to a visitor, so
+the app sends them with
 
 ```
 cache-control: public, max-age=3600, stale-while-revalidate=86400
 ```
 
-A CDN answers for an hour, then keeps answering from the stale copy while it
-refreshes in the background. A deploy never sends a wave of misses at a single
-process, and a restart is invisible to readers. Demo pages are `no-store` —
-they're bound to a room, and the room is where the state is.
+A CDN serves them for an hour, then keeps serving the stale copy while it
+refreshes in the background. A deploy doesn't send a burst of misses to the one
+process, and readers don't notice a restart. Demo pages are `no-store`, because
+each one belongs to a room and the state is in the room.
 
 ## Hosting
 
-Both deployment configs are here; they are alternatives, not a stack.
+The repo has setups for three hosts. Each one works on its own, so pick one.
 
-**Fly.io** (`fly.toml`): one `shared-cpu-1x` machine with 1 GB and a 1 GB
-volume for the database, `auto_stop_machines` and `auto_start_machines` on, and
-`min_machines_running = 0`. Scale to zero fits a demo that is idle most of the
-time, and with the documents in SQLite on the volume a stopped machine loses
-nothing: a returning visitor's link still works, and rooms expire on the
-sweeper's clock, not the machine's. Roughly **$2-4/month** at low traffic.
+### Fly.io
 
-**A VPS with Kamal** (`config/deploy.yml`): one host, one container, kamal-proxy
-terminating TLS, the database on a named Docker volume. A Hetzner CX22 (2 vCPU,
-4 GB) is about **€4/month** flat, holds far more concurrent connections than the
-machine above, and you own the box and its updates.
+`fly.toml` runs one `shared-cpu-1x` machine with 1 GB of RAM and a 1 GB volume
+for the database. It sets `auto_stop_machines = "suspend"`,
+`auto_start_machines = true`, and `min_machines_running = 0`. The machine
+suspends when nobody is using it and starts on the next request, which suits a
+demo that's idle most of the time. The documents are in SQLite on the volume,
+so a stopped machine loses nothing. A returning visitor's link still works, and
+rooms expire on the sweeper's schedule, whether or not the machine stopped. It
+costs roughly **$2-4/month** at low traffic.
 
-**Cloudflare's free tier in front of either.** It is worth doing for both
-reasons: the docs pages become a CDN hit and never reach the app, and the free
-plan absorbs volumetric attacks that would otherwise arrive at one small
-machine. WebSockets pass through on the free plan, so the demos keep working —
-just leave the cable path uncached, which it is, because those responses are
-`no-store`.
+Fly is the option to use if you don't want to run a server yourself.
+
+### Kamal on a VPS
+
+`config/deploy.yml` deploys one container to one host. kamal-proxy terminates
+TLS, and the database is on a named Docker volume. A Hetzner CX22 (2 vCPU,
+4 GB) costs about **€4/month** flat and holds far more concurrent connections
+than the Fly machine above. You own the box and its updates. The 4 GB and the
+steady disk suit a database-backed app, and with no scale-to-zero there's no
+cold start when someone opens a demo.
+
+### Hatchbox
+
+The site also deploys to Hatchbox, using the two scripts in `.hatchbox/` at the
+repo root.
+
+Hatchbox runs `.hatchbox/pre-build` from the release directory before the
+build. It writes a `.tool-versions` file at the repo root and in `site/`, with
+the newest Ruby and Bun that Hatchbox installed, and sets `site/.ruby-version`
+to that Ruby. Hatchbox runs some Bundler commands from the repo root, where the
+Gemfile is the gem's, so the script points Bundler at `site/Gemfile`. It also
+replaces `site/storage` with a symlink to a shared directory, so the SQLite
+database is kept across deploys.
+
+`.hatchbox/build` then installs the gems into a shared bundle path (deployment
+mode, without the development and test groups), installs and builds the
+frontend with bun, and runs `bin/rails db:prepare`.
+
+### Cloudflare in front
+
+Cloudflare's free tier is worth putting in front of any of these, for two
+reasons. Docs pages become CDN hits that never reach the app. And the free plan
+absorbs volumetric attacks that would otherwise hit one small machine.
+WebSockets pass through on the free plan, so the demos keep working. Leave the
+cable path uncached. It already is, because those responses are `no-store`.
 
 ### Secrets and origins
 
-Kamal reads secrets from `.kamal/secrets` (gitignored). Copy the committed
-template and fill it in — or, better, have each line pull from a password
-manager so nothing sensitive lands on disk:
+Kamal reads secrets from `.kamal/secrets`, which is gitignored. Copy the
+committed template and fill it in. You can also have each line pull from a
+password manager so the secrets never get written to disk:
 
 ```bash
 cp .kamal/secrets.example .kamal/secrets
-# SECRET_KEY_BASE=$(openssl rand -hex 64)      — Rails signing key
-# ANYCABLE_SECRET=$(openssl rand -hex 32)      — configures both cable halves
+# SECRET_KEY_BASE=$(openssl rand -hex 64)    # Rails signing key
+# ANYCABLE_SECRET=$(openssl rand -hex 32)    # configures both halves of the cable
 ```
 
-`config/deploy.yml` lists those two under `env.secret`, so they reach the
-container as environment without ever being written into the committed YAML. On
-Fly they are `fly secrets set …` instead. The SQLite volume is `chmod 700` in
-the image, so the database (ephemeral room content) is readable only by the app
-user.
+`config/deploy.yml` lists both under `env.secret`, so they reach the container
+as environment variables and never appear in the committed YAML. On Fly, set
+them with `fly secrets set …`. The image sets the SQLite volume to `chmod 700`,
+so only the app user can read the database and its room content.
 
-**Production requires both `ANYCABLE_SECRET` and `ALLOWED_ORIGINS`, and refuses
-to boot without them.** `ANYCABLE_SECRET` must be a strong value (at least 32
-chars; not the committed development default) — the `/_anycable` RPC endpoint
-authenticates with a bearer derived from it, and a weak or default secret lets
-anyone forge RPC calls past the socket boundary and every limit. `ALLOWED_ORIGINS`
-must name the site's own origin(s) — without it Rails disables the cable's
-forgery protection and any page anywhere could open a socket to it (cross-site
-WebSocket hijacking). This is enforced in
-`config/initializers/production_boot_checks.rb`; development, test, and the local
-e2e stay permissive.
+**Production requires both `ANYCABLE_SECRET` and `ALLOWED_ORIGINS`, and won't
+boot without them.** `ANYCABLE_SECRET` must be at least 32 characters and can't
+be the committed development default. The `/_anycable` RPC endpoint
+authenticates callers with a bearer derived from it. With a weak or default
+secret, anyone could forge RPC calls and skip the socket and every limit.
 
-Set `ALLOWED_ORIGINS` (comma-separated full origins, e.g. `https://yrby.dev`, or
-`http://192.168.1.10:3000` for a plain-http LAN box) in the deploy env. One value
-drives both halves of the cable — the entrypoint strips the scheme into
-`ANYCABLE_ALLOWED_ORIGINS` for the embedded anycable-go, which 403s a mismatched
-handshake at the socket, and Rails re-checks the Origin on the Connect RPC (which
-is why `ANYCABLE_HEADERS` forwards `origin`: anycable-rails treats a *missing*
-Origin as allowed, so the header has to reach the RPC for the re-check to be
-real). Behind Cloudflare it also makes the throttle key the real visitor:
-`trusted_proxies` vendors Cloudflare's ranges (plus loopback and the
-container-internal ranges, but deliberately not `192.168.0.0/16`). The cable's
-per-IP cap derives the client IP with that same trusted set rather than
-`request.remote_ip` — on the RPC path the RemoteIp middleware never runs, and its
-fallback would honor a forged `X-Forwarded-For` from a client connecting straight
-to the edge; the strict rule here consumes a forwarded address only past a hop it
-actually trusts.
+`ALLOWED_ORIGINS` must list the site's own origins. Without it, Rails turns off
+the cable's forgery protection, and any page on the internet could open a socket
+to the cable from a visitor's browser (cross-site WebSocket hijacking).
+`config/initializers/production_boot_checks.rb` enforces both checks.
+Development, test, and the local e2e run without them.
 
-Set `CANONICAL_HOST` in the same deploy env, to the site's real origin
-(e.g. `https://yrby.dev`). It is the one host used in canonical tags, Open
-Graph/Twitter URLs, the sitemap, JSON-LD, and llms.txt — deliberately not
-derived from the request, because Cloudflare and a plain-http LAN origin make
-the request host vary while the canonical host must not. **It defaults to the
-`yrby.example.com` placeholder; the SEO tags are wrong until you set it.**
+Set `ALLOWED_ORIGINS` in the deploy environment as comma-separated full
+origins, such as `https://yrby.dev`, or `http://192.168.1.10:3000` for a
+plain-http LAN box. That one value configures both halves of the cable:
 
-Either way it is one machine and one container: the database volume attaches to
-one box, and the throttle counters assume one process. For a demo site that is
-the right trade — a bigger box is a one-line change, and everything a reader is
-here to see works the same on one process as on fifty.
+1. The entrypoint strips the scheme to build `ANYCABLE_ALLOWED_ORIGINS` for the
+   embedded anycable-go, which returns 403 for a handshake from any other
+   origin.
+2. Rails checks the Origin again on the Connect RPC. That's why
+   `ANYCABLE_HEADERS` forwards `origin`. anycable-rails treats a *missing*
+   Origin as allowed, so the Rails check only works if the header reaches the
+   RPC.
 
-Both configs stay in the repo; the site is deployed with Kamal on Hetzner. The
-€4 box's 4 GB and steady disk suit a database-backed app better than paying for
-wake-ups, and no scale-to-zero means no cold starts in front of a demo. Fly
-remains the config to grab if you want the same site with zero server
-ownership.
+Behind Cloudflare, the throttles also need the visitor's real IP.
+`trusted_proxies` lists Cloudflare's ranges, loopback, and the
+container-internal ranges, and leaves out `192.168.0.0/16`. The cable's per-IP
+cap works out the client IP from that same list and doesn't use
+`request.remote_ip`. On the RPC path the RemoteIp middleware never runs, and
+`remote_ip` would fall back to a rule that accepts a forged `X-Forwarded-For`
+from a client connecting straight to the edge. The site's rule only uses a
+forwarded address when the hop that sent it is on the trusted list.
 
-One proxy-level cap worth noting: `MAX_REQUEST_BODY=65536` in thrust's
-environment. Every public route is a GET, so 64 KB of request body is generous.
-It does not constrain AnyCable — the embedded Go server dials Falcon's port
-directly for RPC and takes broadcasts on its own listener, so neither path
-crosses thrust's public handler. Verified against thruster's source
-(`internal/service.go`): the body cap wraps only the inbound proxy.
+Set `CANONICAL_HOST` in the same deploy environment to the site's real origin,
+for example `https://yrby.dev`. The app uses it for canonical tags, Open Graph
+and Twitter URLs, the sitemap, JSON-LD, and llms.txt. The app doesn't take it
+from the request, because the request host changes behind Cloudflare or on a
+plain-http LAN box. **It defaults to the `yrby.example.com` placeholder, and
+the SEO tags are wrong until you set it.**
+
+Each setup runs the app on one machine. The database volume attaches to one
+box, and the throttle counters assume one process. That's fine for a demo
+site, and moving to a bigger box is a one-line change.
+
+The Dockerfile and `boot_server.sh` also set `MAX_REQUEST_BODY=65536` for
+thrust, a cap on request bodies at the proxy. Every public route is a GET, so
+64 KB is plenty. The cap doesn't affect AnyCable. The embedded Go server
+connects to Falcon's port directly for RPC and receives broadcasts on its own
+listener, so neither path goes through thrust's public handler. In thruster's
+source (`internal/service.go`), the body cap only wraps the inbound proxy.
 
 ## Capacity
 
-The number that matters for a demo site is concurrent WebSocket connections, and
-the app caps it at 500 (`MAX_CONNECTIONS`).
+The number that matters for a demo site is concurrent WebSocket connections,
+and the app caps it at 500 (`MAX_CONNECTIONS`).
 
-Where that comes from: a held socket lives in anycable-go, not in Ruby. It is a
-goroutine plus its read and write buffers, on the order of 10 KB, so 500 of them
-is 5-10 MB. Ruby holds nothing per connection between messages — the channel
-object is built for a command and thrown away — so an idle client costs Rails
-zero. Documents cost RAM only while being loaded or applied: they live in
-SQLite, and the room caps (2000 documents at 512 KiB) bound the database file
-at about 1 GB of disk, not memory. What stays resident is Rails plus the yrby
-native extension, 150-200 MB. The rest of a 1 GB machine is headroom for the
-CRDT work in flight: applying an update allocates, and `on_load` replays a
-room's snapshot and tail into a fresh `Y::Doc` per handshake.
+anycable-go holds each socket as a goroutine plus its read and write buffers,
+around 10 KB, so 500 sockets take 5-10 MB. Ruby holds nothing per connection
+between messages. Rails builds the channel object for one command and then
+discards it, so an idle client costs Rails nothing. A document uses RAM only
+while it's being loaded or applied. Documents live in SQLite, and the room caps
+(2000 documents at 512 KiB) keep the database file to about 1 GB of disk. What
+stays in memory is Rails plus the yrby native extension, 150-200 MB. The rest
+of a 1 GB machine is headroom for CRDT work in progress. Applying an update
+allocates memory, and `on_load` replays a room's snapshot and tail into a fresh
+`Y::Doc` on each handshake.
 
-So the 500 cap is not where memory runs out. It is a deliberately conservative
-number, set so the failure mode at load is a refused connection rather than a
-machine that swaps and dies. On memory alone the Go side would hold several
-thousand.
+So memory doesn't run out at 500. The cap is set low so that under heavy load
+the server refuses new connections before the machine starts swapping. On
+memory alone, the Go side could hold several thousand sockets.
 
-CPU is the real limit, and it is Ruby's. Every document frame is an RPC call
-into the Falcon reactor and a native CRDT apply. yrby releases the GVL for that
-work — the fiber scheduler keeps serving while the native code runs — but 500
-people typing at once on one shared vCPU is not a thing this machine does
-well. SQLite adds a write per update and a read per load on the same box, which
-at demo scale is noise under WAL. Presence costs Ruby too on this site, by
-design: the demo routes awareness through the guarded `send` path rather than an
-AnyCable whisper, so each awareness frame is an RPC and a relay broadcast — no
-SQLite write and no document apply, but not the free client-to-client path a
-whisper would take. That is the deliberate price of not handing anonymous peers
-an unguarded relay; the frame bucket caps it per connection, and an authenticated
-app that trusts its peers can put presence back on whispers and skip Ruby.
-Realistically this is comfortable holding several hundred *connected* clients
-with a few dozen actively editing, which is what a demo site sees.
+CPU is the real limit, and Ruby is what uses it. Every document frame is an RPC
+call into the Falcon reactor plus a native CRDT apply. yrby releases the GVL
+for that work, so the fiber scheduler keeps serving while the native code runs.
+Still, one shared vCPU can't handle 500 people typing at once. SQLite adds a
+write per update and a read per load on the same box, which is negligible at
+demo scale with WAL.
 
-I have not load-tested this app at those numbers. The estimate is arithmetic
-from per-connection cost, not a measurement, and the split between what Go holds
-and what Ruby does is the part I would want measured first. The repo's demo app
-has a `loadtest.mjs` and a `stress.mjs` that would answer it properly.
+Presence also costs Ruby time on this site. The demo sends awareness through the
+guarded `send` path, so each awareness frame is an RPC call and a relay
+broadcast. It doesn't write to SQLite or apply to a document, but it isn't free
+the way a client-to-client whisper is. That's the cost of not giving anonymous
+peers an unguarded relay. The frame bucket limits it per connection. An
+authenticated app that trusts its peers can put presence back on whispers and
+skip Ruby.
+
+Realistically, the site can comfortably hold several hundred connected clients
+with a few dozen editing at once, which is what a demo site sees.
+
+I haven't load-tested this app at those numbers. The estimate comes from
+per-connection costs, not a measurement, and the split between what Go holds and
+what Ruby does is what I'd measure first. `frontend/loadtest_site.mjs` drives
+raw Action Cable clients against `DocumentChannel` and reports connections,
+throughput, and latency. The demo app in `examples/actioncable-demo` has
+`loadtest.mjs` and `stress.mjs`.
 
 ## Docs pages
 
-`docs/*.md`, rendered at request time by `app/lib/doc_page.rb` (Commonmarker,
-GFM). The nav order and the README anchor each page came from are in
-`DocPage::PAGES`; the page title is the file's first `#` heading, so it can't
-fall out of step with the content.
+`app/lib/doc_page.rb` renders `docs/*.md` on each request with Commonmarker
+(GFM). `DocPage::PAGES` sets the nav order and the README section each page
+comes from. The page title is the file's first `#` heading, so it always
+matches the content.
 
-The repo README is canonical. These pages are a copy of it and copies drift, so
-every page says so and links back to the section it came from. When the README
+The repo README is the main reference. These pages copy it, and copies drift,
+so every page says so and links back to its README section. When the README
 changes, update the matching page here.
 
-The in-page table of contents reads its anchors from the rendered HTML's heading
-ids (`DocPage#sections` parses the `id` attributes Commonmarker generated),
-rather than re-slugifying the markdown, so the contents links can't drift from
-the ids they point at.
+The in-page table of contents reads its anchors from the heading ids in the
+rendered HTML. `DocPage#sections` parses the `id` attributes Commonmarker
+generated, without re-slugifying the markdown, so the contents links always
+match the ids they point at.
 
 ## Discoverability
 
-Everything a crawler and an LLM look for, rendered from the same page lists so it
-can't drift:
+The files crawlers and LLMs look for are rendered from the same page lists as
+the site, so they stay in sync:
 
-- **`robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt`** — served by
-  `MetaController` from `DocPage`/`Demos`, not committed as static files, so the
-  URL set and the canonical host stay correct as pages are added. `robots.txt`
-  indexes the docs and the `/demos` index but disallows every `/demos/:slug`
-  prefix, because a bare demo URL mints a fresh room and redirects — a crawler
-  that followed those links would manufacture unlimited URLs. Demo room pages
-  are also `noindex, nofollow` and canonicalize to `/demos`.
-- **Markdown for agents** — every docs page answers `Accept: text/markdown` and
-  a `.md` suffix (`/docs/storage.md`) with its raw markdown plus a small
-  metadata front-block. `llms.txt` points at the `.md` convention; `llms-full.txt`
-  concatenates them.
-- **Canonical / Open Graph / Twitter / JSON-LD** — in the layout head, driven by
-  `content_for :title`/`:description`/`:canonical`. Home carries a
-  `SoftwareSourceCode` block; docs pages carry `TechArticle` + `BreadcrumbList`.
-  The JSON-LD is inline `application/ld+json`, which the strict `script-src`
-  CSP does not govern (browsers never execute it).
-- **`public/og.png`** — one 1200×630 dark social card. Regenerate it by opening
-  the card template in a headless browser at that viewport and screenshotting;
-  the on-brand source is a small standalone HTML page (dark bg, `yrby▌`
-  wordmark, the headline, the flagship line with the accent gutter).
+- **`robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt`.** `MetaController`
+  serves these from `DocPage` and `Demos`. They aren't committed static files,
+  so the URL set and the canonical host stay correct as pages are added.
+  `robots.txt` lets crawlers index the docs and the `/demos` index, and
+  disallows each `/demos/:slug` prefix. A bare demo URL creates a new room and
+  redirects, so a crawler that followed those links would generate unlimited
+  URLs. Demo room pages are also `noindex, nofollow`, with `/demos` as their
+  canonical URL.
+- **Markdown for agents.** Every docs page responds to `Accept: text/markdown`
+  and to a `.md` suffix (`/docs/storage.md`) with its raw markdown plus a short
+  metadata block at the top. `llms.txt` points at the `.md` URLs, and
+  `llms-full.txt` concatenates them.
+- **Canonical, Open Graph, Twitter, and JSON-LD.** These are in the layout's
+  head, driven by `content_for :title`, `:description`, and `:canonical`. The
+  home page has a `SoftwareSourceCode` block, and docs pages have `TechArticle`
+  and `BreadcrumbList`. The JSON-LD is inline `application/ld+json`. The strict
+  `script-src` CSP doesn't apply to it, because browsers never execute it.
+- **`public/og.png`.** One 1200×630 dark social card. To regenerate it, open
+  the card template in a headless browser at that size and take a screenshot.
+  The template is a small standalone HTML page: a dark background, the `yrby▌`
+  wordmark, the headline, and the main code sample with the accent gutter.
 
-Two things still need the real domain and are **launch follow-ups**, not code
-here: add a prominent link back to this site from the repo root `README.md`
-(the site's first high-authority backlink), and point the gemspec
-`homepage`/`documentation_uri` at it. A tutorial-shaped "collaborative rich text
-in Rails" landing page (plan R9) and newsletter distribution (R10) are JP's to
-write.
+Two launch tasks need the real domain and aren't code changes here. Add a
+prominent link to this site from the repo root `README.md` (the site's first
+high-authority backlink), and point the gemspec `homepage` and
+`documentation_uri` at it. JP still has to write a tutorial-style
+"collaborative rich text in Rails" landing page (plan item R9) and handle
+newsletter distribution (R10).
 
 ## Demos
 
-Six pages, chosen for breadth of Yjs shape rather than for count:
+There are six demo pages, picked to cover different Yjs shapes:
 
 | Page | Shape | What it shows |
 |---|---|---|
-| Rich text | `Y.XmlFragment` | Lexxy over the published lexxy-realtime stack: signed-token auth, a record-backed document, and the server rendering `note.body` via `Y::Lexxy` |
+| Rich text | `Y.XmlFragment` | Lexxy on the published lexxy-realtime stack: signed-token auth, a record-backed document, and the server rendering `note.body` with `Y::Lexxy` |
 | Tiptap | `Y.XmlFragment` | The same shape through Tiptap's own Collaboration extension |
-| Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges; sorting kept out of the document |
-| Whiteboard | `Y.Map` | Records in a map — the shape canvas tools keep |
+| Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges, with sorting kept out of the document |
+| Whiteboard | `Y.Map` | Records in a map, the way canvas tools store shapes |
 | Kanban | `Y.Array` | A move is one `map.set`, so concurrent moves never conflict |
 | Code | `Y.Text` | CodeMirror 6 with remote cursors and selections |
 
-### The Rich text demo is the flagship stack, end to end
+### The Rich text demo
 
-The Lexxy page runs the published `lexxy-realtime` gem (0.7.0) and npm package
-(0.6.0) the way a real app would, not a special demo build:
+The Lexxy page uses the published `lexxy-realtime` gem and npm package (both
+0.7.1) the same way a real app would:
 
-- **The record shape.** Each room is a `Note`, created on subscribe by
-  `NoteChannel` (never on the page GET).
-  `has_collaborative_rich_text :body` comes from the gem's Collaborative
-  concern, which capability-detects Action Text — this app has none, so the
-  concern takes its plain-column path and `refresh_collaborative_rich_text`
-  writes the `Y::Lexxy`-rendered HTML straight into `notes.body`. The page's
-  "Stored HTML" panel reads that column back over a GET-only JSON endpoint:
-  server-rendered markup, no browser in the loop.
-- **The auth shape.** The page does not create the `Note` — a GET is anonymous
-  and uncapped, so a crawler could otherwise mint rows without bound. It mints a
-  signed, field-scoped room token — the gem's `lexxy_realtime/body` purpose
-  format — and `NoteChannel` (the generated channel template plus this site's
-  throttle layers) verifies it and creates the `Note` on subscribe, within the
-  room budget. A token for another field does not verify, and the subscription
-  is rejected. `authorized?` returns true because the rooms are public; the
-  field scoping is intact and tested.
-- **The composition API.** The client uses the npm README's "create the
-  provider yourself" path: `room.js` builds the yrby-client provider (over
-  `@anycable/web`, with the room bar and full-room notice), and the
-  `<lexxy-collaboration>` element receives `doc` and `provider` instead of
-  creating its own cable.
-- **One `lexical`.** The bundle pins `lexical` and `@lexical/yjs` as
-  singletons next to the yjs family — two copies break node-class identity
-  the same way two yjs copies break constructor checks (`build.mjs`).
-- **One deliberate cut.** The gem itself is `require: false`: its engine
-  loads the Lexxy gem's engine, which wires Action Text helpers in
-  `to_prepare` and cannot boot without Action Text. The app requires only
-  `lexxy_realtime/collaborative` — the concern is self-contained — and
-  mirrors the gem's one-line sgid purpose format. The ERB form helper
-  (`collaborative_rich_textarea`) is part of what stays unloaded, so the
-  page renders the `<lexxy-editor>` element directly.
+- **The record.** Each room is a `Note`. `NoteChannel` creates it on subscribe,
+  never on the page GET. `has_collaborative_rich_text :body` comes from the
+  gem's Collaborative concern, which checks whether Action Text is loaded. This
+  app doesn't have Action Text, so the concern uses its plain-column path, and
+  `refresh_collaborative_rich_text` writes the HTML that `Y::Lexxy` renders
+  directly into `notes.body`. The page's "Stored HTML" panel reads that column
+  back through a GET-only JSON endpoint. The server rendered that markup, with
+  no browser involved.
+- **Auth.** The page doesn't create the `Note`. A GET is anonymous and has no
+  cap, so a crawler could otherwise create rows without limit. The page
+  generates a signed room token scoped to the field, using the gem's
+  `lexxy_realtime/body` purpose format. `NoteChannel` (the generated channel
+  template plus this site's throttles) verifies the token and creates the
+  `Note` on subscribe, within the room budget. A token for a different field
+  doesn't verify, and the subscription is rejected. `authorized?` returns true
+  because the rooms are public. The field scoping still applies, and the tests
+  cover it.
+- **The provider.** The client follows the npm README's "create the provider
+  yourself" path. `room.js` builds the yrby-client provider over
+  `@anycable/web`, with the room bar and the full-room notice, and passes `doc`
+  and `provider` to the `<lexxy-collaboration>` element so the element doesn't
+  open its own cable.
+- **One copy of `lexical`.** `build.mjs` pins `lexical` and `@lexical/yjs` to a
+  single copy each, alongside the yjs packages. Two copies of `lexical` break
+  node-class identity, the same way two copies of yjs break constructor checks.
+- **Loading only the concern.** The gem is `require: false`. Its engine loads
+  the Lexxy gem's engine, which sets up Action Text helpers in `to_prepare` and
+  can't boot without Action Text. The app requires only
+  `lexxy_realtime/collaborative`, which works on its own, and copies the gem's
+  one-line sgid purpose format. The ERB form helper
+  (`collaborative_rich_textarea`) isn't loaded either, so the page renders the
+  `<lexxy-editor>` element directly.
 
-They are ports of the pages in
-[`examples/actioncable-demo`](../examples/actioncable-demo), with the provider
-setup, presence chips, status line, and room bar lifted into
-`frontend/src/room.js` so each demo file is only its Yjs binding.
+The demos are ports of the pages in
+[`examples/actioncable-demo`](../examples/actioncable-demo). The provider
+setup, presence chips, status line, and room bar live in
+`frontend/src/room.js`, so each demo file holds only its Yjs binding.
 
-Every visitor lands in a fresh room (`/demos/tiptap` mints one and redirects).
-The room id is shared across the demo nav, so switching pages keeps you in the
-same room with a different document key.
+Each visitor gets a fresh room: `/demos/tiptap` creates one and redirects. The
+demo nav keeps the room id, so switching pages keeps you in the same room with
+a different document key.
 
-`frontend/src/room.js` also wraps the Action Cable consumer so the page can read
-the server's `{ notice: ... }` envelopes. `yrby-client`'s provider ignores
-envelopes it doesn't recognize, and the mixin it builds closes over the provider
-rather than `this`, so composing a `received` handler around it is safe.
+`frontend/src/room.js` also wraps the Action Cable consumer so the page can
+read the server's `{ notice: ... }` messages. `yrby-client`'s provider ignores
+messages it doesn't recognize. The mixin it builds reaches the provider through
+a closure and doesn't use `this`, so wrapping its `received` handler is safe.
 
 ### Building the bundles and the stylesheet
 
 ```bash
-cd frontend && bun run build     # JS bundles + CSS
+cd frontend && bun run build     # JS bundles, fonts, and CSS
 bun run watch                    # rebuild bundles on change
 bun run watch:css                # rebuild the stylesheet on change
 ```
 
-One entry per demo, output to `public/<slug>.js`, which the page loads by slug.
-The build pins `yjs`, `y-protocols`, and `lib0` to one canonical path. Two
-copies of `yjs` in one bundle is the failure that costs the most time to find:
-the provider and the editor binding end up on different `Y.Doc` internals,
-y-prosemirror throws "Method unimplemented" applying remote updates, and nothing
-about the symptom points at module resolution. The long comment at the top of
-`build.mjs` has the details.
+Each demo has an entry in `build.mjs` and builds to `public/<slug>.js`, which
+the demo page loads by slug. The home page replay (`hero.js`) and the
+record-backed example (`document.js`) build the same way.
+
+The build pins `yjs`, `y-protocols`, and `lib0` (and `lexical` and
+`@lexical/yjs` for the Lexxy page) to one path each. Two copies of `yjs` in one
+bundle is a hard bug to track down. The provider and the editor binding end up
+on different `Y.Doc` internals, y-prosemirror throws "Method unimplemented"
+when it applies remote updates, and nothing about the symptom points at module
+resolution. The comment at the top of `build.mjs` has the details.
 
 ## Frontend styling
 
-Tailwind v4, through the same bun toolchain as the bundles: `bun run build:css`
-compiles `frontend/css/site.css` to `public/site.css` (a few KB gzipped,
-purged), served as a plain static file. There is no asset pipeline — Propshaft
-is gone, and everything the browser loads is a file bun built.
+Tailwind v4 builds with the same bun toolchain as the bundles.
+`bun run build:css` compiles `frontend/css/site.css` to `public/site.css`
+(purged, a few KB gzipped), and the app serves it as a plain static file.
+There's no asset pipeline. Everything the browser loads is a file bun built.
 
-The design is dark-only: zinc-950 background, one ruby accent for links, CTAs,
-and focus rings, and nothing else colored. Page structure is Tailwind utilities
-in the ERB templates; a small component layer in `site.css` covers the two
-things utilities can't reach — DOM the demo JS builds at runtime (cards, chips,
-notes, grid cells; every one of those classes is load-bearing for the JS and
-the e2e, so they are styled, never renamed) and the docs' rendered markdown.
+The design looks like a shared manuscript: a newsprint page, documents on white
+sheets, ink-colored text, and one red accent for links, buttons, and focus
+rings. Headings use Newsreader, body text uses IBM Plex Sans, and code uses IBM
+Plex Mono. `bun run build:fonts` copies the font files into `public/fonts`,
+because the CSP doesn't allow loading anything from other origins. The
+templates use Tailwind's zinc and rose classes, and the theme in `site.css`
+remaps those scales onto the paper palette.
 
-Code blocks are highlighted server-side by Commonmarker's built-in syntect
-highlighter (`DocPage::CODE_THEME`), the same pipeline for docs pages and the
-home page's snippets, so there is no client-side highlighting and no extra gem.
+Page structure is Tailwind utilities in the ERB templates. A small component
+layer in `site.css` covers the two things utilities can't reach: DOM that the
+demo JS builds at runtime (cards, chips, notes, grid cells), and the docs'
+rendered markdown. The demo bundles and the e2e scripts select on those runtime
+classes, so they get styled and never renamed.
 
-Two lessons are baked into the stylesheet's comments: no `scroll-smooth`
-(animated scrolling makes any automated scroll-then-click race the animation —
-it broke the e2e, and the same race hits real users of assistive tech), and a
-global `scroll-margin-top` so nothing scrolls under the sticky header.
+Code blocks are highlighted on the server by Commonmarker's built-in syntect
+highlighter, with the InspiredGitHub theme (`DocPage::CODE_THEME`). Docs pages
+and the home page's snippets use the same pipeline, so there's no client-side
+highlighting and no extra gem.
 
-## What this app is not
+The stylesheet's comments explain two choices. It doesn't use `scroll-smooth`,
+because animated scrolling makes any automated scroll-then-click race the
+animation. That broke the e2e, and keyboard and assistive-tech users hit the
+same race. It also sets a global `scroll-margin-top`, so an element scrolled
+into view doesn't end up under the sticky header.
 
-It is a demo of yrby, not a template for a production collaborative app. The
-things it does differently from one:
+## How this differs from a production app
+
+This is a demo of yrby. It isn't a template for a production collaborative app,
+and it differs from one in a few ways:
 
 - No authentication. Rooms are public and anonymous, and anyone with the link
   can edit.
-- No accounts and no ownership. Any document is writable by anyone holding its
-  link, and the sweeper deletes it after a day untouched.
-- One process, one box. The throttle accounting assumes it, and the demo does
-  not need more.
+- No accounts or ownership. Anyone with a document's link can write to it, and
+  the sweeper deletes it after a day without changes.
+- One process on one box. The throttle accounting assumes it, and the demo
+  doesn't need more.
 
-`examples/actioncable-demo` in this repo is the other end: Postgres, AnyCable,
-multi-process, and the full test and load suites.
+`examples/actioncable-demo` in this repo covers a production setup: Postgres,
+AnyCable, multiple processes, and the full test and load suites.

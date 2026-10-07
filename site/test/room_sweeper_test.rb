@@ -10,7 +10,7 @@ class RoomSweeperTest < ActiveSupport::TestCase
     document
   end
 
-  test "a sweep deletes stale rooms, rows and all" do
+  test "a sweep deletes stale rooms and their rows" do
     make_room("tiptap/stale", age: 2.hours)
 
     assert_equal ["tiptap/stale"], RoomSweeper.run_once(ttl: 1.hour)
@@ -20,15 +20,15 @@ class RoomSweeperTest < ActiveSupport::TestCase
 
   test "a room with a recent write is kept even if the document row is old" do
     document = make_room("tiptap/active", age: 2.hours)
-    # A new append: the document row's updated_at stays old (appends don't
-    # touch it), but the update row is fresh: that must count as activity.
+    # A new append. Appends don't change the document row's updated_at, so it
+    # stays old, but the new update row counts as activity.
     document.updates.create!(payload: Updates::CHAIN[0])
 
     assert_empty RoomSweeper.run_once(ttl: 1.hour)
     assert Y::Document.exists?(key: "tiptap/active")
   end
 
-  test "an occupied room is never evicted, however stale" do
+  test "an occupied room is kept however stale it is" do
     make_room("tiptap/quiet", age: 2.days)
     Rooms.current.join("tiptap/quiet")
 
@@ -37,8 +37,9 @@ class RoomSweeperTest < ActiveSupport::TestCase
   end
 
   test "eviction clears the room's cached size" do
-    # HELLO is larger than this tiny cap, so the room reads full straight from
-    # the store; a long TTL means only `forget` (from the sweep) can clear it.
+    # HELLO is larger than this small cap, so the room reads as full from the
+    # database. With a long cache TTL, only `forget` from the sweep can clear
+    # the cached size.
     Rooms.current = Rooms.new(max_document_bytes: 5, size_cache_ttl: 3600)
     make_room("tiptap/stale", age: 2.hours)
 
@@ -47,7 +48,7 @@ class RoomSweeperTest < ActiveSupport::TestCase
     RoomSweeper.run_once(ttl: 1.hour)
 
     assert_not Rooms.current.document_full?("tiptap/stale"),
-               "a re-created room must not inherit the evicted room's size"
+               "a recreated room must not keep the deleted room's size"
   end
 
   test "a fresh room is not swept" do
@@ -71,20 +72,20 @@ class RoomSweeperTest < ActiveSupport::TestCase
     assert_not Note.exists?(room: "old")
   end
 
-  test "a note with a live document is never swept while the document is" do
+  test "a note is kept while its document is fresh" do
     note = Note.create!(room: "busy")
     document = note.find_or_create_collaborative_document(:body)
     note.update_columns(updated_at: 2.days.ago)
 
     RoomSweeper.run_once(ttl: 1.day)
 
-    # The document is fresh (just created), so both survive: a stale-looking
-    # note never takes a live document down with it.
+    # The document was just created, so both are kept. A stale note doesn't
+    # delete a live document.
     assert Note.exists?(room: "busy")
     assert Y::Document.exists?(key: "note/#{note.id}/body")
 
-    # Once the document itself goes stale, one pass takes both: the document
-    # sweep runs first, and the note sweep then finds the note document-less.
+    # Once the document is stale, one pass deletes both. The document sweep
+    # runs first, so the note sweep then finds a note with no document.
     document.update_columns(updated_at: 2.days.ago)
     evicted = RoomSweeper.run_once(ttl: 1.day)
 

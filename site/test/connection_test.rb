@@ -45,12 +45,12 @@ class ApplicationCable::ConnectionTest < ActionCable::Connection::TestCase
     ConnectionLimiter.current.acquire(IP)
 
     assert_reject_connection { connect_from }
-    assert_equal 1, ConnectionLimiter.current.count(IP), "the rejected connection must not have taken one"
+    assert_equal 1, ConnectionLimiter.current.count(IP), "the rejected connection did not take a slot"
   end
 
   test "disconnect releases the exact slot connect took" do
-    # Two connections from the same IP; releasing one must free that one, not
-    # whichever slot happens to be oldest.
+    # Releasing a connection frees its own slot, even when the same IP holds
+    # others.
     limiter = ConnectionLimiter.new(max_per_ip: 5)
     ConnectionLimiter.current = limiter
     connect_from
@@ -61,19 +61,19 @@ class ApplicationCable::ConnectionTest < ActionCable::Connection::TestCase
     disconnect
 
     assert_equal 0, limiter.count(IP)
-    # The token this connection released is gone; a stray release of it is a
-    # no-op and cannot decrement another connection's slot.
+    # The released token is gone. Releasing it again does nothing and leaves
+    # the other connection's slot alone.
     limiter.acquire(IP)
     limiter.release(IP, token)
 
-    assert_equal 1, limiter.count(IP), "releasing an already-freed token must not free the live slot"
+    assert_equal 1, limiter.count(IP), "releasing an already freed token leaves the live slot"
   end
 
-  test "the per-IP cap uses the trusted-proxy client IP, not a forged X-Forwarded-For" do
-    # On the AnyCable connect path ActionDispatch::RemoteIp never runs, so a
-    # forged X-Forwarded-For would win under Rack's defaults (which trust the LAN).
-    # The connection derives the IP with the app's trusted set instead: the real
-    # socket address is used and the forged header is ignored.
+  test "the per-IP cap ignores a forged X-Forwarded-For" do
+    # ActionDispatch::RemoteIp doesn't run on the AnyCable connect path. Rack's
+    # defaults trust the LAN, so they'd accept a forged X-Forwarded-For. The
+    # connection uses the app's trusted proxies, so it takes the socket address
+    # and ignores the forged header.
     ConnectionLimiter.current = ConnectionLimiter.new
     connect env: { "REMOTE_ADDR" => "198.51.100.9", "HTTP_X_FORWARDED_FOR" => "1.2.3.4" }
 

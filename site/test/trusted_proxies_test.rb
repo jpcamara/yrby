@@ -1,19 +1,19 @@
 require "test_helper"
 
-# The real-client-IP derivation Rack::Attack throttles on. Drives the actual
-# ActionDispatch::RemoteIp middleware with the app's configured trusted proxies,
-# so this is what request.ip resolves to in production, not a reimplementation.
+# How the app finds the client IP that Rack::Attack throttles on. These tests
+# run the real ActionDispatch::RemoteIp middleware with the app's trusted
+# proxies, so they check the same request.ip production uses.
 #
-# ActionDispatch strips trusted hops from the X-Forwarded-For chain and takes
-# the rightmost address that remains; every case below turns on which hops are
+# ActionDispatch removes trusted hops from the X-Forwarded-For chain and takes
+# the rightmost address left. Each case below depends on which hops are
 # trusted (config/initializers/trusted_proxies.rb).
 class TrustedProxiesTest < ActiveSupport::TestCase
   CLOUDFLARE_IP = "104.16.1.1".freeze # inside 104.16.0.0/13
   CLIENT_IP = "203.0.113.7".freeze    # TEST-NET-3, a public client
-  LAN_IP = "192.168.1.10".freeze      # a LAN client, deliberately untrusted
+  LAN_IP = "192.168.1.10".freeze      # a LAN client, not trusted on purpose
 
-  # Resolve request.ip the way the running stack does: the RemoteIp middleware
-  # built with the app's trusted_proxies, handed a peer and X-Forwarded-For.
+  # Works out request.ip the way the app does, by running the RemoteIp
+  # middleware with the app's trusted proxies, a peer, and an X-Forwarded-For.
   def resolved_ip(peer:, xff: nil)
     app = ->(env) { [200, {}, [ActionDispatch::Request.new(env).remote_ip]] }
     middleware = ActionDispatch::RemoteIp.new(app, false, TrustedProxies::RANGES)
@@ -24,28 +24,28 @@ class TrustedProxiesTest < ActiveSupport::TestCase
   end
 
   test "behind Cloudflare, the real client is recovered from X-Forwarded-For" do
-    # Cloudflare appends the client to XFF and is the peer; trusting its range
-    # strips the edge and leaves the client.
+    # Cloudflare is the peer and appends the client to XFF. Its range is
+    # trusted, so the edge address is removed and the client is left.
     assert_equal CLIENT_IP, resolved_ip(peer: CLOUDFLARE_IP, xff: "#{CLIENT_IP}, #{CLOUDFLARE_IP}")
   end
 
-  test "a client cannot forge a hop to the right of itself behind Cloudflare" do
-    # A forged entry can only be prepended (left); the trusted edge appends the
-    # real socket address to the right, so the client is still rightmost-untrusted.
+  test "a forged hop from a client behind Cloudflare is ignored" do
+    # A client can only add fake entries on the left. Cloudflare appends the real
+    # address on the right, so the client is still the rightmost untrusted one.
     assert_equal CLIENT_IP, resolved_ip(peer: CLOUDFLARE_IP, xff: "1.2.3.4, #{CLIENT_IP}, #{CLOUDFLARE_IP}")
   end
 
-  test "on a LAN box (no Cloudflare) the LAN client is used, forged XFF ignored" do
-    # kamal-proxy forwards from loopback and appends the LAN client; 192.168/16
-    # is NOT trusted, so the LAN address is the rightmost-untrusted entry and a
-    # client-prepended fake is ignored.
+  test "on a LAN box without Cloudflare the LAN client is used and a forged XFF is ignored" do
+    # kamal-proxy forwards from loopback and appends the LAN client. 192.168/16
+    # isn't trusted, so the LAN address is the rightmost untrusted entry and a
+    # fake entry the client added is ignored.
     assert_equal LAN_IP, resolved_ip(peer: "127.0.0.1", xff: "9.9.9.9, #{LAN_IP}")
     assert_equal LAN_IP, resolved_ip(peer: "127.0.0.1", xff: LAN_IP)
   end
 
-  test "a Cloudflare edge address is never mistaken for the client" do
-    # Only the client's forged header, ending in a Cloudflare IP, with the LAN
-    # proxy appending the real client after it: the CF address is stripped.
+  test "a Cloudflare edge address is not taken as the client" do
+    # The client sends a forged header ending in a Cloudflare IP, and the LAN
+    # proxy appends the real client after it. The Cloudflare address is removed.
     assert_equal LAN_IP, resolved_ip(peer: "127.0.0.1", xff: "#{CLOUDFLARE_IP}, #{LAN_IP}")
   end
 
