@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Hatchbox runs this before the build, from the release directory.
+#
+# The site lives in site/ of the yrby gem repo. site/.ruby-version pins the
+# Ruby the Docker image uses. On Hatchbox, use the newest Ruby and Bun that
+# Hatchbox installed for this deploy instead.
+set -euo pipefail
+
+ruby_version=$(ls "$HOME/.asdf/installs/ruby" | sort -V | tail -1)
+bun_version=$(ls "$HOME/.asdf/installs/bun" | sort -V | tail -1)
+for dir in "$RELEASE_DIR" "$RELEASE_DIR/site"; do
+  printf 'ruby %s\nbun %s\n' "$ruby_version" "$bun_version" > "$dir/.tool-versions"
+done
+echo "$ruby_version" > "$RELEASE_DIR/site/.ruby-version"
+
+# Hatchbox runs bundler commands such as `bundle clean` from the repo root,
+# where the Gemfile is the gem's own. Point them at the site's Gemfile.
+(cd "$RELEASE_DIR" && bundle config set --local gemfile "$RELEASE_DIR/site/Gemfile")
+
+# SQLite documents live in site/storage. Keep them across deploys.
+mkdir -p "$DIR/shared/storage"
+rm -rf "$RELEASE_DIR/site/storage"
+ln -s "$DIR/shared/storage" "$RELEASE_DIR/site/storage"
