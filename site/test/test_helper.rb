@@ -5,15 +5,15 @@ require_relative "support/updates"
 
 module ActiveSupport
   class TestCase
-    # Not parallelized. The throttle bookkeeping in this app is process-wide
-    # shared state (Rooms' seats and size cache, ConnectionLimiter, Rack::
-    # Attack's cache), and forked workers would each get their own copy while
-    # the tests assert on counts. Documents themselves are rows, wrapped in the
-    # per-test transaction like any Rails model.
+    # Tests don't run in parallel. The throttle counters are shared across the
+    # process (Rooms' seats and size cache, ConnectionLimiter, Rack::Attack's
+    # cache). Forked workers would each get their own copy, and the tests
+    # assert on counts. Documents are rows, so the per-test transaction covers
+    # them like any Rails model.
 
-    # The singletons the app reaches for through `.current`. Swapping them per
-    # test keeps one test's seats, slots, guards, and cached sizes out of the
-    # next, and lets a test set deliberately tiny caps.
+    # Replace the `.current` singletons before each test so seats, slots,
+    # guards, and cached sizes don't leak between tests, and so a test can set
+    # small caps.
     setup do
       Rooms.current = Rooms.new
       ConnectionLimiter.current = ConnectionLimiter.new

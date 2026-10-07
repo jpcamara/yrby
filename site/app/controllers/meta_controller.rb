@@ -1,15 +1,14 @@
-# The discoverability endpoints: robots.txt, sitemap.xml, and the llms.txt /
-# llms-full.txt pair. Rendered from the doc and demo lists rather than committed
-# as static files, so they can't drift as pages are added and the canonical host
-# stays one ENV-driven value everywhere it appears.
+# robots.txt, sitemap.xml, llms.txt, and llms-full.txt. These are built from
+# the doc and demo lists, so they stay current when pages are added, and they
+# use the same CANONICAL_HOST value as the rest of the site.
 class MetaController < ApplicationController
   before_action :cache_publicly
 
-  # Index the docs and the demos landing pages; keep crawlers out of the demo
-  # rooms. `GET /demos/:demo` mints a fresh room and redirects, so a crawler
-  # that followed those links would manufacture unlimited unique URLs, the
-  # room-mint trap. Disallowing each slug prefix closes both the mint and the
-  # room pages while leaving the /demos index crawlable.
+  # Crawlers can index the docs and the demos index page but not the demo
+  # rooms. `GET /demos/:demo` creates a new room id and redirects, so a crawler
+  # following those links would generate unlimited unique URLs. Disallowing
+  # each slug prefix covers both the redirect and the room pages, and /demos
+  # itself stays crawlable.
   def robots
     disallows = Demos.slugs.map { |slug| "Disallow: /demos/#{slug}" }
     body = <<~ROBOTS
@@ -21,9 +20,9 @@ class MetaController < ApplicationController
     render plain: body, content_type: "text/plain"
   end
 
-  # The real URL set: home, the demos index, and every doc page. Static in
-  # shape, so no lastmod machinery: a fresh domain needs the sitemap to be
-  # found at all, not to be precise about mtimes.
+  # Home, the Lexxy page, the demos index, and every doc page. There's no
+  # lastmod. A new domain needs a sitemap so search engines find the pages,
+  # and modification times don't help much with that.
   def sitemap
     urls = [canonical_host, canonical_url("/lexxy"), canonical_url("/demos")] +
            DocPage.all.map { |entry| canonical_url("/docs/#{entry.slug}") }
@@ -51,11 +50,11 @@ class MetaController < ApplicationController
       It needs no Node process and no third-party service.
 
       For Lexxy, the lexxy-realtime gem adds collaboration with a model macro,
-      a form helper, and a generator, and saves the rendered HTML back to the
-      record after each change: #{canonical_host}/lexxy
+      a form helper, and a generator. It saves the rendered HTML back to the
+      record after each change. See #{canonical_host}/lexxy.
 
-      Append .md to any docs page URL to get its markdown source. Every docs
-      page concatenated into one file is at #{canonical_host}/llms-full.txt.
+      Append .md to any docs page URL to get its markdown source. All the docs
+      pages in one file are at #{canonical_host}/llms-full.txt.
 
       ## Docs
 
@@ -64,8 +63,8 @@ class MetaController < ApplicationController
     render plain: body, content_type: "text/plain"
   end
 
-  # Every docs page concatenated, for a single-fetch corpus. Each page keeps its
-  # own title and metadata front-block.
+  # Every docs page in one file, so a reader can fetch all of them at once.
+  # Each page keeps its own title and metadata block.
   def llms_full
     body = DocPage.all.map do |entry|
       DocPage.find(entry.slug).markdown_with_frontmatter(canonical_url("/docs/#{entry.slug}"))

@@ -1,8 +1,9 @@
-// A collaborative whiteboard. The shared state is a Y.Map of shape records
+// A collaborative whiteboard. The shared state is a Y.Map of shapes
 // (id -> Y.Map{ x, y, text, color }). Double-click to add a note, drag to move
-// (writes x/y), type to edit. Real canvas tools (tldraw, Excalidraw) keep their
-// document as a record store and bind it to a Y.Map the same way, so this exact
-// provider drops under them. The server just syncs the Map.
+// it (this writes x and y), and type to edit. Canvas tools like tldraw and
+// Excalidraw store their document as records and bind them to a Y.Map the
+// same way, so this provider works with them too. The server just syncs the
+// Map.
 import * as Y from "yjs"
 import { connectRoom, uid, user, wireStoredPanel } from "./room.js"
 
@@ -28,7 +29,7 @@ function makeDraggable(el, m) {
     if (e.target.tagName === "TEXTAREA") return
     el.setPointerCapture(e.pointerId)
     const sx = e.clientX, sy = e.clientY, ox = m.get("x"), oy = m.get("y")
-    // One transaction per pointer move, so x and y travel as a single update.
+    // One transaction per pointer move, so x and y go out in one update.
     const onMove = (ev) => ydoc.transact(() => {
       m.set("x", ox + ev.clientX - sx)
       m.set("y", oy + ev.clientY - sy)
@@ -71,8 +72,8 @@ function render() {
 }
 shapes.observeDeep(render)
 
-// Seed the starter notes only on the FIRST catch-up (whenSynced doesn't re-fire
-// on reconnects, so a deliberately cleared board stays cleared).
+// Add the starter notes only on the first sync. whenSynced doesn't fire again
+// on reconnect, so a board someone cleared stays clear.
 provider.whenSynced.then(() => {
   if (shapes.size === 0) {
     addNote(40, 40, "Drag me")

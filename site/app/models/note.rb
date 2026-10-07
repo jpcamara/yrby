@@ -1,38 +1,39 @@
-# The record behind the Lexxy demo. One Note per room, minted by
-# the demo controller (find_or_create_by room id).
+# The record for the Lexxy demo. There's one Note per room, and NoteChannel
+# creates it when the first client subscribes.
 #
 # has_collaborative_rich_text comes from lexxy-realtime's Collaborative
-# concern. This app has no Action Text, so the concern's capability check
-# (`has_rich_text(name) if respond_to?(:has_rich_text)`) leaves `body` a plain
-# text column, and refresh_collaborative_rich_text writes the Y::Lexxy-rendered
-# HTML straight into it. The CRDT state itself is a Y::Document row bound to
-# this record (`record` + name "body"), created on first join and destroyed
-# with the note.
+# concern. This app doesn't use Action Text, and the concern only calls
+# `has_rich_text(name)` when the model responds to it, so `body` is a plain
+# text column. refresh_collaborative_rich_text writes the HTML that Y::Lexxy
+# renders directly into it. The CRDT state is a Y::Document row tied to this
+# record (`record` plus the name "body"). It's created on the first join and
+# destroyed with the note.
 class Note < ApplicationRecord
   include LexxyRealtime::Collaborative
 
   has_collaborative_rich_text :body
 
-  # lexxy-realtime scopes its signed GlobalIDs by purpose,
+  # lexxy-realtime gives its signed GlobalIDs a purpose per field,
   # LexxyRealtime.sgid_purpose(field) = "lexxy_realtime/<field>", so a token
-  # minted for one field cannot join another. This demo keeps that scoping but
-  # signs a ROOM id rather than a record id: the page must not mint a Note row
-  # on a GET (a crawler could then create rows without bound), so there is no
-  # record to build a GlobalID from at render time. The room token carries the
-  # same field/purpose scope; NoteChannel verifies it and creates the Note on
-  # subscribe, under the room budget (see DemosController#show, NoteChannel).
+  # made for one field can't join another. This demo keeps that scoping but
+  # signs a room id instead of a record id. The page can't create a Note row
+  # on a GET, because a crawler could then create rows without limit. So at
+  # render time there's no record to build a GlobalID from. The room token
+  # uses the same per-field purpose. NoteChannel verifies it and creates the
+  # Note on subscribe, within the room budget (see DemosController#show and
+  # NoteChannel).
   def self.sgid_purpose(field) = "lexxy_realtime/#{field}"
 
-  # A signed, field-scoped token for a room. The verifier is keyed by the
-  # purpose (which embeds the field), so a token minted for :body verifies only
-  # under :body: a token for one field cannot be replayed for another, the same
-  # guarantee the gem's sgid gives, minus the pre-created row.
+  # A signed token for a room, scoped to one field. The verifier is keyed by the
+  # purpose, which includes the field, so a token made for :body only verifies
+  # under :body and can't be reused for another field. The gem's sgid gives the
+  # same guarantee, but it needs a row created first.
   def self.room_token(room, field)
     room_verifier(field).generate(room.to_s)
   end
 
-  # The room a token was minted for, or nil when the token is missing, tampered,
-  # minted for a different field/purpose, or carries a malformed room id.
+  # The room a token was made for. Returns nil when the token is missing,
+  # edited, made for a different field, or has an invalid room id.
   def self.verified_room(token, field)
     return nil unless token.is_a?(String)
 
@@ -42,14 +43,13 @@ class Note < ApplicationRecord
 
   def self.room_verifier(field) = Rails.application.message_verifier(sgid_purpose(field))
 
-  # The site accepts no uploads, and the editor has attachments disabled, but
-  # a client that skips the page and speaks the protocol can still craft a
-  # document containing attachment nodes (a data: URL in an attachment's url
-  # attribute is a smuggled file). Y::Lexxy's default schema would render them
-  # into the stored column, so materialization suppresses them: attachment
-  # nodes render to nothing, text content survives. The gem's next release
-  # adds a nodes: option on has_collaborative_rich_text that turns this
-  # override back into a macro argument.
+  # The site doesn't accept uploads, and the editor has attachments turned off.
+  # A client that skips the page and talks the protocol directly can still
+  # build a document with attachment nodes, and a data: URL in an attachment's
+  # url attribute is a file. Y::Lexxy's default schema would render those into
+  # the stored column, so this app renders attachment nodes as nothing and
+  # keeps the text. When lexxy-realtime adds a nodes: option to
+  # has_collaborative_rich_text, this override can move into the macro call.
   SUPPRESSED_NODES = {
     "action_text_attachment" => ->(_node) { "" },
     "custom_action_text_attachment" => ->(_node) { "" },

@@ -6,17 +6,17 @@ Rails.application.configure do
   config.consider_all_requests_local = false
   config.action_controller.perform_caching = true
 
-  # Everything in public/ — the demo bundles and site.css, all built by bun —
-  # is served as plain static files with an hour of cache, matching the docs
-  # pages' own max-age. There is no asset pipeline; a deploy's new files are
-  # picked up within the hour, or immediately once a CDN purge is wired up.
+  # bun builds the demo bundles and site.css into public/, and the app serves
+  # them as plain static files with an hour of cache, the same max-age as the
+  # docs pages. There's no asset pipeline. Browsers and CDNs pick up a deploy's
+  # new files within the hour, or right away with a CDN purge.
   config.public_file_server.headers = { "cache-control" => "public, max-age=#{1.hour.to_i}" }
 
-  # Behind Fly's proxy, Kamal's proxy, or Cloudflare — all of which terminate
-  # TLS. FORCE_SSL=false runs production over plain http for a LAN or
-  # self-hosted box with no TLS in front (a Raspberry Pi on the home network);
-  # everything else about production — eager loading, no reloader, quiet logs —
-  # is exactly what a slow single-board machine wants.
+  # Fly's proxy, Kamal's proxy, and Cloudflare all terminate TLS in front of
+  # the app. FORCE_SSL=false runs production over plain http, for a LAN or
+  # self-hosted box with no TLS in front, such as a Raspberry Pi on a home
+  # network. The rest of the production settings (eager loading, no reloader,
+  # quiet logs) suit a slow single-board machine too.
   unless ENV["FORCE_SSL"] == "false"
     config.assume_ssl = true
     config.force_ssl = true
@@ -29,8 +29,7 @@ Rails.application.configure do
   config.silence_healthcheck_path = "/up"
   config.active_support.report_deprecations = false
 
-  # One process, so an in-memory cache is the only cache that makes sense. It
-  # also backs Rack::Attack's counters.
+  # The site runs one process by default, so it uses an in-memory cache.
   config.cache_store = :memory_store
 
   config.i18n.fallbacks = true

@@ -1,15 +1,14 @@
 # A documentation page: one markdown file under site/docs, rendered at request
 # time.
 #
-# The repo README is the canonical reference for yrby's API. These pages are a
-# navigable copy of it, and copies drift, so every page carries a link back to
-# the README section it came from and says plainly which one wins. `source` is
-# the anchor for that link.
+# The repo README is the reference for yrby's API, and these pages are a copy
+# that's easier to browse. Copies drift, so every page links back to the
+# README section it came from and says to trust the README if they disagree.
+# `source` is the anchor for that link.
 class DocPage
-  # `seo_title` and `description` drive the <title> and meta description, so a
-  # page can end in a search phrase people actually type even when its on-page
-  # h1 is a short navigational name ("Storage", "Presence"). Both fall back to
-  # the markdown when unset.
+  # `seo_title` and `description` set the <title> and meta description. They
+  # let a page use words people search for when its h1 is a short nav name
+  # like "Storage" or "Presence". Both fall back to the markdown when unset.
   Entry = Data.define(:slug, :nav, :source, :seo_title, :description)
 
   # Nav order.
@@ -23,8 +22,8 @@ class DocPage
     Entry.new(
       slug: "document-channel", nav: "The document channel", source: "actioncable-integration",
       seo_title: "The document channel: Yjs sync over Action Cable · yrby",
-      description: "How yrby syncs Yjs documents over Action Cable. Covers the channel " \
-                   "the gem ships, writing your own, authorization, and delivery guarantees."
+      description: "How yrby syncs Yjs documents over Action Cable. Covers the built-in " \
+                   "channel, writing your own, authorization, and delivery guarantees."
     ),
     Entry.new(
       slug: "storage", nav: "Storage", source: "actioncable-integration",
@@ -62,9 +61,9 @@ class DocPage
 
   README_URL = "https://github.com/jpcamara/yrby/blob/main/README.md".freeze
 
-  # The syntect theme Commonmarker highlights fenced code with, server-side.
-  # InspiredGitHub is a light theme whose token colors read well on the white
-  # code sheets (the stylesheet overrides the background to match).
+  # The syntect theme Commonmarker uses to highlight fenced code on the server.
+  # InspiredGitHub is a light theme whose colors read well on the white code
+  # sheets. The stylesheet overrides its background to match.
   CODE_THEME = "InspiredGitHub".freeze
 
   ROOT = Rails.root.join("docs")
@@ -103,8 +102,8 @@ class DocPage
 
   def source_url = "#{README_URL}##{entry.source}"
 
-  # The first level-1 heading is the on-page title, so it lives in the markdown
-  # and can't fall out of step with it.
+  # The page title is the first level-1 heading in the markdown, so the two
+  # always match.
   def title = @title ||= @markdown[/^#\s+(.+)$/, 1] || entry.nav
 
   # The <title> and meta description. Fall back to the on-page title and a
@@ -113,16 +112,16 @@ class DocPage
 
   def description = entry.description || "yrby documentation: #{title}."
 
-  # Level-2 headings, for the in-page contents list. Read from the RENDERED
-  # HTML, so the anchors are the exact ids Commonmarker generated, a
-  # re-slugify here could drift from the real ids and produce dead links.
+  # Level-2 headings for the in-page contents list. They're read from the
+  # rendered HTML so the anchors use the ids Commonmarker generated. Slugifying
+  # the text again here could produce different ids and dead links.
   def sections
     @sections ||= Nokogiri::HTML5.fragment(html).css("h2[id]").map { |h| [h.text, h["id"]] }
   end
 
   # `unsafe: false` makes Commonmarker escape raw HTML in the markdown, so the
-  # rendered string is safe to mark as such. The source is these files, not user
-  # input, but escaping is the right default for a renderer either way.
+  # result is safe to mark html_safe. We write these markdown files ourselves,
+  # but a renderer should still escape by default.
   def html
     @html ||= Commonmarker.to_html(
       @markdown,
@@ -135,10 +134,10 @@ class DocPage
     ).html_safe
   end
 
-  # The raw markdown, with a small metadata front-block, for the `.md` route and
-  # `Accept: text/markdown`, the shape coding agents read best. The body keeps
-  # its own `#` title; the front-block adds the description, the canonical URL,
-  # and the pointer to the authoritative README section.
+  # The raw markdown with a short metadata block on top, for the `.md` route
+  # and `Accept: text/markdown`. Coding agents read markdown best. The body
+  # keeps its own `#` title. The block adds the description, the page URL, and
+  # a link to the README section the page copies.
   def markdown_with_frontmatter(canonical_url)
     <<~FRONT + @markdown
       > #{description}

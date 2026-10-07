@@ -1,7 +1,7 @@
-// Collaborative code. The shared state is a Y.Text; the official
-// y-codemirror.next binding maps it to CodeMirror 6 and renders remote
-// cursors and selections from awareness. Same channel as every other demo —
-// the server has no idea this is code, it syncs the Y.Text.
+// Collaborative code. The shared state is a Y.Text, and the y-codemirror.next
+// binding connects it to CodeMirror 6 and draws remote cursors and selections
+// from awareness. It uses the same channel as the other demos. The server
+// doesn't know this is code. It just syncs the Y.Text.
 import * as Y from "yjs"
 import { EditorState } from "@codemirror/state"
 import { EditorView, basicSetup } from "codemirror"
@@ -25,9 +25,9 @@ new EditorView({
   }),
 })
 
-// Seed the starter snippet only on the FIRST catch-up: whenSynced resolves with
-// the server's state already applied, and doesn't re-fire on reconnects, so a
-// deliberately emptied document stays empty.
+// Add the starter snippet only on the first sync. whenSynced resolves after
+// the server's state is applied and doesn't fire again on reconnect, so a
+// document someone emptied stays empty.
 provider.whenSynced.then(() => {
   if (ytext.length === 0) {
     ytext.insert(0, "// Open this room in a second window and edit this code in both.\n" +

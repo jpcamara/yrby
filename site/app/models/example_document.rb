@@ -1,4 +1,5 @@
-# One pre-provisioned record; its collaborative body uses yrby's default store.
-# The ordinary room sweeper expires its Y::Document state after a day idle.
+# A single record created ahead of time. Its collaborative body uses yrby's
+# default store, and the room sweeper deletes its Y::Document state after a
+# day with no activity.
 class ExampleDocument < ApplicationRecord
 end

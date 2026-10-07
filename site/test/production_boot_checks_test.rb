@@ -1,8 +1,9 @@
 require "test_helper"
 
-# The fail-closed production boot checks (config/initializers/production_boot_checks.rb).
-# The initializer only fires under RAILS_ENV=production; the logic is factored
-# into ProductionBootChecks so it can be exercised here directly.
+# The production boot checks (config/initializers/production_boot_checks.rb)
+# stop the app from booting with an unsafe config. The initializer only runs
+# when RAILS_ENV=production, so the logic lives in ProductionBootChecks where
+# these tests can call it.
 class ProductionBootChecksTest < ActiveSupport::TestCase
   STRONG = ("a".."z").to_a.join + ("A".."F").to_a.join # 32 chars
 
@@ -31,7 +32,7 @@ class ProductionBootChecksTest < ActiveSupport::TestCase
     assert_includes problems(secret: STRONG, origins: nil), "ALLOWED_ORIGINS is not set"
   end
 
-  test "a blank/comma-only origin list fails" do
+  test "a blank or comma-only origin list fails" do
     assert_includes problems(secret: STRONG, origins: " , "), "ALLOWED_ORIGINS is not set"
   end
 

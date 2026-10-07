@@ -1,7 +1,8 @@
 require "test_helper"
 
-# Execute the actual published code blocks, so valid rendered markdown cannot
-# hide a broken Ruby contract or loss of acknowledged CRDT dependencies.
+# Runs the Ruby code blocks from the published docs. Markdown can render fine
+# while the Ruby in it is broken, or while it drops updates that are still
+# waiting on a dependency. These tests catch both.
 class DocumentationExamplesTest < ActiveSupport::TestCase
   def ruby_blocks(page)
     Rails.root.join("docs", "#{page}.md").read.scan(/```ruby\n(.*?)```/m).flatten
@@ -24,8 +25,9 @@ class DocumentationExamplesTest < ActiveSupport::TestCase
       namespace = Module.new
       namespace.module_eval(code)
       channel = namespace.const_get(:ScratchpadChannel).allocate
-      # RPC state serialization is covered by AnyCable; give this hook probe a
-      # state slot so it can execute the exact example's on_load/on_change.
+      # AnyCable's own tests cover RPC state serialization. Here the channel
+      # just needs a doc_state accessor so the example's on_load and on_change
+      # can run as written.
       channel.singleton_class.attr_accessor :doc_state
       klass = channel.class
       [Updates::CHAIN[0], Updates::CHAIN[2]].each do |update|

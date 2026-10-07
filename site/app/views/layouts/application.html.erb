@@ -13,8 +13,8 @@
     <meta name="theme-color" content="#ece8e0">
     <link rel="canonical" href="<%= page_canonical %>">
 
-    <%# Open Graph: how the site unfurls in Slack, Discord, X, Mastodon, and
-        every link preview. og:image is the one static card in public/. %>
+    <%# Open Graph tags control link previews in Slack, Discord, X, Mastodon,
+        and elsewhere. og:image is a static card in public/. %>
     <meta property="og:site_name" content="yrby">
     <meta property="og:title" content="<%= page_title %>">
     <meta property="og:description" content="<%= page_desc %>">
@@ -33,14 +33,14 @@
     <%# Tells createConsumer() where the cable server is. %>
     <%= action_cable_meta_tag %>
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <%# Built by `bun run build:css` (Tailwind v4); served as a plain static
-        file, like the demo bundles. %>
+    <%# `bun run build:css` builds this with Tailwind v4. It's served as a
+        static file, like the demo bundles. %>
     <link rel="stylesheet" href="<%= busted "/site.css" %>">
     <%= yield :head %>
   </head>
 
-  <%# overflow-x-clip: the backstop against any residual wide element. The
-      page never scrolls horizontally; wide content scrolls inside its own
+  <%# overflow-x-clip keeps a stray wide element from scrolling the page
+      sideways. Wide content like code blocks scrolls inside its own
       overflow-x-auto container. %>
   <body class="flex min-h-dvh flex-col overflow-x-clip">
     <a href="#main" class="skip-link">Skip to content</a>

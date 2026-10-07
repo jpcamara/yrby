@@ -1,5 +1,5 @@
-# Documentation pages. Server-rendered markdown, no per-visitor content, so a
-# CDN can serve nearly all of this traffic without the app seeing it.
+# Documentation pages. They're markdown rendered on the server with nothing
+# specific to a visitor, so a CDN can serve almost all of this traffic.
 class DocsController < ApplicationController
   def show
     @page = DocPage.find(params[:page])
@@ -8,9 +8,9 @@ class DocsController < ApplicationController
     cache_publicly
     respond_to do |format|
       format.html { render :show }
-      # The raw markdown, for `Accept: text/markdown` and `/docs/:page.md`,
-      # the format coding agents read best. Nearly free: DocPage already holds
-      # the source.
+      # The raw markdown, for `Accept: text/markdown` and `/docs/:page.md`.
+      # Coding agents read markdown best. DocPage already holds the source, so
+      # this costs almost nothing.
       format.md do
         render plain: @page.markdown_with_frontmatter(canonical_url("/docs/#{@page.slug}")),
                content_type: "text/markdown"
@@ -20,10 +20,10 @@ class DocsController < ApplicationController
 
   private
 
-  # public, max-age=1h, stale-while-revalidate=24h. The CDN answers from cache
-  # for an hour, then keeps answering from the stale copy while it refreshes in
-  # the background, so a deploy never sends a wave of misses at a single
-  # process, and a restart is invisible to readers.
+  # public, max-age=1h, stale-while-revalidate=24h. The CDN serves from cache
+  # for an hour. After that it serves the stale copy while it refreshes in the
+  # background. A deploy doesn't send a burst of cache misses to the single
+  # process, and readers don't notice a restart.
   def cache_publicly
     expires_in Limits::DOCS_MAX_AGE.seconds,
                public: true,

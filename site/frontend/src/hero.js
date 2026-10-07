@@ -1,9 +1,9 @@
 // The home page hero: a replay of two people editing one document. It's a
-// scripted animation (the demos are the live version), so it needs no cable
-// and costs the server nothing.
+// scripted animation (the demos are the live version), so it doesn't open a
+// cable or use the server.
 //
-// Markup (pages/index.html.erb) renders the finished state, so a visitor
-// without JavaScript or with reduced motion sees a complete picture.
+// pages/index.html.erb renders the finished state, so a visitor without
+// JavaScript or with reduced motion sees the whole picture.
 
 const PEERS = {
   you: { label: "you", color: "var(--color-peer-you)" },
@@ -11,9 +11,9 @@ const PEERS = {
 }
 const START = "Launch checklist\n"
 const TITLE_END = "Launch checklist".length
-// you moves to the end only after ada finishes her line. Two carets at the
-// same spot would interleave their letters (a real CRDT does too, but it makes
-// for a confusing demo).
+// "you" moves to the end only after ada finishes her line. Two carets at the
+// same spot would interleave their letters. A real CRDT does that too, but it
+// makes the demo confusing.
 const SCRIPT = {
   you: [{ to: "title" }, { type: " for Friday" }, { after: "ada" }, { to: "end" }, { type: "\n• Publish yrby-client 0.6.0" }],
   ada: [{ to: "end" }, { type: "• Tag the GitHub release" }],

@@ -1,44 +1,44 @@
-# Per-connection limits: what one physical WebSocket may do across all of its
+# Per-connection limits: what one WebSocket can do across all of its
 # subscriptions.
 #
-# ConnectionLimiter caps how many sockets an address holds. This caps what one
-# socket can spend once it is open, and it is keyed to the connection rather
-# than to a subscription on purpose: the flaws it closes are all about a socket
-# that opens many subscriptions:
+# ConnectionLimiter limits how many sockets an address holds. This class limits
+# what one open socket can do. It's keyed by connection, not subscription,
+# because every problem it handles comes from one socket opening many
+# subscriptions:
 #
-#   subscriptions  a hard count, so one socket can't subscribe to thousands of
-#                  distinct rooms (each of which would take a seat and could
-#                  mint a document, walking past the room cap).
-#   subscribe rate a token bucket on `subscribe` commands, so a socket can't
-#                  churn subscribe/unsubscribe to cycle through rooms.
-#   frames         ONE frame bucket for the whole connection. A per-subscription
-#                  bucket resets on every subscribe and multiplies with the
-#                  number of subscriptions, a socket could reset its burst by
-#                  re-subscribing, or run N buckets' worth of rate at once. One
-#                  bucket per socket has neither hole.
-#   one seat/room  a connection may hold at most one seat in a given room, so it
-#                  can't take every peer slot in a room by itself.
+#   subscriptions   a hard count, so one socket can't subscribe to thousands
+#                   of rooms. Each would take a seat and could create a
+#                   document, going over the room cap.
+#   subscribe rate  a token bucket on `subscribe` commands, so a socket can't
+#                   cycle through rooms by subscribing and unsubscribing.
+#   frames          one frame bucket for the whole connection. A bucket per
+#                   subscription would reset on every subscribe and add up
+#                   across subscriptions, so a socket could reset its burst by
+#                   subscribing again or get N times the rate.
+#   one seat/room   a connection holds at most one seat in a room, so it can't
+#                   take every peer slot by itself.
 #
-# Keyed by connection_id, which is minted in ApplicationCable::Connection#connect
-# and travels as a connection identifier, so it is the same string on every
-# command of a connection (and is available in channel tests). The guard is
-# dropped on the Disconnect RPC; `sweep` reaps a guard whose disconnect never
-# arrived, on the RoomSweeper's cadence.
+# Guards are keyed by connection_id. ApplicationCable::Connection#connect
+# creates it, and it's a connection identifier, so every command on a
+# connection has the same string (channel tests have it too). The guard is
+# removed on the Disconnect RPC. If that RPC never arrives, `sweep` removes it
+# on the RoomSweeper's schedule.
 #
-# The guard is also this node's LIVENESS record for a connection, and the only
-# safe leak backstop for its room seats and its connection slot. `seen_at` is
-# stamped on every server-visible frame, a document update OR an awareness
-# frame (awareness reaches Ruby now that the demo routes it through `send`
-# instead of a whisper). A live viewer, even one only reading, keeps its clock
-# fresh: yrby-client re-emits its awareness on a heartbeat (~every 15s, well
-# under the TTL), so an idle-but-open tab stays visibly alive. A connection
-# silent past CONNECTION_SLOT_TTL is therefore a genuine leak (the Disconnect
-# RPC never arrived), and the sweep reaps it: it releases the connection's room
-# seats (freeing the room's peer slot and dropping it from occupied_keys, so the
-# room sweeper can evict a truly-abandoned room) and its connection slot, then
-# forgets the guard. Reaping a still-live connection can only ever loosen a cap,
-# never wrongly reject, the safe direction, and anycable-go's own
-# ANYCABLE_MAX_CONN is the hard ceiling underneath all of this.
+# This class is also how the server knows a connection is still alive, and
+# it's the only safe way to free the seats and slot of a connection that
+# leaked. `seen_at` is updated on every frame the server sees, both document
+# updates and awareness. The demo sends awareness through `send`, so it
+# reaches Ruby. A tab that's open but idle still sends awareness:
+# yrby-client repeats it on a heartbeat about every 15 seconds, well under the
+# TTL. So a connection that's silent past CONNECTION_SLOT_TTL has leaked (its
+# Disconnect RPC never arrived).
+#
+# The sweep then releases that connection's room seats, which frees the peer
+# slot and removes the room from occupied_keys so the room sweeper can delete
+# an abandoned room. It releases the connection slot and removes the guard.
+# If the sweep removes a connection that's still open, the only effect is a
+# looser limit. No one gets wrongly rejected. anycable-go's ANYCABLE_MAX_CONN
+# is the hard limit under all of this.
 class ConnectionGuard
   class << self
     attr_writer :current
@@ -46,9 +46,9 @@ class ConnectionGuard
     def current = @current ||= new
   end
 
-  # One connection's live budget. Not serialized: this registry is process
-  # memory, like the seats and the connection slots, and every connection lives
-  # in this one node.
+  # One connection's limits. It isn't serialized. Like the seats and the
+  # connection slots, it lives in process memory, and every connection runs
+  # through this one server.
   class Guard
     attr_accessor :seen_at, :ip, :slot_token
 
@@ -62,13 +62,14 @@ class ConnectionGuard
       @seen_at = now
     end
 
-    # The rooms this connection is seated in, a snapshot the reaper releases
-    # when the guard is reaped without a Disconnect.
+    # A copy of the rooms this connection has seats in. The sweep releases
+    # them when it removes a guard that never got a Disconnect.
     def seated_keys = @keys.to_a
 
-    # :ok, :rate_limited past the subscribe bucket, :duplicate for a room this
-    # connection is already in, or :too_many past the subscription cap. A
-    # rate-limited or duplicate attempt does not consume a subscription slot.
+    # Returns :ok, :rate_limited when the subscribe bucket is empty,
+    # :duplicate for a room this connection is already in, or :too_many at the
+    # subscription cap. A rate-limited or duplicate attempt doesn't use up a
+    # subscription slot.
     def admit_subscription(key, now)
       @seen_at = now
       return :rate_limited unless @subscribe.take(now)
@@ -104,9 +105,9 @@ class ConnectionGuard
     @mutex = Mutex.new
   end
 
-  # Record a connection's identity (its throttle IP and slot token) at connect,
-  # so the sweep can free its connection slot if it leaks. Creates the guard
-  # (every accepted connection gets one) and stamps it live.
+  # Records a connection's throttle IP and slot token at connect, so the sweep
+  # can free its slot if it leaks. Every accepted connection gets a guard, and
+  # this marks it as seen now.
   def register(connection_id, ip, slot_token, now = monotonic)
     @mutex.synchronize do
       g = guard(connection_id, now)
@@ -127,9 +128,9 @@ class ConnectionGuard
       next unless g
 
       g.release_subscription(key, now)
-      # Keep the guard while the socket is open even with no subscriptions: its
-      # frame bucket must not reset just because it dropped to zero rooms. It is
-      # dropped on disconnect, or reaped by the sweep.
+      # Keep the guard while the socket is open, even with no subscriptions, so
+      # its frame bucket doesn't reset when it leaves its last room. The guard
+      # is removed on disconnect or by the sweep.
     end
     nil
   end
@@ -146,18 +147,20 @@ class ConnectionGuard
     @mutex.synchronize { @guards[connection_id]&.size || 0 }
   end
 
-  # The Disconnect RPC fired (or the connection was rejected): drop its guard.
+  # Called on the Disconnect RPC, or when the connection was rejected.
   def forget(connection_id)
     @mutex.synchronize { @guards.delete(connection_id) }
     nil
   end
 
-  # Reap guards whose Disconnect never arrived, freeing each one's room seats and
-  # connection slot. Returns the number reclaimed. The silent guards are removed
-  # from the registry under the lock, then their seats and slots are released
-  # OUTSIDE it: `rooms` and `limiter` take their own mutexes, and holding this
-  # one across them would invite a lock-order deadlock. A removed guard is ours
-  # alone, so reading its keys without the lock is safe.
+  # Removes guards whose Disconnect never arrived and frees each one's room
+  # seats and connection slot. Returns how many it removed.
+  #
+  # It takes the silent guards out of the registry under the lock, then
+  # releases their seats and slots outside it. `rooms` and `limiter` take their
+  # own mutexes, and holding this one while calling them could deadlock on lock
+  # order. Once a guard is out of the registry nothing else can reach it, so
+  # reading its keys without the lock is safe.
   def sweep(now = monotonic, rooms: Rooms.current, limiter: ConnectionLimiter.current)
     dead = @mutex.synchronize do
       stale = @guards.select { |_id, g| now - g.seen_at >= @max_age }
@@ -173,8 +176,8 @@ class ConnectionGuard
 
   private
 
-  # Free a reaped connection's room seats and its connection slot. Called
-  # without the guard-registry lock (see sweep).
+  # Frees a removed connection's room seats and connection slot. Called without
+  # the registry lock (see sweep).
   def reclaim(guard, rooms, limiter)
     guard.seated_keys.each { |key| rooms.leave(key) }
     limiter.release(guard.ip, guard.slot_token) if guard.ip && guard.slot_token

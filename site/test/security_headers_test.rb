@@ -4,15 +4,15 @@ require "test_helper"
 class SecurityHeadersTest < ActionDispatch::IntegrationTest
   setup { Rack::Attack.cache.store.clear }
 
-  test "a docs page carries the CSP with a strict script-src" do
+  test "a docs page has a CSP with a strict script-src" do
     get "/docs/getting-started"
 
     csp = response.headers["Content-Security-Policy"]
 
-    assert_predicate csp, :present?, "every response must carry a CSP"
+    assert_predicate csp, :present?, "every response must have a CSP"
     assert_includes csp, "script-src 'self'"
     assert_not_includes csp, "script-src 'self' 'unsafe-inline'",
-                        "script-src must be strict: no inline scripts anywhere"
+                        "script-src must not allow inline scripts"
     assert_includes csp, "frame-ancestors 'none'"
     assert_includes csp, "object-src 'none'"
     assert_includes csp, "base-uri 'self'"
@@ -35,7 +35,7 @@ class SecurityHeadersTest < ActionDispatch::IntegrationTest
     assert_equal "strict-origin-when-cross-origin", response.headers["Referrer-Policy"]
   end
 
-  test "a demo page carries the CSP too" do
+  test "a demo page has a CSP too" do
     get "/demos/spreadsheet/room1"
 
     assert_predicate response.headers["Content-Security-Policy"], :present?
@@ -43,8 +43,8 @@ class SecurityHeadersTest < ActionDispatch::IntegrationTest
   end
 
   test "no page over plain http sends HSTS" do
-    # The test/dev stack runs without force_ssl, like a plain-http LAN box;
-    # HSTS must be absent there (it is only correct once TLS is terminated).
+    # Test and development run without force_ssl, like a plain-http LAN box.
+    # HSTS should only be sent once TLS is in place, so it must be absent here.
     get "/docs/getting-started"
 
     assert_nil response.headers["Strict-Transport-Security"]

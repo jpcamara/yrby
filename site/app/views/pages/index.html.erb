@@ -68,9 +68,9 @@
     <% end %>
   </div>
   <p class="mt-3 text-sm text-zinc-500">
-    A scripted replay. The
+    This is a scripted replay. The
     <%= link_to "demos", demos_path, class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
-    are live: open one in two windows and type in both.
+    are live, so open one in two windows and type in both.
   </p>
 </section>
 
@@ -80,16 +80,16 @@
     <div>
       <h2 class="font-serif text-4xl leading-[1.04] tracking-tight text-zinc-100 sm:text-5xl">How it works</h2>
       <p class="mt-5 leading-7 text-zinc-400">
-        Put the tag in a view where the user is allowed to edit the post. It
-        includes a signed token for <code>@post.body</code>, and the browser
-        subscribes to the gem's channel with it. The channel saves each change
-        to your database before sending it to anyone else.
+        Put the tag in a view where the user is allowed to edit the post. The
+        tag includes a signed token for <code>@post.body</code>, and the
+        browser uses it to subscribe to the gem's channel. The channel saves
+        each change to your database before it sends the change to anyone
+        else. Any Ruby code in your app can load the saved document, for
+        search, emails, or plain HTML.
       </p>
       <p class="mt-4 leading-7 text-zinc-400">
         In the browser, you import the client and attach your editor once the
-        document has synced. Any editor with a Yjs binding works. On the
-        server, Ruby can read the saved document directly, for search,
-        emails, or plain HTML.
+        document has synced. Any editor with a Yjs binding works.
       </p>
       <p class="mt-5"><%= link_to "Getting started →", doc_path("getting-started"), class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %></p>
     </div>
@@ -111,10 +111,10 @@
   </p>
   <dl class="mt-8 border-t border-zinc-700">
     <% [
-      ["yrby", "gem", "Ruby bindings for y-crdt, the Rust implementation of Yjs. Documents, the sync protocol, and the Tiptap and Lexxy HTML renderers.", "https://rubygems.org/gems/yrby", "https://github.com/jpcamara/yrby"],
-      ["yrby-rails", "gem", "The Rails side: the document channel, the Active Record models, the view tag, and the install generator.", "https://rubygems.org/gems/yrby-rails", "https://github.com/jpcamara/yrby"],
-      ["yrby-client", "npm", "The browser side: the yrby-document element and a Yjs provider for Action Cable and AnyCable.", "https://www.npmjs.com/package/yrby-client", "https://github.com/jpcamara/yrby/tree/main/packages/client"],
-      ["lexxy-realtime", "gem + npm", "Collaborative editing for Lexxy, Basecamp's Action Text editor. Built on the three above.", "https://rubygems.org/gems/lexxy-realtime", "https://github.com/jpcamara/lexxy-realtime"]
+      ["yrby", "gem", "Ruby bindings for y-crdt, the Rust implementation of Yjs. It includes documents, the sync protocol, and HTML renderers for Tiptap and Lexxy.", "https://rubygems.org/gems/yrby", "https://github.com/jpcamara/yrby"],
+      ["yrby-rails", "gem", "The Rails integration. It includes the document channel, the Active Record models, the view tag, and the install generator.", "https://rubygems.org/gems/yrby-rails", "https://github.com/jpcamara/yrby"],
+      ["yrby-client", "npm", "The browser package. It includes the yrby-document element and a Yjs provider for Action Cable and AnyCable.", "https://www.npmjs.com/package/yrby-client", "https://github.com/jpcamara/yrby/tree/main/packages/client"],
+      ["lexxy-realtime", "gem + npm", "Collaborative editing for Lexxy, Basecamp's Action Text editor. It's built on the three packages above.", "https://rubygems.org/gems/lexxy-realtime", "https://github.com/jpcamara/lexxy-realtime"]
     ].each do |name, kind, body, registry, source| %>
       <div class="grid gap-2 border-b border-zinc-700 py-5 sm:grid-cols-[15rem_minmax(0,1fr)_auto] sm:gap-6">
         <dt class="font-mono text-zinc-100"><%= name %> <span class="ml-1 text-xs text-zinc-500"><%= kind %></span></dt>

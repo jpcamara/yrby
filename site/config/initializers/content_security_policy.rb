@@ -1,17 +1,16 @@
 # Content Security Policy and the other response security headers.
 #
-# A public demo site with no authentication and no user-supplied HTML, but the
-# policy still earns its place: it is what keeps an injected script from
-# reaching anything, and it documents that this app loads nothing from anywhere
-# else.
+# The site has no authentication and no user-supplied HTML, but the policy is
+# still useful. It stops an injected script from running, and it makes clear
+# that the app loads nothing from other origins.
 #
-# script-src is strict 'self' with NO 'unsafe-inline' — there are no inline
-# <script> blocks or on* handlers anywhere (all behavior lives in the bun
-# bundles), so an injected script has no way to execute. style-src does allow
-# 'unsafe-inline', pragmatically and at low risk: the server-side syntax
-# highlighter (Commonmarker/syntect) stamps inline `style=` on code spans, the
-# Lexxy editor sets styles at runtime, and the demos color the elements they
-# build (presence chips, cell fills). Style injection can't run code.
+# script-src is 'self' with no 'unsafe-inline'. There are no inline <script>
+# blocks or on* handlers (all behavior is in the bun bundles), so an injected
+# script can't execute. style-src allows 'unsafe-inline', which is low risk.
+# The server-side syntax highlighter (Commonmarker with syntect) puts inline
+# `style=` on code spans, the Lexxy editor sets styles at runtime, and the
+# demos color the elements they build (presence chips, cell fills). Injected
+# styles can't run code.
 Rails.application.configure do
   config.content_security_policy do |policy|
     policy.default_src :self
@@ -24,13 +23,13 @@ Rails.application.configure do
     policy.connect_src :self, "ws:", "wss:"
     policy.object_src  :none
     policy.base_uri    :self
-    # The demos are not meant to be framed; this is the modern X-Frame-Options
-    # (the legacy header itself is set to DENY in config/application.rb, where
-    # default_headers can still be changed before Response snapshots them).
+    # The demos aren't meant to be framed. This does the job of X-Frame-Options
+    # for modern browsers. config/application.rb also sets X-Frame-Options to
+    # DENY, because that's where default_headers can still be changed.
     policy.frame_ancestors :none
   end
 end
 
-# Rails already sends nosniff and Referrer-Policy by default, and — once
-# force_ssl is on: HSTS, so a plain-http box (FORCE_SSL=false) never sends
-# Strict-Transport-Security, which is exactly right.
+# Rails sends nosniff and Referrer-Policy by default. It sends HSTS only when
+# force_ssl is on, so a plain-http box (FORCE_SSL=false) doesn't send
+# Strict-Transport-Security.

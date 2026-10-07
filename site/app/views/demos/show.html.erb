@@ -1,6 +1,7 @@
 <% content_for :title, "#{@demo.title} · yrby demos" %>
-<%# Room URLs are per-visitor and ephemeral: never index them, and point the
-    canonical at the demos index so any that leak out don't compete with it. %>
+<%# Each room URL belongs to one visitor and gets deleted later, so search
+    engines shouldn't index it. The canonical link points at the demos index
+    in case a room URL gets shared somewhere public. %>
 <% content_for :canonical, canonical_url("/demos") %>
 <% content_for :head do %>
   <meta name="robots" content="noindex, nofollow">
@@ -46,10 +47,10 @@
 
   <%= render "demos/#{@demo.slug}" %>
 
-  <%# The server-side read panel, for every shape demo (the Lexxy demo
-      carries its own note.body panel). Same behavior as that one: it fetches
-      when opened and stays live while open. read_text/read_xml return a
-      string; read_map/read_array return JSON. %>
+  <%# The server-side read panel for the shape demos. The Lexxy demo has its
+      own note.body panel that works the same way. Both fetch when opened and
+      refetch after each change while open. read_text and read_xml return a
+      string, and read_map and read_array return JSON. %>
   <% if @demo.read %>
     <% call = %{doc.#{"read_#{@demo.read.kind}"}(\"#{@demo.read.root}\")} %>
     <details class="stored group mt-4 rounded-xl border border-zinc-800 bg-panel">

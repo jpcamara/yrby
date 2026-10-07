@@ -1,14 +1,14 @@
 require "test_helper"
 
-# The lexxy-realtime channel: signed, field-scoped room-token auth, the Note
-# created lazily on subscribe (never on a page GET), record-based storage, and
-# the server-side materialization into the note's plain body column.
+# The lexxy-realtime channel: signed room tokens scoped to a field, the Note
+# created on subscribe (not on a page GET), storage through the record, and
+# the server rendering the note's plain body column.
 class NoteChannelTest < ActionCable::Channel::TestCase
   tests NoteChannel
 
-  # A full Lexical document captured from a real Lexxy editor (the fixture
-  # lexxy-realtime's own tests pin byte-parity with). Y::Lexxy renders it, so
-  # materialization can be asserted on real content here.
+  # A full Lexical document captured from a real Lexxy editor. lexxy-realtime's
+  # own tests use the same fixture to check byte-for-byte output. Y::Lexxy
+  # renders it, so these tests check rendering against real content.
   LEXXY_STATE = File.binread(File.expand_path("fixtures/lexxy_full.bin", __dir__))
   ROOM = "e2e-room".freeze
 
@@ -28,8 +28,8 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     assert transmissions.any? { |m| m["update"].present? }, "expected a SyncStep1 handshake"
     note = Note.find_by(room: ROOM)
 
-    assert_not_nil note, "the note is minted on subscribe"
-    # The join minted the record-bound document with the derived key.
+    assert_not_nil note, "the note is created on subscribe"
+    # The join created the record's document with the expected key.
     assert Y::Document.exists?(key: "note/#{note.id}/body")
     assert_equal 1, Rooms.current.peers("note/#{note.id}/body")
   end
@@ -42,16 +42,16 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     assert_equal 0, Y::Document.count
   end
 
-  test "a token minted for another field is rejected" do
-    # The verifier is keyed by the field-scoped purpose, so a body token does
-    # not verify under a different field: the gem's field scoping.
+  test "a token made for another field is rejected" do
+    # The verifier is keyed by a purpose that includes the field, so a token
+    # for one field doesn't verify for another.
     subscribe token: Note.room_token(ROOM, :title), field: "body"
 
     assert_predicate subscription, :rejected?
     assert_equal 0, Note.count
   end
 
-  test "a body token presented for another field is rejected" do
+  test "a body token sent for another field is rejected" do
     subscribe token: token, field: "title"
 
     assert_predicate subscription, :rejected?
@@ -64,10 +64,10 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     subscribe_with_valid_token
 
     assert_predicate subscription, :rejected?
-    assert_equal 0, Note.count, "a subscribe past the cap must not mint a note"
+    assert_equal 0, Note.count, "a subscribe past the cap must not create a note"
   end
 
-  test "a re-subscribe reuses the existing note rather than creating another" do
+  test "subscribing again reuses the existing note" do
     subscribe_with_valid_token
     note = Note.find_by!(room: ROOM)
     unsubscribe
@@ -87,7 +87,7 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, Note.find_by!(room: ROOM).collaborative_document(:body).updates.count
   end
 
-  test "a lexical update materializes into the plain body column" do
+  test "a Lexical update is rendered into the plain body column" do
     subscribe_with_valid_token
 
     assert_nil Note.find_by!(room: ROOM).body
@@ -101,17 +101,17 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     assert_includes body, "<h1>Heading One</h1>"
   end
 
-  test "a non-lexical update is stored but does not materialize" do
+  test "a non-Lexical update is stored but not rendered" do
     subscribe_with_valid_token
     perform :receive, "update" => Updates.frame(Updates::HELLO), "id" => 1
 
-    assert_equal [1], acks, "recording succeeds regardless"
-    assert_nil Note.find_by!(room: ROOM).body, "Y::Lexxy returns nil for a foreign shape; the column stays put"
+    assert_equal [1], acks, "the update is still recorded"
+    assert_nil Note.find_by!(room: ROOM).body, "Y::Lexxy returns nil for a non-Lexical document, so body is unchanged"
   end
 
-  test "the throttle layers guard this channel too" do
-    # Size the cap to exactly one update: the first fills the room, the second
-    # crosses the cap and is refused (the prospective-reservation check).
+  test "the room byte cap applies to this channel" do
+    # Set the cap to one update's size. The first update fills the room, and
+    # the second would go over the cap, so it's refused.
     one_update = Y.update_from_message(Base64.strict_decode64(Updates.frame(LEXXY_STATE)))
     Rooms.current = Rooms.new(max_document_bytes: one_update.bytesize)
     subscribe_with_valid_token
@@ -119,26 +119,26 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     perform :receive, "update" => Updates.frame(LEXXY_STATE), "id" => 1
     perform :receive, "update" => Updates.frame(LEXXY_STATE), "id" => 2
 
-    assert_equal [1], acks, "the first write fills the room; the second crosses the cap"
+    assert_equal [1], acks, "the first write fills the room and the second is over the cap"
     assert(transmissions.any? { |m| m["notice"] == "document_full" })
   end
 
-  test "presence still flows through the guarded path in a full room" do
+  test "presence still works in a full room" do
     Rooms.current = Rooms.new(max_document_bytes: Updates::HELLO.bytesize)
     subscribe_with_valid_token
     perform :receive, "update" => Updates.frame(Updates::HELLO), "id" => 1
 
     assert Rooms.current.document_full?(document_key)
 
-    # Awareness is a `send`, not a whisper: it reaches the server and is relayed
-    # even when the room has stopped accepting document writes.
+    # Awareness comes in through `send`, so the server relays it even after the
+    # room stops accepting document writes.
     assert_broadcasts("yrby:#{document_key}", 1) do
       perform :receive, "update" => Updates.awareness_frame
     end
   end
 
   test "the peer cap applies to note rooms" do
-    # Pre-create the note so the peer key exists, then fill its one peer seat.
+    # Create the note first so its key exists, then fill its one peer seat.
     note = Note.create!(room: ROOM)
     Rooms.current = Rooms.new(max_peers: 1)
     Rooms.current.join("note/#{note.id}/body")
