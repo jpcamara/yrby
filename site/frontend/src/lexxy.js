@@ -1,48 +1,47 @@
-// Rich text with a Lexxy editor and lexxy-realtime. The shared state is the
-// Y.XmlFragment that Lexical stores its document in. The
-// <lexxy-collaboration> element connects the editor to it, sets up an empty
-// document, and draws remote carets.
+// The Lexxy demo, on lexxy-realtime. The page renders the markup the gem's
+// form helper renders: a <yrby-document> around the Lexxy editor and a
+// <lexxy-collaboration> inside it. Importing lexxy-realtime registers both
+// elements. <yrby-document> subscribes to NoteChannel with the room token as
+// its grant and holds the Yjs document, and <lexxy-collaboration> binds the
+// editor to that document once it syncs.
 //
-// This page creates the provider itself, which the npm package supports.
-// room.js builds the yrby-client provider over @anycable/web, along with the
-// room bar, presence chips, and full-room notice. The element gets the doc and
-// provider from here and doesn't open its own cable.
-//
-// The provider subscribes to NoteChannel with a signed room token the server
-// rendered for this field. NoteChannel accepts any token this site issued for
-// the field, and it creates the Note on subscribe, never on the page GET.
+// This file adds the parts every demo page has: the AnyCable consumer from
+// room.js, the room bar, presence chips, the status line, and the stored
+// HTML panel.
 import "@37signals/lexxy"
 // Lexxy's package exports only include the JS entry, so import the stylesheet
 // by path. Bun bundles it with lexxy-realtime's caret styles into
 // public/lexxy.css.
 import "../node_modules/@37signals/lexxy/dist/stylesheets/lexxy.css"
 import "lexxy-realtime/lexxy-realtime.css"
-import "lexxy-realtime" // registers <lexxy-collaboration>
-import * as Y from "yjs"
-import { connectRoom, user, wireStoredPanel } from "./room.js"
+import { setConsumer } from "lexxy-realtime" // registers <lexxy-collaboration> and <yrby-document>
+import { roomConsumer, setupRoomPage, showRoomState, user, wireStoredPanel } from "./room.js"
 
-const editor = document.getElementById("editor") // <lexxy-editor attachments="false">
-const ydoc = new Y.Doc()
-const provider = connectRoom(ydoc, editor, {
-  channel: "NoteChannel",
-  params: { token: editor.dataset.token, field: editor.dataset.field },
-})
+// <yrby-document> asks for a consumer once this script has run, so setting
+// the factory here comes early enough. It gets the same notice-aware AnyCable
+// consumer as the other demos, with whisper hidden.
+setConsumer(() => roomConsumer())
 
-window.__yrby = { provider, ydoc, user }
+const element = document.querySelector("yrby-document")
 
-// The collaboration element, given our doc and provider. It waits for the
-// editor to initialize, so it's fine to append it right away.
-const collab = document.createElement("lexxy-collaboration")
-collab.setAttribute("doc-id", editor.dataset.documentKey)
+// The cursor name and color come from the random identity room.js picks for
+// every demo. The element reads them when it binds, after the first sync.
+const collab = element.querySelector("lexxy-collaboration")
 collab.setAttribute("name", user.name)
 collab.setAttribute("color", user.color)
-collab.doc = ydoc
-collab.provider = provider
-editor.appendChild(collab)
 
-// The "Stored HTML" panel shows the note.body column. Y::Lexxy renders that
-// HTML in Ruby, with no browser involved. The panel fetches it with a GET and
-// refreshes while open, like the other demos.
-wireStoredPanel(ydoc)
+setupRoomPage()
 
-provider.connect() // the provider doesn't connect on its own
+// Each yrby:synced is a new document session, and its signal aborts when the
+// session ends. The "Stored HTML" panel shows the note.body column, which
+// Y::Lexxy renders in Ruby with no browser involved. It refreshes after each
+// change while it's open.
+element.addEventListener("yrby:synced", ({ detail }) => {
+  window.__yrby = { provider: detail.provider, ydoc: detail.doc, user }
+  const stopRoomState = showRoomState(detail.provider)
+  const stopStoredPanel = wireStoredPanel(detail.doc)
+  detail.signal.addEventListener("abort", () => {
+    stopRoomState()
+    stopStoredPanel()
+  }, { once: true })
+})

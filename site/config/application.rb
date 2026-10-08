@@ -11,12 +11,8 @@ require "rails/test_unit/railtie"
 require "bundler"
 Bundler.require(*Rails.groups)
 
-# Load only the storage concern from lexxy-realtime. The gem is require: false
-# because its engine loads Lexxy's Action Text setup, which can't boot without
-# Action Text (see the Gemfile). The concern works on its own. It checks for
-# has_rich_text, and without Action Text it renders the collaborative document
-# with Y::Lexxy and saves the HTML to the model's plain column.
-require "lexxy_realtime/collaborative"
+# Load lexxy-realtime without its engine. See config/lexxy_realtime.rb.
+require_relative "lexxy_realtime"
 
 # A plain require, because the Rack::Attack initializer reads these constants
 # while the app is still booting, before autoloading is available.
@@ -27,6 +23,10 @@ module Site
     config.load_defaults 8.1
 
     config.autoload_lib(ignore: %w[assets tasks])
+
+    # LexxyRealtime::DocumentChannel, which NoteChannel extends. The gem's
+    # engine would add this directory, and this app doesn't load the engine.
+    config.eager_load_paths << File.join(Gem.loaded_specs.fetch("lexxy-realtime").full_gem_path, "app/channels")
 
     # Deny all framing, since the demos aren't meant to be embedded.
     # ActionDispatch::Response copies default_headers in a railtie initializer,

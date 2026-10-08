@@ -85,9 +85,11 @@ const openBoth = async (path) => {
 }
 
 // --- 0) Rich text (Lexxy): two browsers through NoteChannel -----------------
-// This part runs the published lexxy-realtime stack end to end: sgid auth, the
-// record-based document, and the server rendering the document into the note's
-// plain body column with Y::Lexxy. No other demo renders on the server.
+// This part runs the published lexxy-realtime stack end to end: the
+// <yrby-document> wrapper with a room token as its grant, NoteChannel on top of
+// LexxyRealtime::DocumentChannel, the record-based document, and the server
+// rendering the document into the note's plain body column with Y::Lexxy. No
+// other demo renders on the server.
 await openBoth(`/demos/lexxy/${ROOM}`)
 
 const lexxyText = (s) => js(s, `JSON.stringify(document.querySelector("lexxy-editor [contenteditable]")?.innerText ?? null)`)

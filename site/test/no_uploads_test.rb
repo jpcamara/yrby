@@ -76,7 +76,7 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
   test "rendering drops attachment nodes from a crafted document" do
     note = Note.create!(room: "no-uploads-probe")
     state = File.binread(File.expand_path("fixtures/lexxy_full.bin", __dir__))
-    Y::Document.append(note.find_or_create_collaborative_document(:body).key, state)
+    note.collaborative_document(:body).append(state)
 
     assert note.refresh_collaborative_rich_text(:body)
     body = note.reload.body
