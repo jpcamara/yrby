@@ -31,7 +31,7 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
 
 `bindYourEditor` stands for however you attach your editor. When the signal
 aborts, remove the Yjs listeners and disable or remove the editor. Don't
-destroy the document, the provider, or the shared consumer, because yrby
+destroy the Yjs document, the provider, or the shared consumer, because yrby
 manages those. The signal fires before yrby sends any final update. Handle it even if the
 editor is already gone from the page.
 
@@ -43,26 +43,26 @@ until the server confirms them. If the server rejects the subscription, the
 session stops and keeps the unsent edits in memory so you can recover them.
 
 The element works with Turbo and Turbolinks 5. A cached preview doesn't create
-a document or connect. When you go back to a page, the element picks up its
+a Yjs document or connect. When you go back to a page, the element picks up its
 old session if that session still has unsent edits. Otherwise it loads the
 saved content from Rails. If the page renders a new token, the element gets a
 new session, and the old session's edits reach it through the server like
 anyone else's. This all happens within one tab. Nothing is stored for offline
 use, so closing or reloading the tab loses edits the server hasn't confirmed.
 
-Moving the element in the DOM keeps its editor and document, as long as you
+Moving the element in the DOM keeps its editor and Yjs document, as long as you
 remove and reinsert it in the same synchronous block of code. If you put it
 back later, it reloads the saved content, and the old `Y.Doc` and undo history
 are gone. Changing the token, name, or channel tears down the old editor right
-away and connects to the new document. The old session still finishes sending
-its unsent edits with its original token.
+away and connects to the Yjs document the new token points at. The old
+session still finishes sending its unsent edits with its original token.
 
 The element exposes its current `session`, `doc`, and `provider`. They're
-undefined until it connects and while it switches documents, and reading them
+undefined until it connects and while it switches Yjs documents, and reading them
 never creates one. `whenSynced` is always a promise, even before the consumer
-is set up. It resolves when the document first catches up with the server, and
-never resolves if the element gives up on that document. The `yrby:synced`
-event bubbles, fires once each time the element connects to a document, and
+is set up. It resolves when the Yjs document first catches up with the server, and
+never resolves if the element gives up on it. The `yrby:synced`
+event bubbles, fires once each time the element connects to a Yjs document, and
 includes `detail.signal` for cleanup. Synced doesn't mean the connection is up
 right now, or that every edit is confirmed. Check `provider.synced` and
 `session.hasPending` for those.
@@ -75,9 +75,9 @@ again. `element.destroy()` disconnects the element until it's put back on the
 page. It doesn't throw away unsent edits.
 
 The `refresh` attribute is a same-origin URL that returns a new token for this
-document as `{ "grant": "..." }`. When the server rejects the subscription,
+record attribute as `{ "grant": "..." }`. When the server rejects the subscription,
 usually because the token expired, the session fetches that URL once and
-subscribes again with the new token. It keeps its document and unsent edits.
+subscribes again with the new token. It keeps its Yjs document and unsent edits.
 See [Grant lifetime and
 refresh](https://github.com/jpcamara/yrby#grant-lifetime-and-refresh) in the
 main README. The element reads this attribute when it connects, so changing it
@@ -105,12 +105,14 @@ its source is in
 ## Document sessions and navigation
 
 Each consumer has its own session store. Elements with the same channel,
-token, and name share one document and one queue of unsent edits. The store
+token, and name share one Yjs document and one queue of unsent edits. The store
 compares tokens as plain strings and never decodes them. Each session adds a
 random `session_id` to its subscription, so its acks don't get mixed up with
-another session's. The server doesn't use it to pick or authorize a document.
+another session's. The server doesn't use it to pick a Yjs document or to
+authorize anything.
 
-Code without an editor can hold a lease for as long as it needs the document:
+Code without an editor can hold a lease for as long as it needs the Yjs
+document:
 
 ```js
 import { DocumentSessionStore } from "yrby-client";
@@ -143,7 +145,7 @@ Sessions keep their queues while the consumer is down and send them when it
 reconnects. A new consumer gets a new store and doesn't pick up another
 consumer's queued work.
 
-A blocked session keeps its document and unsent edits in memory. `retry()`
+A blocked session keeps its Yjs document and unsent edits in memory. `retry()`
 reconnects with its current token, which is the original or the last one its
 `refresh` URL returned. `discard()` throws the edits away. A token that
 arrives any other way, such as a new element attribute, starts a separate
@@ -164,7 +166,7 @@ const provider = new ActionCableProvider(
 )
 ```
 
-The constructor takes the document, the consumer, the channel name, and the
+The constructor takes the Yjs document, the consumer, the channel name, and the
 channel params. Consumers from `@rails/actioncable` and `@anycable/web` both
 work without adapters or type casts. On AnyCable, the provider sends presence
 as whispers, so cursor updates go straight between browsers through AnyCable
@@ -180,15 +182,15 @@ await provider.whenSynced
 // now hand ydoc to the editor binding
 ```
 
-`whenSynced` resolves when the document first catches up with the server. Most
-editor bindings add an empty paragraph when they start. If you attach the
+`whenSynced` resolves when the Yjs document first catches up with the server.
+Most editor bindings add an empty paragraph when they start. If you attach the
 editor before the server's copy arrives, every client adds its own empty
-paragraph to the shared document.
+paragraph to the text everyone is editing.
 
 If that already happened, `whenSynced` resolves right away, even while
 disconnected. It resolves once, and later reconnects don't trigger it again.
-That makes it a good place to add starter content, since it won't refill a
-document someone emptied on purpose.
+That makes it a good place to add starter content, since it won't refill an
+editor someone emptied on purpose.
 
 ## Connection status
 
@@ -212,7 +214,7 @@ const off = provider.onStatusChange(({ status }) => {
 ```
 
 `onStatusChange` returns an unsubscribe function. `provider.status` is the
-current value, and `provider.synced` is true once the document has caught up.
+current value, and `provider.synced` is true once the Yjs document has caught up.
 
 ## Reliable delivery
 
@@ -228,7 +230,7 @@ confirmed, so that client keeps resending it.
 
 ## Seeding from an HTTP response
 
-`applyRemoteUpdate` loads state into the document without sending it back to
+`applyRemoteUpdate` loads state into the Yjs document without sending it back to
 the server as a new edit. Call it for each piece of state the server already
 has, before `connect()`.
 

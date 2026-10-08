@@ -39,9 +39,9 @@
     <code>post.body</code> is still Action Text.
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
-    While people are editing, lexxy-realtime keeps the document in yrby's
-    <code>Y::Document</code> tables. After each change, it renders the
-    document to HTML in Ruby with <code>Y::Lexxy</code> and saves the result
+    While people are editing, lexxy-realtime keeps the body's Yjs state in
+    yrby's <code>Y::Document</code> tables. After each change, it renders
+    that state to HTML in Ruby with <code>Y::Lexxy</code> and saves the result
     to <code>post.body</code>. That HTML matches what Lexxy would have
     submitted itself, so search, mailers, and show pages work without
     changes.
@@ -61,7 +61,7 @@
     channel looks up the record from it, then calls your
     <code>authorized?</code> method. A token for <code>:body</code> only
     opens <code>:body</code>, and the channel rejects a token that has been
-    tampered with or has expired. So the browser can only join documents your
+    tampered with or has expired. So the browser can only edit fields your
     page gave it a token for.
   </p>
 </section>
@@ -72,13 +72,13 @@
   </h2>
   <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
     Any custom Lexical nodes you've registered sync like the rest of the
-    document. When <code>Y::Lexxy</code> doesn't know a node, it still writes
+    editor's content. When <code>Y::Lexxy</code> doesn't know a node, it still writes
     the node's text into the saved HTML.
   </p>
   <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
     To encrypt a field, pass <code>encrypted: true</code> to
     <code>has_collaborative_rich_text</code>. Both the Action Text body and
-    the collaborative document are then stored with Active Record
+    the <code>Y::Document</code> rows are then stored with Active Record
     encryption.
   </p>
 </section>

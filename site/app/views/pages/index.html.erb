@@ -35,9 +35,9 @@
   </h1>
   <div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
     <p class="max-w-[34em] text-lg leading-8 text-zinc-300 sm:text-xl">
-      Your users type in the same document and see each other's changes as
-      they happen, the way they do in Google Docs. yrby syncs it over Action
-      Cable and saves it in your database. There's no Node process to run and
+      Your users edit the same post and see each other's changes as they
+      happen, the way they do in Google Docs. yrby syncs the edits over Action
+      Cable and saves them in your database. There's no Node process to run and
       no third-party service holding your data. For drop-in Action Text
       support with Lexxy, use
       <%= link_to "lexxy-realtime", lexxy_path, class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>.
@@ -86,12 +86,12 @@
         tag includes a signed token for <code>@post.body</code>, and the
         browser uses it to subscribe to the gem's channel. The channel saves
         each change to your database before it sends the change to anyone
-        else. Any Ruby code in your app can load the saved document, for
+        else. Any Ruby code in your app can load the saved body, for
         search, emails, or plain HTML.
       </p>
       <p class="mt-4 leading-7 text-zinc-400">
         In the browser, you import the client and attach your editor once the
-        document has synced. Any editor with a Yjs binding works.
+        Yjs document has synced. Any editor with a Yjs binding works.
       </p>
       <p class="mt-5"><%= link_to "Getting started →", doc_path("getting-started"), class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %></p>
     </div>
@@ -113,7 +113,7 @@
   </p>
   <dl class="mt-8 border-t border-zinc-700">
     <% [
-      ["yrby", "gem", "Ruby bindings for y-crdt, the Rust implementation of Yjs. It includes documents, the sync protocol, and HTML renderers for Tiptap and Lexxy.", "https://rubygems.org/gems/yrby", "https://github.com/jpcamara/yrby"],
+      ["yrby", "gem", "Ruby bindings for y-crdt, the Rust implementation of Yjs. It includes the Yjs document type, the sync protocol, and HTML renderers for Tiptap and Lexxy.", "https://rubygems.org/gems/yrby", "https://github.com/jpcamara/yrby"],
       ["yrby-rails", "gem", "The Rails integration. It includes the document channel, the Active Record models, the view tag, and the install generator.", "https://rubygems.org/gems/yrby-rails", "https://github.com/jpcamara/yrby"],
       ["yrby-client", "npm", "The browser package. It includes the yrby-document element and a Yjs provider for Action Cable and AnyCable.", "https://www.npmjs.com/package/yrby-client", "https://github.com/jpcamara/yrby/tree/main/packages/client"],
       ["lexxy-realtime", "gem + npm", "Collaborative editing for Lexxy, Basecamp's Action Text editor. It's built on the three packages above.", "https://rubygems.org/gems/lexxy-realtime", "https://github.com/jpcamara/lexxy-realtime"]
@@ -137,7 +137,7 @@
     <p class="mt-5 max-w-[42em] leading-7 text-zinc-400">
       Each demo is a public room running on this site. Open one in two
       windows and type in both. Every demo also shows what Ruby reads from
-      the saved document.
+      the saved state.
     </p>
     <ul class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <% Demos::ALL.each do |demo| %>
