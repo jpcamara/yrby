@@ -699,3 +699,144 @@ test("the default consumer loads lazily and a failed load is retried on the next
   assert.equal(errors(el).at(-1).detail.session, session);
   session.discard();
 });
+
+test("current is undefined before the first sync and reading it creates nothing", async t => {
+  const { el, consumer, mount } = setup(t);
+  assert.equal(el.current, undefined);
+  assert.equal(consumer.created.length, 0);
+  await mount();
+  assert.equal(el.current, undefined, "acquired but not synced");
+  assert.equal(consumer.created.length, 1);
+});
+
+test("current is the yrby:synced detail, already set when the event fires", async t => {
+  const { el, consumer, mount, remove } = setup(t);
+  let duringEvent = "unset";
+  const record = el.dispatchEvent;
+  el.dispatchEvent = event => { duringEvent = el.current; return record(event); };
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  const [event] = synced(el);
+  assert.equal(el.current, event.detail);
+  assert.equal(duringEvent, event.detail);
+  remove(); await mount();
+  assert.equal(el.current, event.detail, "a same-turn move keeps it");
+});
+
+test("current is undefined as soon as the lease aborts", async t => {
+  for (const end of ["discard", "reject"]) {
+    const { el, consumer, mount } = setup(t);
+    await mount(); sync(consumer.created[0]); await el.whenSynced;
+    let duringAbort = "unset";
+    el.current.signal.addEventListener("abort", () => { duringAbort = el.current; });
+    if (end === "discard") {
+      el.current.session.discard();
+      assert.equal(el.current, undefined, "cleared before settle runs");
+    } else {
+      consumer.created[0].handlers.rejected();
+    }
+    await tick();
+    assert.equal(duringAbort, undefined);
+    assert.equal(el.current, undefined, `stalled after ${end}`);
+  }
+});
+
+test("current is undefined while retargeting and while the page is cached", async t => {
+  const { el, consumer, mount, change } = setup(t);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  change("name", "notes");
+  assert.equal(el.current, undefined, "retarget clears it immediately");
+  await tick();
+  assert.equal(el.current, undefined, "the new session hasn't synced");
+  sync(consumer.created.at(-1)); await el.whenSynced;
+  assert.equal(el.current, synced(el).at(-1).detail);
+  el.deactivate();
+  assert.equal(el.current, undefined);
+});
+
+for (const when of ["after the stall", "right after discard", "from the abort handler"]) {
+  test(`retry ${when} acquires a new session with a fresh document`, async t => {
+    const { el, consumer, mount } = setup(t);
+    await mount(); sync(consumer.created[0], "saved"); await el.whenSynced;
+    const old = el.current;
+    old.doc.getText("content").insert(0, "broken ");
+    if (when === "from the abort handler") old.signal.addEventListener("abort", () => el.retry(), { once: true });
+    old.session.discard();
+    if (when === "right after discard") el.retry();
+    await tick();
+    if (when === "after the stall") {
+      assert.equal(consumer.created.length, 1, "stalled until retry");
+      el.retry(); await tick();
+    }
+    assert.equal(consumer.created.length, 2);
+    assert.notEqual(el.session, old.session);
+    assert.notEqual(el.session.doc, old.doc);
+    assert.equal(el.current, undefined, "not announced before the new sync");
+    sync(consumer.created[1], "saved"); await el.whenSynced;
+    assert.equal(el.current, synced(el).at(-1).detail);
+    assert.equal(el.doc.getText("content").toString(), "saved");
+    assert.equal(synced(el).length, 2);
+    assert.equal(errors(el).length, 0);
+    assert.equal(el.inert, false);
+  });
+}
+
+test("retry does nothing while the element is bound or still acquiring", async t => {
+  const { el, consumer, mount } = setup(t);
+  await mount();
+  const acquiring = el.session;
+  el.retry(); await tick();
+  assert.equal(el.session, acquiring);
+  assert.equal(consumer.created.length, 1);
+  sync(consumer.created[0]); await el.whenSynced;
+  const current = el.current, ready = el.whenSynced;
+  el.retry(); await tick();
+  assert.equal(el.current, current);
+  assert.equal(current.signal.aborted, false);
+  assert.equal(el.whenSynced, ready);
+  assert.equal(consumer.created.length, 1);
+  assert.equal(el.events.length, 1);
+});
+
+test("retry on a cached page waits for Turbo to show the page", async t => {
+  const document = new EventTarget();
+  let preview = false;
+  document.documentElement = { hasAttribute: () => preview };
+  const { el, consumer, mount } = setup(t, undefined, undefined, document);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  const old = el.session;
+  old.discard(); await tick();
+  preview = true;
+  document.dispatchEvent(new Event("turbo:render"));
+  el.retry(); await tick();
+  assert.equal(consumer.created.length, 1, "a cached page doesn't acquire");
+  assert.equal(el.session, undefined);
+  assert.equal(el.inert, true);
+  preview = false;
+  document.dispatchEvent(new Event("turbo:load"));
+  await tick();
+  assert.equal(consumer.created.length, 2);
+  assert.notEqual(el.session, old);
+  sync(consumer.created[1]); await el.whenSynced;
+  assert.equal(el.current, synced(el).at(-1).detail);
+});
+
+test("retry while the session is blocked reports it again, and binds once the session retries", async t => {
+  const { el, consumer, mount } = setup(t);
+  await mount(); sync(consumer.created[0]); await el.whenSynced;
+  // A pending edit keeps the session open while nothing holds it.
+  el.doc.getText("content").insert(0, "unsent");
+  consumer.created[0].handlers.rejected();
+  await tick();
+  const { session } = errors(el)[0].detail;
+  el.retry(); await tick();
+  assert.equal(errors(el).length, 2);
+  assert.equal(errors(el)[1].detail.session, session);
+  assert.equal(el.current, undefined);
+  session.retry();
+  el.retry(); await tick();
+  sync(consumer.created.at(-1)); await tick();
+  assert.equal(el.session, session, "the retried session is reused");
+  assert.equal(el.doc.getText("content").toString(), "unsent");
+  assert.equal(el.current, synced(el).at(-1).detail);
+  assert.equal(synced(el).length, 2);
+});

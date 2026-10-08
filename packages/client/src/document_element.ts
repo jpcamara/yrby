@@ -44,6 +44,15 @@ function blockReport(session: DocumentSession): ErrorDetail | undefined {
 
 type ErrorDetail = { error: unknown; session?: DocumentSession };
 
+/** The `yrby:synced` event's detail, which `element.current` also returns. */
+export type SyncedDetail = {
+  session: DocumentSession;
+  doc: DocumentSession["doc"];
+  provider: DocumentSession["provider"];
+  lease: DocumentLease;
+  signal: AbortSignal;
+};
+
 // One try at binding one document. Async steps record their results here and
 // request a settle. Results that arrive after the attempt is abandoned go
 // unread.
@@ -53,7 +62,8 @@ type BindAttempt = {
   consumer?: CableConsumer;
   lease?: DocumentLease;
   synced?: boolean;
-  announced?: boolean;
+  // The yrby:synced detail, set just before the event is dispatched.
+  announced?: SyncedDetail;
   // Set when the attempt can't continue, with the yrby:error detail if there is one.
   ended?: { detail: ErrorDetail | undefined };
 };
@@ -92,6 +102,16 @@ export class YrbyDocumentElement extends Base {
   get provider(): DocumentSession["provider"] | undefined { return this.session?.provider; }
   /** Resolves after the current attempt's first sync. If the attempt is abandoned, its promise never resolves. */
   get whenSynced(): Promise<void> { return this.#firstSync.promise; }
+  /**
+   * The `yrby:synced` detail of the session the element is bound to. It is
+   * undefined before the first sync, while the element retargets or the page
+   * is cached, while the document is stalled, and as soon as the lease aborts.
+   * Reading it never creates anything.
+   */
+  get current(): SyncedDetail | undefined {
+    const detail = this.#attempt?.announced;
+    return detail && !detail.signal.aborted ? detail : undefined;
+  }
 
   connectedCallback(): void {
     this.#stalledKey = undefined;
@@ -119,6 +139,26 @@ export class YrbyDocumentElement extends Base {
   deactivate(): void {
     this.#live = false;
     this.#abandon();
+  }
+  /**
+   * Acquires the document again after its session blocked or was discarded.
+   * It doesn't change whether the page is live, so a cached page binds when
+   * Turbo shows it again. It does nothing while the element is bound to, or
+   * still acquiring, a session whose lease hasn't aborted.
+   *
+   * It is safe to call from a lease abort handler, or right after
+   * `session.discard()` in the same call stack. The element drops the ended
+   * attempt immediately, so the settle that would have stalled it acquires
+   * instead. A discarded session is gone from the store, so that acquisition
+   * creates a new session with a new `Y.Doc`. A session that is still blocked
+   * is reported again with `yrby:error`.
+   */
+  retry(): void {
+    const attempt = this.#attempt;
+    if (attempt && !attempt.ended && !attempt.lease?.signal.aborted) return;
+    this.#stalledKey = undefined;
+    this.#abandon();
+    this.#requestSettle();
   }
   /** Releases the editor lease. The session keeps any unsaved work. */
   destroy(): void {
@@ -198,15 +238,13 @@ export class YrbyDocumentElement extends Base {
     });
   }
   #announce(attempt: BindAttempt): void {
-    attempt.announced = true;
     const lease = attempt.lease!;
     const { session } = lease;
+    const detail: SyncedDetail = { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal };
+    attempt.announced = detail;
     this.#restoreInert();
     this.#firstSync.resolve();
-    this.dispatchEvent(new CustomEvent("yrby:synced", {
-      bubbles: true,
-      detail: { session, doc: session.doc, provider: session.provider, lease, signal: lease.signal },
-    }));
+    this.dispatchEvent(new CustomEvent("yrby:synced", { bubbles: true, detail }));
   }
   #stall(detail: ErrorDetail | undefined): void {
     this.#stalledKey = this.#attempt?.key;

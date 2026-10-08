@@ -6,6 +6,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- yrby-client: `<yrby-document>` has a read-only `current` property that
+  returns the `yrby:synced` detail of the bound session, or undefined when
+  nothing is bound. A binding that loads after the event fired can bind from
+  it.
+- yrby-client: `<yrby-document>` has a `retry()` method that acquires the
+  document again after its session blocked or was discarded, without changing
+  whether the page is live. It works from a lease abort handler or right after
+  `session.discard()`, so a binding can replace a broken document with a fresh
+  session. It replaces calling `activate()`, which is internal to the Turbo
+  adapter.
+
 ## [0.8.1] - 2026-10-03
 
 ### Added
