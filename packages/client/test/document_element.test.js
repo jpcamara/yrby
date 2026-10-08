@@ -700,6 +700,99 @@ test("the default consumer loads lazily and a failed load is retried on the next
   session.discard();
 });
 
+// Counts calls and returns each result in turn, repeating the last one.
+function consumerFactory(...results) {
+  const factory = () => {
+    const result = results[Math.min(factory.calls++, results.length - 1)];
+    if (result instanceof Error) throw result;
+    return result;
+  };
+  factory.calls = 0;
+  return factory;
+}
+function discardSessions(t, consumer) {
+  t.after(() => { for (const session of DocumentSessionStore.for(consumer).sessions) session.discard(); });
+}
+
+test("a consumer factory runs when an element first needs a consumer", async t => {
+  const consumer = fakeConsumer();
+  const factory = consumerFactory(consumer);
+  discardSessions(t, consumer);
+  const { el, mount } = setup(t, undefined, factory);
+  assert.equal(YrbyDocumentElement.consumer, factory);
+  assert.equal(factory.calls, 0);
+  await mount();
+  assert.equal(factory.calls, 1);
+  sync(consumer.created[0], "saved"); await el.whenSynced;
+  assert.equal(el.doc.getText("content").toString(), "saved");
+});
+
+test("a consumer factory runs once for every element on the page", async t => {
+  const consumer = fakeConsumer();
+  const factory = consumerFactory(consumer);
+  discardSessions(t, consumer);
+  const first = setup(t, { grant: "g", name: "body" }, factory);
+  const second = setup(t, { grant: "g", name: "notes" }, factory);
+  await first.mount(); await second.mount();
+  first.remove(); await tick(); await first.mount();
+  assert.equal(factory.calls, 1);
+  assert.equal(consumer.created.length, 3);
+  assert.equal(first.el.session.store.consumer, consumer);
+  assert.equal(second.el.session.store.consumer, consumer);
+});
+
+test("a consumer factory that returns a promise is called once while it loads", async t => {
+  const consumer = fakeConsumer();
+  let provide;
+  const factory = consumerFactory(new Promise(resolve => { provide = resolve; }));
+  discardSessions(t, consumer);
+  const first = setup(t, { grant: "g", name: "body" }, factory);
+  const second = setup(t, { grant: "g", name: "notes" }, factory);
+  await first.mount(); await second.mount();
+  assert.equal(consumer.created.length, 0);
+  provide(consumer); await tick();
+  assert.equal(factory.calls, 1);
+  assert.equal(consumer.created.length, 2);
+  sync(consumer.created[0]); await first.el.whenSynced;
+});
+
+for (const [kind, failure] of [["throws", () => new Error("boom")], ["rejects", () => Promise.reject(new Error("boom"))]]) {
+  test(`a consumer factory that ${kind} is called again on the next attempt`, async t => {
+    const consumer = fakeConsumer();
+    const failed = failure();
+    failed.catch?.(() => {});
+    const factory = consumerFactory(failed, consumer);
+    discardSessions(t, consumer);
+    const { el, mount } = setup(t, undefined, factory);
+    await mount();
+    assert.equal(factory.calls, 1);
+    assert.equal(errors(el).length, 1);
+    assert.equal(errors(el)[0].detail.error.message, "boom");
+    el.retry(); await tick();
+    assert.equal(factory.calls, 2);
+    sync(consumer.created[0]); await el.whenSynced;
+    assert.equal(el.session.store.consumer, consumer);
+  });
+}
+
+test("assigning a new consumer replaces the factory's result", async t => {
+  const replaced = fakeConsumer(), consumer = fakeConsumer();
+  const factory = consumerFactory(replaced);
+  discardSessions(t, replaced);
+  const first = setup(t, { grant: "g", name: "body" }, factory);
+  await first.mount();
+  assert.equal(first.el.session.store.consumer, replaced);
+  const second = setup(t, { grant: "g", name: "notes" }, consumer);
+  await second.mount();
+  assert.equal(second.el.session.store.consumer, consumer);
+  YrbyDocumentElement.consumer = factory;
+  const third = setup(t, { grant: "g", name: "other" }, factory);
+  await third.mount();
+  assert.equal(factory.calls, 2);
+  assert.equal(third.el.session.store.consumer, replaced);
+  assert.equal(replaced.created.length, 2);
+});
+
 test("current is undefined before the first sync and reading it creates nothing", async t => {
   const { el, consumer, mount } = setup(t);
   assert.equal(el.current, undefined);

@@ -199,14 +199,21 @@ it later doesn't rebind the editor.
 The default element needs `@rails/actioncable`, `yjs`, and `y-protocols`. All
 default elements share one consumer and one import of it while that import is
 loading. For AnyCable, assign an ActionCable-compatible consumer before adding
-any elements:
+any elements. `consumer` takes a consumer, a promise of one, or a function that
+returns either:
 
 ```js
 import { YrbyDocumentElement } from "yrby-client/element";
 import { createConsumer } from "@anycable/web";
 
-YrbyDocumentElement.consumer = createConsumer();
+YrbyDocumentElement.consumer = () => createConsumer();
 ```
+
+The element calls the function when it first needs a consumer, not when you
+assign it, and all elements reuse the result. If the function throws or its
+promise rejects, the element reports a `yrby:error`, and the next attempt to
+bind, such as `retry()` or the next render, calls the function again.
+Assigning a different value replaces the reused result.
 
 ## Document sessions
 
