@@ -370,9 +370,11 @@ endpoint is a free file host. The throttles above all limit what a stranger can
 use up, and this app has no reason to hand out disk or object storage at all.
 So the app has no upload path to configure:
 
-- Active Storage isn't installed. The Gemfile lists the Rails frameworks the
-  app needs, including Active Record for document storage, and leaves out the
-  `rails` meta-gem. There's no upload engine in the image to mount by accident.
+- Active Storage isn't loaded. The app requires only the Rails frameworks it
+  needs, including Active Record for document storage. The activestorage and
+  actiontext gems are in the bundle, because lexxy-realtime depends on the
+  `rails` meta-gem, but nothing requires them, so no upload engine or route
+  is mounted.
 - There are no upload routes, no direct-upload endpoints, and no multipart
   handling.
 - The Tiptap demo uses StarterKit only. It has no Image extension, so the
