@@ -126,8 +126,8 @@ module ApplicationHelper
   # The final text of the hero replay, rendered on the server so the panes
   # look right without JavaScript or with reduced motion. frontend/src/hero.js
   # animates the typing that leads up to it.
-  HERO_TEXT = "Launch checklist for Friday\n• Tag the GitHub release\n• Publish yrby-client 0.6.0".freeze
-  HERO_CARETS = { "ada" => HERO_TEXT.index(" release") + " release".length, "you" => HERO_TEXT.length }.freeze
+  HERO_TEXT = "Writing together in Rails\n• Edits merge without conflicts\n• Saved before anyone sees them".freeze
+  HERO_CARETS = { "ada" => HERO_TEXT.index(" conflicts") + " conflicts".length, "you" => HERO_TEXT.length }.freeze
 
   def hero_pane(viewer)
     at = 0
