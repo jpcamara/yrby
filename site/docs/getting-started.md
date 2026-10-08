@@ -108,13 +108,14 @@ Rails, with a fresh undo history. The
 page has the details, and the [record-backed editor](/examples/document) lets
 you try it in two windows.
 
-On AnyCable, set the consumer before any element connects:
+On AnyCable, set the consumer in the same script that imports the element.
+A function runs the first time an element needs a consumer:
 
 ```js
 import { YrbyDocumentElement } from "yrby-client/element"
 import { createConsumer } from "@anycable/web"
 
-YrbyDocumentElement.consumer = createConsumer()
+YrbyDocumentElement.consumer = () => createConsumer()
 ```
 
 See [The JavaScript client](/docs/javascript-client) for the rest of the API.

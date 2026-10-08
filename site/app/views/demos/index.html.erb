@@ -7,10 +7,11 @@
     app. Five of them use one <code>DocumentChannel</code>. It saves every
     update with <code>Y::Document</code>, sends it to everyone in the room,
     and has no code for any particular demo. The Lexxy demo uses
-    <code>NoteChannel</code>, a channel written for this site's public rooms.
-    It creates each room's note when the first person joins and renders the
-    note's body to HTML after each change. Every demo page has
-    a panel that shows what Ruby reads from the saved state.
+    <code>NoteChannel</code>, a small subclass of lexxy-realtime's own channel
+    for this site's public rooms. It creates each room's note when the first
+    person joins, and the parent channel renders the note's body to HTML after
+    each change. Every demo page has a panel that shows what Ruby reads from
+    the saved state.
   </p>
   <p class="mt-4 leading-7 text-zinc-400">
     New to yrby? Start with the <a class="text-accent underline" href="/examples/document">record-backed editor</a>.

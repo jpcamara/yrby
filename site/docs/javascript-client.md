@@ -67,12 +67,43 @@ includes `detail.signal` for cleanup. Synced doesn't mean the connection is up
 right now, or that every edit is confirmed. Check `provider.synced` and
 `session.hasPending` for those.
 
+`element.current` is the detail of the last `yrby:synced` event,
+`{ session, doc, provider, lease, signal }`, while that lease is still bound.
+It's undefined before the first sync, while the element switches Yjs
+documents or its page is cached, while its session is blocked, and from the
+moment the lease aborts. It's already set when `yrby:synced` fires. Code that
+loads after the event has fired reads it instead of waiting for an event that
+won't come again:
+
+```js
+function attach(element, bind) {
+  if (element.current) bind(element.current)
+  element.addEventListener("yrby:synced", ({ detail }) => bind(detail))
+}
+```
+
 If the import fails or the server rejects the subscription, the element fires
 `yrby:error` with `detail.error`. A rejection also includes `detail.session`,
 so you can retry it. While the session is blocked, the element does nothing.
-After you retry, call `element.activate()` or remount the element to attach
-again. `element.destroy()` disconnects the element until it's put back on the
-page. It doesn't throw away unsent edits.
+After you retry the session, call `element.retry()` to attach again.
+
+`element.retry()` makes the element get its Yjs document again after its
+session was blocked or discarded. It does nothing while the element is bound
+to a session, or still connecting to one. It doesn't change whether the page
+is live, so on a cached page the element connects when Turbo shows the page
+again. You can call it from a lease's abort handler, or right after
+`session.discard()`. A discarded session has left the store, so the element
+gets a new session with a new `Y.Doc` loaded from the server. That's how an
+editor binding replaces a Yjs document it can't trust anymore:
+
+```js
+const { session } = element.current
+session.discard() // aborts every lease, so bindings clean up now
+element.retry()   // yrby:synced fires again with a new session
+```
+
+`element.destroy()` disconnects the element until it's put back on the page.
+It doesn't throw away unsent edits.
 
 The `refresh` attribute is a same-origin URL that returns a new token for this
 record attribute as `{ "grant": "..." }`. When the server rejects the subscription,
@@ -84,22 +115,31 @@ main README. The element reads this attribute when it connects, so changing it
 later has no effect on the current editor.
 
 By default the element needs `@rails/actioncable`, `yjs`, and `y-protocols`,
-and every element on the page shares one consumer. For AnyCable, set the
-consumer before adding any elements:
+and every element on the page shares one consumer. For AnyCable, set
+`YrbyDocumentElement.consumer` before any element needs a consumer. It takes a
+consumer, a promise of one, or a function that returns either:
 
 ```js
 import { YrbyDocumentElement } from "yrby-client/element";
 import { createConsumer } from "@anycable/web";
 
-YrbyDocumentElement.consumer = createConsumer();
+YrbyDocumentElement.consumer = () => createConsumer();
 ```
 
+The element calls the function the first time it needs a consumer, not when
+you assign it, and every element reuses the result. If the function throws or
+its promise rejects, the element fires `yrby:error`, and the next attempt
+(`retry()` or the next page render) calls the function again. Assigning a
+different value replaces the result.
+
 Importing the module registers the element, and any `<yrby-document>` tags
-already on the page start right away. So if you set a custom consumer on a
-page that's already rendered, put the tag inside a `<template>`. Set the
-consumer and add your `yrby:synced` listener first, then insert the template's
-content. The [working example](/examples/document) does it in that order, and
-its source is in
+already on the page start connecting. Each one asks for its consumer after the
+current script finishes, so set the consumer in the same script that imports
+the element, as above. If your consumer setup runs later, in another script,
+put the tag inside a `<template>`. Set the consumer and add your `yrby:synced`
+listener first, then insert the template's content. The
+[working example](/examples/document) does it in that order, and its source is
+in
 [`site/frontend/src/document.js`](https://github.com/jpcamara/yrby/blob/main/site/frontend/src/document.js).
 
 ## Document sessions and navigation
