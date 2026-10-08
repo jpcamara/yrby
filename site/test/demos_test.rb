@@ -32,7 +32,10 @@ class DemosTest < ActionDispatch::IntegrationTest
       get "/demos/#{demo.slug}/room1"
 
       assert_response :success, "#{demo.slug} did not render"
-      assert_includes response.body, %(data-document-key="#{demo.slug}/room1")
+      # The Lexxy page names its Yjs document in <lexxy-collaboration doc-id>.
+      key_attribute = demo.slug == "lexxy" ? "doc-id" : "data-document-key"
+
+      assert_includes response.body, %(#{key_attribute}="#{demo.slug}/room1")
       assert_includes response.body, "/#{demo.slug}.js"
     end
   end
@@ -89,7 +92,7 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_equal 0, Y::Document.count, "documents are created by the channel, not the page"
   end
 
-  test "the lexxy page creates no note and includes a room token for the body field" do
+  test "the lexxy page creates no note and renders a room token as the body field's grant" do
     get "/demos/lexxy/room1"
 
     assert_response :success
@@ -98,14 +101,17 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_equal 0, Note.count, "the page must not create the note on a GET"
     assert_equal 0, Y::Document.count
 
-    token = response.body[/data-token="([^"]+)"/, 1]
+    element = response.body[/<yrby-document [^>]+>/]
+
+    assert_includes element, %(name="body")
+    assert_includes element, %(channel="NoteChannel")
+    token = element[/grant="([^"]+)"/, 1]
 
     assert_predicate token, :present?
     # The token verifies to this room for the body field.
     assert_equal "room1", Note.verified_room(token, "body")
-    # It doesn't verify for any other field, like the gem's sgid.
+    # It doesn't verify for any other field, like the gem's grant.
     assert_nil Note.verified_room(token, "title")
-    assert_includes response.body, %(data-field="body")
   end
 
   test "many lexxy page GETs create zero notes" do

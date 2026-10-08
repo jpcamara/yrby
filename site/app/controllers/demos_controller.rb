@@ -24,10 +24,10 @@ class DemosController < ApplicationController
       # The Lexxy demo uses a record, like lexxy-realtime does, with one Note
       # per room. The page doesn't create the Note. A GET is anonymous and has
       # no limit, so a crawler fetching room URLs could create any number of
-      # rows. The page gives the client a signed token for the room and field.
-      # NoteChannel verifies it and creates the Note on subscribe, within the
-      # room limits.
-      @note_token = Note.room_token(@room, :body)
+      # rows. The page renders a signed token for the room and field as the
+      # <yrby-document> grant. NoteChannel verifies it and creates the Note on
+      # subscribe, within the room limits.
+      @note_grant = Note.room_token(@room, :body)
     else
       # The shape demos work the same way. This action signs a token for the
       # document, and DocumentChannel verifies it. The channel doesn't accept
