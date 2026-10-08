@@ -1,0 +1,42 @@
+<% content_for :head do %>
+  <%# Lexxy's editor styles and lexxy-realtime's caret styles. bun builds this
+      file along with the page's JS (see frontend/src/lexxy.js). %>
+  <link rel="stylesheet" href="<%= busted "/lexxy.css" %>">
+<% end %>
+
+<%# This is the markup lexxy-realtime's collaborative_rich_textarea renders,
+    written out by hand. The helper needs a saved record to sign a grant, and
+    this page must not create a Note on a GET (see DemosController#show). The
+    helper also builds the editor with Lexxy's Action Text form helpers, which
+    this app doesn't load. So the grant is the room token, and NoteChannel
+    turns it into the room's Note.
+
+    <yrby-document> subscribes to NoteChannel with the grant and name and holds
+    the Yjs document. <lexxy-collaboration> binds the editor to it once it
+    syncs. frontend/src/lexxy.js sets the cursor name and color.
+
+    attachments="false" is a Lexxy editor option. It removes the upload
+    buttons from the toolbar and turns off file paste and drop in the editor.
+    room.js also blocks dropped and pasted files for the whole page, and the
+    app doesn't include Active Storage. %>
+<yrby-document grant="<%= @note_grant %>" name="body" channel="NoteChannel">
+  <lexxy-editor id="editor" name="body" attachments="false" markdown="false"
+                placeholder="Start writing…">
+    <lexxy-collaboration doc-id="<%= @document_key %>"></lexxy-collaboration>
+  </lexxy-editor>
+</yrby-document>
+
+<details class="stored group mt-4 rounded-xl border border-zinc-800 bg-panel">
+  <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-400 select-none group-open:border-b group-open:border-zinc-800 hover:text-zinc-200">
+    Stored HTML in <code>note.body</code>
+  </summary>
+  <div class="px-4 py-3">
+    <p class="mb-2 text-xs leading-5 text-zinc-500">
+      This is the HTML <code>Y::Lexxy</code> saved to <code>note.body</code>,
+      which is what your app reads from the record. This panel loads it from
+      <code>GET <%= demo_note_body_path(@room) %></code> when you open it, and
+      again after each change.
+    </p>
+    <pre id="stored-html" class="!my-0 max-h-64 text-[0.72rem]" data-url="<%= demo_note_body_path(@room) %>"><code>…</code></pre>
+  </div>
+</details>

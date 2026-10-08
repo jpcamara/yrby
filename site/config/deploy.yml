@@ -1,0 +1,71 @@
+# Kamal config for deploying the same image to one cheap VPS.
+#
+#   gem install kamal
+#   kamal setup     # first time: installs Docker on the host and boots the app
+#   kamal deploy    # after that
+#
+# Use this or fly.toml, not both.
+#
+# Run one host and one container. Documents live in SQLite on the volume
+# below, so a second container would mean a second database, with rooms split
+# between them. To grow, use a bigger host.
+
+service: yrby-site
+
+image: jpcamara/yrby-site
+
+servers:
+  web:
+    - 192.0.2.10 # replace with the VPS address
+
+proxy:
+  ssl: true
+  host: yrby.example.com
+  app_port: 3000
+  healthcheck:
+    path: /up
+    interval: 10
+  # kamal-proxy has to hold the WebSocket open. If the cable connects and then
+  # drops after 30 seconds, check this setting first.
+  response_timeout: 300
+
+registry:
+  username: jpcamara
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64 # most VPS hosts; drop to arch: arm64 for an Ampere/Graviton box
+
+# The Dockerfile's ENV lines set everything else the container needs.
+env:
+  clear:
+    RAILS_ENV: production
+    # Required in production. The app won't boot without it (see
+    # config/initializers/production_boot_checks.rb). This one value sets the
+    # allowed WebSocket origins for both halves of the cable. The entrypoint
+    # strips the scheme to build ANYCABLE_ALLOWED_ORIGINS for the embedded Go
+    # server, and Rails checks the origin again on the Connect RPC. Set it to
+    # this site's own origins.
+    ALLOWED_ORIGINS: https://yrby.example.com
+  # Secrets come from .kamal/secrets, which is gitignored (see
+  # .kamal/secrets.example). Don't put them in this committed file.
+  secret:
+    - SECRET_KEY_BASE
+    # The embedded Go server and Rails both derive the HTTP RPC key and the
+    # broadcast key from this. Required in production. It must be at least 32
+    # characters and not the development default, or the app won't boot.
+    - ANYCABLE_SECRET
+
+# The SQLite database lives on a named volume, so documents survive deploys and
+# restarts. The sweeper deletes rooms after 24 hours idle.
+volumes:
+  - "yrby_site_storage:/rails/storage"
+
+# No accessories. The app needs no Postgres, no Redis, and nothing else running
+# alongside it. The WebSocket server runs in the same container, inside the
+# thrust proxy, and the database is a file on the volume above.
+
+aliases:
+  logs: app logs -f
+  console: app exec --interactive --reuse "bin/rails console"

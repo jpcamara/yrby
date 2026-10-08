@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- The social card at public/og.png. Regenerate it with `bun run build:og`.
+     It uses the site's fonts from public/fonts, so run `bun run build:fonts`
+     first. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>yrby social card</title>
+<style>
+  @font-face { font-family: "Newsreader"; src: url("../../public/fonts/newsreader-latin-opsz-normal.woff2") format("woff2"); font-style: normal; font-weight: 200 800; }
+  @font-face { font-family: "Newsreader"; src: url("../../public/fonts/newsreader-latin-opsz-italic.woff2") format("woff2"); font-style: italic; font-weight: 200 800; }
+  @font-face { font-family: "IBM Plex Mono"; src: url("../../public/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; }
+  @font-face { font-family: "IBM Plex Mono"; src: url("../../public/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; }
+
+  html, body { margin: 0; }
+  body {
+    width: 1200px;
+    height: 630px;
+    box-sizing: border-box;
+    padding: 72px 80px;
+    background: #ece8e0;
+    color: #17140f;
+    font-family: "IBM Plex Mono", monospace;
+    display: flex;
+    flex-direction: column;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 34px; font-weight: 500; letter-spacing: -0.01em; }
+  .brand svg { width: 26px; height: 22px; color: #c21f3a; margin-top: -10px; }
+  h1 {
+    margin: 36px 0 0;
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 400;
+    font-size: 84px;
+    line-height: 1;
+    letter-spacing: -0.025em;
+  }
+  h1 em { color: #c21f3a; }
+  .sheet {
+    margin-top: 44px;
+    align-self: flex-start;
+    background: #ffffff;
+    border: 1px solid #d8d1c4;
+    border-radius: 14px;
+    padding: 18px 26px 18px 0;
+    font-size: 26px;
+    display: flex;
+    align-items: center;
+  }
+  .sheet .gutter { width: 3px; align-self: stretch; background: #c21f3a; margin: 0 22px 0 0; border-radius: 2px; }
+  .sheet .dim { color: #8a8174; }
+  .tagline { margin-top: auto; font-size: 22px; color: #5e574d; }
+  .tagline .dot { color: #c21f3a; }
+</style>
+</head>
+<body>
+  <div class="brand">
+    yrby
+    <svg viewBox="0 0 12 10" aria-hidden="true"><path d="M1.5 8.5 6 1.5l4.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+  <h1>Collaborative editing,<br><em>inside your Rails app.</em></h1>
+  <div class="sheet"><span class="gutter"></span><span><span class="dim">&lt;%=</span> collaborative_document_tag @post, :body <span class="dim">%&gt;</span></span></div>
+  <div class="tagline">Real-time editing for Rails <span class="dot">·</span> saved in your database <span class="dot">·</span> no Node process</div>
+</body>
+</html>

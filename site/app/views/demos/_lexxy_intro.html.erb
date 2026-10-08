@@ -1,0 +1,19 @@
+<p>
+  A <a href="https://github.com/basecamp/lexxy">Lexxy</a> editor synced with
+  <a href="https://github.com/jpcamara/lexxy-realtime">lexxy-realtime</a>.
+  Lexical stores its content in the Yjs document as nested
+  <code>Y.XmlText</code> nodes. The page renders the same
+  <code>&lt;yrby-document&gt;</code> wrapper the gem's form helper renders,
+  with a signed token for this room's <code>body</code> field as its grant.
+  Each room has a <code>Note</code> record, which <code>NoteChannel</code>
+  creates when the first person joins. <code>NoteChannel</code> extends the
+  gem's <code>LexxyRealtime::DocumentChannel</code> and rejects any other
+  token.
+</p>
+<p>
+  After each update, the channel renders the note's whole body to HTML with
+  <code>Y::Lexxy</code> and saves it to <code>body</code>, a plain text column.
+  yrby's tests check that this HTML matches what a live Lexxy editor produces.
+  The panel below loads the column over HTTP, so you can watch the saved HTML
+  change as you type.
+</p>

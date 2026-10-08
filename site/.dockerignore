@@ -1,0 +1,17 @@
+.git
+.gitignore
+.bundle
+vendor/bundle
+log/*
+tmp/*
+frontend/node_modules
+
+# The assets stage builds these inside the image.
+public/tiptap.js
+public/spreadsheet.js
+public/whiteboard.js
+public/kanban.js
+public/codemirror.js
+public/assets
+
+.DS_Store

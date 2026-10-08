@@ -1,0 +1,15 @@
+# Broadcasts go through AnyCable to the embedded anycable-go server, which holds
+# every socket. There's no Redis and no async adapter. `any_cable` posts each
+# broadcast to the Go server over localhost, and the Go server sends it to
+# subscribers.
+#
+# Tests use Action Cable's test adapter, so the channel tests call the concern
+# directly without a Go process.
+development:
+  adapter: any_cable
+
+test:
+  adapter: test
+
+production:
+  adapter: any_cable
