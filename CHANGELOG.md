@@ -6,6 +6,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## yrby-client 0.7.0 - 2026-10-08
+
+This release updates yrby-client only. The gems are unchanged.
+
 ### Added
 
 - yrby-client: `<yrby-document>` has a read-only `current` property that
