@@ -67,7 +67,7 @@ and they can call back into the element or session while it's partway through
 something. Both classes follow three rules to stay consistent:
 
 1. Calls you make (`acquire`, `retry`, `discard`, and the element's
-   deactivate, retarget, and destroy) take effect right away. Turbo copies the
+   deactivate, retarget, retry, and destroy) take effect right away. Turbo copies the
    page as soon as `before-cache` returns, and a retargeted editor has to stop
    writing to the old document immediately.
 2. Callbacks and async results (provider status and errors, lease aborts, the
@@ -149,10 +149,41 @@ resolves. The bubbling `yrby:synced` event fires once per lease and includes
 or that every edit has been acknowledged. Check `provider.synced` and
 `session.hasPending` for those.
 
+`element.current` returns the same object as the last `yrby:synced` detail,
+`{ session, doc, provider, lease, signal }`, while that lease is bound. It is
+undefined before the first sync, while the element retargets or its page is
+cached, while its document is stalled, and as soon as the lease aborts. It is
+already set when `yrby:synced` fires. A binding that loads or connects after
+the event reads it instead of waiting for an event that already happened:
+
+```js
+function attach(element, bind) {
+  if (element.current) bind(element.current);
+  element.addEventListener("yrby:synced", ({ detail }) => bind(detail));
+}
+```
+
 Import failures and subscription rejections emit `yrby:error` with
 `detail.error`, and a rejection also includes `detail.session` for you to
 retry. The element is inert while its session is blocked. After retrying the
-session, call `element.activate()` or remount the element to attach again.
+session, call `element.retry()` to attach again.
+
+`element.retry()` makes the element acquire its document again after the
+session blocked or was discarded. It does nothing while the element is bound
+to, or still acquiring, a session whose lease hasn't aborted. It doesn't change
+whether the page is live, so on a cached page the element acquires when Turbo
+shows the page again. You can call it from a lease abort handler or right after
+`session.discard()` in the same call stack, and the element acquires on its
+next settle without stalling first. A discarded session has left the store, so
+the element gets a new session with a new `Y.Doc` loaded from the server. A
+session that is still blocked is reported again with `yrby:error`. This is how
+a binding replaces a document it can no longer trust:
+
+```js
+const { session } = element.current;
+session.discard(); // aborts every lease, so bindings clean up now
+element.retry();   // yrby:synced fires again with a new session
+```
 `element.destroy()` releases the lease and stops automatic binding until the
 element is reinserted, without discarding pending edits.
 
