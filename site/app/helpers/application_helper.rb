@@ -73,28 +73,6 @@ module ApplicationHelper
     JS
   end
 
-  # The three samples on the Lexxy page. They live in Ruby so the template's
-  # ERB parser never sees the `<%= ... %>` in the form snippet.
-  def sample_lexxy_model
-    added_lines_code(<<~RUBY, add: ["has_collaborative_rich_text"])
-      class Post < ApplicationRecord
-        has_collaborative_rich_text :body
-      end
-    RUBY
-  end
-
-  def sample_lexxy_form
-    added_lines_code(<<~ERB, add: ["collaborative_rich_textarea"])
-      <%= form.collaborative_rich_textarea :body %>
-    ERB
-  end
-
-  def sample_lexxy_install
-    added_lines_code(<<~BASH, add: ["lexxy_realtime:install"])
-      bin/rails generate lexxy_realtime:install && bin/rails db:migrate
-    BASH
-  end
-
   # The proofreader's insertion caret, used as the site's logo mark. It's an
   # SVG because most fonts draw the ‸ character too small.
   def caret_mark(css_class = "text-rose-500")

@@ -15,7 +15,7 @@ handles short requests.
 ```
 site/
 ├── app/lib/           room caps, rate limiters, the demo list, the docs model
-├── app/channels/      DocumentChannel, NoteChannel, and the connection
+├── app/channels/      DocumentChannel, NoteChannel, the guards, and the connection
 ├── config/limits.rb   every rate, size, and count limit, with the reasoning for each
 ├── db/                the vendored yrby:tables migration and the schema
 ├── docs/              the documentation pages, as markdown
@@ -39,13 +39,16 @@ destroyed when `detail.signal` aborts. The helper markup stays in a template
 until the AnyCable consumer and the delegated listener are set up. The read
 panel calls `collaborative_document(:body).y_doc.read_text("content")` in Rails.
 
-`ExampleDocumentGuard` is prepended to the gem's own `Y::DocumentChannel`, and
-it only lets this example's body through. `RoomGuarded` gives the channel the
-same seats, frame limits, write budget, and awareness rules as the room demos.
-The guard goes on the gem's class because a guard on an app subclass could be
-skipped by a client that subscribes to `Y::DocumentChannel` by name. These
-limits are this site's policy for an anonymous demo. Your app doesn't need them
-to use yrby.
+`RecordChannelGuard` is prepended to the gem's own `Y::DocumentChannel`, and
+`RoomGuarded` is included in it. Together they give the channel the same
+seats, frame limits, write budget, and awareness rules as the room demos. The
+guards go on the gem's class because a guard on an app subclass could be
+skipped by a client that subscribes to `Y::DocumentChannel` by name.
+lexxy-realtime's channel and `NoteChannel` extend `Y::DocumentChannel`, so
+they get the same guards. An `authorize_document` block on `Y::DocumentChannel`
+only lets this example's body through
+(`config/initializers/record_channels.rb`). These limits are this site's
+policy for an anonymous demo. Your app doesn't need them to use yrby.
 
 The idle-document sweeper clears this example's CRDT content like any other
 room, and the record itself stays. Every visitor shares this one document. The
@@ -617,50 +620,64 @@ There are six demo pages, picked to cover different Yjs shapes:
 
 | Page | Shape | What it shows |
 |---|---|---|
-| Rich text | `Y.XmlFragment` | Lexxy on the published lexxy-realtime stack: signed-token auth, a record-backed document, and the server rendering `note.body` with `Y::Lexxy` |
+| Lexxy | `Y.XmlText` | Lexxy on the published lexxy-realtime stack: the `<yrby-document>` wrapper, a channel built on the gem's, a record-backed document, and the server rendering `note.body` with `Y::Lexxy` |
 | Tiptap | `Y.XmlFragment` | The same shape through Tiptap's own Collaboration extension |
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges, with sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map, the way canvas tools store shapes |
 | Kanban | `Y.Array` | A move is one `map.set`, so concurrent moves never conflict |
 | Code | `Y.Text` | CodeMirror 6 with remote cursors and selections |
 
-### The Rich text demo
+### The Lexxy demo
 
 The Lexxy page uses the published `lexxy-realtime` gem and npm package (both
-0.7.1) the same way a real app would:
+0.8.0) the way a real app would. These are the parts that differ for public,
+anonymous rooms, and why:
 
-- **The record.** Each room is a `Note`. `NoteChannel` creates it on subscribe,
-  never on the page GET. `has_collaborative_rich_text :body` comes from the
-  gem's Collaborative concern, which checks whether Action Text is loaded. This
-  app doesn't have Action Text, so the concern uses its plain-column path, and
-  `refresh_collaborative_rich_text` writes the HTML that `Y::Lexxy` renders
-  directly into `notes.body`. The page's "Stored HTML" panel reads that column
-  back through a GET-only JSON endpoint. The server rendered that markup, with
-  no browser involved.
-- **Auth.** The page doesn't create the `Note`. A GET is anonymous and has no
-  cap, so a crawler could otherwise create rows without limit. The page
-  generates a signed room token scoped to the field, using the gem's
-  `lexxy_realtime/body` purpose format. `NoteChannel` (the generated channel
-  template plus this site's throttles) verifies the token and creates the
-  `Note` on subscribe, within the room budget. A token for a different field
-  doesn't verify, and the subscription is rejected. `authorized?` returns true
-  because the rooms are public. The field scoping still applies, and the tests
-  cover it.
-- **The provider.** The client follows the npm README's "create the provider
-  yourself" path. `room.js` builds the yrby-client provider over
-  `@anycable/web`, with the room bar and the full-room notice, and passes `doc`
-  and `provider` to the `<lexxy-collaboration>` element so the element doesn't
-  open its own cable.
+- **The record.** Each room is a `Note`. `NoteChannel` creates it on
+  subscribe, never on the page GET. `has_collaborative_rich_text :body` comes
+  from the gem's Collaborative concern, which checks whether Action Text is
+  loaded. This app doesn't have Action Text, so the concern uses its
+  plain-column path. After each update, the channel renders the document with
+  `Y::Lexxy` and writes the HTML directly into `notes.body`. The page's
+  "Stored HTML" panel reads that column back through a GET-only JSON endpoint.
+  The server rendered that markup, with no browser involved. The `nodes:` rules
+  on the macro render attachment nodes as nothing, because the site accepts no
+  uploads.
+- **The grant.** The gem's form helper signs a GlobalID for a saved record,
+  and this page can't create a `Note` on a GET. A GET is anonymous and has no
+  cap, so a crawler could otherwise create rows without limit. So the page
+  signs the room id for the `body` field (`Note.room_token`) and renders it as
+  the `grant` of a `<yrby-document name="body" channel="NoteChannel">`.
+- **The channel.** `NoteChannel` extends the gem's
+  `LexxyRealtime::DocumentChannel` and overrides three things. `locate_record`
+  finds the room's `Note` from the room token. `subscribed` creates the `Note`
+  first, within the room budget. Its `authorize_document` block allows
+  everyone, because the rooms are public. A token for a different field
+  doesn't verify, and the parent still rejects a field that isn't declared
+  with `has_collaborative_rich_text`. The rest is the gem's channel: storage,
+  acknowledgments, and rendering `note.body`. The seats and throttles come
+  from `RecordChannelGuard` and `RoomGuarded` on `Y::DocumentChannel`, like the
+  record-backed example's.
+- **The markup.** `collaborative_rich_textarea` needs a saved record and
+  builds the editor with Lexxy's Action Text form helpers, which this app
+  doesn't load. So the page renders the helper's markup directly: a
+  `<yrby-document>` around the `<lexxy-editor>`, with a
+  `<lexxy-collaboration doc-id>` inside it. `frontend/src/lexxy.js` imports
+  `lexxy-realtime`, which registers both elements, and passes `setConsumer` a
+  function that returns the same AnyCable consumer as the other demos, with
+  the room bar, the full-room notice, and whispers hidden. On each
+  `yrby:synced` it wires the presence chips, the status line, and the stored
+  HTML panel to the session's provider and Yjs document.
 - **One copy of `lexical`.** `build.mjs` pins `lexical` and `@lexical/yjs` to a
   single copy each, alongside the yjs packages. Two copies of `lexical` break
   node-class identity, the same way two copies of yjs break constructor checks.
-- **Loading only the concern.** The gem is `require: false`. Its engine loads
-  the Lexxy gem's engine, which sets up Action Text helpers in `to_prepare` and
-  can't boot without Action Text. The app requires only
-  `lexxy_realtime/collaborative`, which works on its own, and copies the gem's
-  one-line sgid purpose format. The ERB form helper
-  (`collaborative_rich_textarea`) isn't loaded either, so the page renders the
-  `<lexxy-editor>` element directly.
+- **Loading the gem without its engine.** The gem is `require: false`. Its
+  engine loads the Lexxy gem's engine, which sets up Action Text helpers in
+  `to_prepare` and can't boot without Action Text. `config/lexxy_realtime.rb`
+  requires `lexxy_realtime/collaborative`, which works on its own, and defines
+  the two module methods the concern and the channel call.
+  `config/application.rb` adds the gem's `app/channels` to the load paths so
+  `LexxyRealtime::DocumentChannel` loads.
 
 The demos are ports of the pages in
 [`examples/actioncable-demo`](../examples/actioncable-demo). The provider
