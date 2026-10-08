@@ -9,14 +9,14 @@ const PEERS = {
   you: { label: "you", color: "var(--color-peer-you)" },
   ada: { label: "ada", color: "var(--color-peer-ada)" },
 }
-const START = "Launch checklist\n"
-const TITLE_END = "Launch checklist".length
+const START = "Writing together\n"
+const TITLE_END = "Writing together".length
 // "you" moves to the end only after ada finishes her line. Two carets at the
 // same spot would interleave their letters. A real CRDT does that too, but it
 // makes the demo confusing.
 const SCRIPT = {
-  you: [{ to: "title" }, { type: " for Friday" }, { after: "ada" }, { to: "end" }, { type: "\n• Publish yrby-client 0.6.0" }],
-  ada: [{ to: "end" }, { type: "• Tag the GitHub release" }],
+  you: [{ to: "title" }, { type: " in Rails" }, { after: "ada" }, { to: "end" }, { type: "\n• Saved before anyone sees them" }],
+  ada: [{ to: "end" }, { type: "• Edits merge without conflicts" }],
 }
 const TICK_MS = 85
 const PAUSE_TICKS = 50
