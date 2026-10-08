@@ -20,6 +20,9 @@ const Base = (typeof HTMLElement === "undefined" ? class {} : HTMLElement) as ty
 // Holds the application's own inert value while the element forces inert on.
 const INERT_ATTRIBUTE = "data-yrby-inert";
 
+/** A consumer, a promise of one, or a function that returns either. */
+export type ConsumerSource = CableConsumer | Promise<CableConsumer> | (() => CableConsumer | Promise<CableConsumer>);
+
 let sharedConsumer: Promise<CableConsumer> | undefined;
 
 // Loads once per page. A failed import is cleared so a later attempt can retry it.
@@ -28,6 +31,27 @@ function defaultConsumer(): Promise<CableConsumer> {
     .then(actioncable => actioncable.createConsumer() as CableConsumer)
     .catch(error => { sharedConsumer = undefined; throw error; });
   return sharedConsumer;
+}
+
+let assignedConsumer: ConsumerSource | undefined;
+// The last factory called and its result. Assigning a new value clears it,
+// and so does a failed result, so the next attempt calls the factory again.
+let factoryResult: { factory: () => unknown; consumer: Promise<CableConsumer> } | undefined;
+
+function loadConsumer(source: ConsumerSource | null | undefined): Promise<CableConsumer> {
+  if (source == null) return defaultConsumer();
+  if (typeof source !== "function") return Promise.resolve(source);
+  if (factoryResult?.factory === source) return factoryResult.consumer;
+  let consumer: Promise<CableConsumer>;
+  try {
+    consumer = Promise.resolve(source());
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  const entry = { factory: source, consumer };
+  factoryResult = entry;
+  consumer.catch(() => { if (factoryResult === entry) factoryResult = undefined; });
+  return consumer;
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -76,8 +100,20 @@ type BindAttempt = {
 // all go through #settle, which runs after the current call stack and compares
 // what should be bound with what is.
 export class YrbyDocumentElement extends Base {
-  /** Set before adding elements to use another consumer, such as AnyCable's. */
-  static consumer: CableConsumer | Promise<CableConsumer> | undefined;
+  /**
+   * Set before adding elements to use another consumer, such as AnyCable's.
+   * It takes a consumer, a promise of one, or a function that returns either.
+   * The element calls the function when it first needs a consumer and reuses
+   * the result. If the function throws or its promise rejects, the next
+   * attempt calls it again. Assigning a different value replaces the reused
+   * result. When unset, elements share an `@rails/actioncable` consumer.
+   */
+  static get consumer(): ConsumerSource | undefined { return assignedConsumer; }
+  static set consumer(value: ConsumerSource | undefined) {
+    if (value === assignedConsumer) return;
+    assignedConsumer = value;
+    factoryResult = undefined;
+  }
   // refresh is read when the session is acquired and isn't part of the
   // document's identity, so changing it doesn't rebind the editor.
   static observedAttributes = ["grant", "name", "channel"];
@@ -203,7 +239,7 @@ export class YrbyDocumentElement extends Base {
   #start(key: string, descriptor: DocumentDescriptor): void {
     const attempt: BindAttempt = { key, descriptor };
     this.#attempt = attempt;
-    Promise.resolve(YrbyDocumentElement.consumer ?? defaultConsumer()).then(
+    loadConsumer(YrbyDocumentElement.consumer).then(
       consumer => { attempt.consumer = consumer; },
       error => { attempt.ended = { detail: { error } }; },
     ).then(() => this.#requestSettle());

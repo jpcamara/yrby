@@ -18,6 +18,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `session.discard()`, so a binding can replace a broken document with a fresh
   session. It replaces calling `activate()`, which is internal to the Turbo
   adapter.
+- yrby-client: `YrbyDocumentElement.consumer` accepts a function that returns
+  a consumer or a promise of one. The element calls it when it first needs a
+  consumer and reuses the result. A function that throws or rejects is called
+  again on the next attempt, and assigning a different value replaces the
+  result.
 
 ## [0.8.1] - 2026-10-03
 
