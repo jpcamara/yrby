@@ -75,8 +75,8 @@ You pass them the provider or its `awareness`. `provider.awareness` is a plain
 
 On AnyCable, the channel also opens a presence stream with `whisper: true`. A
 whisper goes from one browser to the others without calling your Ruby code.
-Only presence uses it. Document edits still go through the server, which
-saves and confirms them.
+Only presence uses it. Edits still go through the server, which saves and
+confirms them.
 
 To use whispers, create the consumer with `@anycable/web`. The provider
 whispers whenever the subscription supports it:

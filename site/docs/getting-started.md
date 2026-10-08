@@ -1,10 +1,14 @@
 # Getting started
 
-yrby lets several people edit the same document in your Rails app at once. It
-wraps [y-crdt](https://github.com/y-crdt/y-crdt), the Rust version of Yjs, for
-Ruby. On top of that it adds a sync channel for Action Cable and AnyCable, a
-browser client, and tools to read and render documents in Ruby. You don't need
-to run Node.
+yrby lets several people edit the same field in your Rails app at once, such
+as a post's body. It wraps [y-crdt](https://github.com/y-crdt/y-crdt), the Rust
+version of Yjs, for Ruby. On top of that it adds a sync channel for Action Cable
+and AnyCable, a browser client, and tools to read and render the saved content
+in Ruby. You don't need to run Node.
+
+In yrby, a document is the Yjs state for one record attribute, such as
+`@post.body`. Browsers sync it over Action Cable, and the server stores it as
+`Y::Document` and `Y::DocumentUpdate` rows.
 
 ## Install
 
@@ -14,7 +18,7 @@ Add both gems, then install the browser package and its peer dependencies:
 # Core CRDT and protocol primitives
 gem "yrby"
 
-# The Rails side: the sync channel, the document models, the generator
+# The Rails side: the sync channel, the storage models, the generator
 gem "yrby-rails"
 ```
 
@@ -58,16 +62,16 @@ controller already let this user see the page. To also check the user's
 current permissions when they subscribe, see
 [The document channel](/docs/document-channel).
 
-The document is stored as rows in your database, and you can read it back in
-Ruby:
+The saved state lives in `Y::Document` rows in your database, and you can read
+the post's body back in Ruby:
 
 ```ruby
 doc = @post.collaborative_document(:body).y_doc
 doc.read_text("content")  # for rich text, use Y::Lexxy.new(doc).to_html
 ```
 
-If you need documents keyed by room, a different store, or your own
-authorization, generate your own channel with
+If you need a Yjs document keyed by room instead of a record, a different
+store, or your own authorization, generate your own channel with
 `bin/rails generate yrby:install --channel`. It's a few lines long and uses the
 same concern as `Y::DocumentChannel`.
 [The document channel](/docs/document-channel) covers it.
@@ -75,8 +79,8 @@ same concern as `Y::DocumentChannel`.
 ## The browser side
 
 The tag renders a `<yrby-document>` element. Import it once and it connects by
-itself. When the document has synced, your listener gets it and hands it to
-your editor:
+itself. When the Yjs document (`Y.Doc`) has synced, your listener gets it and
+hands it to your editor:
 
 ```js
 import "yrby-client/element"
@@ -87,15 +91,15 @@ document.addEventListener("yrby:synced", ({ target, detail }) => {
 })
 ```
 
-`yrby:synced` fires once the document has caught up with the server. Wait for
+`yrby:synced` fires once the Yjs document has caught up with the server. Wait for
 it before you attach the editor. Most editor bindings add an empty paragraph when
-they start. If two people attach before the server's copy arrives, the document
+they start. If two people attach before the server's copy arrives, the post's body
 ends up with both paragraphs.
 
-When the signal aborts, remove the editor and its listeners. Leave the
+When the signal aborts, remove the editor and its listeners. Leave the Yjs
 document, the provider, and the cable consumer alone, because yrby manages
-those. The event bubbles, so one listener on `document` also covers elements
-added to the page later.
+those. The event bubbles, so one listener on the page's `document` also covers
+elements added to the page later.
 
 If the user leaves the page before their edits are sent, yrby keeps sending
 them as long as the tab stays open. The next visit loads the saved content from
@@ -117,11 +121,11 @@ See [The JavaScript client](/docs/javascript-client) for the rest of the API.
 
 ## What yrby covers
 
-`yrby` binds the parts of `y-crdt` you need to sync and persist collaborative
-documents: a `Doc`, awareness, and the y-websocket protocol primitives. The
-server doesn't need to know what's in a document to sync it. It applies
-updates, answers sync handshakes, and saves changes without reading them. The
-editor in the browser defines the document's structure. When you want to read
+`yrby` binds the parts of `y-crdt` you need to sync and save Yjs documents: a
+`Doc`, awareness, and the y-websocket protocol primitives. The server doesn't
+need to know what's in a Yjs document to sync it. It applies updates, answers
+sync handshakes, and saves changes without reading them. The editor in the
+browser defines its structure. When you want to read
 the contents in Ruby, use `Doc#read_text` or `Doc#read_map`.
 
 The API is small. Most of the gem's code deals with saving changes, delivering
@@ -140,16 +144,16 @@ Chrome.
 | [Rhino Editor](https://github.com/KonnorRogers/rhino-editor) (Tiptap 3) | `@tiptap/extension-collaboration` + `-caret` |
 | [CodeMirror 6](https://codemirror.net) | `y-codemirror.next` |
 
-The same channel also syncs documents that aren't text, such as a whiteboard
+The same channel also syncs Yjs documents that aren't text, such as a whiteboard
 on a `Y.Map`, a kanban board on a `Y.Array`, or a spreadsheet on a `Y.Array` of
 nested `Y.Map`s. This site has six [live demos](/demos). In the Lexxy one,
 built on [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime), the
-server renders the document to HTML with `Y::Lexxy` after every change and
+server renders the rich text to HTML with `Y::Lexxy` after every change and
 saves it to a plain column.
 
-## Reading a document in Ruby
+## Reading a Yjs document in Ruby
 
-You can read a document on the server for search, exports, or emails:
+You can read a Yjs document on the server for search, exports, or emails:
 
 ```ruby
 doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
