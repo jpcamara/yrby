@@ -1,7 +1,7 @@
 # AnyCable and multi-process
 
-Most Rails apps run several processes, and any of them might handle a given
-document. Two things keep them in sync.
+Most Rails apps run several processes, and any of them might handle messages
+for a given Yjs document. Two things keep them in sync.
 
 ## Broadcasts have to cross processes
 
@@ -13,15 +13,15 @@ never see edits made on the other.
 
 ## Every process rebuilds from the store
 
-yrby doesn't keep documents in process memory between messages. Every process
-loads the document from your store through `on_load`. Whichever process
+yrby doesn't keep Yjs documents in process memory between messages. Every
+process loads the saved state from your store through `on_load`. Whichever process
 receives a change writes it to the store before any client sees it.
 
 You don't need sticky routing, per-document ownership, or any coordination
 between processes.
 
 The demo app's `multiprocess.mjs` test runs clients against two processes. It
-checks that every client ends up with the same document, that both processes
+checks that every client ends up with the same Yjs document, that both processes
 read the latest state, that presence reaches clients on the other process, and
 that both processes write to the same log.
 
@@ -64,7 +64,7 @@ work, but the examples are written to run on both.
 
 ### Connection-scoped state has to be declared
 
-If you keep a temporary document on the connection, declare it as channel
+If you keep temporary Yjs state on the connection, declare it as channel
 state with `state_attr_accessor` from anycable-rails. Base64-encode the bytes,
 because AnyCable sends that state as JSON with every RPC call:
 
@@ -93,14 +93,14 @@ end
 ```
 
 The state goes back and forth with every message, so this only makes sense for
-small documents.
+small Yjs documents.
 
 ## Awareness whispers
 
 On AnyCable, the channel opens a second stream for presence with
 `whisper: true`. A whisper goes from one browser to the others through
-anycable-go. Only presence uses it. Document edits still go through the
-server, which saves and confirms them.
+anycable-go. Only presence uses it. Edits still go through the server, which
+saves and confirms them.
 
 Plain Action Cable has no whispers, so presence goes through the server too.
 Your channel code doesn't change, because the concern checks whether whispers
@@ -124,7 +124,7 @@ You can share a `Doc` across Ruby threads (Puma threads, Action Cable
 connection threads, background jobs) without adding locks.
 `test/thread_safety_test.rb` runs shared docs and full sync handshakes from 8
 threads at once, and checks that every thread still ends up with the same
-document.
+Yjs document.
 
 Methods that do real CRDT work release the Global VM Lock while the native
 code runs. So CRDT work runs in parallel on regular MRI, and you don't need JRuby or

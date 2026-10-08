@@ -1,12 +1,13 @@
 # Server-side rendering
 
-These classes turn a collaborative document into HTML in Ruby, with no Node or
-headless browser. Each one targets a specific editor and produces the same
-HTML that editor would. `Y::Tiptap` renders Tiptap documents and builds on
-`Y::ProseMirror`. `Y::Lexxy` renders [Lexxy](https://github.com/basecamp/lexxy)
-documents and builds on `Y::Lexical`. For another editor built on ProseMirror
-or Lexical, extend the base class with your own rules. Point a renderer at a
-document from the other engine and it returns `nil`.
+These classes turn the Yjs document behind an editor into HTML in Ruby, with
+no Node or headless browser. Each one targets a specific editor and produces
+the same HTML that editor would. `Y::Tiptap` renders Yjs documents written by
+Tiptap and builds on `Y::ProseMirror`. `Y::Lexxy` renders Yjs documents written
+by [Lexxy](https://github.com/basecamp/lexxy) and builds on `Y::Lexical`. For
+another editor built on ProseMirror or Lexical, extend the base class with your
+own rules. Point a renderer at a Yjs document written by the other engine and
+it returns `nil`.
 
 ## Y::Tiptap
 
@@ -17,7 +18,7 @@ tiptap.to_html("content") # or another XML root
 ```
 
 The output matches Tiptap's own `getHTML()` byte for byte, and the tests check
-it against a document captured from a real editor. It's modeled on
+it against a Yjs document captured from a real editor. It's modeled on
 [`tiptap-php`](https://github.com/ueberdosis/tiptap-php). It understands both
 naming styles, Tiptap's (`bulletList`, `bold`) and prosemirror-schema-basic's
 (`bullet_list`, `strong`).
@@ -44,7 +45,7 @@ lexxy.to_html("notepad") # or another XML root
 ```
 
 The HTML is the same as the `value` a `lexxy-editor` submits to Rails, and the
-tests check it against a document captured from a real editor. Lexical itself
+tests check it against a Yjs document captured from a real editor. Lexical itself
 has no standard HTML output, because each editor sets up its own, so the class
 is named after Lexxy. `Y::Lexical` covers core Lexical, and other Lexical
 editors can extend it with their own rules.
@@ -87,11 +88,11 @@ the node holds. Use `:inline` for formatted text, `:blocks` for child block
 nodes, or `:none` for a node with no content. `:inline` is the default.
 `void: true` leaves off the closing tag.
 
-## Finding a document's node types
+## Finding your editor's node types
 
 Editors store types and attributes under names that are hard to guess. Rhino's
 strike mark is `rhino-strike`, and Lexical prefixes its own properties with
-`__`. To see the real names, create a document in your editor that uses your
+`__`. To see the real names, add some content in your editor that uses your
 custom node, then ask the renderer:
 
 ```ruby
@@ -132,7 +133,7 @@ has to match the editor's exactly, use `Y::RenderRules.escape_text` and
 do. To set the content mode for a block rule, pass both:
 `rules.node "embed", contains: :blocks do |node| ... end`.
 
-Blocks don't run while the document is locked. The renderer does its native
+Blocks don't run while the Yjs document is locked. The renderer does its native
 pass first, in one read transaction with the GVL released, then runs your
 blocks and inserts what they return. So a block can safely read the same doc,
 write to it, or query the database.

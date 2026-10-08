@@ -6,8 +6,8 @@
   <p class="text-sm text-accent">Example</p>
   <h1>A record-backed editor</h1>
   <p>Open this page in two windows and type in either one. Rails saves the
-    document to its database, and the button below reads it back in Ruby.</p>
-  <p>Everyone who visits this page edits the same document, and it's cleared
+    text to its database, and the button below reads it back in Ruby.</p>
+  <p>Everyone who visits this page edits the same text, and it's cleared
     after a day with no activity. Don't type anything private.</p>
 </div>
 <p id="document-status" role="status" class="my-4 text-sm text-zinc-400">Connecting…</p>
@@ -24,7 +24,7 @@
   <%= code_block "ruby", "doc = @document.collaborative_document(:body).y_doc\ndoc.read_text(\"content\")" %>
   <h2>How it's wired</h2>
   <p>The view renders <code>collaborative_document_tag</code>. Once the
-    document syncs, the page's script attaches CodeMirror to it. When the
+    Yjs document syncs, the page's script attaches CodeMirror to it. When the
     lease's abort signal fires, the script removes CodeMirror again. The
     document session keeps any edits the server hasn't confirmed yet, so
     removing the editor doesn't lose them.</p>

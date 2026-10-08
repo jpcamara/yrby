@@ -2,14 +2,14 @@
 
 A channel only needs two hooks, `on_load` and `on_change`, and they can talk to
 any store. yrby comes with an Active Record store because most apps want one.
-You can also keep documents somewhere else, or nowhere at all.
+You can also store Yjs documents somewhere else, or nowhere at all.
 
 ## The bundled models
 
 The models come with the gem, the same way `ActionText::RichText` comes with
 Action Text.
 
-`Y::Document` stores one row per document. Each row has a unique `key`, which
+`Y::Document` stores one row per Yjs document. Each row has a unique `key`, which
 is what channels use. Your app can pick the key, and yrby never parses it. A
 row can also point at a model attribute through a polymorphic `record` and a
 `name`, such as `"body"`. Rows created by key alone leave those two nil.
@@ -18,19 +18,20 @@ You can create a row by key or by record, in either order.
 `Y::Document.for(record, name)` finds or creates the row for a record's
 attribute, with a readable key like `post/1/body`. If a channel already
 created a row with that key, `for` links it to the record, so both end up on
-the same document.
+the same row.
 
-The row also holds `state`, the merged snapshot of the document, and nothing
-else. If you want rendered HTML or search text, compute it yourself, usually
+The row also holds `state`, the merged snapshot of the Yjs document, and
+nothing else. If you want rendered HTML or search text, compute it yourself, usually
 in the channel's `on_change`. By default the channel reads with
 `.load_state(key)` and writes with `.append(key, update)`.
 
 `Y::DocumentUpdate` holds the changes that haven't been compacted yet, one per
 row. Once there are `compact_every` of them (64 by default), yrby merges them
-into `state` and deletes the rows. Loading a document reads the snapshot plus
-any remaining rows. A row lock keeps two compactions of the same document from
-running at once. Rows that belong to an open gap are marked pending and kept
-until the gap closes. Destroying a document deletes its update rows too.
+into `state` and deletes the rows. Loading the saved state reads the snapshot
+plus any remaining update rows. A row lock keeps two compactions of the same
+`Y::Document` row from running at once. Rows that belong to an open gap are
+marked pending and kept until the gap closes. Destroying a `Y::Document` row
+deletes its update rows too.
 
 The migration creates `y_documents` and `y_document_updates`. To rename them,
 edit the generated migration and set `Y::Document.table_name` and
@@ -51,8 +52,8 @@ end
 `Y::DocumentChannel` sees that and loads and saves the attribute through the
 encrypted class. Other attributes use plain `Y::Document`. In your own channel,
 point `on_load` and `on_change` at `Y::EncryptedDocument`. Either way, you need
-Active Record encryption keys set up, and you should always read a document
-through the same class. Reading an encrypted row through the plain class gives
+Active Record encryption keys set up, and you should always read an attribute's
+rows through the same class. Reading an encrypted row through the plain class gives
 you ciphertext.
 
 ## Record-backed access
@@ -82,7 +83,7 @@ Your store needs to do two things.
 struct, and with it an edit the server already confirmed.
 
 When an ack gets lost, the client resends an update the store already has.
-Replaying the log still produces the same document, because applying a CRDT
+Replaying the log still produces the same Yjs document, because applying a CRDT
 update twice has no effect. Deduplicating is optional. If log size matters,
 deduplicate by content hash:
 
@@ -118,14 +119,14 @@ end
 ### Watch for gaps that don't close
 
 An open gap is easy to miss, because the pending edit doesn't appear in the
-document until its dependency arrives. Usually the gap closes by itself. The
+editor until its dependency arrives. Usually the gap closes by itself. The
 sender resends the missing update until the server acknowledges it. Every
 handshake also asks the client for everything the server is missing. Use the
 `on_gap` hook to emit a metric, so you can see a gap that doesn't close.
 
 ## Pending structs and gap-free state
 
-When a doc gets an update whose dependency is missing, yrs holds it as a
+When a `Y::Doc` gets an update whose dependency is missing, yrs holds it as a
 pending struct and applies it if the dependency arrives later. Until then, the
 doc's state vector doesn't include it, and `Doc#pending?` returns true.
 
@@ -140,9 +141,9 @@ a compacted snapshot.
 
 ## Ephemeral documents (no database)
 
-Some documents only need to last for one session, like a scratchpad, live form
-state, or a draft you save on submit. For those, the channel can keep the
-document on the connection.
+Some content only needs to last for one session, like a scratchpad, live form
+state, or a draft you save on submit. For those, the channel can keep the Yjs
+state on the connection.
 
 ```ruby
 class ScratchpadChannel < ApplicationCable::Channel
@@ -172,19 +173,19 @@ instance variable is all the store you need. AnyCable builds a new channel
 instance for each message. There, declare the store as channel state with
 `state_attr_accessor` from anycable-rails, and Base64-encode it. AnyCable
 serializes that state as JSON in every RPC call to `anycable-go`, so keep
-these documents small.
+this state small.
 
 Each connection has its own copy, which limits where this fits. With one
 person editing, you get every delivery guarantee and no database. With
 several people, one client's update can depend on edits its connection hasn't
 seen. The server saves it as pending, and the next handshake with that client
-fills the gap. Everyone still ends up with the same document, but with heavy
+fills the gap. Everyone still ends up with the same Yjs document, but with heavy
 editing, more updates sit pending between handshakes than they would with a
 shared store.
 
 The connection and the browsers hold the only copies. After a server restart,
 a reconnecting client sends its state back through the normal sync handshake.
-The document survives as long as some client still has it.
+The content survives as long as some client still has a copy.
 
 ## The store this site uses
 
@@ -201,9 +202,9 @@ end
 ```
 
 SQLite isn't required. It's just what this site uses. On top of the hooks, the
-site caps people per room, documents on disk, and bytes per document. A
+site caps people per room, rooms saved on disk, and bytes stored per room. A
 sweeper deletes rooms nobody has edited for a day, since public, anonymous
-documents shouldn't stick around.
+content shouldn't stick around.
 
 The site runs on AnyCable, where each command gets a new channel instance. So
 anything that has to last between commands goes in `state_attr_accessor`, as
