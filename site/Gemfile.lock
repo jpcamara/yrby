@@ -222,11 +222,11 @@ GEM
     language_server-protocol (3.17.0.6)
     lexxy (1.0.0)
       railties (>= 8.0.2)
-    lexxy-realtime (0.7.1)
-      lexxy (>= 0.9.29)
+    lexxy-realtime (0.8.0)
+      lexxy (>= 0.9.29, < 2.0)
       rails (>= 8.0.2)
-      yrby (>= 0.6.0)
-      yrby-rails (>= 0.5)
+      yrby (~> 0.8, >= 0.8.1)
+      yrby-rails (~> 0.7)
     lint_roller (1.1.0)
     localhost (1.8.0)
       bake
@@ -431,7 +431,7 @@ DEPENDENCIES
   debug
   falcon (>= 0.55)
   globalid
-  lexxy-realtime (~> 0.7)
+  lexxy-realtime (~> 0.8)
   rack-attack (~> 6.7)
   railties (~> 8.1.3, >= 8.1.3.1)
   rubocop
@@ -518,7 +518,7 @@ CHECKSUMS
   json (3.0.2) sha256=8e6d7e7b11384c21230430cef90b71f14849a34a1f4452796670f7c981bd19df
   language_server-protocol (3.17.0.6) sha256=5ef2c0c138f8267e1bc631d3328347d354f96724b0af22f2c79516120443b7f0
   lexxy (1.0.0) sha256=fdf28c85671d3441483d69f3eebb9760231a99b3e2dd1c9c4d49054aaa7a9b06
-  lexxy-realtime (0.7.1) sha256=462a6ed78a75849cb6d88e9b9c452a6a9978c16a71bc5117583199540997019d
+  lexxy-realtime (0.8.0) sha256=3c4bd48ceffa01e213dcb0f1a36bdd9c8db6d12cc9db29ce8ee7fb36c1cb01a4
   lint_roller (1.1.0) sha256=2c0c845b632a7d172cb849cc90c1bce937a28c5c8ccccb50dfd46a485003cc87
   localhost (1.8.0) sha256=df7ea825b4f64949c588c17efac86bc47ddc4460d723778abe933b71759b2701
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203

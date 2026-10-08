@@ -24,7 +24,7 @@ Rails.application.routes.draw do
   # A bare demo URL creates a room and redirects to it, so every visitor gets
   # a separate room.
   get "demos/:demo", to: "demos#new_room", as: :demo
-  # The Rich text demo's stored HTML column (see DemosController#body).
+  # The Lexxy demo's stored HTML column (see DemosController#body).
   get "demos/lexxy/:room/body", to: "demos#body", as: :demo_note_body
   # The server-side read for the other demos: Ruby rebuilds the document from
   # stored state (see DemosController#stored).

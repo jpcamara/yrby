@@ -1,8 +1,9 @@
 require "test_helper"
 
-# The lexxy-realtime channel: signed room tokens scoped to a field, the Note
-# created on subscribe (not on a page GET), storage through the record, and
-# the server rendering the note's plain body column.
+# NoteChannel, lexxy-realtime's channel with a room token as the grant: room
+# tokens scoped to a field, the Note created on subscribe (not on a page GET),
+# storage through the record, the server rendering the note's plain body
+# column, and the site's throttles from RecordChannelGuard.
 class NoteChannelTest < ActionCable::Channel::TestCase
   tests NoteChannel
 
@@ -15,7 +16,7 @@ class NoteChannelTest < ActionCable::Channel::TestCase
   setup { stub_connection(connection_id: "c1") }
 
   def token = Note.room_token(ROOM, :body)
-  def subscribe_with_valid_token = subscribe token: token, field: "body"
+  def subscribe_with_valid_token = subscribe grant: token, name: "body", session_id: "s1"
   def document_key = "note/#{Note.find_by!(room: ROOM).id}/body"
   def acks = transmissions.filter_map { |m| m["ack"] }
 
@@ -29,13 +30,23 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     note = Note.find_by(room: ROOM)
 
     assert_not_nil note, "the note is created on subscribe"
-    # The join created the record's document with the expected key.
-    assert Y::Document.exists?(key: "note/#{note.id}/body")
+    # The seat is on the record's document key. The document row itself waits
+    # for the first write.
     assert_equal 1, Rooms.current.peers("note/#{note.id}/body")
+    assert_equal 0, Y::Document.count
+  end
+
+  test "the first write creates the record's document" do
+    subscribe_with_valid_token
+    perform :receive, "update" => Updates.frame(Updates::HELLO), "id" => 1
+
+    note = Note.find_by!(room: ROOM)
+
+    assert Y::Document.exists?(key: "note/#{note.id}/body", record: note, name: "body")
   end
 
   test "a garbage token is rejected and creates nothing" do
-    subscribe token: "not-a-token", field: "body"
+    subscribe grant: "not-a-token", name: "body"
 
     assert_predicate subscription, :rejected?
     assert_equal 0, Note.count
@@ -45,14 +56,14 @@ class NoteChannelTest < ActionCable::Channel::TestCase
   test "a token made for another field is rejected" do
     # The verifier is keyed by a purpose that includes the field, so a token
     # for one field doesn't verify for another.
-    subscribe token: Note.room_token(ROOM, :title), field: "body"
+    subscribe grant: Note.room_token(ROOM, :title), name: "body"
 
     assert_predicate subscription, :rejected?
     assert_equal 0, Note.count
   end
 
   test "a body token sent for another field is rejected" do
-    subscribe token: token, field: "title"
+    subscribe grant: token, name: "title"
 
     assert_predicate subscription, :rejected?
   end
@@ -84,7 +95,7 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     perform :receive, "update" => Updates.frame(Updates::HELLO), "id" => 7
 
     assert_equal [7], acks
-    assert_equal 1, Note.find_by!(room: ROOM).collaborative_document(:body).updates.count
+    assert_equal 1, Note.find_by!(room: ROOM).collaborative_document(:body).document_row.updates.count
   end
 
   test "a Lexical update is rendered into the plain body column" do
@@ -169,5 +180,12 @@ class NoteChannelTest < ActionCable::Channel::TestCase
 
     assert_equal 0, Y::Document.count
     assert_equal 0, Y::DocumentUpdate.count
+  end
+
+  test "a signed GlobalID is not a room token" do
+    note = Note.create!(room: ROOM)
+    subscribe grant: note.to_sgid(for: LexxyRealtime.grant_purpose(:body)).to_s, name: "body"
+
+    assert_predicate subscription, :rejected?
   end
 end

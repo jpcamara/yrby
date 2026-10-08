@@ -52,7 +52,7 @@ gem "yrby-rails", "~> 0.7"
 # requires only lexxy_realtime/collaborative. That's the storage concern. It
 # checks for has_rich_text and, without it, saves the rendered HTML to a plain
 # column. The editor JavaScript comes from npm.
-gem "lexxy-realtime", "~> 0.7", require: false
+gem "lexxy-realtime", "~> 0.8", require: false
 
 # A lexxy-realtime client uses a signed GlobalID to prove which record and
 # field it may join. Rails apps normally get globalid through Active Job,

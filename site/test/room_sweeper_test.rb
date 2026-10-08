@@ -74,7 +74,7 @@ class RoomSweeperTest < ActiveSupport::TestCase
 
   test "a note is kept while its document is fresh" do
     note = Note.create!(room: "busy")
-    document = note.find_or_create_collaborative_document(:body)
+    document = note.collaborative_document(:body).document_row
     note.update_columns(updated_at: 2.days.ago)
 
     RoomSweeper.run_once(ttl: 1.day)
@@ -92,6 +92,21 @@ class RoomSweeperTest < ActiveSupport::TestCase
     assert_includes evicted, "note/#{note.id}/body"
     assert_includes evicted, "note:busy"
     assert_not Note.exists?(room: "busy")
+  end
+
+  test "a stale note with no document is kept while someone is in its room" do
+    note = Note.create!(room: "seated")
+    note.update_columns(updated_at: 2.days.ago)
+    key = Y::Document.key_for(note, :body)
+    Rooms.current.join(key)
+
+    assert_empty RoomSweeper.run_once(ttl: 1.day)
+    assert Note.exists?(room: "seated"), "the room has a visitor who hasn't typed yet"
+
+    Rooms.current.leave(key)
+
+    assert_includes RoomSweeper.run_once(ttl: 1.day), "note:seated"
+    assert_not Note.exists?(room: "seated")
   end
 
   test "a fresh note is not swept" do
