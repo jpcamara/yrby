@@ -35,7 +35,7 @@ module RoomSweeper
 
     def run_once(rooms: Rooms.current, ttl: Limits::ROOM_IDLE_TTL)
       evicted = sweep_documents(rooms, ttl)
-      evicted.concat(sweep_notes(Time.current - ttl))
+      evicted.concat(sweep_notes(rooms, Time.current - ttl))
       Rails.logger.info("room-sweeper: evicted #{evicted.length} stale room(s)") if evicted.any?
       reap_leaked_connections
       evicted
@@ -109,13 +109,27 @@ module RoomSweeper
     # note (refresh_collaborative_rich_text), so updated_at tracks writes. If
     # a note's document still exists, the document sweep above handles it,
     # because deleting the note would delete a document someone may be using.
-    # Once the document is gone, or if it was never created, a stale note is
-    # just an orphaned row.
-    def sweep_notes(cutoff)
-      stale = Note.where(updated_at: ...cutoff).where.missing(:collaborative_document_body)
-      keys = stale.pluck(:room).map { |room| "note:#{room}" }
-      stale.destroy_all
-      keys
+    # Once the document is gone, or if nobody ever wrote to the room, a stale
+    # note is just an orphaned row.
+    #
+    # The document row only appears with the first write, so a note with no
+    # document can still have a visitor seated in its room. The note's room
+    # is claimed through Rooms#claim_evictions the same way a document's is,
+    # so an occupied note is kept and a join can't slip in while it's deleted.
+    def sweep_notes(rooms, cutoff)
+      stale = Note.where(updated_at: ...cutoff)
+                  .where.not(id: Y::Document.where(record_type: Note.polymorphic_name).select(:record_id))
+                  .index_by { |note| Y::Document.key_for(note, :body) }
+      claimed = rooms.claim_evictions(stale.keys)
+      return [] if claimed.empty?
+
+      begin
+        notes = stale.values_at(*claimed)
+        notes.each(&:destroy)
+        notes.map { |note| "note:#{note.room}" }
+      ensure
+        claimed.each { |key| rooms.forget(key) }
+      end
     end
   end
 end

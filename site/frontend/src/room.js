@@ -189,13 +189,11 @@ export function renderPresence(provider) {
   )
 }
 
-// Builds the provider for this page's room and sets up the shared page parts.
-// The client never names its document. It sends the signed token the server
-// rendered into the mount element, and the channel gets the key from that.
-// Every demo works this way. Channel and params default to DocumentChannel for
-// the shape demos. The Lexxy page passes NoteChannel and its field token.
-export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params } = {}) {
-  const consumer = noticeAwareConsumer(createConsumer(cableUrl()), {
+// The cable consumer every demo uses: @anycable/web, wrapped so the page reads
+// the server's notices and the provider never sees `whisper`. The Lexxy page
+// hands it to <yrby-document>, and the other demos pass it to their provider.
+export function roomConsumer() {
+  return noticeAwareConsumer(createConsumer(cableUrl()), {
     onNotice: () =>
       showNotice(
         "This room has reached its size limit, so new edits won't be saved or shared. " +
@@ -204,18 +202,42 @@ export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params }
     onRejected: () =>
       showNotice("Couldn't join this room. It may be full, or the site may be busy. Try again in a minute, or open the demo again for a new room."),
   })
+}
 
-  const provider = new ActionCableProvider(ydoc, consumer, channel, params || { token: mount.dataset.token })
-  provider.awareness.setLocalStateField("user", user)
-  provider.awareness.on("update", () => renderPresence(provider))
+// The room bar and the file blocker. Every demo page has both.
+export function setupRoomPage() {
+  setupRoomBar()
+  refuseFiles()
+}
 
+// Shows the provider's connection state in the status line and everyone in
+// the room as chips. Returns a function that stops both.
+export function showRoomState(provider) {
   const status = statusEl()
-  status.dataset.state = "connecting"
-  status.textContent = "Connecting…"
   const STATUS_TEXT = { connecting: "Connecting…", connected: "Syncing…", disconnected: "Disconnected" }
-  provider.onStatusChange(({ status: state }) => {
+  const render = ({ status: state }) => {
     status.dataset.state = state === "synced" ? "connected" : state
     status.textContent = state === "synced" ? `Synced. You're editing as ${user.name}.` : (STATUS_TEXT[state] ?? state)
+  }
+  const onPresence = () => renderPresence(provider)
+  const offStatus = provider.onStatusChange(render)
+  provider.awareness.on("update", onPresence)
+  render({ status: provider.status })
+  renderPresence(provider)
+  return () => {
+    offStatus()
+    provider.awareness.off("update", onPresence)
+  }
+}
+
+// Builds the provider for a shape demo's room and sets up the shared page
+// parts. The client never names its document. It sends the signed token the
+// server rendered into the mount element, and DocumentChannel gets the key
+// from that.
+export function connectRoom(ydoc, mount) {
+  const provider = new ActionCableProvider(ydoc, roomConsumer(), "DocumentChannel", { token: mount.dataset.token })
+  provider.awareness.setLocalStateField("user", user)
+  provider.onStatusChange(({ status: state }) => {
     // disconnect() clears this client's awareness entry, and
     // setLocalStateField does nothing while the local state is null. After a
     // reconnect, set the identity again or other people won't see this browser.
@@ -224,23 +246,23 @@ export function connectRoom(ydoc, mount, { channel = "DocumentChannel", params }
     }
   })
 
-  setupRoomBar()
-  refuseFiles()
-  renderPresence(provider)
+  showRoomState(provider)
+  setupRoomPage()
   return provider
 }
 
 // The "server-side read" panel on every demo. It calls a GET endpoint that
 // rebuilds the document in Ruby with read_text, read_xml, read_map, or
-// read_array, or returns note.body for the Rich text demo. It fetches when
+// read_array, or returns note.body for the Lexxy demo. It fetches when
 // the panel opens and again after edits while it's open, so it shows what the
 // server reads back as you type. The fetch is debounced, which gives the
 // server time to record the change and avoids a request per keystroke. Does
-// nothing if the page has no panel.
+// nothing if the page has no panel. Returns a function that stops listening,
+// for a page whose Yjs document can be replaced.
 export function wireStoredPanel(ydoc) {
   const stored = document.querySelector("#stored-html")
   const details = document.querySelector("details.stored")
-  if (!stored || !details) return
+  if (!stored || !details) return () => {}
 
   // Indents markup for display. Block tags go on their own line at their
   // depth. Text and inline tags stay on the line with their content, so a
@@ -316,10 +338,17 @@ export function wireStoredPanel(ydoc) {
   }
 
   let timer = null
-  ydoc.on("update", () => {
+  const onUpdate = () => {
     if (!details.open) return
     clearTimeout(timer)
     timer = setTimeout(load, 600)
-  })
-  details.addEventListener("toggle", () => { if (details.open) load() })
+  }
+  const onToggle = () => { if (details.open) load() }
+  ydoc.on("update", onUpdate)
+  details.addEventListener("toggle", onToggle)
+  return () => {
+    clearTimeout(timer)
+    ydoc.off("update", onUpdate)
+    details.removeEventListener("toggle", onToggle)
+  }
 }

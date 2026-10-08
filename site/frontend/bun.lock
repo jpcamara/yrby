@@ -20,13 +20,13 @@
         "@tiptap/starter-kit": "^2.11.0",
         "codemirror": "^6.0.1",
         "lexical": "^0.44",
-        "lexxy-realtime": "^0.7.1",
+        "lexxy-realtime": "^0.8.0",
         "lib0": "^0.2.117",
         "y-codemirror.next": "^0.3.5",
         "y-prosemirror": "^1.3.7",
         "y-protocols": "^1.0.6",
         "yjs": "^13.6.20",
-        "yrby-client": "^0.6.0",
+        "yrby-client": "^0.7.0",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -183,6 +183,8 @@
     "@parcel/watcher-win32-x64": ["@parcel/watcher-win32-x64@2.5.1", "", { "os": "win32", "cpu": "x64" }, "sha512-9lHBdJITeNR++EvSQVUcaZoWupyHfXe1jZvGZ06O/5MflPcuPLtEphScIBL+AiCWBO46tDSHzWyD0uDmmZqsgA=="],
 
     "@preact/signals-core": ["@preact/signals-core@1.14.4", "", {}, "sha512-HNB6HYeYKhQbJ1aKl+YRjrS4+QWHLKX6qKoUsfS/m0vqzsVaEBiZiaKbG/e+NKk2ch5ALQr/ihWaMHxiCuuWHA=="],
+
+    "@rails/actioncable": ["@rails/actioncable@8.1.400", "", {}, "sha512-Qffc3/I9xcpeaal12hmi9EPRV3hz9FvakUHBR7kL0jpZviWwO9dyaG8F1ltcjkHIdFxQ5QqzRyequAWHMq17xQ=="],
 
     "@remirror/core-constants": ["@remirror/core-constants@3.0.0", "", {}, "sha512-42aWfPrimMfDKDi4YegyS7x+/0tlzaqwPQCULLanv3DMIlu96KTJR0fM5isWX2UViOqlGnX6YFgqWepcX+XMNg=="],
 
@@ -384,7 +386,7 @@
 
     "lexical": ["lexical@0.44.0", "", {}, "sha512-ReDUjRlFgkGoPWzvdjr7s16PUVpHATN+2NH2NiZs+PLlISTaIFFgKil2P467oP3Vg+XgmpDsUgmWZsFJTztYjg=="],
 
-    "lexxy-realtime": ["lexxy-realtime@0.7.1", "", { "dependencies": { "yrby-client": "^0.5.0" }, "peerDependencies": { "@37signals/lexxy": "^0.9.29 || ^1.0.0", "@lexical/yjs": "^0.44", "lexical": "^0.44", "y-protocols": "^1.0", "yjs": "^13.6" } }, "sha512-vbzWeHoXAZBgo8i61vTBi++QlTHKTH4uXPWxoCm6lzfl5/aTpWvsVyHXzQMIiXGI0fDYtYLzMDb4AYFmbGkCdQ=="],
+    "lexxy-realtime": ["lexxy-realtime@0.8.0", "", { "dependencies": { "@rails/actioncable": "^7.1.0 || ^8.0.0", "yrby-client": "^0.7.0" }, "peerDependencies": { "@37signals/lexxy": "^0.9.29 || ^1.0.0", "@lexical/yjs": "^0.44", "lexical": "^0.44", "y-protocols": "^1.0", "yjs": "^13.6" } }, "sha512-29yBI4vK3PR/q3oy7e1Duw9HaBSkJBi4gBK1IufMizyjawmTpKTvNpVEb3jJ1NesMkSbGN10R/xDhE3WgfBTvw=="],
 
     "lib0": ["lib0@0.2.117", "", { "dependencies": { "isomorphic.js": "^0.2.4" }, "bin": { "0serve": "bin/0serve.js", "0gentesthtml": "bin/gentesthtml.js", "0ecdsa-generate-keypair": "bin/0ecdsa-generate-keypair.js" } }, "sha512-DeXj9X5xDCjgKLU/7RR+/HQEVzuuEUiwldwOGsHK/sfAfELGWEyTcf0x+uOvCvK3O2zPmZePXWL85vtia6GyZw=="],
 
@@ -536,7 +538,7 @@
 
     "yocto-queue": ["yocto-queue@0.1.0", "", {}, "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="],
 
-    "yrby-client": ["yrby-client@0.6.0", "", { "dependencies": { "lib0": "^0.2.117" }, "peerDependencies": { "@rails/actioncable": ">= 7.1", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["@rails/actioncable", "y-protocols", "yjs"] }, "sha512-4xXbMZ7q338ZeoO5+z+goVeBAjmgOmkbzG+XsEWwISuMMS6JF/A+cdDQKcqP14wSxTltyPeO887mQs3uqoK/nA=="],
+    "yrby-client": ["yrby-client@0.7.0", "", { "dependencies": { "lib0": "^0.2.117" }, "peerDependencies": { "@rails/actioncable": ">= 7.1", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["@rails/actioncable", "y-protocols", "yjs"] }, "sha512-nVvYcC3ohX4GHp++26+IZiN/bpfmfANPl5LneVjKpGTql53uSjRl36F7XZpNbnB4aOdkKV7AecYVBFLVk3p+dA=="],
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
@@ -551,8 +553,6 @@
     "@tailwindcss/oxide-wasm32-wasi/@tybys/wasm-util": ["@tybys/wasm-util@0.10.3", "", { "dependencies": { "tslib": "^2.4.0" }, "bundled": true }, "sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg=="],
 
     "@tailwindcss/oxide-wasm32-wasi/tslib": ["tslib@2.8.1", "", { "bundled": true }, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
-
-    "lexxy-realtime/yrby-client": ["yrby-client@0.5.0", "", { "dependencies": { "lib0": "^0.2.117" }, "peerDependencies": { "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["y-protocols", "yjs"] }, "sha512-04cX0ixPRGY401P60TMdg71xNOK48uBHJGTDM9hTnskertLql7eoxTxxxl8ZnthoG5EDAuGTfSl29fDNjwBAJA=="],
 
     "lightningcss/detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
   }
