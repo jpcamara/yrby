@@ -15,7 +15,9 @@
 //   bun build.mjs            # one-shot build
 //   bun build.mjs --watch    # rebuild on change
 /* global Bun */
-import { dirname, resolve } from "node:path"
+import { createHash } from "node:crypto"
+import { readFileSync, writeFileSync } from "node:fs"
+import { basename, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -66,6 +68,26 @@ const ENTRIES = [
   "src/hero.js",         // the home page replay; no Yjs, no cable
 ]
 
+// The CSP's img-src is 'self' only (config/initializers/content_security_policy.rb),
+// so a stylesheet can't load a data: image. Lexxy's stylesheet draws the
+// chevron on its code-language picker with inline SVG data: URLs. This writes
+// each one to public/ as its own file (named by content hash, so it caches
+// safely) and points the stylesheet at it. A data: URL that's left over fails
+// the build, so a Lexxy upgrade that adds one shows up here, not as a CSP
+// error in the browser.
+const DATA_SVG = /url\(\s*(["'])data:image\/svg\+xml,(.*?)\1\s*\)/g
+
+function externalizeDataImages(cssPath) {
+  const css = readFileSync(cssPath, "utf8").replace(DATA_SVG, (_match, _quote, data) => {
+    const svg = decodeURIComponent(data)
+    const name = `lexxy-icon-${createHash("sha256").update(svg).digest("hex").slice(0, 12)}.svg`
+    writeFileSync(resolve(here, "../public", name), svg)
+    return `url("/${name}")`
+  })
+  if (css.includes("data:")) throw new Error(`${basename(cssPath)} still has a data: URL, which the CSP blocks`)
+  writeFileSync(cssPath, css)
+}
+
 async function buildEntry(spec) {
   const { entry, external = [] } = typeof spec === "string" ? { entry: spec } : spec
   // An entry that imports CSS emits two outputs (JS + CSS); [name].[ext]
@@ -81,6 +103,9 @@ async function buildEntry(spec) {
   if (!result.success) {
     for (const log of result.logs) console.error(log)
     return false
+  }
+  for (const output of result.outputs) {
+    if (output.path.endsWith(".css")) externalizeDataImages(output.path)
   }
   console.log(`built ../public/${entry.replace("src/", "")}`)
   return true
