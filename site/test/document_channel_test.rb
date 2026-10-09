@@ -179,6 +179,34 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     assert_equal({ reason: "message rate limit", reconnect: false }, @closes.first)
   end
 
+  test "an update carrying a data: URL is refused, not stored, and reported once" do
+    subscribe token: Demos.room_token("tiptap", "room1")
+
+    assert_no_difference "Y::Document.count" do
+      send_update(Updates.text("data:image/png;base64,iVBORw0KGgo="), id: 1)
+      send_update(Updates.text("DATA:text/html,<b>x</b>"), id: 2)
+    end
+
+    assert_empty acks, "a refused update must not be acked"
+    assert_equal ["file_refused"], notices
+  end
+
+  test "an update carrying a blob: URL is refused" do
+    subscribe token: Demos.room_token("tiptap", "room1")
+    send_update(Updates.text("blob:https://example.com/0f6c"), id: 1)
+
+    assert_empty acks
+    assert_equal ["file_refused"], notices
+  end
+
+  test "text that only mentions data: or blob: is accepted" do
+    subscribe token: Demos.room_token("tiptap", "room1")
+    send_update(Updates.text("metadata: the blob: column holds data: rows"), id: 1)
+
+    assert_equal [1], acks
+    assert_empty notices
+  end
+
   test "a room at its byte cap stops accepting writes and says so" do
     Rooms.current = Rooms.new(max_document_bytes: Updates::HELLO.bytesize)
     subscribe token: Demos.room_token("tiptap", "room1")

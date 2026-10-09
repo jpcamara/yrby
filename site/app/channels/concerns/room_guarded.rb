@@ -24,7 +24,7 @@
 #
 # Sockets terminate in anycable-go and every command builds a new channel
 # instance, so anything that has to last between commands is channel state.
-module RoomGuarded
+module RoomGuarded # rubocop:disable Metrics/ModuleLength -- one guard, read top to bottom
   extend ActiveSupport::Concern
 
   # The Y.message_kind code for a frame with document state (an Update or a
@@ -48,7 +48,7 @@ module RoomGuarded
 
     # Per-subscription state, kept across RPC calls:
     #   seat      this subscription holds a place in the room
-    #   notified  the "room is full" notice was already sent
+    #   notified  the notices already sent, comma-separated
     # ConnectionGuard tracks the frame bucket and subscription budget per
     # connection.
     state_attr_accessor :seat, :notified
@@ -143,15 +143,16 @@ module RoomGuarded
   end
 
   # Charges document frames (an Update or a SyncStep2) against the write budget
-  # and the room byte cap before yrby sees them. Awareness and handshake frames
-  # aren't writes, so they pass through. Returns true when the frame should be
-  # dropped.
+  # and the room byte cap before yrby sees them, and drops any that carry a
+  # file (EmbeddedFiles). Awareness and handshake frames aren't writes, so they
+  # pass through. Returns true when the frame should be dropped.
   def refuse_document_write?(encoded, key)
     bytes = safe_decode(encoded)
     return false unless bytes && document_frame?(bytes)
 
     update = Y.update_from_message(bytes)
     return false unless update
+    return refuse_with_notice?("file_refused") if EmbeddedFiles.in?(update)
 
     refuse_write?(key, update.bytesize)
   end
@@ -172,9 +173,16 @@ module RoomGuarded
 
     return false if Rooms.current.reserve_write(key, bytes)
 
-    unless notified
-      self.notified = true
-      transmit({ "notice" => "document_full", "limit" => Limits::MAX_DOCUMENT_BYTES })
+    refuse_with_notice?("document_full", "limit" => Limits::MAX_DOCUMENT_BYTES)
+  end
+
+  # Drops the write and tells the page why, sending each notice once per
+  # subscription. Always true, so a refusal can return it.
+  def refuse_with_notice?(notice, fields = {})
+    sent = notified.to_s.split(",")
+    unless sent.include?(notice)
+      self.notified = [*sent, notice].join(",")
+      transmit({ "notice" => notice, **fields })
     end
     true
   end

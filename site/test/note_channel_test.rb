@@ -98,6 +98,16 @@ class NoteChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, Note.find_by!(room: ROOM).collaborative_document(:body).document_row.updates.count
   end
 
+  test "an update carrying a data: URL is refused and never reaches the body" do
+    subscribe_with_valid_token
+
+    perform :receive, "update" => Updates.frame(Updates.text("data:image/gif;base64,R0lGODlhAQABAA==")), "id" => 8
+
+    assert_empty acks
+    assert_equal(["file_refused"], transmissions.filter_map { |m| m["notice"] })
+    assert_nil Note.find_by!(room: ROOM).body
+  end
+
   test "a Lexical update is rendered into the plain body column" do
     subscribe_with_valid_token
 

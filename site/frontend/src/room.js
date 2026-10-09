@@ -194,10 +194,13 @@ export function renderPresence(provider) {
 // hands it to <yrby-document>, and the other demos pass it to their provider.
 export function roomConsumer() {
   return noticeAwareConsumer(createConsumer(cableUrl()), {
-    onNotice: () =>
+    onNotice: ({ notice }) =>
       showNotice(
-        "This room has reached its size limit, so new edits won't be saved or shared. " +
-        "Open the demo again to start a new room.",
+        notice === "file_refused"
+          ? "This site doesn't accept files or embedded images, so new edits from this tab won't be saved or shared. " +
+            "Reload the page to keep editing."
+          : "This room has reached its size limit, so new edits won't be saved or shared. " +
+            "Open the demo again to start a new room.",
       ),
     onRejected: () =>
       showNotice("Couldn't join this room. It may be full, or the site may be busy. Try again in a minute, or open the demo again for a new room."),
