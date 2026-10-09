@@ -2,8 +2,42 @@ require "test_helper"
 
 # The site doesn't accept files. These tests check that, because a later
 # change like adding images to the rich text demo could break it without
-# anyone noticing.
+# anyone noticing. This file covers the frameworks, the boot guard
+# (config/initializers/no_upload_frameworks.rb), and the routes. "No uploads"
+# in README.md lists the other layers and their tests.
 class NoUploadsTest < ActionDispatch::IntegrationTest
+  test "the app booted with neither Active Storage nor Action Text" do
+    assert_empty NoUploadFrameworks.loaded
+    assert_not defined?(ActiveStorage::Engine)
+    assert_not defined?(ActionText::Engine)
+  end
+
+  test "the boot guard names each upload framework it finds" do
+    assert_equal ["Active Storage"], NoUploadFrameworks.loaded(->(name) { name == "ActiveStorage::Engine" })
+    assert_equal ["Action Text"], NoUploadFrameworks.loaded(->(name) { name == "ActionText::Engine" })
+
+    error = assert_raises(RuntimeError) { NoUploadFrameworks.check!(->(_name) { true }) }
+    assert_includes error.message, "Active Storage and Action Text are loaded"
+    assert_includes error.message, "accepts no uploads"
+  end
+
+  test "the boot guard runs in every environment" do
+    initializer = Rails.root.join("config/initializers/no_upload_frameworks.rb").read
+
+    assert_match(/^NoUploadFrameworks\.check!$/, initializer, "the check must run unconditionally at boot")
+  end
+
+  test "no route matches the Active Storage or direct upload paths" do
+    %w[/rails/active_storage/blobs/redirect/x/y.png /rails/active_storage/disk/x/y.png
+       /rails/active_storage/direct_uploads /rails/direct_uploads].each do |path|
+      %i[get post put].each do |verb|
+        assert_raises(ActionController::RoutingError, "#{verb.upcase} #{path} must not route") do
+          Rails.application.routes.recognize_path(path, method: verb)
+        end
+      end
+    end
+  end
+
   test "Active Storage is not loaded" do
     # The gems are in the lockfile because lexxy-realtime depends on the rails
     # meta-gem, but nothing requires them. There's no constant, engine, route,
