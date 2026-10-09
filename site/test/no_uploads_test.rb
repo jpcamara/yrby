@@ -94,16 +94,16 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
                         "the ActiveStorage upload client must not be bundled"
   end
 
-  test "POST and PUT are refused, including multipart uploads" do
+  test "a multipart upload is refused on every path" do
     file = Rack::Test::UploadedFile.new(StringIO.new("x" * 1024), "image/png", original_filename: "x.png")
 
-    %w[/ /demos /docs/getting-started].each do |path|
+    %w[/ /demos /docs/getting-started /rails/active_storage/direct_uploads].each do |path|
       post path, params: { file: file }
 
-      assert_response :not_found, "POST #{path} must not route"
+      assert_response :unsupported_media_type, "POST #{path} must be refused before it's parsed"
       put path, params: { file: file }
 
-      assert_response :not_found, "PUT #{path} must not route"
+      assert_response :unsupported_media_type, "PUT #{path} must be refused before it's parsed"
     end
   end
 
