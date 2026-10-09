@@ -366,28 +366,31 @@ them off.
 ### No uploads
 
 The site accepts no files. A public, anonymous write surface with a file
-endpoint is a free file host. The throttles above all limit what a stranger can
-use up, and this app has no reason to hand out disk or object storage at all.
-So the app has no upload path to configure:
+endpoint is a free file host, and this app has no reason to hand out disk or
+object storage. Four small pieces keep it that way.
 
-- Active Storage isn't loaded. The app requires only the Rails frameworks it
-  needs, including Active Record for document storage. The activestorage and
-  actiontext gems are in the bundle, because lexxy-realtime depends on the
-  `rails` meta-gem, but nothing requires them, so no upload engine or route
-  is mounted.
-- There are no upload routes, no direct-upload endpoints, and no multipart
-  handling.
-- The Tiptap demo uses StarterKit only. It has no Image extension, so the
-  editor's schema has no node a file could become. The Lexxy demo mounts its
-  editor with `attachments="false"`, which removes Lexxy's upload buttons and
-  its file paste and drop handlers. Lexxy's upload code imports
-  `@rails/activestorage`, which the app doesn't install, and `build.mjs` marks
-  that import as external.
-- `frontend/src/room.js` refuses files before any editor sees them. On every
-  demo page it cancels `paste`, `drop`, and `dragover` events that carry files,
-  in the capture phase on `document`. The Tiptap editor also returns "handled"
-  from its own `handlePaste` and `handleDrop` for those events. Text pastes
-  work normally.
+- **Boot guard.** `config/initializers/no_upload_frameworks.rb` stops the app
+  from booting if Active Storage or Action Text is loaded. The gems are in the
+  bundle, because lexxy-realtime depends on the `rails` meta-gem, but the app
+  requires only the frameworks it uses. If a later change requires them, boot
+  fails instead of mounting upload routes.
+- **Method gate.** `config/initializers/method_gate.rb` answers any multipart
+  body with 415, and any method other than GET and HEAD with 405, before
+  routing. The one exception is the AnyCable RPC endpoint, which anycable-go
+  POSTs to and Rack::Attack keeps private. The cable's WebSocket upgrade is a
+  GET.
+- **CSP.** `img-src` is `'self'`, with no `data:` or `blob:`, and `media-src`
+  and `frame-src` are `'none'`. An image embedded in a document can't load. The
+  frontend build writes Lexxy's inline SVG chevrons out as files and fails if a
+  `data:` URL is left in a stylesheet.
+- **Cable check.** The editors don't offer uploads (the Tiptap demo has no
+  Image extension, the Lexxy demo sets `attachments="false"`, and
+  `frontend/src/room.js` cancels file pastes and drops), but a client can send
+  any Yjs update. `RoomGuarded` drops a document update that contains a
+  `data:` or `blob:` URL (`app/lib/embedded_files.rb`) before yrby sees it, the
+  same way it drops a write to a full room: not stored, not relayed, not acked.
+  Later edits from that tab build on the dropped one, so they stop syncing
+  too. The page gets a `file_refused` notice once and asks the person to reload.
 
 ### Process-local counters
 

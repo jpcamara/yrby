@@ -26,6 +26,15 @@ module Updates
     b64("AQEFAAQBB2NvbnRlbnQQY2xpZW50LTUtY29udGVudAA=")
   ].freeze
 
+  # A Y.Text "content" root holding one string, in the same shape as HELLO:
+  # one client, one ContentString struct, an empty delete set. Strings under
+  # 128 bytes, so the length fits in one byte.
+  def self.text(str)
+    raise ArgumentError, "keep it under 128 bytes" if str.bytesize >= 128
+
+    [1, 1, 1, 0, 4, 1, 7].pack("C*") + "content".b + [str.bytesize].pack("C") + str.b + "\x00".b
+  end
+
   # One full document state for each shape demo's root, for the server-side
   # read endpoint (DemosController#stored). Captured from Y.js like the rest of
   # this file. Each root name matches the demo's getText, getMap, getArray, or
