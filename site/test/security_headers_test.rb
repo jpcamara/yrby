@@ -20,6 +20,31 @@ class SecurityHeadersTest < ActionDispatch::IntegrationTest
     assert_includes csp, "connect-src 'self' ws: wss:"
   end
 
+  test "the CSP loads no images, media, or frames from data: or blob: URLs" do
+    get "/demos/lexxy/room1"
+    directives = response.headers["Content-Security-Policy"].split(";").to_h do |directive|
+      name, *values = directive.split
+      [name, values.join(" ")]
+    end
+
+    assert_equal "'self'", directives["img-src"], "img-src must not allow data: or blob:"
+    assert_equal "'none'", directives["media-src"]
+    assert_equal "'none'", directives["frame-src"]
+    assert_equal "'self'", directives["form-action"]
+    assert_equal "'none'", directives["object-src"]
+    assert_no_match(/data:|blob:/, response.headers["Content-Security-Policy"])
+  end
+
+  test "the built Lexxy stylesheet has no data: URLs for the CSP to block" do
+    css = Rails.root.join("public/lexxy.css")
+    skip "run `cd frontend && bun run build` first" unless css.exist?
+
+    assert_not_includes css.read, "data:", "frontend/build.mjs writes Lexxy's inline icons out as files"
+    css.read.scan(%r{url\("/(lexxy-icon-\h+\.svg)"\)}).flatten.uniq.each do |icon|
+      assert_predicate Rails.root.join("public", icon), :exist?
+    end
+  end
+
   test "style-src allows inline (syntect + editor styles) but only style-src" do
     get "/docs/getting-started"
     csp = response.headers["Content-Security-Policy"]
