@@ -19,6 +19,8 @@ const consumer = {
         received(message) {
           if (message?.notice === "document_full") {
             status.textContent = "This shared scratchpad is full, so new edits won't be saved. Anything typed since then is only in this tab."
+          } else if (message?.notice === "file_refused") {
+            status.textContent = "This site doesn't accept files or embedded images, so new edits from this tab won't be saved. Reload the page to keep editing."
           } else {
             callbacks.received(message)
           }
