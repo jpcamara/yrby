@@ -114,13 +114,24 @@ pub(crate) fn subject_for<T: Collaborative>(record: &T) -> String {
     format!("{}/{}", T::RECORD_TYPE, record.public_id())
 }
 
+/// What a request for a record's document comes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Resolved {
+    /// The record exists and its policy allows this identity: its id.
+    Allowed(i64),
+    /// No such record type, attribute, or record.
+    Missing,
+    /// The record's policy refused this identity.
+    Refused,
+}
+
 type Resolve = Arc<
     dyn Fn(
             DatabaseConnection,
             String,
             Identity,
             String,
-        ) -> Pin<Box<dyn Future<Output = Option<i64>> + Send>>
+        ) -> Pin<Box<dyn Future<Output = Resolved> + Send>>
         + Send
         + Sync,
 >;
@@ -142,11 +153,14 @@ impl Registry {
     pub(crate) fn register<T: Collaborative>(&mut self) {
         let resolve: Resolve = Arc::new(|db, public_id, identity, name| {
             Box::pin(async move {
-                let record = T::locate(&db, &public_id).await?;
-                record
-                    .authorize_document(&db, &identity, &name)
-                    .await
-                    .then(|| record.record_id())
+                let Some(record) = T::locate(&db, &public_id).await else {
+                    return Resolved::Missing;
+                };
+                if record.authorize_document(&db, &identity, &name).await {
+                    Resolved::Allowed(record.record_id())
+                } else {
+                    Resolved::Refused
+                }
             })
         });
         self.entries.insert(
@@ -161,6 +175,31 @@ impl Registry {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Look up `record_type`'s record `public_id` and run its policy for
+    /// `identity` on its `name` document.
+    pub(crate) async fn resolve(
+        &self,
+        db: &DatabaseConnection,
+        identity: &Identity,
+        record_type: &str,
+        public_id: &str,
+        name: &str,
+    ) -> Resolved {
+        let Some(entry) = self.entries.get(record_type) else {
+            return Resolved::Missing;
+        };
+        if !entry.documents.contains(&name) {
+            return Resolved::Missing;
+        }
+        (entry.resolve)(
+            db.clone(),
+            public_id.to_string(),
+            identity.clone(),
+            name.to_string(),
+        )
+        .await
     }
 
     /// Whether a document key (`post/42/body`) names an attribute its model
@@ -199,27 +238,12 @@ impl DocumentAuthorizer for RecordAuthorizer {
     async fn authorize(&self, identity: &Identity, grant: &str, name: &str) -> Option<String> {
         let subject = self.signer.verify(grant, name)?;
         let (record_type, public_id) = subject.rsplit_once('/')?;
-        let entry = self.registry.entries.get(record_type)?;
-        if !entry.documents.contains(&name) {
-            tracing::info!(
-                record_type,
-                name,
-                "[yrby] grant names an attribute the model does not declare"
-            );
-            return None;
-        }
-        let Some(record_id) = (entry.resolve)(
-            self.db.clone(),
-            public_id.to_string(),
-            identity.clone(),
-            name.to_string(),
-        )
-        .await
-        else {
-            tracing::info!(
-                record_type,
-                "[yrby] grant's record is gone, or its policy refused"
-            );
+        let resolved = self
+            .registry
+            .resolve(&self.db, identity, record_type, public_id, name)
+            .await;
+        let Resolved::Allowed(record_id) = resolved else {
+            tracing::info!(record_type, name, ?resolved, "[yrby] grant refused");
             return None;
         };
         let key = key_for(record_type, record_id, name);
@@ -325,7 +349,7 @@ mod tests {
         let (authorizer, yrby, db) = setup().await;
 
         // A grant for a live record opens that record's document and binds it.
-        let grant = yrby.grant_for(&post(1), "body", 60).unwrap();
+        let grant = yrby.grant_for(&post(1), "body").unwrap();
         assert_eq!(
             authorizer
                 .authorize(&ctx("ada"), &grant, "body")
@@ -349,7 +373,7 @@ mod tests {
         );
 
         // Undeclared attributes: refused when minting, and when presented.
-        assert!(yrby.grant_for(&post(1), "title", 60).is_err());
+        assert!(yrby.grant_for(&post(1), "title").is_err());
         let title = authorizer.signer.sign("Post/pid-1", "title", 60);
         assert_eq!(
             authorizer.authorize(&ctx("ada"), &title, "title").await,
@@ -369,7 +393,7 @@ mod tests {
         );
 
         // A deleted record's grant stops working, as a Rails sgid does.
-        let grant2 = yrby.grant_for(&post(2), "body", 60).unwrap();
+        let grant2 = yrby.grant_for(&post(2), "body").unwrap();
         POSTS.lock().unwrap().retain(|(id, _)| *id != 2);
         assert_eq!(
             authorizer.authorize(&ctx("ada"), &grant2, "body").await,
@@ -392,7 +416,7 @@ mod tests {
         let store = SeaOrmStore::new(db.clone());
         POSTS.lock().unwrap().push((3, "pid-3".into()));
         store.append("post/3/body", &[0, 0]).await.unwrap();
-        let grant3 = yrby.grant_for(&post(3), "body", 60).unwrap();
+        let grant3 = yrby.grant_for(&post(3), "body").unwrap();
         assert_eq!(
             authorizer
                 .authorize(&ctx("ada"), &grant3, "body")

@@ -21,39 +21,14 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-/// A post's `body` and `notes` are collaborative documents; the body is
-/// stored encrypted when the app configures encryption.
-#[async_trait::async_trait]
-impl loco_yrby::Collaborative for Model {
-    const RECORD_TYPE: &'static str = "Post";
-    const DOCUMENTS: &'static [&'static str] = &["body", "notes"];
-    const ENCRYPTED: &'static [&'static str] = &["body"];
-
-    fn public_id(&self) -> String {
-        self.pid.to_string()
-    }
-
-    fn record_id(&self) -> i64 {
-        self.id
-    }
-
-    async fn locate(db: &DatabaseConnection, public_id: &str) -> Option<Self> {
-        Self::find_by_pid(db, public_id).await.ok()
-    }
-
-    /// Only the post's owner edits its body, on a connection identified as them.
-    async fn authorize_document(
-        &self,
-        db: &DatabaseConnection,
-        identity: &loco_yrby::Identity,
-        _name: &str,
-    ) -> bool {
-        match loco_yrby::connected_user(identity) {
-            Some(user_pid) => self.is_owned_by(db, user_pid).await,
-            None => false,
-        }
-    }
-}
+// A post's body and notes are collaborative documents. The body is stored
+// encrypted when the app sets an encryption key. Only the post's owner edits
+// them.
+loco_yrby::collaborative!(Model as "Post",
+    documents: ["body", "notes"],
+    encrypted: ["body"],
+    authorize: is_owned_by,
+);
 
 // implement your read-oriented logic here
 impl Model {

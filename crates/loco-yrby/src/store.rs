@@ -215,7 +215,7 @@ impl SeaOrmStore {
                 .collect::<Result<Vec<_>, StoreError>>()?;
             let mut plan = compaction::plan(state.as_deref(), &rows)?;
             if let Some(sealer) = sealer {
-                plan.state = plan.state.map(|s| sealer.encrypt(&s));
+                plan.state = plan.state.map(|s| sealer.seal(&key, &s));
             }
             Ok::<_, StoreError>(plan)
         })
@@ -287,7 +287,7 @@ impl DocumentStore for SeaOrmStore {
         let row = updates::ActiveModel {
             document_id: Set(id),
             payload: Set(match self.sealer(key) {
-                Some(sealer) => sealer.encrypt(update),
+                Some(sealer) => sealer.seal(key, update),
                 None => update.to_vec(),
             }),
             pending: Set(false),

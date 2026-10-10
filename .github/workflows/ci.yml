@@ -356,7 +356,7 @@ jobs:
         run: cargo test --manifest-path examples/loco-demo/Cargo.toml
 
   crates-e2e:
-    name: yrby-client through anycable-go (Rust and Loco backends)
+    name: yrby-client end to end (Rust and Loco backends)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -399,4 +399,9 @@ jobs:
         working-directory: packages/client
         env:
           E2E_DB: postgres
+        run: node e2e/loco.mjs
+      - name: Loco app behind anycable-go
+        working-directory: packages/client
+        env:
+          E2E_TRANSPORT: anycable
         run: node e2e/loco.mjs

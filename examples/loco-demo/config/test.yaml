@@ -86,11 +86,3 @@ auth:
     secret: XdqwdjEwzHJZZ7XQHSCM
     # Token expiration time in seconds
     expiration: 604800 # 7 days
-
-initializers:
-  yrby:
-    # Port 0: each test app gets its own free port.
-    rpc_addr: 127.0.0.1:0
-    broadcast_url: http://127.0.0.1:8080/_broadcast
-    anycable_secret: yrby-test-anycable-secret
-    grant_secret: yrby-test-grant-secret
