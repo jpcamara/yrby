@@ -46,6 +46,13 @@ class DocChangesTest < Minitest::Test
     assert_equal "two\na\nb", @peer.read_xml("root")
   end
 
+  def test_blocks_removed_together_name_every_ordinal_they_had
+    update = @src.diff { @src.get_xml_text("root").delete(0, 2) }
+
+    assert_equal [0, 1], @peer.apply_update_changes(update, "root")
+    assert_equal "a\nb", @peer.read_xml("root")
+  end
+
   def test_an_update_already_applied_changes_nothing
     update = @src.diff { Y::Lexxy.append_paragraph(@src, "three") }
     @peer.apply_update_changes(update, "root")

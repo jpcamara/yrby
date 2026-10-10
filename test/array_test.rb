@@ -55,6 +55,10 @@ class ArrayTest < Minitest::Test
     @plan.insert(99, "z") # past the end appends rather than raising
 
     assert_equal %w[a b c z], @plan.to_a
+
+    @plan.insert(2**32, "end") # too large for a u32 still appends
+
+    assert_equal %w[a b c z end], @plan.to_a
   end
 
   def test_delete_at_returns_the_removed_value
