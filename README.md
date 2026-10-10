@@ -966,9 +966,16 @@ unsubscribes on the way out.
 
 One agent works on a document at a time. The lock is in `Rails.cache` by
 default, so it holds across processes when the cache is shared. Pass
-`lock:` for another `ActiveSupport::Cache` store. `run` returns `:busy`
-without joining when another agent holds the document, and `:left`
-otherwise.
+`lock:` for another `ActiveSupport::Cache` store. A thread renews it while
+the agent stays, so a slow model call doesn't let it lapse. `run` returns
+`:busy` without joining when another agent holds the document, and `:left`
+otherwise. Cache stores can't compare and set in one step, so a process that
+stalls for over a minute can lose the lock and briefly overlap the agent that
+took over. Its writes raise `Y::Error` from then on, and it leaves.
+
+The first argument is usually `record.collaborative_document(:name)`. Any
+object that responds to `key`, `name`, and `grant(expires_in:)` works, for a
+channel that issues its own grants.
 
 An error in the setup block or a handler is logged and passed to
 `agent.on_error`, and the agent keeps going. A job that runs an agent holds

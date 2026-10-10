@@ -13,7 +13,7 @@ class AgentTest < Minitest::Test
   # What Y::Agent needs from a record's collaborative document. The grant
   # comes from the app, which owns the record.
   Document = Data.define(:key, :name) do
-    def grant(expires_in: nil) = ClientApp.grant(name) || expires_in
+    def grant(**) = ClientApp.grant(name)
   end
 
   PERSON = { "user" => { "name" => "Ada", "color" => "#0ea5e9" } }.freeze
