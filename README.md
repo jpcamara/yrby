@@ -97,8 +97,12 @@ bin/rails generate yrby:install && bin/rails db:migrate
 - [Usage](#usage)
   - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
   - [Reading document contents](#reading-document-contents)
+  - [Y::Map](#ymap-live-shared-maps), [Y::Array](#yarray-live-shared-lists), [Y::Text](#ytext-live-shared-text)
   - [Pending structs and gap-free state](#pending-structs-and-gap-free-state)
   - [Rendering to HTML](#rendering-to-html)
+  - [Writing rich text from Ruby](#writing-rich-text-from-ruby)
+  - [Anchors](#anchors-a-blocks-identity-while-others-edit)
+  - [Streaming into a document](#streaming-into-a-document)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
 - [Thread Safety](#thread-safety)
@@ -117,7 +121,8 @@ primitives. By default the Ruby side treats a document as opaque CRDT state. It
 applies updates, answers sync handshakes, and records deltas without reading
 the contents, and the browser editor decides what shape the document has. When
 you do need to look inside, `Doc#read_text` and `Doc#read_map` rebuild it in
-Ruby.
+Ruby, and live handles (`Doc#get_map`, `get_array`, `get_text`,
+`get_xml_text`) write to it.
 
 ## Durability and delivery
 
@@ -260,6 +265,102 @@ doc.read_xml("root")          # => text of an XML root, one block per line
 doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
 doc.read_array("cards")       # => a Y.Array root as a JSON string; JSON.parse it
 ```
+
+### Y::Map (live shared maps)
+
+`Doc#get_map` returns a live handle to a `Y.Map` root: reading it reflects the
+current document, and writing it mutates the CRDT (so the change syncs to every
+peer). Handles carry the same thread-safety guarantees as `Doc`: every operation
+runs with the GVL released and holds no lock across the boundary.
+
+```ruby
+map = doc.get_map("state")   # root map, created if absent
+
+# Write: primitives, arrays, and (nested) hashes
+map["title"]  = "Dashboard"
+map["count"]  = 3
+map["tags"]   = %w[a b c]
+map["user"]   = { "name" => "Ada", "role" => "eng" }  # nested Y.Map
+
+# Read: a snapshot value (nested map/array come back as Hash/Array)
+map["title"]           # => "Dashboard"
+map.to_h               # => { "title" => "Dashboard", "count" => 3, ... }
+map.keys               # => ["title", "count", "tags", "user"]
+map.size               # => 4
+map.key?("title")      # => true
+map.each { |k, v| puts "#{k}: #{v}" }
+
+# A live handle to a nested map; mutating it mutates the document
+user = map.get_map("user")   # => Y::Map (or nil if absent / not a map)
+user["name"] = "Grace"       # doc now has state.user.name == "Grace"
+
+# Delete
+map.delete("count")    # => 3 (the previous value)
+map.clear
+```
+
+A handle is addressed by its root name plus a path and re-resolves on every
+operation, so it never caches a raw CRDT pointer that could dangle when the tree
+is mutated (possibly on another thread). A nested handle keeps working even as
+sibling keys change around it.
+
+### Y::Array (live shared lists)
+
+`Doc#get_array` returns a live handle to a `Y.Array` root. The method that
+matters is `get_map`: a list of records is the shape most collaborative state
+has, and a handle addressed by index is what lets you edit one in place.
+
+```ruby
+plan = doc.get_array("plan")   # root array, created if absent
+
+plan.push({ "text" => "Find the posts", "status" => "pending" })
+plan << { "text" => "Draft an outline", "status" => "pending" }
+plan.insert(1, { "text" => "Summarize them", "status" => "pending" })
+
+plan[0]                        # => { "text" => "Find the posts", ... } (a snapshot)
+plan.size                      # => 3
+plan.to_a                      # => the whole list, as plain Ruby
+plan.each { |step| puts step["text"] }
+
+# A live handle to a record stored in the list. Writing it writes the document.
+step = plan.get_map(0)         # => Y::Map (or nil if that element is not a map)
+step["status"] = "done"        # every peer sees the status change
+
+plan.delete_at(-1)             # => the removed value
+plan.clear
+```
+
+Negative indexes count from the end, and an index outside the array reads as
+`nil` rather than raising, so a stale index from a concurrent edit is harmless.
+
+### Y::Text (live shared text)
+
+`Doc#get_text` returns a live handle to a `Y.Text` root. Appending is a CRDT
+insert rather than a whole-document write, so a person typing in the same text
+while a server-side writer appends keeps their edit, and so does the writer.
+
+```ruby
+body = doc.get_text("body")
+
+body.push("The agent wrote ")   # append; the hot path when streaming
+body << "this sentence."
+body.insert(0, "Note: ")        # insert at an index
+body.delete(0, 6)               # remove a range
+
+body.to_s                       # => "The agent wrote this sentence."
+body.length
+body.empty?
+body.clear
+```
+
+Every handle can reach any nested shared type: `get_map`, `get_array`, and
+`get_text` exist on both `Y::Map` and `Y::Array`, so a text field inside a
+record inside a list is directly addressable.
+
+> **Naming note.** Inside `module Y`, `Array` means `Y::Array`. Code in that
+> namespace that means the core class says `::Array`, and `Kernel.Array(...)`
+> for the conversion method, the same way channels in `module Y` say
+> `::ActionCable`.
 
 ### Pending structs and gap-free state
 
@@ -532,6 +633,103 @@ that needs logic, which means galleries, list items, header cells, and both
 attachment types) and
 `Y::Tiptap::NODES` in `lib/y/tiptap.rb` (task lists, mentions, the details
 family).
+
+### Writing rich text from Ruby
+
+Rich-text editors built on Yjs keep their document in `XmlText` nodes.
+`Doc#get_xml_text` returns a live `Y::XmlText` handle with the operations that
+shape needs: `insert` a string, `insert_embed` a JSON value, `set_attribute`,
+and `push_xml_text(attributes)` to append a nested block and get its handle.
+Blocks are addressed by ordinal, so a handle stays valid after other edits.
+
+`Y::Lexical` builds Lexical's exact node shape on top of that, so what Ruby
+appends renders the same as what a person typed and an open editor applies it
+as an ordinary remote edit:
+
+```ruby
+doc = Y::Doc.new
+Y::Lexical.append_heading(doc, "Agent review", tag: "h2")
+Y::Lexical.append_paragraph(doc, "Read 82 words. One suggestion: name who signs off.")
+Y::Lexxy.new(doc).to_html("root")
+# => "<h2>Agent review</h2><p>Read 82 words. One suggestion: name who signs off.</p>"
+```
+
+`append_list(doc, items, ordered:)` appends a bulleted or numbered list. Call
+it on the flavor that matches the editor: `Y::Lexxy.append_list` writes
+Lexxy's own list item type, `Y::Lexical.append_list` the standard one.
+
+Text can be formatted. Anywhere a helper takes text it also takes runs, an
+array of strings and hashes: `{ text: "bold", bold: true }`, and likewise
+`italic:`, `strikethrough:`, `underline:`, `code:`, or `link: "https://…"`.
+`append_quote` and `append_code(doc, code, language:)` add quotes and code
+blocks. `append_markdown(doc, text)` takes the subset of Markdown a model
+writes (headings, lists, quotes, fenced code, and inline formatting and
+links) and appends it as blocks.
+
+A block handle's `text` is what it says, markers skipped and nested blocks
+joined by newlines. The document can be edited in place, not only appended
+to. A block handle has `delete(index, length)` and `clear`; a parent has
+`insert_xml_text(at, attributes)` and `delete_xml_text(at)`. The helpers
+`insert_paragraph(doc, at, runs)`, `replace_runs(block, runs)`, and
+`delete_block(doc, at)` cover the common moves.
+
+`apply_update_changes(update, root)` applies an update and returns the
+ordinals of the top-level blocks it touched: a block edited (however deep),
+added, or removed. A process following a document reacts to the part that
+changed instead of diffing the text.
+
+To put a change into a shared document, record the update it produced and
+send it to the document's subscribers (see "Streaming into a document"). A
+Ruby-written paragraph and a typed one render byte for byte the same.
+
+A caret is a Yjs relative position, and `relative_position(index)` builds
+one: the `{type, tname, item, assoc}` hash editors put in awareness as
+`anchorPos` and `focusPos`. Ids are global, so a position built from a
+replayed document resolves in every open editor. Put it in the presence
+state and the agent has a caret people can see move.
+
+### Anchors: a block's identity while others edit
+
+A live handle addresses a block by its ordinal under the root, and a block
+someone inserts above moves every ordinal below it. A process that holds a
+block across a model call or a streamed write needs something steadier.
+`XmlText#anchor` returns a `Y::Anchor`: the relative position at the block's
+start plus the root's name, a plain value that serializes to JSON. Ask the
+document where the block is now with `Doc#block_at(anchor)`, which returns the
+ordinal or nil once the block is gone, or fetch the live handle with
+`Doc#find(anchor)`.
+
+```ruby
+block = Y::Lexical.append_paragraph(doc, "Verify the canary rollout.")
+anchor = block.anchor
+doc.get_xml_text("root").insert_xml_text(0, Y::Lexical::PARAGRAPH_ATTRIBUTES)
+doc.block_at(anchor)                          # => 1
+doc.find(anchor).insert(doc.find(anchor).length, " Owner: SRE.")
+Y::Anchor.from_json(anchor.to_json) == anchor # => true
+```
+
+`XmlText#attributes` returns a block's attributes (`__type`, `__tag`, and the
+rest), what a process keeps to put a block back the way it was.
+
+### Streaming into a document
+
+A process that types into a document over time, an agent writing as a model
+produces text, keeps one `Y::Doc` for the whole stream and sends each piece
+as its own diff. `Doc#diff` returns the update a block produced, or nil when
+it produced nothing:
+
+```ruby
+doc = Y::Doc.new
+paragraph = Y::Lexical.append_paragraph(doc, "")
+%w[one two three].each do |word|
+  update = doc.diff { paragraph.insert(paragraph.length, "#{word} ") }
+  # record `update`, then send it to the document's subscribers
+end
+```
+
+Each update is about its chunk, not the document, so open editors show the
+words appearing. Put the block's end position in the presence state and the
+agent's caret follows what it writes.
 
 ### Protocol codec (module functions)
 
