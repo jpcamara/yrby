@@ -48,7 +48,7 @@ packages/client/e2e/     # the client end to end against the Rust backends
 ```
 
 `crates/` is its own Cargo workspace. [`crates/README.md`](crates/README.md)
-covers its tests, including Postgres and the Rails/Loco interop run.
+covers its tests, including Postgres.
 
 The native code keeps the binding (magnus/`RString`/GVL) separate from pure
 logic (e.g. `classify_message`, `merged_doc_update`, in `yrby-core`) so the logic is

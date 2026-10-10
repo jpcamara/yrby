@@ -18,9 +18,9 @@ What you get:
 - Durable sync. A change is stored, then relayed to the other editors, then
   acknowledged to its author. Nothing lives only in memory, so the app can
   restart, or run on several machines, without losing an edit.
-- yrby-rails' storage: the same two tables, the same compaction, and the same
-  encryption format. A Rails app using yrby-rails and a Loco app using this
-  crate can share one database.
+- yrby-rails' storage design: a snapshot plus a log of updates, compacted
+  without losing an update that is still waiting on another, and optional
+  encryption at rest.
 - Grants and identity. A page receives a signed grant for one document, and
   the connection is identified as a user, so a per-user policy can decide at
   subscribe time.
@@ -130,12 +130,11 @@ initializers:
     anycable_secret: <%= get_env(name="ANYCABLE_SECRET") %>     # anycable-go's --secret
     grant_secret: <%= get_env(name="YRBY_GRANT_SECRET") %>      # signs grants; a secret of its own
     compact_every: 64
-    # Optional: encryption at rest, in Active Record encryption's format. Use
-    # a Rails app's active_record.encryption values to share a database with it.
+    # Optional: encryption at rest. Unset leaves it off.
     encryption:
       primary_key: <%= get_env(name="AR_ENCRYPTION_PRIMARY_KEY", default="") %>
       key_derivation_salt: <%= get_env(name="AR_ENCRYPTION_KEY_DERIVATION_SALT", default="") %>
-      hash_digest_class: SHA256   # SHA1 for Rails apps on load_defaults before 7.1
+      hash_digest_class: SHA256
 ```
 
 Other settings:
@@ -182,21 +181,6 @@ const lease = DocumentSessionStore.for(consumer).acquire({ grant, name: "body" }
 
 A connection without a token is identified by the Loco login cookie instead,
 through anycable-go's connect call.
-
-## Sharing a database with a Rails app
-
-The tables, document keys (`post/42/body`), record binding, compaction, and
-encryption are yrby-rails' own, so both apps can read and write the same
-documents. Two things to line up:
-
-- Encryption: configure the same `active_record.encryption` primary key, salt,
-  and digest on both sides.
-- Grants: Rails signs GlobalIDs by default. Set `config.yrby.grant_secret` to
-  the same `grant_secret`, and `config.yrby.grant_format = :jwt`, and each app
-  accepts the other's grants. Rails models that name records by a public id
-  set `self.collaborative_public_id = :pid`.
-
-`interop/run.sh` checks this against yrby-rails itself, in Docker.
 
 ## Example
 

@@ -118,9 +118,8 @@ initializers:
     broadcast_url: <%= get_env(name="ANYCABLE_BROADCAST_URL") %>
     anycable_secret: <%= get_env(name="ANYCABLE_SECRET") %>
     grant_secret: <%= get_env(name="YRBY_GRANT_SECRET") %>
-    # Active Record encryption, in Rails' format: use the Rails app's
-    # active_record.encryption values to share a database with it. Unset
-    # leaves encryption off.
+    # Encryption at rest for the documents models declare encrypted. Unset
+    # leaves it off.
     encryption:
       primary_key: <%= get_env(name="AR_ENCRYPTION_PRIMARY_KEY", default="") %>
       key_derivation_salt: <%= get_env(name="AR_ENCRYPTION_KEY_DERIVATION_SALT", default="") %>

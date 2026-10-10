@@ -67,9 +67,7 @@ A grant is an HS256 JWT:
 ```
 
 `name` scopes it to one attribute, `aud` keeps it from passing for any other
-kind of token, and it must expire. yrby-rails verifies and mints the same
-grants (`config.yrby.grant_secret`), so a Rails app and a Rust app can accept
-each other's.
+kind of token, and it must expire.
 
 ## Storage
 

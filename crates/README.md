@@ -28,7 +28,6 @@ logic.
 cargo test                               # everything, documents on SQLite
 YRBY_TEST_POSTGRES_URL=postgres://user:pass@localhost:5432/postgres \
   cargo test -p loco-yrby                # the store again, on Postgres
-loco-yrby/interop/run.sh                 # Rails and Loco on one database (Docker)
 ```
 
 The Postgres tests create a database per test (named `yrby_test_*`), so the

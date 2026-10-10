@@ -1,5 +1,4 @@
-//! The two tables yrby-rails uses, column for column, so one database can
-//! serve a Rails app and a Loco app.
+//! The two tables, as yrby-rails defines them.
 
 /// `y_documents`: one row per document. `state` is the compacted snapshot.
 pub mod documents {

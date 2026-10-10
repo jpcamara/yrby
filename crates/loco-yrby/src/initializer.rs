@@ -72,9 +72,8 @@ pub struct Settings {
     /// unidentified connection is refused before it can subscribe.
     #[serde(default)]
     pub allow_anonymous: bool,
-    /// Encrypt documents at rest, in Active Record Encryption's format. Use
-    /// the Rails app's `active_record.encryption` values to share a database
-    /// with it. Which documents are encrypted is up to their models
+    /// Encrypt documents at rest, in Active Record encryption's format. Which
+    /// documents are encrypted is up to their models
     /// ([`Collaborative::ENCRYPTED`]).
     pub encryption: Option<EncryptionSettings>,
 }
@@ -85,7 +84,7 @@ pub struct Settings {
 /// encryption:
 ///   primary_key: <%= get_env(name="AR_ENCRYPTION_PRIMARY_KEY") %>   # or a list, newest last
 ///   key_derivation_salt: <%= get_env(name="AR_ENCRYPTION_KEY_DERIVATION_SALT") %>
-///   hash_digest_class: SHA256   # SHA1 for Rails apps on load_defaults before 7.1
+///   hash_digest_class: SHA256   # or SHA1
 /// ```
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
