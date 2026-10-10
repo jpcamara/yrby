@@ -19,7 +19,9 @@ ActionCable.server.config.logger = Logger.new(File::NULL)
 # Runs the ```ruby blocks from README.md against the real gem, so an
 # example that drifts from the API fails the suite. Each block evaluates
 # in its own anonymous module with a prelude supplying the names examples
-# use without declaring (doc, key, a store, channel scaffolding).
+# use without declaring (doc, key, a store, channel scaffolding). A block
+# fenced ```rb is shown but not run, for code that needs a live server;
+# test/client_app_test.rb covers the client example.
 class ReadmeExamplesTest < Minitest::Test
   README = File.expand_path("../README.md", __dir__)
 
