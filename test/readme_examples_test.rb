@@ -12,6 +12,10 @@ require "y/collaborative"
 require "action_cable"
 require_relative "../app/channels/y/document_channel"
 
+# Examples that edit a document broadcast the change.
+ActionCable.server.config.cable = { "adapter" => "test" }
+ActionCable.server.config.logger = Logger.new(File::NULL)
+
 # Runs the ```ruby blocks from README.md against the real gem, so an
 # example that drifts from the API fails the suite. Each block evaluates
 # in its own anonymous module with a prelude supplying the names examples
