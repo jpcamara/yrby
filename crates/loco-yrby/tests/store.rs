@@ -330,12 +330,7 @@ async fn racing_compactions_lose_nothing() {
 }
 
 fn cipher() -> loco_yrby::DocumentCipher {
-    loco_yrby::DocumentCipher::new(
-        &["primary".into()],
-        "salt",
-        loco_yrby::crypto::HashDigest::SHA256,
-    )
-    .unwrap()
+    loco_yrby::DocumentCipher::new("q0b3cxVvT6s0w8m3k4b0w2bX8y0pZ8b0YxK2l9p3n1o=", &[]).unwrap()
 }
 
 async fn raw_values(db: &DatabaseConnection, key: &str) -> Vec<Vec<u8>> {

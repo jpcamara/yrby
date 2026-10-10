@@ -35,8 +35,3 @@ pub struct CreatePost {
 pub struct UpdatePost {
     pub title: String,
 }
-
-#[derive(serde::Serialize, serde::Deserialize, TS)]
-pub struct GrantDto {
-    pub grant: String,
-}

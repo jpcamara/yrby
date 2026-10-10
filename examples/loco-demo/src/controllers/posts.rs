@@ -5,7 +5,7 @@ use loco_rs::prelude::*;
 use crate::{
     dtos::{
         common::{ApiError, Page},
-        posts::{CreatePost, GrantDto, PostDto, UpdatePost},
+        posts::{CreatePost, PostDto, UpdatePost},
     },
     models::{
         _entities::posts::{ActiveModel, Column, Entity},
@@ -130,29 +130,6 @@ async fn remove(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-#[derive(serde::Deserialize)]
-pub struct GrantParams {
-    /// The collaborative document: the `name` the client subscribes with.
-    pub name: String,
-}
-
-/// A grant to one of the post's collaborative documents, for rendering into a
-/// page and for `<yrby-document refresh>`. Only the owner gets one.
-#[debug_handler]
-async fn grant(
-    auth: auth::JWT,
-    State(ctx): State<AppContext>,
-    Path(id): Path<i64>,
-    Query(params): Query<GrantParams>,
-) -> Result<Response> {
-    let model = match owned_post(&ctx, &auth, id).await? {
-        Ok(post) => post,
-        Err(response) => return Ok(response),
-    };
-    let grant = loco_yrby::Yrby::from_context(&ctx)?.grant_for(&model, &params.name, 3600)?;
-    Ok(Json(GrantDto { grant }).into_response())
-}
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/api/posts")
@@ -161,5 +138,4 @@ pub fn routes() -> Routes {
         .add("/{id}", get(get_one))
         .add("/{id}", put(update))
         .add("/{id}", delete(remove))
-        .add("/{id}/grant", get(grant))
 }
