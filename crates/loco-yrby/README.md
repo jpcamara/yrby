@@ -5,8 +5,10 @@ the same document at once, in a browser editor such as Tiptap, and every
 change is saved in the app's own database before anyone else sees it.
 
 It is the Loco side of [yrby](https://github.com/jpcamara/yrby). The browser
-runs the `yrby-client` package, which talks to the app over a WebSocket the
-app serves itself.
+runs the `yrby-client` package, connected to
+[AnyCable](https://anycable.io)'s `anycable-go`, which holds the WebSockets
+and calls the app over gRPC. Every app process serves the same documents, so
+you can run as many as you like.
 
 What you get:
 
@@ -81,27 +83,47 @@ async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
 }
 ```
 
-That is all the server needs. When the app starts, it serves:
+### 5. anycable-go
 
-- `/yrby/cable`: the WebSocket the browser connects to. It speaks ActionCable's
-  protocol, so the standard clients work.
+Tell the app the secret anycable-go runs with:
+
+```yaml
+# config/<env>.yaml
+initializers:
+  yrby:
+    anycable:
+      secret: <%= get_env(name="ANYCABLE_SECRET") %>  # anycable-go's --secret
+```
+
+```sh
+anycable-go --rpc_host=127.0.0.1:50051 --broadcast_adapter=http --secret="$ANYCABLE_SECRET"
+```
+
+When the app starts its web server, it serves:
+
+- AnyCable's gRPC service on `127.0.0.1:50051`, for anycable-go. anycable-go
+  sends no credentials over gRPC, so keep it on a private address.
 - `/yrby/grants/Post/{pid}/body`: a grant to that document for the logged-in
   user, if `is_editable_by` allows it; 401, 403, or 404 otherwise.
+- `/yrby/token`: a token that identifies the logged-in user's connection to
+  anycable-go, so it needs no call to the app.
 
 Users are identified by the app's own login: the JWT from Loco's auth, read
-from the `auth_token` cookie, a `?token=` query parameter, or a `Bearer`
-header. Grants are signed with a key derived from the app's
-`auth.jwt.secret`. There is nothing else to configure.
+from the `auth_token` cookie or a `Bearer` header. Grants are signed with a
+key derived from the app's `auth.jwt.secret`.
 
 ## The page
 
 ```js
-import { createConsumer } from "@rails/actioncable"; // or @anycable/web
+import { createConsumer } from "@anycable/web";
 import { YrbyDocumentElement } from "yrby-client/element";
 
-// A page with the login cookie can connect to "/yrby/cable" as is. An app that
-// keeps the login token in the browser, as Loco's React starter does, passes it.
-YrbyDocumentElement.consumer = createConsumer(`/yrby/cable?token=${loginToken}`);
+// /yrby/token reads the login cookie. An app that keeps the login token in
+// the browser, as Loco's React starter does, sends it as a Bearer header.
+const token = async () => (await (await fetch("/yrby/token")).json()).token;
+YrbyDocumentElement.consumer = createConsumer(`wss://cable.example.com/cable?jid=${await token()}`, {
+  tokenRefresher: async (transport) => transport.setParam("jid", await token()),
+});
 ```
 
 ```html
@@ -114,60 +136,35 @@ the yrby-client README shows.
 
 ## Configuration
 
-Everything is optional:
+Beyond `anycable.secret`, everything is optional:
 
 ```yaml
 # config/<env>.yaml
 initializers:
   yrby:
     encryption_key: <%= get_env(name="YRBY_ENCRYPTION_KEY", default="") %>  # openssl rand -base64 32
+    anycable:
+      secret: <%= get_env(name="ANYCABLE_SECRET") %>
+      rpc_addr: 127.0.0.1:50051                        # anycable-go's --rpc_host
+      broadcast_url: http://127.0.0.1:8080/_broadcast
 ```
 
 - `encryption_key` encrypts the attributes declared `encrypted` at rest.
   `previous_encryption_keys` keeps older keys readable while you rotate.
   Documents written before encryption was on stay readable.
-- `cable_path` (`/yrby/cable`), `routes_path` (`/yrby`), `grant_ttl` (a week;
-  grants are re-checked against the model at every subscribe),
-  `compact_every` (64), `login_cookie` (`auth_token`), `token_param`
-  (`token`), `allow_anonymous` (`false`), `grant_secret` (derived).
+- `routes_path` (`/yrby`), `grant_ttl` (a week; grants are re-checked
+  against the model at every subscribe), `compact_every` (64),
+  `login_cookie` (`auth_token`), `token_param` (`token`), `allow_anonymous`
+  (`false`), `grant_secret` (derived).
+- `anycable`: `broadcast_key` (anycable-go's `--broadcast_key`, if it has
+  one; otherwise derived from `secret`), `jwt_secret` (its `--jwt_secret`, if
+  that differs from `secret`), `token_ttl` (300 seconds; the client refreshes
+  the token).
 
 `cargo loco doctor` checks the configuration and that the tables exist.
-
-## Several app processes
-
-The WebSocket's broadcasts stay inside the process that serves it, so every
-browser editing a document must reach the same process. To run several,
-put [AnyCable](https://anycable.io)'s `anycable-go` in front: it holds the
-WebSockets and calls the app over gRPC, and broadcasts reach every process.
-
-```yaml
-initializers:
-  yrby:
-    transport: anycable
-    anycable:
-      rpc_addr: 127.0.0.1:50051                       # anycable-go's --rpc_host; keep it private
-      broadcast_url: http://127.0.0.1:8080/_broadcast
-      secret: <%= get_env(name="ANYCABLE_SECRET") %>  # anycable-go's --secret
-```
-
-```sh
-anycable-go --rpc_host=127.0.0.1:50051 --broadcast_adapter=http --secret="$ANYCABLE_SECRET"
-```
-
-The page then connects to anycable-go with a connection token from
-`/yrby/token`:
-
-```js
-import { createConsumer } from "@anycable/web";
-
-const token = async () => (await (await fetch("/yrby/token")).json()).token;
-const consumer = createConsumer(`wss://cable.example.com/cable?jid=${await token()}`, {
-  tokenRefresher: async (transport) => transport.setParam("jid", await token()),
-});
-```
 
 ## Example
 
 [`examples/loco-demo`](../../examples/loco-demo) is a complete Loco app with
 users and owned posts, and the end-to-end tests in `packages/client/e2e` drive
-it with the real client, in both transports.
+it with the real client through anycable-go.

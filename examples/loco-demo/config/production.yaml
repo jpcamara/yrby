@@ -111,8 +111,12 @@ auth:
     # Token expiration time in seconds
     expiration: 604800 # 7 days
 
-# yrby: documents served from this app at /yrby/cable. Set an encryption key
-# to encrypt the post bodies at rest (openssl rand -base64 32).
+# yrby: documents served to anycable-go. Set an encryption key to encrypt the
+# post bodies at rest (openssl rand -base64 32).
 initializers:
   yrby:
     encryption_key: <%= get_env(name="YRBY_ENCRYPTION_KEY", default="") %>
+    anycable:
+      rpc_addr: <%= get_env(name="YRBY_RPC_ADDR", default="127.0.0.1:50051") %>
+      broadcast_url: <%= get_env(name="ANYCABLE_BROADCAST_URL", default="http://127.0.0.1:8080/_broadcast") %>
+      secret: <%= get_env(name="ANYCABLE_SECRET") %>

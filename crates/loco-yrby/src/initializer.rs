@@ -1,4 +1,4 @@
-//! The Loco initializer: serves yrby's documents from the app.
+//! The Loco initializer: serves yrby's documents to anycable-go from the app.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,7 +7,6 @@ use anycable_rpc::{Cable, HttpBroadcaster};
 use async_trait::async_trait;
 use axum::Router as AxumRouter;
 use axum::extract::Path;
-use axum::extract::ws::WebSocketUpgrade;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -24,7 +23,6 @@ use yrby_anycable::{CHANNEL_NAME, DocumentChannel};
 use yrby_core::engine::{DocumentAuthorizer, Identity};
 use yrby_core::grant::GrantSigner;
 
-use crate::cable::{EmbeddedCable, Hub, HubBroadcaster};
 use crate::collaborative::{Collaborative, RecordAuthorizer, Registry, Resolved, subject_for};
 use crate::connection::{self, LocoLogin, USER_IDENTIFIER};
 use crate::crypto::DocumentCipher;
@@ -40,19 +38,6 @@ fn login_secret(ctx: &AppContext) -> Option<String> {
         .map(|jwt| jwt.secret.clone())
 }
 
-/// How clients reach the app.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Transport {
-    /// The app serves ActionCable's protocol itself, at `cable_path`. One
-    /// process: every client of a document connects to the same one.
-    #[default]
-    Embedded,
-    /// anycable-go holds the connections and calls the app over gRPC, so
-    /// several app processes can serve the same documents.
-    AnyCable,
-}
-
 /// `initializers.yrby` in `config/<env>.yaml`. Every setting has a default,
 /// so the block can be left out.
 ///
@@ -64,9 +49,6 @@ pub enum Transport {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
-    pub transport: Transport,
-    /// Where the embedded transport serves ActionCable.
-    pub cable_path: String,
     /// Where the app hands out grants (and, with AnyCable, connection tokens).
     pub routes_path: String,
     /// Signs grants. Defaults to one derived from the app's login secret.
@@ -92,8 +74,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            transport: Transport::default(),
-            cable_path: "/yrby/cable".into(),
             routes_path: "/yrby".into(),
             grant_secret: None,
             grant_ttl: 7 * 24 * 60 * 60,
@@ -108,7 +88,7 @@ impl Default for Settings {
     }
 }
 
-/// `initializers.yrby.anycable`, for `transport: anycable`.
+/// `initializers.yrby.anycable`: how the app and anycable-go reach each other.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AnyCableSettings {
@@ -226,8 +206,8 @@ impl Yrby {
         Ok(self.signer.sign(&subject_for(record), name, self.grant_ttl))
     }
 
-    /// With the AnyCable transport: a token that identifies a connection as
-    /// the user `user_pid`. The crate's token route hands these out.
+    /// A token that identifies an anycable-go connection as the user
+    /// `user_pid`. The crate's token route hands these out.
     ///
     /// # Errors
     /// When AnyCable's secret is not configured.
@@ -259,12 +239,12 @@ impl Yrby {
 ///
 /// When the app starts its web server, it serves:
 ///
-/// - `GET /yrby/cable`: ActionCable over WebSocket, for yrby-client (the
-///   embedded transport, the default).
+/// - AnyCable's gRPC service, at `anycable.rpc_addr`, for anycable-go, which
+///   holds the browsers' WebSockets.
 /// - `GET /yrby/grants/{record type}/{public id}/{name}`: a grant to that
 ///   document, for the logged-in user, if the model's policy allows it.
-/// - `GET /yrby/token`: with the AnyCable transport, a connection token for
-///   the logged-in user.
+/// - `GET /yrby/token`: a connection token for the logged-in user, for
+///   anycable-go.
 #[derive(Default)]
 pub struct YrbyInitializer {
     registry: Registry,
@@ -322,7 +302,7 @@ async fn grant(
     }
 }
 
-// GET {routes_path}/token, with the AnyCable transport.
+// GET {routes_path}/token
 async fn token(
     login: Arc<LocoLogin>,
     yrby: Yrby,
@@ -411,72 +391,45 @@ impl Initializer for YrbyInitializer {
             );
         }
 
-        match settings.transport {
-            Transport::Embedded => {
-                let hub = Arc::new(Hub::default());
-                let channel = DocumentChannel::new(
-                    Arc::new(store),
-                    Arc::new(HubBroadcaster(hub.clone())),
-                    authorizer,
-                )
-                .on_gap(|key| tracing::warn!(key, "[yrby] document has an open causal gap"));
-                let cable = Cable::new()
-                    .authenticator(settings.login(ctx))
-                    .channel(CHANNEL_NAME, channel);
-                let embedded = EmbeddedCable::new(cable, hub);
-                router = router.route(
-                    &settings.cable_path,
-                    get(move |ws: WebSocketUpgrade, headers: HeaderMap, uri: Uri| {
-                        embedded.upgrade(ws, headers, uri)
-                    }),
-                );
-                tracing::info!(path = %settings.cable_path, "[yrby] serving ActionCable");
-            }
-            Transport::AnyCable => {
-                let any = &settings.anycable;
-                let mut broadcaster = HttpBroadcaster::new(&any.broadcast_url);
-                if let Some(key) = any.broadcast_key.clone().or_else(|| {
-                    any.secret
-                        .as_deref()
-                        .map(anycable_rpc::secret::broadcast_key)
-                }) {
-                    broadcaster = broadcaster.with_key(key);
-                }
-                let channel =
-                    DocumentChannel::new(Arc::new(store), Arc::new(broadcaster), authorizer)
-                        .on_gap(|key| {
-                            tracing::warn!(key, "[yrby] document has an open causal gap")
-                        });
-                let cable = Cable::new()
-                    .authenticator(settings.login(ctx))
-                    .channel(CHANNEL_NAME, channel);
-
-                let (login, yrby, ttl) = (login.clone(), yrby.clone(), any.token_ttl);
-                router = router.route(
-                    &format!("{routes}/token"),
-                    get(move |headers: HeaderMap, uri: Uri| token(login, yrby, ttl, headers, uri)),
-                );
-
-                // Bind now, so a taken port fails the boot instead of a background task.
-                let listener = TcpListener::bind(any.rpc_addr).await.map_err(|e| {
-                    Error::Message(format!("yrby: cannot listen on {}: {e}", any.rpc_addr))
-                })?;
-                tracing::info!(addr = %any.rpc_addr, "[yrby] AnyCable RPC listening");
-                // A second server, not a job: it lives exactly as long as the
-                // web server beside it, and stops on the same signal.
-                tokio::spawn(async move {
-                    let incoming = tonic::transport::server::TcpIncoming::from(listener);
-                    let served = tonic::transport::Server::builder()
-                        .add_service(anycable_rpc::service(cable))
-                        .serve_with_incoming_shutdown(incoming, loco_rs::boot::shutdown_signal())
-                        .await;
-                    match served {
-                        Ok(()) => tracing::info!("[yrby] AnyCable RPC stopped"),
-                        Err(error) => tracing::error!(%error, "[yrby] AnyCable RPC server failed"),
-                    }
-                });
-            }
+        let any = &settings.anycable;
+        let mut broadcaster = HttpBroadcaster::new(&any.broadcast_url);
+        if let Some(key) = any.broadcast_key.clone().or_else(|| {
+            any.secret
+                .as_deref()
+                .map(anycable_rpc::secret::broadcast_key)
+        }) {
+            broadcaster = broadcaster.with_key(key);
         }
+        let channel = DocumentChannel::new(Arc::new(store), Arc::new(broadcaster), authorizer)
+            .on_gap(|key| tracing::warn!(key, "[yrby] document has an open causal gap"));
+        let cable = Cable::new()
+            .authenticator(settings.login(ctx))
+            .channel(CHANNEL_NAME, channel);
+
+        let (login, yrby, ttl) = (login.clone(), yrby.clone(), any.token_ttl);
+        router = router.route(
+            &format!("{routes}/token"),
+            get(move |headers: HeaderMap, uri: Uri| token(login, yrby, ttl, headers, uri)),
+        );
+
+        // Bind now, so a taken port fails the boot instead of a background task.
+        let listener = TcpListener::bind(any.rpc_addr)
+            .await
+            .map_err(|e| Error::Message(format!("yrby: cannot listen on {}: {e}", any.rpc_addr)))?;
+        tracing::info!(addr = %any.rpc_addr, "[yrby] AnyCable RPC listening");
+        // A second server, not a job: it lives exactly as long as the web
+        // server beside it, and stops on the same signal.
+        tokio::spawn(async move {
+            let incoming = tonic::transport::server::TcpIncoming::from(listener);
+            let served = tonic::transport::Server::builder()
+                .add_service(anycable_rpc::service(cable))
+                .serve_with_incoming_shutdown(incoming, loco_rs::boot::shutdown_signal())
+                .await;
+            match served {
+                Ok(()) => tracing::info!("[yrby] AnyCable RPC stopped"),
+                Err(error) => tracing::error!(%error, "[yrby] AnyCable RPC server failed"),
+            }
+        });
         Ok(router)
     }
 
@@ -530,8 +483,6 @@ mod tests {
     #[test]
     fn everything_has_a_default() {
         let settings = parse(json!({})).unwrap();
-        assert_eq!(settings.transport, Transport::Embedded);
-        assert_eq!(settings.cable_path, "/yrby/cable");
         assert_eq!(settings.routes_path, "/yrby");
         assert!(settings.grant_secret.is_none());
         assert!(
@@ -542,18 +493,16 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_anycable_transport_and_refuses_typos() {
+    fn reads_anycable_and_encryption_and_refuses_typos() {
         let settings = parse(json!({
-            "transport": "anycable",
             "encryption_key": "q0b3cxVvT6s0w8m3k4b0w2bX8y0pZ8b0YxK2l9p3n1o=",
             "anycable": { "secret": "s", "rpc_addr": "127.0.0.1:6000" }
         }))
         .unwrap();
-        assert_eq!(settings.transport, Transport::AnyCable);
         assert_eq!(settings.anycable.rpc_addr.port(), 6000);
         assert!(settings.cipher().unwrap().is_some());
 
-        assert!(parse(json!({ "trasnport": "anycable" })).is_err());
+        assert!(parse(json!({ "transport": "embedded" })).is_err());
         assert!(parse(json!({ "anycable": { "secrt": "s" } })).is_err());
         assert!(
             parse(json!({ "encryption_key": "short" }))

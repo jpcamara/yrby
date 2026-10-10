@@ -1,19 +1,17 @@
 // End-to-end: yrby-client, unchanged, against a Loco app with a database.
 //
 //   clients (DocumentSessionStore + @anycable/web, over real WebSockets)
-//     -> examples/loco-demo, serving ActionCable itself at /yrby/cable
-//        (or, with E2E_TRANSPORT=anycable, anycable-go -> gRPC -> the app)
+//     -> anycable-go -> gRPC -> examples/loco-demo
 //     -> SQLite or Postgres: y_documents + y_document_updates, encrypted per
 //        attribute and compacted
 //
 // The database is inspected directly (sqlite3, or psql) and decrypted here
 // with node:crypto, so what is checked is what is on disk. Needs cargo, plus
-// sqlite3 or a Postgres for E2E_DB=postgres, and anycable-go for
-// E2E_TRANSPORT=anycable. Run from packages/client after `npm run build`:
+// anycable-go, and sqlite3 or a Postgres for E2E_DB=postgres. Run from
+// packages/client after `npm run build`:
 //
-//   node e2e/loco.mjs                            # embedded, SQLite
-//   E2E_DB=postgres node e2e/loco.mjs            # embedded, Postgres
-//   E2E_TRANSPORT=anycable node e2e/loco.mjs     # behind anycable-go
+//   node e2e/loco.mjs                    # SQLite
+//   E2E_DB=postgres node e2e/loco.mjs    # Postgres
 //
 // For Postgres, PG_URL names the server (default: the yrby-pg container on
 // 127.0.0.1:55432). The database is inspected with psql, inside that
@@ -32,7 +30,6 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = path.resolve(here, "../../../examples/loco-demo");
-const TRANSPORT = process.env.E2E_TRANSPORT === "anycable" ? "anycable" : "embedded";
 const HTTP_PORT = Number(process.env.HTTP_PORT || 5161);
 const RPC_PORT = Number(process.env.RPC_PORT || 50161);
 const WS_PORT = Number(process.env.WS_PORT || 8161);
@@ -40,7 +37,7 @@ const ANYCABLE_SECRET = "yrby-loco-e2e-anycable";
 const ENCRYPTION_KEY = randomBytes(32);
 const COMPACT_EVERY = 16;
 const API = `http://127.0.0.1:${HTTP_PORT}`;
-const CABLE = TRANSPORT === "anycable" ? `ws://127.0.0.1:${WS_PORT}/cable` : `ws://127.0.0.1:${HTTP_PORT}/yrby/cable`;
+const CABLE = `ws://127.0.0.1:${WS_PORT}/cable`;
 const scratch = mkdtempSync(path.join(tmpdir(), "yrby-loco-"));
 
 // Grants are signed with a key derived from the app's login secret (loco-yrby's
@@ -123,7 +120,6 @@ async function startLoco() {
       PORT: String(HTTP_PORT),
       BINDING: "127.0.0.1",
       DATABASE_URL,
-      YRBY_TRANSPORT: TRANSPORT,
       YRBY_RPC_ADDR: `127.0.0.1:${RPC_PORT}`,
       ANYCABLE_BROADCAST_URL: `http://127.0.0.1:${WS_PORT}/_broadcast`,
       ANYCABLE_SECRET,
@@ -138,9 +134,7 @@ async function boot() {
   execFileSync("cargo", ["build", "-q"], { cwd: app, stdio: "inherit" });
   createDatabase();
   await startLoco();
-  if (TRANSPORT === "anycable") {
-    await startAnycable({ wsPort: WS_PORT, rpcHost: `127.0.0.1:${RPC_PORT}`, secret: ANYCABLE_SECRET });
-  }
+  await startAnycable({ wsPort: WS_PORT, rpcHost: `127.0.0.1:${RPC_PORT}`, secret: ANYCABLE_SECRET });
 }
 
 // --- users, posts, and grants ------------------------------------------------------
@@ -190,19 +184,16 @@ const hs256 = (claims, secret) => {
 const signGrant = (sub, { name = "body", ttl = 60 } = {}) =>
   hs256({ aud: "yrby", sub, name, exp: Math.floor(Date.now() / 1000) + ttl }, GRANT_SECRET);
 
-// A browser tab of `user`. Embedded: the app reads Loco's login token from the
-// URL, as an app that keeps it in the browser would send it. AnyCable: an
-// AnyCable identification token from the crate's token route, refreshed when
-// anycable-go reports it expired.
+// A browser tab of `user`: an AnyCable identification token from the crate's
+// token route, refreshed when anycable-go reports it expired.
 const cableToken = async (user) => (await (await api("/yrby/token", {}, user)).json()).token;
 async function client(user = users.Ada) {
-  if (TRANSPORT === "embedded") return cableClient(`${CABLE}?token=${user.token}`);
   return cableClient(`${CABLE}?jid=${await cableToken(user)}`, {
     tokenRefresher: async (transport) => transport.setParam("jid", await cableToken(user)),
   });
 }
-// A tab with no token in the URL: the login cookie identifies it (in AnyCable
-// mode, through anycable-go's connect call). undici's WebSocket takes headers,
+// A tab with no token in the URL: the login cookie identifies it, through
+// anycable-go's connect call. undici's WebSocket takes headers,
 // as a browser sends cookies.
 function cookieClient(user) {
   class WithCookie extends WebSocket {
@@ -215,26 +206,22 @@ function cookieClient(user) {
 
 // --- scenarios -----------------------------------------------------------------
 async function identification() {
-  console.log(`\n--- Connections are identified (${TRANSPORT}) ---`);
+  console.log("\n--- Connections are identified ---");
   const post = await createPost("Identified");
   const grant = await grantFor(post);
 
   const token = (await client()).open({ grant });
-  await waitFor(TRANSPORT === "embedded"
-    ? "Ada, identified by her login token, opens her post"
-    : "Ada, identified by an AnyCable token (no connect call), opens her post",
-  () => token.session.provider.status === "synced");
+  await waitFor("Ada, identified by an AnyCable token (no connect call), opens her post",
+    () => token.session.provider.status === "synced");
   const cookie = cookieClient(users.Ada).open({ grant });
   await waitFor("Ada, identified by her login cookie, opens it too", () =>
     cookie.session.provider.status === "synced");
-  if (TRANSPORT === "anycable") {
-    const expired = hs256({ ext: JSON.stringify({ user: users.Ada.pid }), exp: Math.floor(Date.now() / 1000) - 5 }, ANYCABLE_SECRET);
-    const refreshed = cableClient(`${CABLE}?jid=${expired}`, {
-      tokenRefresher: async (transport) => transport.setParam("jid", await cableToken(users.Ada)),
-    }).open({ grant });
-    await waitFor("an expired connection token is refreshed, and the connection proceeds", () =>
-      refreshed.session.provider.status === "synced", 15_000);
-  }
+  const expired = hs256({ ext: JSON.stringify({ user: users.Ada.pid }), exp: Math.floor(Date.now() / 1000) - 5 }, ANYCABLE_SECRET);
+  const refreshed = cableClient(`${CABLE}?jid=${expired}`, {
+    tokenRefresher: async (transport) => transport.setParam("jid", await cableToken(users.Ada)),
+  }).open({ grant });
+  await waitFor("an expired connection token is refreshed, and the connection proceeds", () =>
+    refreshed.session.provider.status === "synced", 15_000);
 
   const bob = (await client(users.Bob)).open({ grant });
   await waitFor("Bob, identified, cannot open Ada's post even holding her grant", () => bob.session.state === "blocked");
@@ -388,7 +375,7 @@ async function grants() {
   check("and opened no document", !stored(keyOf(doomed)).exists);
 }
 
-await run(`yrby-client syncs with a Loco app (${TRANSPORT}, ${BACKEND})`, async () => {
+await run(`yrby-client syncs with a Loco app (${BACKEND})`, async () => {
   try {
     await boot();
     await logIn();
