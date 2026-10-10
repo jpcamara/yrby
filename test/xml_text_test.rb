@@ -121,6 +121,23 @@ class XmlTextTest < Minitest::Test
     assert_equal "second", root.xml_text(1).xml_text(1).text
   end
 
+  def test_a_link_stays_on_its_line
+    doc = Y::Doc.new
+    Y::Lexxy.append_paragraph(doc, ["see ", { text: "docs", link: "https://example.com" }, " here"])
+
+    assert_equal "see docs here", doc.get_xml_text("root").xml_text(0).text
+  end
+
+  def test_an_ordinal_past_the_largest_block_index_touches_nothing
+    doc = Y::Doc.new
+    Y::Lexxy.append_paragraph(doc, "keep me")
+    root = doc.get_xml_text("root")
+
+    refute root.delete_xml_text(2**32)
+    assert_raises(Y::Error) { root.xml_text(2**32) }
+    assert_equal "keep me", root.xml_text(0).text
+  end
+
   # --- editing in place ---
 
   def test_blocks_can_be_inserted_between_replaced_and_removed

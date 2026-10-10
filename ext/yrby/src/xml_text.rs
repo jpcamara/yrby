@@ -322,10 +322,10 @@ impl RbXmlText {
             let mut txn = doc.transact_mut();
             let x = resolve_xml_text(&txn, Root::XmlText, root, path)
                 .ok_or_else(|| "xml text no longer exists".to_string())?;
-            if n < 0 {
+            let Ok(n) = u32::try_from(n) else {
                 return Ok(false);
-            }
-            match embedded_xml_text_index(&txn, &x, n as u32) {
+            };
+            match embedded_xml_text_index(&txn, &x, n) {
                 Some(at) => {
                     x.remove_range(&mut txn, at, 1);
                     Ok(true)
@@ -366,11 +366,10 @@ impl RbXmlText {
 
     /// A live handle to the `n`-th embedded `XmlText` block.
     fn xml_text(&self, n: i64) -> Result<RbXmlText, Error> {
-        if n < 0 {
-            return Err(yrb_error("block index must be non-negative".to_string()));
-        }
+        let n =
+            u32::try_from(n).map_err(|_| yrb_error(format!("block index {n} is out of range")))?;
         let mut child_path = self.path.clone();
-        child_path.push(Seg::Embed(n as u32));
+        child_path.push(Seg::Embed(n));
         Ok(RbXmlText {
             doc: self.doc.clone(),
             root: self.root.clone(),

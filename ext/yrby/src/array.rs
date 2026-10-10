@@ -200,7 +200,7 @@ impl RbArray {
             let at = if index < 0 {
                 (len as i64 + index).max(0) as u32
             } else {
-                (index as u32).min(len)
+                index.min(len as i64) as u32
             };
             a.insert(&mut txn, at, to_in(iv));
             Ok(())

@@ -754,7 +754,7 @@ fn root_positions(txn: &yrs::TransactionMut, event: &yrs::types::Event, hits: &m
                         }
                         pos += items.len() as u32;
                     }
-                    Change::Removed(_) => hits.push(pos),
+                    Change::Removed(n) => hits.extend(pos..pos + n),
                 }
             }
         }
@@ -766,7 +766,7 @@ fn root_positions(txn: &yrs::TransactionMut, event: &yrs::types::Event, hits: &m
                         hits.push(pos);
                         pos += 1;
                     }
-                    Delta::Deleted(_) => hits.push(pos),
+                    Delta::Deleted(n) => hits.extend(pos..pos + n),
                 }
             }
         }

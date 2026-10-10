@@ -127,14 +127,17 @@ pub fn embedded_xml_text_index<T: ReadTxn>(txn: &T, parent: &XmlTextRef, n: u32)
     None
 }
 
-/// The strings in `block`, markers skipped, nested blocks joined by newlines.
+/// The strings in `block`, markers skipped. Inline children (a link) join the
+/// line and nested blocks (a list item) start a new one.
 pub fn block_text<T: ReadTxn>(txn: &T, block: &XmlTextRef) -> String {
     let mut out = String::new();
     for d in block.diff(txn, YChange::identity) {
         match &d.insert {
             Out::Any(Any::String(s)) => out.push_str(s),
             Out::YXmlText(child) => {
-                if !out.is_empty() {
+                let inline =
+                    crate::read::is_inline_lexical_type(&crate::read::lexical_type(txn, child));
+                if !inline && !out.is_empty() {
                     out.push('\n');
                 }
                 out.push_str(&block_text(txn, child));
