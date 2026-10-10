@@ -68,6 +68,8 @@ class ReadmeExamplesTest < Minitest::Test
       def self.application = self
       def self.config = self
       def self.to_prepare(&block) = block.call
+      def self.yrby = (@yrby ||= ActiveSupport::OrderedOptions.new)
+      def self.credentials = ActiveSupport::OrderedOptions.new
     end
   RUBY
 

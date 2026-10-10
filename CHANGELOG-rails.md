@@ -9,6 +9,16 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- JWT grants, verifiable by apps other than the one that signed them, such as
+  a Loco app running loco-yrby against the same database. Set
+  `config.yrby.grant_secret`. `record.collaborative_grant(name, expires_in:)`
+  mints one, `Y::Collaborative.locate` accepts both kinds, and
+  `config.yrby.grant_format = :jwt` makes `collaborative_document_tag` render
+  them. A grant is HS256 with `aud: "yrby"`, scoped to one attribute, and must
+  expire. `self.collaborative_public_id = :pid` names a model's records by a
+  public id instead of the primary key. Signed GlobalIDs stay the default and
+  are unchanged.
+
 - `Y::DocumentChannel.authorize_document { |record, name| ... }` checks the
   application's permissions when a client subscribes, in addition to the
   signed grant. The block runs in channel context. A denial rejects that
