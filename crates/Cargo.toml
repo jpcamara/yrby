@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["anycable-rpc", "loco-yrby", "yrby-anycable"]
