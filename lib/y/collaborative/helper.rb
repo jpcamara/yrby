@@ -17,8 +17,7 @@ module Y
     # turbo_stream_from.
     #
     # The grant is a signed GlobalID scoped to this record and attribute
-    # (record.collaborative_sgid(name)), or with config.yrby.grant_format = :jwt
-    # a JWT grant another app can verify (record.collaborative_grant(name)). Render the tag only where the request
+    # (record.collaborative_sgid(name)). Render the tag only where the request
     # is already allowed to edit the record, because holding the grant is what
     # the channel checks by default. To also check the user's current
     # permissions when they subscribe, use Y::DocumentChannel.authorize_document.
@@ -37,12 +36,7 @@ module Y
     #                                  refresh: grant_post_path(@post) %>
     module Helper
       def collaborative_document_tag(record, name, expires_in: nil, refresh: nil, **, &)
-        options = { expires_in: expires_in }.compact
-        grant = if Y::Collaborative.grant_format == :jwt
-                  record.collaborative_grant(name, **options)
-                else
-                  record.collaborative_sgid(name, **options)
-                end
+        grant = record.collaborative_sgid(name, **{ expires_in: expires_in }.compact)
         attributes = { grant: grant, name: name }
         attributes[:refresh] = refresh if refresh
         # The helper's attributes come last: a later key wins in a keyword

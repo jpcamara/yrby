@@ -41,18 +41,6 @@ class CollaborativeHelperTest < Minitest::Test
     assert_includes html, 'name="body"'
   end
 
-  def test_jwt_grant_format_renders_a_grant_other_apps_verify
-    previous = [Y::Collaborative.grant_secret, Y::Collaborative.grant_format]
-    Y::Collaborative.grant_secret = "helper-test-grant-secret"
-    Y::Collaborative.grant_format = :jwt
-    grant = collaborative_document_tag(@page, :body, expires_in: 1.minute)[/ grant="([^"]+)"/, 1]
-
-    assert_equal 2, grant.count("."), "a JWT, not a signed GlobalID"
-    assert_equal @page, Y::Collaborative.locate(grant, :body)
-  ensure
-    Y::Collaborative.grant_secret, Y::Collaborative.grant_format = previous
-  end
-
   def test_refresh_option_renders_the_url_the_element_fetches_a_new_grant_from
     html = collaborative_document_tag(@page, :body, refresh: "/pages/1/grant")
 
