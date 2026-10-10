@@ -709,6 +709,27 @@ as before. Nothing renews on a timer, so an open, healthy subscription is never
 interrupted. Every reconnect after expiry is a fresh permission check, which is
 what a short lifetime is for.
 
+### Grants another app can verify
+
+A signed GlobalID only verifies inside the Rails app that signed it. To share
+documents with another app, such as a [Loco](https://loco.rs) app running
+loco-yrby against the same database, use JWT grants. Both apps sign and verify
+them with one shared secret:
+
+```ruby
+# config/application.rb, or an initializer
+Rails.application.config.yrby.grant_secret = Rails.application.credentials.yrby_grant_secret
+Rails.application.config.yrby.grant_format = :jwt # collaborative_document_tag renders JWT grants
+```
+
+`record.collaborative_grant(:body, expires_in: 10.minutes)` mints one, and
+`Y::Collaborative.locate` accepts both kinds. A JWT grant is HS256 with
+`{ "aud": "yrby", "sub": "Post/<id>", "name": "body", "exp": ... }`. It is scoped
+to one attribute, as the signed GlobalID's purpose is, and it must expire. It
+names its record by class and id, or by another column if the model sets
+`self.collaborative_public_id = :pid`. That matters when the other app names
+records by a public id rather than the primary key, as Loco models do.
+
 For room-keyed collaboration or other custom channel behavior, generate a
 channel with `bin/rails generate yrby:install --channel` and implement its
 `authorized?(key)`. Both storage hooks remain available in custom channels.

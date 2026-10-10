@@ -34,6 +34,18 @@ module Y
     extend ActiveSupport::Concern
 
     class << self
+      # The secret that signs and verifies JWT grants (Y::Collaborative::Grant),
+      # shared with any other app (a Loco app, say) whose grants this one
+      # accepts. Set config.yrby.grant_secret. Without it, only signed
+      # GlobalIDs are grants.
+      attr_accessor :grant_secret
+
+      # What collaborative_document_tag renders: :sgid (the default), or
+      # :jwt for grants another app can verify. Set config.yrby.grant_format.
+      attr_writer :grant_format
+
+      def grant_format = @grant_format || :sgid
+
       # The signed-GlobalID purpose for one collaborative attribute. A token
       # minted for one attribute only verifies against that attribute's
       # purpose, so it cannot locate a record for any other attribute. The
@@ -42,19 +54,44 @@ module Y
       # shipped one share tokens.
       def sgid_purpose(name) = "yrby/#{name}"
 
-      # Resolves a signed token minted by `collaborative_sgid(name)` back to
-      # its record. Returns nil for an invalid, tampered, expired, or
-      # wrong-attribute token, and for a record that no longer exists.
-      def locate(sgid, name)
-        GlobalID::Locator.locate_signed(sgid, for: sgid_purpose(name))
+      # Resolves a grant back to its record: a signed GlobalID from
+      # `collaborative_sgid(name)`, or a JWT grant from `collaborative_grant(name)`
+      # or another app sharing grant_secret. Returns nil for an invalid,
+      # tampered, expired, or wrong-attribute grant, and for a record that no
+      # longer exists.
+      def locate(grant, name)
+        return locate_jwt(grant, name) if Grant.jwt?(grant)
+
+        GlobalID::Locator.locate_signed(grant, for: sgid_purpose(name))
       rescue ActiveRecord::RecordNotFound
         nil
+      end
+
+      private
+
+      # A JWT grant names its record as "<polymorphic name>/<public id>". The
+      # class must be a model that includes Y::Collaborative: the grant was
+      # signed with our secret, but it only ever opens collaborative records.
+      def locate_jwt(grant, name)
+        subject = Grant.verify(grant, name: name, secret: grant_secret)
+        record_type, _, public_id = subject&.rpartition("/")
+        return nil if record_type.nil? || record_type.empty? || public_id.empty?
+
+        model = record_type.safe_constantize
+        return nil unless model.is_a?(Class) && model < ActiveRecord::Base && model.include?(Y::Collaborative)
+
+        model.find_by(model.collaborative_public_id => public_id)
       end
     end
 
     included do
       class_attribute :collaborative_document_options,
                       instance_accessor: false, default: {}.freeze
+      # The column JWT grants name records by: the primary key unless the
+      # model has a public id of its own, as Loco models have pid.
+      #
+      #   self.collaborative_public_id = :pid
+      class_attribute :collaborative_public_id, instance_accessor: false, default: :id
     end
 
     class_methods do
@@ -106,8 +143,21 @@ module Y
       options[:expires_in] = expires_in if expires_in
       to_sgid(**options).to_s
     end
+
+    # The same permission as collaborative_sgid, as a JWT that any app with
+    # the shared grant_secret verifies, a Loco app included. A JWT grant must
+    # expire: without expires_in: it lasts as long as a signed GlobalID would
+    # (SignedGlobalID.expires_in, a month under Rails).
+    def collaborative_grant(name, expires_in: nil)
+      secret = Y::Collaborative.grant_secret or raise ArgumentError, "set config.yrby.grant_secret to mint JWT grants"
+      lifetime = expires_in || SignedGlobalID.expires_in || 1.month
+      public_id = public_send(self.class.collaborative_public_id)
+      Grant.encode(subject: "#{self.class.polymorphic_name}/#{public_id}", name: name,
+                   expires_at: Time.now + lifetime, secret: secret)
+    end
   end
 end
 
 require "y/collaborative/attribute"
+require "y/collaborative/grant"
 require "y/collaborative/helper"
