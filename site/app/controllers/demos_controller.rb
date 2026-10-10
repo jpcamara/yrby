@@ -1,6 +1,10 @@
 # The live demos. None of these responses can be cached, because every page
 # belongs to a room and the room's state changes.
 class DemosController < ApplicationController
+  # The invite is a fetch from the demo page. The site has no sessions to
+  # hold a CSRF token, so #agent checks that the request's Origin is this
+  # site instead.
+  skip_forgery_protection only: :agent
   before_action :no_store
   before_action :load_demo, only: %i[new_room show]
 
@@ -46,6 +50,23 @@ class DemosController < ApplicationController
 
     note = Note.find_by(room: room)
     render json: { body: note&.body }
+  end
+
+  # Invites the demo agent into a Lexxy room. The agent runs as a
+  # ReviewAgentJob in this process and leaves when the room empties. One agent
+  # per room and Limits::MAX_AGENTS at once.
+  def agent
+    room = params[:room].to_s
+    return head :not_found unless Demos.valid_room?(room) && Note.exists?(room: room)
+    return head :forbidden unless request.origin == request.base_url
+
+    case AgentSeats.current.take(room)
+    when :ok
+      ReviewAgentJob.perform_later(room, request.base_url)
+      render json: { status: "joining" }, status: :accepted
+    when :here then render json: { status: "here" }
+    else render json: { status: "busy" }, status: :service_unavailable
+    end
   end
 
   # The shape demos' version of #body. It loads the stored Y::Document and

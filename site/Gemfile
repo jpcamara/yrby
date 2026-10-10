@@ -42,8 +42,15 @@ gem "anycable-rails", "~> 1.6"
 # The published gems, so the site runs what a reader installs. yrby-rails
 # provides the channel concern and the storage models. The site's documents
 # are Y::Document rows, as in the docs.
-gem "yrby", "~> 0.8"
-gem "yrby-rails", "~> 0.7"
+# TODO before deploy: back to the published gems once yrby 0.9 and
+# yrby-rails 0.8 ship. Until then the agent demo builds on the local branch.
+gem "yrby", path: "../../yrby-writes"
+gem "yrby-rails", path: "../../yrby-writes"
+
+# The agent demo: Y::Agent joins a room over the cable with async-websocket,
+# and ruby_llm talks to the model.
+gem "async-websocket"
+gem "ruby_llm"
 
 # Collaborative Lexxy editing over yrby. It's require: false because the gem's
 # engine requires the lexxy gem, whose engine sets up Action Text helpers in

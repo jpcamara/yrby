@@ -1,3 +1,24 @@
+PATH
+  remote: ../../yrby-writes
+  specs:
+    yrby (0.8.1)
+      rb_sys (~> 0.9)
+    yrby (0.8.1-aarch64-linux)
+    yrby (0.8.1-aarch64-linux-musl)
+    yrby (0.8.1-arm64-darwin)
+    yrby (0.8.1-x86_64-darwin)
+    yrby (0.8.1-x86_64-linux)
+    yrby (0.8.1-x86_64-linux-musl)
+    yrby-rails (0.7.0)
+      actioncable (>= 7.1)
+      actionview (>= 7.1)
+      activerecord (>= 7.1)
+      activesupport (>= 7.1)
+      base64 (~> 0.2)
+      globalid (>= 1.0)
+      railties (>= 7.1)
+      yrby (>= 0.7.0)
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -122,6 +143,11 @@ GEM
       string-format (~> 0.2)
     async-utilization (0.5.0)
       console (~> 1.0)
+    async-websocket (0.30.1)
+      async-http (~> 0.76)
+      protocol-http (~> 0.34)
+      protocol-rack (~> 0.7)
+      protocol-websocket (~> 0.17)
     bake (0.25.0)
       bigdecimal
       samovar (~> 2.1)
@@ -161,6 +187,16 @@ GEM
       protocol-http (~> 0.31)
       protocol-rack (~> 0.7)
       samovar (~> 2.3)
+    faraday (2.14.4)
+      faraday-net_http (>= 2.0, < 3.5)
+      json
+      logger
+    faraday-multipart (1.2.0)
+      multipart-post (~> 2.0)
+    faraday-net_http (3.4.4)
+      net-http (~> 0.5)
+    faraday-retry (2.4.0)
+      faraday (~> 2.0)
     fiber-annotation (0.2.0)
     fiber-local (1.1.0)
       fiber-storage
@@ -245,6 +281,10 @@ GEM
     minitest (6.0.6)
       drb (~> 2.0)
       prism (~> 1.5)
+    multipart-post (2.4.1)
+    net-http (0.10.0)
+      net-protocol (>= 0.3.0)
+      uri (>= 0.11.1)
     net-imap (0.6.6)
       date
       net-protocol
@@ -288,6 +328,8 @@ GEM
       protocol-http (~> 0.58)
       rack (>= 1.0)
     protocol-url (0.18.0)
+    protocol-websocket (0.21.2)
+      protocol-http (~> 0.2)
     racc (1.8.1)
     rack (3.2.7)
     rack-attack (6.8.0)
@@ -331,6 +373,9 @@ GEM
       zeitwerk (~> 2.6)
     rainbow (3.1.1)
     rake (13.4.2)
+    rake-compiler-dock (1.12.0)
+    rb_sys (0.9.130)
+      rake-compiler-dock (= 1.12.0)
     rbs (4.2.0)
       logger
       prism (>= 1.6.0)
@@ -366,8 +411,19 @@ GEM
       rubocop (>= 1.72.1)
     ruby-next-core (1.2.1)
     ruby-progressbar (1.13.0)
+    ruby_llm (2.1.0)
+      base64
+      faraday (>= 1.10.0)
+      faraday-multipart (>= 1)
+      faraday-net_http (>= 1)
+      faraday-retry (>= 1)
+      json (< 4)
+      marcel (>= 1.0, < 3)
+      schematist (~> 1.1)
+      zeitwerk (~> 2)
     samovar (2.5.1)
       console (~> 1.0)
+    schematist (1.1.0)
     securerandom (0.4.1)
     sqlite3 (2.9.6-aarch64-linux-gnu)
     sqlite3 (2.9.6-aarch64-linux-musl)
@@ -391,21 +447,6 @@ GEM
       base64
       websocket-extensions (>= 0.1.0)
     websocket-extensions (0.1.5)
-    yrby (0.8.1-aarch64-linux)
-    yrby (0.8.1-aarch64-linux-musl)
-    yrby (0.8.1-arm64-darwin)
-    yrby (0.8.1-x86_64-darwin)
-    yrby (0.8.1-x86_64-linux)
-    yrby (0.8.1-x86_64-linux-musl)
-    yrby-rails (0.7.0)
-      actioncable (>= 7.1)
-      actionview (>= 7.1)
-      activerecord (>= 7.1)
-      activesupport (>= 7.1)
-      base64 (~> 0.2)
-      globalid (>= 1.0)
-      railties (>= 7.1)
-      yrby (>= 0.7.0)
     zeitwerk (2.8.3)
 
 PLATFORMS
@@ -427,6 +468,7 @@ DEPENDENCIES
   activesupport (~> 8.1.3, >= 8.1.3.1)
   anycable-rails (~> 1.6)
   anycable-thruster
+  async-websocket
   commonmarker (~> 2.10)
   debug
   falcon (>= 0.55)
@@ -437,10 +479,11 @@ DEPENDENCIES
   rubocop
   rubocop-minitest
   rubocop-rake
+  ruby_llm
   sqlite3 (>= 2.1)
   tzinfo-data
-  yrby (~> 0.8)
-  yrby-rails (~> 0.7)
+  yrby!
+  yrby-rails!
 
 CHECKSUMS
   action_text-trix (2.1.19) sha256=7012f59421009cf284aa651294896414d653a61a2417c9b8714c8476d2f74009
@@ -472,6 +515,7 @@ CHECKSUMS
   async-pool (0.12.0) sha256=5580493dc024bd704dab2ed0bf1307100722e49cbb825c7965f8501194f58506
   async-service (0.25.0) sha256=71d9d75c2898dddf6549150cecd57156453e5b61da69fa87f10a0c97becfb6d1
   async-utilization (0.5.0) sha256=96c347634e09edcbcb7f70cf8c5a1ae058c64d88186341e3f924a44440f95981
+  async-websocket (0.30.1) sha256=54bb8a8f184e4aa64434c7a78ecc55850a67a3d1dcd02e3ae787376e2c673936
   bake (0.25.0) sha256=a47bdc6a26addc048827debc36fe27bb4d5d71ac2958ad910b5386e9baf49869
   base64 (0.3.0) sha256=27337aeabad6ffae05c265c450490628ef3ebd4b67be58257393227588f5a97b
   bigdecimal (4.1.3) sha256=61ebe1e5e559bdc3cc6f2c0ee7f427321fc838f59611c294356eb04d6e21cf66
@@ -492,6 +536,10 @@ CHECKSUMS
   erb (6.0.7) sha256=c5ca6dc25b0ef974a44dc8f59fe847577122483b1968a38dec305c60bf91ee92
   erubi (1.13.1) sha256=a082103b0885dbc5ecf1172fede897f9ebdb745a4b97a5e8dc63953db1ee4ad9
   falcon (0.57.0) sha256=c9b060bc23a3b90a80376078aae037d8f48e0b2f12f5f30f360d4b29d7baf0f7
+  faraday (2.14.4) sha256=9bb4408c44621b0dbaaaa39e5dbfc4dbe58cc6751b6eb94d16ae9e1f2f2fab6e
+  faraday-multipart (1.2.0) sha256=7d89a949693714176f612323ca13746a2ded204031a6ba528adee788694ef757
+  faraday-net_http (3.4.4) sha256=0e78af151747ed1b00f33e25973b4bc220d7f16c00c39676817c8b12331eb588
+  faraday-retry (2.4.0) sha256=7b79c48fb7e56526faf247b12d94a680071ff40c9fda7cf1ec1549439ad11ebe
   fiber-annotation (0.2.0) sha256=7abfadf1d119f508867d4103bf231c0354d019cc39a5738945dec2edadaf6c03
   fiber-local (1.1.0) sha256=c885f94f210fb9b05737de65d511136ea602e00c5105953748aa0f8793489f06
   fiber-storage (1.0.1) sha256=f48e5b6d8b0be96dac486332b55cee82240057065dc761c1ea692b2e719240e1
@@ -527,6 +575,8 @@ CHECKSUMS
   marcel (1.2.1) sha256=1678e9360e32f9eafa917c80029e2f6d10b2715c66a4b87b6d0da9b9cd1f859f
   mini_mime (1.1.5) sha256=8681b7e2e4215f2a159f9400b5816d85e9d8c6c6b491e96a12797e798f8bccef
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
+  multipart-post (2.4.1) sha256=9872d03a8e552020ca096adadbf5e3cb1cd1cdd6acd3c161136b8a5737cdb4a8
+  net-http (0.10.0) sha256=1a2ff6e37a05724973c43f2bf7bf105f59c36a4cd0a7e9b1c021a0a566987c27
   net-imap (0.6.6) sha256=96aa4ee50df3060203e649efc341f53480b791d49e150f2fdebf68beb141a8df
   net-pop (0.1.2) sha256=848b4e982013c15b2f0382792268763b748cce91c9e91e36b0f27ed26420dff3
   net-protocol (0.3.0) sha256=ba310c3d4f1cad46bb1ab20336b06669b1ff8f7c568d9cb9342b32a718547472
@@ -550,6 +600,7 @@ CHECKSUMS
   protocol-http2 (0.27.0) sha256=54e651964388d5f990cca161b280abc4480a22845be8de1d55f25033a51e3bff
   protocol-rack (0.22.1) sha256=1185d245927ef9849a603700d6991ca353bc89724fbf98efa4a4333ed62a9fc3
   protocol-url (0.18.0) sha256=b16f55983094b46d18e04b709333b260e4ab5962a32696728e33a6c396150ed6
+  protocol-websocket (0.21.2) sha256=cbe35be8e045597b221874fba5928d7cd2483884126e3e36faece4741dc88eb7
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f
   rack (3.2.7) sha256=93e13e1c24f93556671d85d2d79fa228c3485815c50d7e2f265b5330c6528fb7
   rack-attack (6.8.0) sha256=f2499fdebf85bcc05573a22dff57d24305ac14ec2e4156cd3c28d47cafeeecf2
@@ -562,6 +613,8 @@ CHECKSUMS
   railties (8.1.4) sha256=b5e7a8e8984e33114d68af62227971960aae1e6c02bd7c9d826ffad97fff583c
   rainbow (3.1.1) sha256=039491aa3a89f42efa1d6dec2fc4e62ede96eb6acd95e52f1ad581182b79bc6a
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
+  rake-compiler-dock (1.12.0) sha256=f13205c2738f3d2053afcd03491a9e4541b22a59a0bfc53fc8bc883bd8188023
+  rb_sys (0.9.130) sha256=7d486d99c1da02635515deaf9860fc5aea90bb4ab2589b2deec7fdc7d3548615
   rbs (4.2.0) sha256=51f7b886dcc05bc09e10b901daa6a81829f6adc03101d6ca9ea4aac6103e0674
   rdoc (8.1.0) sha256=befc37880a5cfd36dcb176c748b5fd5ee39dd3536a75e81824e4972ce230f60a
   regexp_parser (2.12.0) sha256=35a916a1d63190ab5c9009457136ae5f3c0c7512d60291d0d1378ba18ce08ebb
@@ -572,7 +625,9 @@ CHECKSUMS
   rubocop-rake (0.7.1) sha256=3797f2b6810c3e9df7376c26d5f44f3475eda59eb1adc38e6f62ecf027cbae4d
   ruby-next-core (1.2.1) sha256=ddba3e986e127143299a26bde8bdbeedd4bc738a1a765e499f9634f361551f79
   ruby-progressbar (1.13.0) sha256=80fc9c47a9b640d6834e0dc7b3c94c9df37f08cb072b7761e4a71e22cff29b33
+  ruby_llm (2.1.0) sha256=041e73588758172e37b2883584b3bbca6fbddec2f273cdbdfa5f2b4f2f9a053e
   samovar (2.5.1) sha256=8a9fc41eb8868084f0321eb41678c485cfbc7d282fb306c0be67c3284b1d2394
+  schematist (1.1.0) sha256=905d8f0286830926e77e0d631bee325ee741c4b99640bc99735593b40ba73e7b
   securerandom (0.4.1) sha256=cc5193d414a4341b6e225f0cb4446aceca8e50d5e1888743fac16987638ea0b1
   sqlite3 (2.9.6-aarch64-linux-gnu) sha256=d8b1f7d23efd7abac285775a9566562fc7debfef79d594e3a20354406fb7907c
   sqlite3 (2.9.6-aarch64-linux-musl) sha256=3579e1c98cdc7ff5c3722847bb63ed4e1efb7ff675cb5e1e48ef2d4da5fb3bc9
@@ -592,13 +647,14 @@ CHECKSUMS
   useragent (0.16.11) sha256=700e6413ad4bb954bb63547fa098dddf7b0ebe75b40cc6f93b8d54255b173844
   websocket-driver (0.8.2) sha256=97c556b019bf3410b4961002ac501621e9322d3f8a7bc02161a09301cc4c4146
   websocket-extensions (0.1.5) sha256=1c6ba63092cda343eb53fc657110c71c754c56484aad42578495227d717a8241
-  yrby (0.8.1-aarch64-linux) sha256=5974eed1606e76ea7dfe37372ac79fa2840533d2a5216466715677a428d217bb
-  yrby (0.8.1-aarch64-linux-musl) sha256=1ab1e604da86d8f9e0279757273559fd331432dd87daa346994da2501142fe75
-  yrby (0.8.1-arm64-darwin) sha256=80d52973206e0fefa27ff82fc74e431487428fc628c745ff291024b89912f23e
-  yrby (0.8.1-x86_64-darwin) sha256=dc987d2ac758ef0d2f73061e92e7481d87e11772927cc5e20809fb7933b77b5c
-  yrby (0.8.1-x86_64-linux) sha256=cd884ec18860e195897fc9a72ee0511c3465acd75bb0a1470b5646b8b928b13f
-  yrby (0.8.1-x86_64-linux-musl) sha256=a77fed2c453c565cb81eb00703364d5e693bc4cfdf4403000e6e55ba8f1710b0
-  yrby-rails (0.7.0) sha256=1327ae9b98a57aa391fff70085094d30e5e9cbd059f056d3316e16c5f4075aa0
+  yrby (0.8.1)
+  yrby (0.8.1-aarch64-linux)
+  yrby (0.8.1-aarch64-linux-musl)
+  yrby (0.8.1-arm64-darwin)
+  yrby (0.8.1-x86_64-darwin)
+  yrby (0.8.1-x86_64-linux)
+  yrby (0.8.1-x86_64-linux-musl)
+  yrby-rails (0.7.0)
   zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
 
 BUNDLED WITH

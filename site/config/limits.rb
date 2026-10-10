@@ -185,6 +185,24 @@ module Limits
   # sweep every minute.
   SWEEP_INTERVAL = 5 * 60 # seconds
 
+  # --- Agents ----------------------------------------------------------------
+
+  # Agents running at once, across all rooms. Each one holds a thread and a
+  # cable connection for as long as it stays, and each model call costs money.
+  MAX_AGENTS = Integer(ENV.fetch("MAX_AGENTS", 3))
+
+  # Invitations one IP can make in an hour (Rack::Attack).
+  AGENT_INVITES_PER_HOUR = 6
+
+  # Model calls per day across the site. Past this, an invited agent says the
+  # day's budget is used up instead of calling the model.
+  AGENT_CALLS_PER_DAY = Integer(ENV.fetch("AGENT_CALLS_PER_DAY", 300))
+
+  # An agent leaves after this long with nobody else in the room, and after
+  # AGENT_MAX_STAY no matter what.
+  AGENT_IDLE = 60 # seconds
+  AGENT_MAX_STAY = 15 * 60 # seconds
+
   # --- Caching ---------------------------------------------------------------
 
   # Docs pages are server-rendered markdown that doesn't change between

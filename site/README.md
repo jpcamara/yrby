@@ -698,6 +698,44 @@ read the server's `{ notice: ... }` messages. `yrby-client`'s provider ignores
 messages it doesn't recognize. The mixin it builds reaches the provider through
 a closure and doesn't use `this`, so wrapping its `received` handler is safe.
 
+### The demo agent
+
+"Invite the agent" on the Lexxy demo starts a Ruby agent in the room. It
+joins over the cable with the room's token, the way a browser does, says
+hello, reviews what's written, and answers any line that starts with
+`@agent`. Its replies stream into the document with its caret at the end of
+the words.
+
+- `DemosController#agent` takes the POST. It checks that the Origin is this
+  site and that the room has a note, then takes the room's seat in
+  `AgentSeats` and enqueues `ReviewAgentJob`.
+- `ReviewAgentJob` runs `Y::Agent` from yrby-rails, which holds the
+  connection, the presence, and the one-agent-per-room lock. `ReviewAgent`
+  (`app/agents/`) decides what the agent writes.
+- Jobs run on Active Job's async adapter, in this process, with one thread
+  per agent.
+- `AgentModel` calls Fireworks AI through ruby_llm when `FIREWORKS_API_KEY`
+  is set, and streams a canned reply otherwise, so development and tests run
+  without a key. `AGENT_MODEL` picks the model.
+
+The limits, in `config/limits.rb`:
+
+| Limit | Default | Why |
+|---|---|---|
+| `MAX_AGENTS` | 3 | each agent holds a thread and a connection while it stays |
+| `AGENT_INVITES_PER_HOUR` | 6 per IP | an invitation starts a model call |
+| `AGENT_CALLS_PER_DAY` | 300 | caps the model bill; past it the agent says so in the document |
+| `AGENT_IDLE` | 60 s | the agent leaves once nobody else is in the room |
+| `AGENT_MAX_STAY` | 15 min | and after this however busy the room is |
+
+The agent joins at the origin the inviting browser used. Set
+`AGENT_CABLE_URL` to send it another way, such as straight to the local
+proxy.
+
+The invitation is the one POST the method gate lets through: no body, and
+only on `/demos/lexxy/:room/agent`. Active Job is loaded for it. Active
+Storage still isn't, and the boot guard checks that separately.
+
 ### Building the bundles and the stylesheet
 
 ```bash

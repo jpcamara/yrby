@@ -16,6 +16,9 @@ class MethodGate
   READ_METHODS = %w[GET HEAD].freeze
   # /_anycable and its command paths (/_anycable/connect, /command, ...).
   RPC_PATH = %r{\A/_anycable(?:/[a-z_]+)?\z}
+  # Inviting the agent into a Lexxy room: a POST with no body. Rack::Attack
+  # throttles it per IP and DemosController#agent checks the Origin.
+  AGENT_INVITE = %r{\A/demos/lexxy/[A-Za-z0-9_-]+/agent\z}
   HEADERS = { "content-type" => "text/plain; charset=utf-8", "cache-control" => "no-store" }.freeze
 
   def initialize(app)
@@ -25,6 +28,7 @@ class MethodGate
   def call(env)
     return refuse(415, "This site doesn't accept uploads.\n") if multipart?(env)
     return @app.call(env) if READ_METHODS.include?(env["REQUEST_METHOD"]) || rpc_path?(env["PATH_INFO"].to_s)
+    return @app.call(env) if agent_invite?(env)
 
     refuse(405, "This site only serves GET and HEAD requests.\n", "allow" => "GET, HEAD")
   end
@@ -34,6 +38,10 @@ class MethodGate
   def multipart?(env) = env["CONTENT_TYPE"].to_s.strip.downcase.start_with?("multipart/")
 
   def rpc_path?(path) = RPC_PATH.match?(path)
+
+  def agent_invite?(env)
+    env["REQUEST_METHOD"] == "POST" && env["CONTENT_LENGTH"].to_i.zero? && AGENT_INVITE.match?(env["PATH_INFO"].to_s)
+  end
 
   def refuse(status, body, extra = {})
     [status, HEADERS.merge(extra), [body]]

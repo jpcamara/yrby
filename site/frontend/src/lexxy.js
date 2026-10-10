@@ -36,6 +36,31 @@ setupRoomPage()
 // session ends. The "Stored HTML" panel shows the note.body column, which
 // Y::Lexxy renders in Ruby with no browser involved. It refreshes after each
 // change while it's open.
+// "Invite the agent" asks the server to start the demo agent in this room.
+// The agent joins over the cable like another browser, so everything after
+// the invitation shows up through the document and presence.
+const invite = document.getElementById("invite-agent")
+const agentStatus = document.getElementById("agent-status")
+const AGENT_STATUS = {
+  joining: "The agent is joining. Start a line with @agent to ask it something.",
+  here: "The agent is already in this room.",
+  busy: "Every agent is busy right now. Try again in a few minutes.",
+}
+invite?.addEventListener("click", async () => {
+  invite.disabled = true
+  agentStatus.textContent = "Inviting…"
+  try {
+    const response = await fetch(invite.dataset.url, { method: "POST" })
+    const json = response.headers.get("content-type")?.includes("json") ? await response.json() : {}
+    agentStatus.textContent = AGENT_STATUS[json.status] ??
+      (response.status === 429 ? "You've invited the agent a lot this hour. Try again later." : "The agent couldn't join this room.")
+  } catch {
+    agentStatus.textContent = "Couldn't reach the server."
+  } finally {
+    invite.disabled = false
+  }
+})
+
 element.addEventListener("yrby:synced", ({ detail }) => {
   window.__yrby = { provider: detail.provider, ydoc: detail.doc, user }
   const stopRoomState = showRoomState(detail.provider)
