@@ -984,9 +984,10 @@ fn json_to_ruby(ruby: &Ruby, v: &serde_json::Value) -> Value {
     match v {
         serde_json::Value::Null => ruby.qnil().as_value(),
         serde_json::Value::Bool(b) => b.into_value_with(ruby),
-        serde_json::Value::Number(n) => match n.as_i64() {
-            Some(i) => i.into_value_with(ruby),
-            None => n.as_f64().unwrap_or(0.0).into_value_with(ruby),
+        serde_json::Value::Number(n) => match (n.as_i64(), n.as_u64()) {
+            (Some(i), _) => i.into_value_with(ruby),
+            (None, Some(u)) => u.into_value_with(ruby),
+            _ => n.as_f64().unwrap_or(0.0).into_value_with(ruby),
         },
         serde_json::Value::String(s) => s.as_str().into_value_with(ruby),
         serde_json::Value::Array(a) => {

@@ -39,6 +39,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Y::Awareness` builds and reads presence frames, and `Doc#client_id` returns
   the id a document writes under.
 
+### Fixed
+
+- yrby-rails: the channel relays a client's SyncStep2 to peers as a plain
+  update. Relayed as is, a peer that was still joining could take it for the
+  answer to its own handshake and report itself loaded before it had the
+  server's state.
+
 ## yrby-client 0.7.0 - 2026-10-08
 
 This release updates yrby-client only. The gems are unchanged.

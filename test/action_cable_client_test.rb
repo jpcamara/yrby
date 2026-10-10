@@ -208,13 +208,16 @@ class ActionCableClientOutboxTest < Minitest::Test
     assert_equal [a, b], @outbox.pending
   end
 
-  def test_an_ack_confirms_everything_up_to_its_id
+  # The server may record one connection's updates out of order, so an ack
+  # for a later update leaves an earlier one pending.
+  def test_an_ack_confirms_only_its_own_update
     @outbox.push("a")
     @outbox.push("b")
     @outbox.push("c")
 
     assert @outbox.ack(2)
-    assert_equal [3], @outbox.pending.map(&:id)
+    assert_equal [1, 3], @outbox.pending.map(&:id)
+    assert @outbox.ack(1)
     assert @outbox.ack(3)
     refute_predicate @outbox, :pending?
   end
