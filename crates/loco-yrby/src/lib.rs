@@ -1,9 +1,9 @@
 //! Collaborative documents for [Loco](https://loco.rs) apps, with
 //! [yrby](https://github.com/jpcamara/yrby).
 //!
-//! - [`YrbyInitializer`]: serves the documents from the app itself: an
-//!   ActionCable endpoint for yrby-client, and a route that hands out grants.
-//!   AnyCable is an option for running several app processes.
+//! - [`YrbyInitializer`]: serves the documents to
+//!   [AnyCable](https://anycable.io)'s anycable-go, which holds the browsers'
+//!   WebSockets and calls the app over gRPC, and hands out grants.
 //! - [`collaborative!`]: declares which of a model's attributes are documents,
 //!   and the model method that decides who may edit them.
 //! - [`migration::CreateYTables`]: the tables.
@@ -15,7 +15,6 @@
 #[doc = include_str!("../README.md")]
 mod readme_examples {}
 
-pub mod cable;
 pub mod collaborative;
 pub mod connection;
 pub mod crypto;
@@ -27,7 +26,7 @@ pub mod store;
 pub use collaborative::{Collaborative, key_for};
 pub use connection::{LocoLogin, connected_user};
 pub use crypto::DocumentCipher;
-pub use initializer::{AnyCableSettings, Settings, Transport, Yrby, YrbyInitializer};
+pub use initializer::{AnyCableSettings, Settings, Yrby, YrbyInitializer};
 pub use store::SeaOrmStore;
 /// Who a connection is, for [`Collaborative::authorize_document`].
 pub use yrby_core::engine::Identity;

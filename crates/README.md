@@ -9,7 +9,7 @@ the same `yrby-client` package it does with Rails.
 | [`yrby-core`](../ext/yrby/crates/yrby-core) | yrby's sync and storage rules, and a document engine for any transport. Shared with the Ruby gem's native extension, which is why it lives under `ext/`. |
 | [`anycable-rpc`](anycable-rpc) | A Rust backend for anycable-go: its gRPC service, ActionCable-style channels, and an HTTP broadcaster. Not specific to yrby. |
 | [`yrby-anycable`](yrby-anycable) | yrby's collaborative-document channel on `anycable-rpc`, for any Rust web framework. |
-| [`loco-yrby`](loco-yrby) | yrby for [Loco](https://loco.rs) apps: one initializer and a model macro. The app serves the WebSocket itself (AnyCable optional), with storage in its database, compaction, encryption, and grants checked against the model. |
+| [`loco-yrby`](loco-yrby) | yrby for [Loco](https://loco.rs) apps: one initializer and a model macro. Runs behind anycable-go, with storage in the app's database, compaction, encryption, and grants checked against the model. |
 
 ```text
 loco-yrby -> yrby-anycable -> anycable-rpc

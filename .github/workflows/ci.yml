@@ -400,8 +400,3 @@ jobs:
         env:
           E2E_DB: postgres
         run: node e2e/loco.mjs
-      - name: Loco app behind anycable-go
-        working-directory: packages/client
-        env:
-          E2E_TRANSPORT: anycable
-        run: node e2e/loco.mjs

@@ -114,12 +114,11 @@ auth:
     # `name:`. A YAML list of these tries each in order and uses the first
     # that yields a token. See https://loco.rs/docs/how-to/jwt-locations
 
-# yrby serves its documents from this app, at /yrby/cable, with nothing to
-# configure. These only show the knobs: YRBY_TRANSPORT=anycable runs behind
-# anycable-go instead, for several app processes.
+# yrby serves its documents to anycable-go, which holds the browsers'
+# WebSockets: `anycable-go --rpc_host=127.0.0.1:50051 --broadcast_adapter=http
+# --secret=yrby-dev-anycable-secret`.
 initializers:
   yrby:
-    transport: <%= get_env(name="YRBY_TRANSPORT", default="embedded") %>
     encryption_key: <%= get_env(name="YRBY_ENCRYPTION_KEY", default="") %>
     compact_every: <%= get_env(name="YRBY_COMPACT_EVERY", default="64") %>
     anycable:
