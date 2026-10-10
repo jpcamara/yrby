@@ -105,6 +105,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Streaming into a document](#streaming-into-a-document)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
+  - [Editing a document from Ruby](#editing-a-document-from-ruby)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
 - [Message Type Constants](#message-type-constants)
@@ -678,8 +679,8 @@ ordinals of the top-level blocks it touched: a block edited (however deep),
 added, or removed. A process following a document reacts to the part that
 changed instead of diffing the text.
 
-To put a change into a shared document, record the update it produced and
-send it to the document's subscribers (see "Streaming into a document"). A
+To put a change into a record's document, write it inside
+`collaborative_document(:body).edit` (see "Editing a document from Ruby"). A
 Ruby-written paragraph and a typed one render byte for byte the same.
 
 A caret is a Yjs relative position, and `relative_position(index)` builds
@@ -723,7 +724,7 @@ doc = Y::Doc.new
 paragraph = Y::Lexical.append_paragraph(doc, "")
 %w[one two three].each do |word|
   update = doc.diff { paragraph.insert(paragraph.length, "#{word} ") }
-  # record `update`, then send it to the document's subscribers
+  # record `update`, then Y::ActionCable.broadcast(key, update)
 end
 ```
 
@@ -858,6 +859,26 @@ receives the document key. The shipped `Y::DocumentChannel` defines it to run
 the `authorize_document` block with the record and the attribute name, or to
 accept any valid grant when there's no block. A subclass can override
 `authorized?` directly and read the located record from `record`.
+
+### Editing a document from Ruby
+
+A job, a console, or a controller edits a record's document with `edit`. It
+loads the current document, yields it, records what the block changed in the
+document's rows, and broadcasts the update so open editors apply it. It
+returns the update, or nil when the block changed nothing.
+
+```ruby
+post.collaborative_document(:body).edit do |doc|
+  Y::Lexxy.append_paragraph(doc, "Reviewed by ops.")
+end
+```
+
+The edit is a CRDT update like a browser's, so a person typing at the same
+moment keeps their change and so does the job. An encrypted document is
+edited through its encrypted rows.
+
+`Y::ActionCable.broadcast(key, update)` sends an update you already recorded
+to a document's subscribers, for code that records updates itself.
 
 ### Grant lifetime and refresh
 

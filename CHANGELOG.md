@@ -26,6 +26,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   editors put in awareness.
 - `Doc#apply_update_changes(update, root)` applies an update and returns the
   ordinals of the top-level blocks it touched.
+- yrby-rails: `collaborative_document(:body).edit { |doc| ... }` edits a
+  record's document from Ruby. It records the change in the document's rows,
+  encrypted ones included, and broadcasts it to open editors.
+  `Y::ActionCable.broadcast(key, update)` sends an already recorded update.
 
 ## yrby-client 0.7.0 - 2026-10-08
 
