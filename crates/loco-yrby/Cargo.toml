@@ -1,6 +1,6 @@
 [package]
 name = "loco-yrby"
-description = "Collaborative documents for Loco apps: yrby's Yjs sync through AnyCable, stored in the app's database with compaction and optional encryption"
+description = "Collaborative documents for Loco apps: yrby's Yjs sync served from the app itself, stored in its database with compaction and optional encryption"
 repository = "https://github.com/jpcamara/yrby"
 readme = "README.md"
 version = "0.1.0"
@@ -15,31 +15,33 @@ categories = ["web-programming", "web-programming::websocket"]
 aes-gcm = "0.10"
 anycable-rpc = { version = "0.1.0", path = "../anycable-rpc" }
 async-trait = "0.1.92"
-axum = { version = "0.8", default-features = false }
+axum = { version = "0.8", default-features = false, features = ["ws"] }
 base64 = "0.23.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
-flate2 = "1.1.10"
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+hex = "0.4"
 hmac = "0.12"
 jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
 loco-rs = "1.2"
-pbkdf2 = { version = "0.12", features = ["hmac"] }
 sea-orm = { version = "2.0", features = ["macros"] }
 sea-orm-migration = "2.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-sha1 = "0.10"
 sha2 = "0.10"
-tokio = { version = "1.53.1", features = ["net", "rt"] }
+tokio = { version = "1.53.1", features = ["macros", "net", "rt", "sync", "time"] }
 tonic = "0.14.6"
 tracing = "0.1.44"
 yrby-anycable = { version = "0.1.0", path = "../yrby-anycable" }
 yrby-core = { version = "0.1.0", path = "../../ext/yrby/crates/yrby-core", features = ["engine"] }
 
 [dev-dependencies]
+axum = { version = "0.8", features = ["ws", "tokio", "http1"] }
 base64 = "0.23.1"
+futures-util = "0.3.34"
 jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
 sea-orm = { version = "2.0", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "sqlx-postgres"] }
 sea-orm-migration = { version = "2.0", features = ["sqlx-sqlite", "runtime-tokio-rustls", "sqlx-postgres"] }
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["full"] }
+tokio-tungstenite = "0.28"
 yrs = "0.27"

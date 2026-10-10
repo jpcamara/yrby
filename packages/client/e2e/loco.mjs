@@ -1,27 +1,27 @@
 // End-to-end: yrby-client, unchanged, against a Loco app with a database.
 //
-//   clients (DocumentSessionStore + @anycable/web)
-//     -> anycable-go -> gRPC -> examples/loco-demo (loco-yrby's initializer)
-//     -> SQLite or Postgres: y_documents + y_document_updates, encrypted at
-//        rest and compacted as yrby-rails does
+//   clients (DocumentSessionStore + @anycable/web, over real WebSockets)
+//     -> examples/loco-demo, serving ActionCable itself at /yrby/cable
+//        (or, with E2E_TRANSPORT=anycable, anycable-go -> gRPC -> the app)
+//     -> SQLite or Postgres: y_documents + y_document_updates, encrypted per
+//        attribute and compacted
 //
-// The database is inspected directly (sqlite3, or psql in the Postgres
-// container) and decrypted here with node:crypto, so what is checked is what
-// is on disk. Needs anycable-go and cargo, plus sqlite3, or Docker with a
-// Postgres container for E2E_DB=postgres. Run from packages/client after
-// `npm run build`:
+// The database is inspected directly (sqlite3, or psql) and decrypted here
+// with node:crypto, so what is checked is what is on disk. Needs cargo, plus
+// sqlite3 or a Postgres for E2E_DB=postgres, and anycable-go for
+// E2E_TRANSPORT=anycable. Run from packages/client after `npm run build`:
 //
-//   node e2e/loco.mjs                    # SQLite
-//   E2E_DB=postgres node e2e/loco.mjs    # Postgres
+//   node e2e/loco.mjs                            # embedded, SQLite
+//   E2E_DB=postgres node e2e/loco.mjs            # embedded, Postgres
+//   E2E_TRANSPORT=anycable node e2e/loco.mjs     # behind anycable-go
 //
 // For Postgres, PG_URL names the server (default: the yrby-pg container on
 // 127.0.0.1:55432). The database is inspected with psql, inside that
 // container (PG_CONTAINER, default yrby-pg) or, with PG_CONTAINER set empty,
 // with a psql on PATH, as in CI.
 import { execFileSync } from "node:child_process";
-import { createDecipheriv, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
-import { inflateSync } from "node:zlib";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -32,18 +32,22 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = path.resolve(here, "../../../examples/loco-demo");
+const TRANSPORT = process.env.E2E_TRANSPORT === "anycable" ? "anycable" : "embedded";
 const HTTP_PORT = Number(process.env.HTTP_PORT || 5161);
 const RPC_PORT = Number(process.env.RPC_PORT || 50161);
 const WS_PORT = Number(process.env.WS_PORT || 8161);
 const ANYCABLE_SECRET = "yrby-loco-e2e-anycable";
-const GRANT_SECRET = "yrby-loco-e2e-grants";
-// Active Record encryption settings, as a Rails app would have them.
-const AR_PRIMARY_KEY = randomBytes(24).toString("hex");
-const AR_SALT = randomBytes(24).toString("hex");
+const ENCRYPTION_KEY = randomBytes(32);
 const COMPACT_EVERY = 16;
 const API = `http://127.0.0.1:${HTTP_PORT}`;
-const CABLE = `ws://127.0.0.1:${WS_PORT}/cable`;
+const CABLE = TRANSPORT === "anycable" ? `ws://127.0.0.1:${WS_PORT}/cable` : `ws://127.0.0.1:${HTTP_PORT}/yrby/cable`;
 const scratch = mkdtempSync(path.join(tmpdir(), "yrby-loco-"));
+
+// Grants are signed with a key derived from the app's login secret (loco-yrby's
+// default): HMAC-SHA256(auth.jwt.secret, "yrby grants"), hex.
+const LOGIN_SECRET = readFileSync(path.join(app, "config/development.yaml"), "utf8")
+  .match(/^\s+jwt:[\s\S]*?^\s+secret:\s*(\S+)/m)[1];
+const GRANT_SECRET = createHmac("sha256", LOGIN_SECRET).update("yrby grants").digest("hex");
 
 // --- the database ----------------------------------------------------------------
 const BACKEND = process.env.E2E_DB === "postgres" ? "postgres" : "sqlite";
@@ -73,21 +77,18 @@ const sql = (query) => {
 const hex = (column) => (BACKEND === "postgres" ? `encode(${column}, 'hex')` : `hex(${column})`);
 const quote = (s) => `'${s.replaceAll("'", "''")}'`;
 
-// Active Record encryption's format, decrypted here independently of Rust:
-// JSON {"p": ciphertext, "h": {"iv", "at", "c"?}}, AES-256-GCM with no AAD,
-// key PBKDF2-SHA256(primary_key, key_derivation_salt, 2^16), zlib if "c".
-const AR_KEY = pbkdf2Sync(AR_PRIMARY_KEY, AR_SALT, 2 ** 16, 32, "sha256");
-function arMessage(value) {
-  if (value[0] !== 0x7b) return null; // "{"
-  try { const m = JSON.parse(value.toString("utf8")); return typeof m.p === "string" ? m : null; } catch { return null; }
-}
-function openValue(value) {
-  const message = arMessage(value);
-  if (!message) return value;
-  const decipher = createDecipheriv("aes-256-gcm", AR_KEY, Buffer.from(message.h.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(message.h.at, "base64"));
-  const body = Buffer.concat([decipher.update(Buffer.from(message.p, "base64")), decipher.final()]);
-  return message.h.c ? inflateSync(body) : body;
+// The at-rest format (loco_yrby::crypto), decrypted here independently of Rust:
+// 00 00 'Y' 'E' '1' | 12-byte nonce | ciphertext | 16-byte tag, AAD = document key.
+const MAGIC = Buffer.from([0, 0, 0x59, 0x45, 0x31]);
+const isEncrypted = (value) => value.subarray(0, MAGIC.length).equals(MAGIC);
+function openValue(key, value) {
+  if (!isEncrypted(value)) return value;
+  const nonce = value.subarray(MAGIC.length, MAGIC.length + 12);
+  const sealed = value.subarray(MAGIC.length + 12);
+  const decipher = createDecipheriv("aes-256-gcm", ENCRYPTION_KEY, nonce);
+  decipher.setAAD(Buffer.from(key));
+  decipher.setAuthTag(sealed.subarray(sealed.length - 16));
+  return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - 16)), decipher.final()]);
 }
 function stored(key) {
   const [doc] = sql(`SELECT id, ${hex("state")} AS state, record_type, record_id, name
@@ -97,7 +98,7 @@ function stored(key) {
                     WHERE document_id = ${doc.id} ORDER BY id`);
   const raw = [doc.state, ...tail.map((row) => row.payload)].filter(Boolean).map((h) => Buffer.from(h, "hex"));
   const ydoc = new Y.Doc();
-  for (const value of raw) Y.applyUpdate(ydoc, openValue(value));
+  for (const value of raw) Y.applyUpdate(ydoc, openValue(key, value));
   return {
     exists: true,
     binding: [doc.record_type, Number(doc.record_id), doc.name],
@@ -109,8 +110,8 @@ function stored(key) {
   };
 }
 const encryptedAtRest = (row, plaintext) =>
-  row.raw.length > 0 && row.raw.every((value) => arMessage(value)) && !row.raw.some((value) => value.includes(Buffer.from(plaintext)));
-const plainAtRest = (row) => row.raw.length > 0 && row.raw.every((value) => !arMessage(value));
+  row.raw.length > 0 && row.raw.every(isEncrypted) && !row.raw.some((value) => value.includes(Buffer.from(plaintext)));
+const plainAtRest = (row) => row.raw.length > 0 && row.raw.every((value) => !isEncrypted(value));
 
 // --- processes -----------------------------------------------------------------
 async function startLoco() {
@@ -122,13 +123,12 @@ async function startLoco() {
       PORT: String(HTTP_PORT),
       BINDING: "127.0.0.1",
       DATABASE_URL,
+      YRBY_TRANSPORT: TRANSPORT,
       YRBY_RPC_ADDR: `127.0.0.1:${RPC_PORT}`,
       ANYCABLE_BROADCAST_URL: `http://127.0.0.1:${WS_PORT}/_broadcast`,
       ANYCABLE_SECRET,
-      YRBY_GRANT_SECRET: GRANT_SECRET,
       YRBY_COMPACT_EVERY: String(COMPACT_EVERY),
-      AR_ENCRYPTION_PRIMARY_KEY: AR_PRIMARY_KEY,
-      AR_ENCRYPTION_KEY_DERIVATION_SALT: AR_SALT,
+      YRBY_ENCRYPTION_KEY: ENCRYPTION_KEY.toString("base64"),
       LOG_LEVEL: verbose ? "debug" : "warn",
     },
   });
@@ -138,10 +138,12 @@ async function boot() {
   execFileSync("cargo", ["build", "-q"], { cwd: app, stdio: "inherit" });
   createDatabase();
   await startLoco();
-  await startAnycable({ wsPort: WS_PORT, rpcHost: `127.0.0.1:${RPC_PORT}`, secret: ANYCABLE_SECRET });
+  if (TRANSPORT === "anycable") {
+    await startAnycable({ wsPort: WS_PORT, rpcHost: `127.0.0.1:${RPC_PORT}`, secret: ANYCABLE_SECRET });
+  }
 }
 
-// --- users, posts, grants, and connection tokens --------------------------------------
+// --- users, posts, and grants ------------------------------------------------------
 const users = {};
 async function signUp(name) {
   const account = { name, email: `${name.toLowerCase()}@example.com`, password: "correct horse" };
@@ -173,10 +175,10 @@ async function createPost(title) {
   if (res.status !== 201) throw new Error(`create post: ${res.status}`);
   return res.json();
 }
-const grantFor = async (post, name = "body") => (await (await api(`/api/posts/${post.id}/grant?name=${name}`)).json()).grant;
-const refreshFor = (post) => `${API}/api/posts/${post.id}/grant?name=body`;
-const keyOf = (post) => `post/${post.id}/body`;
-const cableToken = async (user) => (await (await api("/api/cable/token", {}, user)).json()).token;
+// loco-yrby's own grant route: the app writes none.
+const grantPath = (post, name = "body") => `/yrby/grants/Post/${post.pid}/${name}`;
+const grantFor = async (post, name = "body", as = users.Ada) => (await (await api(grantPath(post, name), {}, as)).json()).grant;
+const keyOf = (post, name = "body") => `post/${post.id}/${name}`;
 
 const b64url = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
 const hs256 = (claims, secret) => {
@@ -187,20 +189,21 @@ const hs256 = (claims, secret) => {
 // contract, and this checks it from the other side.
 const signGrant = (sub, { name = "body", ttl = 60 } = {}) =>
   hs256({ aud: "yrby", sub, name, exp: Math.floor(Date.now() / 1000) + ttl }, GRANT_SECRET);
-// An AnyCable identification token, as the app would mint it.
-const signConnection = (user, ttl) =>
-  hs256({ ext: JSON.stringify({ user: user.pid }), exp: Math.floor(Date.now() / 1000) + ttl }, ANYCABLE_SECRET);
 
-// A browser tab of `user`: connects with an AnyCable identification token and
-// fetches a fresh one when anycable-go reports it expired.
-async function client(user = users.Ada, token) {
-  const jid = token ?? (await cableToken(user));
-  return cableClient(`${CABLE}?jid=${jid}`, {
+// A browser tab of `user`. Embedded: the app reads Loco's login token from the
+// URL, as an app that keeps it in the browser would send it. AnyCable: an
+// AnyCable identification token from the crate's token route, refreshed when
+// anycable-go reports it expired.
+const cableToken = async (user) => (await (await api("/yrby/token", {}, user)).json()).token;
+async function client(user = users.Ada) {
+  if (TRANSPORT === "embedded") return cableClient(`${CABLE}?token=${user.token}`);
+  return cableClient(`${CABLE}?jid=${await cableToken(user)}`, {
     tokenRefresher: async (transport) => transport.setParam("jid", await cableToken(user)),
   });
 }
-// A tab with no token: anycable-go asks the app's connect RPC, which reads the
-// login cookie. undici's WebSocket takes headers, as a browser sends cookies.
+// A tab with no token in the URL: the login cookie identifies it (in AnyCable
+// mode, through anycable-go's connect call). undici's WebSocket takes headers,
+// as a browser sends cookies.
 function cookieClient(user) {
   class WithCookie extends WebSocket {
     constructor(url, protocols) {
@@ -212,23 +215,30 @@ function cookieClient(user) {
 
 // --- scenarios -----------------------------------------------------------------
 async function identification() {
-  console.log("\n--- Connections are identified, through AnyCable ---");
+  console.log(`\n--- Connections are identified (${TRANSPORT}) ---`);
   const post = await createPost("Identified");
   const grant = await grantFor(post);
 
   const token = (await client()).open({ grant });
-  await waitFor("Ada, identified by an AnyCable token (no connect RPC), opens her post", () =>
-    token.session.provider.status === "synced");
+  await waitFor(TRANSPORT === "embedded"
+    ? "Ada, identified by her login token, opens her post"
+    : "Ada, identified by an AnyCable token (no connect call), opens her post",
+  () => token.session.provider.status === "synced");
   const cookie = cookieClient(users.Ada).open({ grant });
-  await waitFor("Ada, identified by her login cookie through the connect RPC, opens it too", () =>
+  await waitFor("Ada, identified by her login cookie, opens it too", () =>
     cookie.session.provider.status === "synced");
-  const expired = (await client(users.Ada, signConnection(users.Ada, -5))).open({ grant });
-  await waitFor("an expired connection token is refreshed, and the connection proceeds", () =>
-    expired.session.provider.status === "synced", 15_000);
+  if (TRANSPORT === "anycable") {
+    const expired = hs256({ ext: JSON.stringify({ user: users.Ada.pid }), exp: Math.floor(Date.now() / 1000) - 5 }, ANYCABLE_SECRET);
+    const refreshed = cableClient(`${CABLE}?jid=${expired}`, {
+      tokenRefresher: async (transport) => transport.setParam("jid", await cableToken(users.Ada)),
+    }).open({ grant });
+    await waitFor("an expired connection token is refreshed, and the connection proceeds", () =>
+      refreshed.session.provider.status === "synced", 15_000);
+  }
 
   const bob = (await client(users.Bob)).open({ grant });
   await waitFor("Bob, identified, cannot open Ada's post even holding her grant", () => bob.session.state === "blocked");
-  check("and cannot get a grant for it", (await api(`/api/posts/${post.id}/grant?name=body`, {}, users.Bob)).status === 403);
+  check("and the grant route refuses him one", (await api(grantPath(post), {}, users.Bob)).status === 403);
 
   const anonymous = cableClient(CABLE).open({ grant });
   await sleep(2000);
@@ -267,7 +277,7 @@ async function persisted() {
   await notes.session.whenSynced;
   type(notes, "notes are not secret");
   await waitFor("the post's notes are saved", () => !notes.session.hasPending);
-  const notesRow = stored(`post/${post.id}/notes`);
+  const notesRow = stored(keyOf(post, "notes"));
   check("the notes document is stored in plaintext: only the body is declared encrypted",
     notesRow.text === "notes are not secret" && plainAtRest(notesRow));
 }
@@ -321,7 +331,7 @@ async function restart() {
   await waitFor("the first edit is acknowledged", () => !a.session.hasPending);
 
   const stopped = await stop("loco");
-  check(`SIGTERM stops the app and its RPC server cleanly (exit ${stopped.code} in ${stopped.ms}ms)`,
+  check(`SIGTERM stops the app cleanly (exit ${stopped.code} in ${stopped.ms}ms)`,
     stopped.code === 0 && stopped.ms < 5000);
   type(a, "during A. ");
   type(b, "during B. ");
@@ -331,7 +341,7 @@ async function restart() {
 
   await startLoco();
   await waitFor("the edits are acknowledged once the app is back", () =>
-    !a.session.hasPending && !b.session.hasPending, 15_000);
+    !a.session.hasPending && !b.session.hasPending, 30_000);
   await waitFor("both clients converge", () =>
     [a, b].every((v) => v.text().includes("during A") && v.text().includes("during B")));
   check("the database has everything", stored(key).text === a.text());
@@ -343,12 +353,12 @@ async function restart() {
 }
 
 async function grants() {
-  console.log("\n--- Grants find their post, as a signed GlobalID does ---");
+  console.log("\n--- Grants find their post, through the crate's grant route ---");
   const post = await createPost("Granted");
   const subject = `Post/${post.pid}`;
 
-  const a = (await client()).open({ grant: signGrant(subject, { ttl: -30 }), refresh: refreshFor(post) });
-  await waitFor("an expired grant is refreshed through the post's grant action", () => a.session.provider.status === "synced");
+  const a = (await client()).open({ grant: signGrant(subject, { ttl: -30 }), refresh: `${API}${grantPath(post)}` });
+  await waitFor("an expired grant is refreshed through the grant route", () => a.session.provider.status === "synced");
   type(a, "after refresh");
   await waitFor("and its edits are acknowledged", () => !a.session.hasPending);
   check("and stored under the post's key", stored(keyOf(post)).text === "after refresh");
@@ -378,7 +388,7 @@ async function grants() {
   check("and opened no document", !stored(keyOf(doomed)).exists);
 }
 
-await run(`yrby-client syncs through anycable-go with a Loco app on ${BACKEND}`, async () => {
+await run(`yrby-client syncs with a Loco app (${TRANSPORT}, ${BACKEND})`, async () => {
   try {
     await boot();
     await logIn();
