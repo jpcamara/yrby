@@ -26,25 +26,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   editors put in awareness.
 - `Doc#apply_update_changes(update, root)` applies an update and returns the
   ordinals of the top-level blocks it touched.
-- yrby-rails: `collaborative_document(:body).edit { |doc| ... }` edits a
-  record's document from Ruby. It records the change in the document's rows,
-  encrypted ones included, and broadcasts it to open editors.
-  `Y::ActionCable.broadcast(key, update)` sends an already recorded update.
-- yrby-rails: `Y::ActionCable::Client` joins a document over the cable's
-  websocket with a grant, as a browser does. `edit` sends a change, every
-  update is resent until acked, and a dropped socket reconnects. `presence=`
-  shows the client to others and renews itself. `headers:` let
-  `ApplicationCable::Connection` authenticate the process. It needs the
-  async-websocket gem.
 - `Y::Awareness` builds and reads presence frames, and `Doc#client_id` returns
   the id a document writes under.
-
-### Fixed
-
-- yrby-rails: the channel relays a client's SyncStep2 to peers as a plain
-  update. Relayed as is, a peer that was still joining could take it for the
-  answer to its own handshake and report itself loaded before it had the
-  server's state.
 
 ## yrby-client 0.7.0 - 2026-10-08
 
