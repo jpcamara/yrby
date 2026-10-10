@@ -1,0 +1,28 @@
+[package]
+name = "yrby-anycable"
+description = "yrby's collaborative-document channel for an AnyCable backend in Rust: durable Yjs sync that the yrby browser client talks to through anycable-go"
+repository = "https://github.com/jpcamara/yrby"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+authors = ["JP Camara <johnpcamara@gmail.com>"]
+license = "MIT"
+keywords = ["yjs", "crdt", "anycable", "collaboration", "yrs"]
+categories = ["web-programming::websocket", "data-structures"]
+
+[dependencies]
+anycable-rpc = { version = "0.1.0", path = "../anycable-rpc" }
+async-trait = "0.1.92"
+serde_json = "1.0.151"
+tracing = "0.1.44"
+yrby-core = { version = "0.1.0", path = "../../ext/yrby/crates/yrby-core", features = ["engine"] }
+
+[dev-dependencies]
+axum = "0.8"
+base64 = "0.23"
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.2", features = ["full"] }
+tonic = "0.14"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+yrs = { version = "0.27", features = ["sync"] }
