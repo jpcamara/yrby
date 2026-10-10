@@ -49,6 +49,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     RESEND = 1     # seconds between retransmits of unacked updates
     STALE = 15     # seconds without a message before the socket is given up; the server pings every 3
     RENEW = 15     # seconds between presence renewals; peers drop a client they haven't heard from in 30
+    LEAVE_GRACE = 0.25 # seconds between clearing presence and unsubscribing
     BACKOFF = [1, 2, 4, 8].freeze # seconds before each reconnect, then the last for good
 
     attr_reader :doc
@@ -76,13 +77,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       @closed = false
     end
 
-    def on_update(&)
-      @session.on_update(&)
+    def on_update(&block)
+      @session.on_update { |*args| callback(block, args) }
       self
     end
 
-    def on_awareness(&)
-      @session.on_awareness(&)
+    def on_awareness(&block)
+      @session.on_awareness { |*args| callback(block, args) }
       self
     end
 
@@ -115,6 +116,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       @closed = true
       @commands << [:close, timeout]
+      # From inside a callback the runner is the caller, so it can't be
+      # waited on. It finishes leaving once the callback returns.
+      return self if Thread.current[:yrby_client_callback].equal?(self)
+
       @runner.is_a?(Thread) ? @runner.join(timeout + 5) : @runner&.wait
       self
     rescue Async::Stop
@@ -156,6 +161,14 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     private
+
+    # Runs a caller's callback, marked so `unsubscribe` knows it is inside one.
+    def callback(block, args)
+      Thread.current[:yrby_client_callback] = self
+      block.call(*args)
+    ensure
+      Thread.current[:yrby_client_callback] = nil
+    end
 
     def close_and_raise(reason)
       @closed = true
@@ -262,14 +275,28 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # Give in-flight updates a moment to be acked, say goodbye, let the
     # goodbye reach the socket, and stop the reactor task.
+    #
+    # Action Cable runs one connection's messages on a worker pool, so an
+    # unsubscribe sent right behind the presence removal can be handled first,
+    # and the server then drops the removal. The client lets the removal go
+    # out and waits LEAVE_GRACE before unsubscribing. If it is lost anyway,
+    # peers drop the presence after 30 seconds.
     def leave(timeout)
       deadline = now + timeout
       sleep 0.05 while @session.pending? && now < deadline
-      @session.send_awareness(@awareness.clear_local_state) if @presence
+      if @presence
+        @session.send_awareness(@awareness.clear_local_state)
+        flush
+        sleep LEAVE_GRACE
+      end
       @session.unsubscribe
+      flush
+      @task.stop
+    end
+
+    def flush
       deadline = now + 1
       sleep 0.05 until @outgoing.empty? || now > deadline
-      @task.stop
     end
 
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)

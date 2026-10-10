@@ -3,12 +3,12 @@
 module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   class Client
     # The local updates the server has not acknowledged yet, in the order
-    # they were made. Each carries the id the server acks; an ack confirms
-    # every update up to it. Nothing here touches the socket: the session
-    # sends what `pending` holds and this drops what `ack` confirms. It is
-    # the JS provider's ReliableSync without the merge, since yrby has no
-    # update merge: a retransmit sends the pending updates one by one, in
-    # order, which on one socket keeps them causally complete.
+    # they were made. Each carries the id the server acks, and an ack
+    # confirms only its own update: the server may record the updates of one
+    # connection out of order, so an ack for a later update says nothing about
+    # an earlier one. Nothing here touches the socket: the session sends what
+    # `pending` holds and this drops what `ack` confirms. A retransmit sends
+    # the pending updates one by one, in order.
     class Outbox
       Pending = Data.define(:id, :update)
 
@@ -29,15 +29,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         entry
       end
 
-      # Confirm delivery of every update up to `id`. The value comes off the
-      # wire: one that is not an integer, or names an id never sent, drops
+      # Confirm delivery of the update sent as `id`. The value comes off the
+      # wire: one that is not an integer, or names an id not pending, drops
       # nothing. Returns true when something was confirmed.
       def ack(id) # rubocop:disable Naming/PredicateMethod -- an action that reports whether it did anything
-        return false unless id.is_a?(Integer) && id.positive? && id < @next_id
+        return false unless id.is_a?(Integer)
 
-        before = @pending.size
-        @pending.reject! { |entry| entry.id <= id }
-        @pending.size < before
+        !@pending.reject! { |entry| entry.id == id }.nil?
       end
     end
   end
