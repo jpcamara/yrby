@@ -1,10 +1,7 @@
 //! Encryption at rest, in Active Record Encryption's format.
 //!
-//! yrby-rails encrypts a document with Active Record encryption
-//! (`has_collaborative_document :body, encrypted: true`). This reads and writes
-//! the same values, so a Rails app and a Loco app can share one database,
-//! encrypted documents included. Configure it with the Rails app's
-//! `active_record.encryption` values.
+//! The format is Active Record encryption's, the scheme yrby-rails encrypts
+//! documents with (`has_collaborative_document :body, encrypted: true`).
 //!
 //! A stored value is the JSON Active Record writes (activerecord 8.1):
 //!
@@ -19,10 +16,9 @@
 //!   encrypts and all decrypt, as in Rails.
 //! - Payloads over 140 bytes are zlib-deflated first, flagged by `"c": true`.
 //!
-//! Active Record binds no associated data, so unlike a scheme of our own, a
-//! value moved into another document's row still decrypts there. Matching
-//! Rails is worth that; database write access is already the threat that
-//! would require.
+//! Active Record binds no associated data, so a value moved into another
+//! document's row still decrypts there. Doing that takes database write
+//! access, which is a larger problem already.
 //!
 //! A value that is not such a message is plaintext: a document written before
 //! it was encrypted. It reads as is, so encryption can be turned on for an
@@ -96,8 +92,8 @@ impl std::fmt::Debug for DocumentCipher {
 }
 
 impl DocumentCipher {
-    /// Keys from the Rails app's `active_record.encryption.primary_key` (one
-    /// or several) and `key_derivation_salt`.
+    /// Keys from a primary key (one or several; the last encrypts) and a
+    /// key derivation salt.
     ///
     /// # Errors
     /// When there is no primary key.

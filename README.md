@@ -195,8 +195,8 @@ The rest of the dev setup, plus the demo, is in [CONTRIBUTING.md](CONTRIBUTING.m
   and the test and load suites.
 - [`crates/`](crates): the server side in Rust, through
   [AnyCable](https://anycable.io), including [`loco-yrby`](crates/loco-yrby)
-  for [Loco](https://loco.rs) apps. It shares yrby-rails' tables, compaction,
-  and encryption, and [`examples/loco-demo`](examples/loco-demo) runs it.
+  for [Loco](https://loco.rs) apps, built on yrby-rails' storage design.
+  [`examples/loco-demo`](examples/loco-demo) runs it.
 - [CHANGELOG.md](CHANGELOG.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Editors
