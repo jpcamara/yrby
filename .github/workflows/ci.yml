@@ -309,3 +309,92 @@ jobs:
         if: failure()
         run: /usr/bin/tail -120 /tmp/e2e-server.log || true
 
+
+  crates:
+    name: Rust crates (anycable-rpc, yrby-anycable, loco-yrby)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: yrby
+          POSTGRES_PASSWORD: yrby
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: rustfmt
+        run: |
+          cargo fmt --manifest-path crates/Cargo.toml --all -- --check
+          cargo fmt --manifest-path examples/loco-demo/Cargo.toml --all -- --check
+      - name: clippy
+        run: |
+          cargo clippy --manifest-path crates/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path examples/loco-demo/Cargo.toml --all-targets -- -D warnings
+      - name: rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --manifest-path crates/Cargo.toml --no-deps
+      - name: cargo test (SQLite)
+        run: cargo test --manifest-path crates/Cargo.toml
+      # The store's tests again, each in a fresh Postgres database: this is
+      # what exercises compaction's row lock.
+      - name: cargo test (Postgres)
+        env:
+          YRBY_TEST_POSTGRES_URL: postgres://yrby:yrby@localhost:5432/postgres
+        run: cargo test --manifest-path crates/Cargo.toml -p loco-yrby
+      - name: Loco demo tests
+        run: cargo test --manifest-path examples/loco-demo/Cargo.toml
+
+  crates-e2e:
+    name: yrby-client through anycable-go (Rust and Loco backends)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: yrby
+          POSTGRES_PASSWORD: yrby
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    env:
+      # The Loco e2e's Postgres run: this server, inspected with the runner's psql.
+      PG_URL: postgres://yrby:yrby@localhost:5432
+      PG_CONTAINER: ""
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y sqlite3 postgresql-client
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # The version the e2e suites were written against.
+      - name: Install anycable-go
+        run: |
+          curl -fsSL https://github.com/anycable/anycable/releases/download/v1.6.14/anycable-go-linux-amd64 -o /tmp/anycable-go
+          sudo install -m 0755 /tmp/anycable-go /usr/local/bin/anycable-go
+          anycable-go --version
+      - name: Build yrby-client
+        working-directory: packages/client
+        run: npm ci && npm run build
+      - name: Rust AnyCable backend
+        working-directory: packages/client
+        run: node e2e/anycable_rust.mjs
+      - name: Loco app on SQLite
+        working-directory: packages/client
+        run: node e2e/loco.mjs
+      - name: Loco app on Postgres
+        working-directory: packages/client
+        env:
+          E2E_DB: postgres
+        run: node e2e/loco.mjs

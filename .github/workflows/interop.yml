@@ -1,0 +1,19 @@
+name: Rails <-> Loco interop
+
+# yrby-rails' models (in Docker) and loco-yrby's store share one database,
+# in every combination of database, schema owner, and key-derivation digest.
+# Slower than CI, so it runs nightly and on demand.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  interop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rails and Loco on one database
+        run: crates/loco-yrby/interop/run.sh

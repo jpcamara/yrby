@@ -1,0 +1,60 @@
+[workspace]
+
+[package]
+name = "yrby_loco"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "yrby_loco-cli"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace.dependencies]
+loco-rs = { version = "1.2" }
+
+[dependencies]
+loco-rs = { workspace = true  }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+tokio = { version = "1.45", default-features = false, features = [
+  "rt-multi-thread",
+] }
+async-trait = { version = "0.1" }
+axum = { version = "0.8" }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+regex = { version = "1.11" }
+migration = { path = "migration" }
+sea-orm = { version = "2.0", features = [
+  "sqlx-sqlite",
+  "sqlx-postgres",
+  "runtime-tokio-rustls",
+  "macros",
+] }
+chrono = { version = "0.4" }
+validator = { version = "0.20" }
+uuid = { version = "1.6", features = ["v4"] }
+# ts-rs derives the TypeScript bindings for the `dtos` (the typed JSON API
+# contract). Present for every db app; the SPA frontend consumes the exports,
+# and a headless app can still emit them for external consumers.
+ts-rs = { version = "12", features = ["chrono-impl", "serde-compat"] }
+include_dir = { version = "0.7" }
+loco-yrby = { version = "0.1.0", path = "../../crates/loco-yrby" }
+
+[[bin]]
+name = "yrby_loco-cli"
+path = "src/bin/main.rs"
+required-features = []
+
+[dev-dependencies]
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test = { version = "3.1.1" }
+rstest = { version = "0.25" }
+insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
+yrby-anycable = { path = "../../crates/yrby-anycable" }
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+
+# yrby's tables have their entities in loco_yrby::entities; don't generate
+# app copies of them.
+[package.metadata.db.entity]
+ignore-tables = "y_documents,y_document_updates"
