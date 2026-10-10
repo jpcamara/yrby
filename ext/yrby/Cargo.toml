@@ -17,6 +17,7 @@ serde_json = "1.0"
 yjs-html-core = { path = "crates/html-core" }
 lexical-yjs-html = { path = "crates/lexical-html" }
 prosemirror-yjs-html = { path = "crates/prosemirror-html" }
+yrby-core = { path = "crates/yrby-core" }
 
 [dev-dependencies]
 rb-sys-env = "0.1"

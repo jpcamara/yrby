@@ -35,6 +35,15 @@ jobs:
         run: cargo clippy --manifest-path ext/yrby/Cargo.toml --all-targets -- -D warnings
       - name: cargo test (Rust unit tests)
         run: cargo test --manifest-path ext/yrby/Cargo.toml
+      # yrby-core: the protocol and storage rules the extension and the Rust
+      # servers share, with and without its engine feature.
+      - name: yrby-core
+        run: |
+          cargo fmt --manifest-path ext/yrby/crates/yrby-core/Cargo.toml -- --check
+          cargo clippy --manifest-path ext/yrby/crates/yrby-core/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path ext/yrby/crates/yrby-core/Cargo.toml --all-targets --features engine -- -D warnings
+          cargo test --manifest-path ext/yrby/crates/yrby-core/Cargo.toml
+          cargo test --manifest-path ext/yrby/crates/yrby-core/Cargo.toml --features engine
 
       # Ruby: build the extension, run the test suite, lint.
       - name: compile
