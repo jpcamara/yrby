@@ -106,6 +106,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
   - [Editing a document from Ruby](#editing-a-document-from-ruby)
+  - [Joining a document from a Ruby process](#joining-a-document-from-a-ruby-process)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
 - [Message Type Constants](#message-type-constants)
@@ -879,6 +880,52 @@ edited through its encrypted rows.
 
 `Y::ActionCable.broadcast(key, update)` sends an update you already recorded
 to a document's subscribers, for code that records updates itself.
+
+### Joining a document from a Ruby process
+
+`Y::ActionCable::Client` joins a document the way a browser does: over the
+cable's websocket, as a subscriber of the document channel, with a grant. The
+server records, acks, and relays its edits like anyone else's, and it applies
+everyone else's edits to its own `Y::Doc`. An agent, a worker, or a script
+runs as one, outside the web process.
+
+```rb
+# Gemfile: gem "async-websocket"
+require "y/action_cable/client"
+
+client = Y::ActionCable::Client.new(
+  "wss://example.com/cable",
+  params: { grant: post.collaborative_sgid(:body), name: "body" },
+  headers: { "Authorization" => "Bearer #{agent_token}" }
+)
+client.on_update { |update, doc, changed| } # changed: ordinals of the blocks it touched
+client.subscribe                               # returns once the document has loaded
+client.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
+client.edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewed.") }
+client.unsubscribe                             # waits for acks, clears presence, closes
+```
+
+`headers:` go on the websocket request, so `ApplicationCable::Connection`
+authenticates the process the way it authenticates a browser by its cookie.
+A connection the server refuses, or a subscription it rejects, raises
+`Y::Error` from `subscribe`.
+
+`edit` sends what its block changed. A remote update waits until the block
+returns, so the update holds only this client's edit. Every update carries an
+id and is resent until the server acks it, and a dropped socket reconnects
+with backoff. `presence=` shows the client in the editor's roster and is
+renewed every 15 seconds, since peers drop presence they haven't heard from in
+30.
+
+The client runs as a task of the caller's reactor when there is one (Falcon,
+an `Async` block) and in a thread of its own otherwise (Puma, a job, a
+script). Callbacks run on that reactor, so keep them short.
+
+`Y::Awareness` is the presence state underneath: `set_local_state(json)`
+returns the frame to send, `apply_update(frame)` reads another client's, and
+`states` returns every client's state by client id. `Doc#client_id` is the id
+a document writes its edits under, and a presence for the same writer uses it
+so editors tie a caret to its author.
 
 ### Grant lifetime and refresh
 

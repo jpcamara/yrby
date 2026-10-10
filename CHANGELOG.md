@@ -30,6 +30,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   record's document from Ruby. It records the change in the document's rows,
   encrypted ones included, and broadcasts it to open editors.
   `Y::ActionCable.broadcast(key, update)` sends an already recorded update.
+- yrby-rails: `Y::ActionCable::Client` joins a document over the cable's
+  websocket with a grant, as a browser does. `edit` sends a change, every
+  update is resent until acked, and a dropped socket reconnects. `presence=`
+  shows the client to others and renews itself. `headers:` let
+  `ApplicationCable::Connection` authenticate the process. It needs the
+  async-websocket gem.
+- `Y::Awareness` builds and reads presence frames, and `Doc#client_id` returns
+  the id a document writes under.
 
 ## yrby-client 0.7.0 - 2026-10-08
 

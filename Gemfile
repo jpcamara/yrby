@@ -23,5 +23,9 @@ gem "puma", require: false # runs the ActionCable server for the element browser
 gem "sqlite3", require: false
 
 gem "rubocop", require: false
+
+# Y::ActionCable::Client speaks Action Cable over async-websocket. An app that
+# uses the client adds this gem.
+gem "async-websocket", require: false
 gem "rubocop-minitest", require: false
 gem "rubocop-rake", require: false

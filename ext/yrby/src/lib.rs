@@ -2,7 +2,8 @@ use magnus::{
     function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RHash, RString, Ruby,
     TryConvert, Value,
 };
-use yrs::sync::{Message, SyncMessage};
+use std::cell::RefCell;
+use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{DeepObservable, Doc, GetString, ReadTxn, Text, Transact};
@@ -150,6 +151,12 @@ impl RbDoc {
             Doc::with_client_id(client_id)
         };
         Ok(RbDoc(doc))
+    }
+
+    /// The id this document writes its own edits under. Presence for the same
+    /// writer uses it too, so editors tie a caret to its author's edits.
+    fn client_id(&self) -> u64 {
+        self.0.client_id().get()
     }
 
     fn encode_state_vector(&self) -> RString {
@@ -737,6 +744,133 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // Module Initialization
 // ============================================================================
 
+/// A presence handle a Ruby process can use to appear as a live collaborator.
+///
+/// Wraps a yrs `Awareness`. `set_local_state` takes a JSON string (the shape the
+/// editor renders, e.g. `{"name":"Agent","color":"#7c3aed"}`) and returns the
+/// y-protocol awareness frame to broadcast. Browsers subscribed to the document
+/// apply it as another participant. `clear_local_state` returns the frame that
+/// removes this presence. The bytes are the same wire format Yjs and
+/// y-protocols use, so no client change is needed.
+#[magnus::wrap(class = "Y::Awareness", free_immediately, size)]
+struct RbAwareness(RefCell<Awareness>);
+
+impl RbAwareness {
+    fn new(args: &[Value]) -> Result<Self, Error> {
+        let doc = if args.is_empty() || args[0].is_nil() {
+            Doc::new()
+        } else {
+            let client_id: u64 = TryConvert::try_convert(args[0])?;
+            Doc::with_client_id(client_id)
+        };
+        Ok(RbAwareness(RefCell::new(Awareness::new(doc))))
+    }
+
+    /// This presence's client id, stable for the life of the handle.
+    fn client_id(&self) -> u64 {
+        self.0.borrow().client_id().get()
+    }
+
+    /// Set this client's presence from a JSON string and return the awareness
+    /// frame to broadcast.
+    fn set_local_state(&self, json: String) -> Result<RString, Error> {
+        let value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| yrb_error(format!("Y::Awareness state must be JSON: {e}")))?;
+        let mut awareness = self.0.borrow_mut();
+        awareness
+            .set_local_state(value)
+            .map_err(|e| yrb_error(e.to_string()))?;
+        Self::frame(&awareness)
+    }
+
+    /// Remove this client's presence and return the frame that tells peers to
+    /// drop it: an entry with the next clock and a null state, as y-protocols
+    /// encodes a removal. yrs's own clean just forgets the client, and a
+    /// frame built from that says nothing, so peers would wait for a timeout.
+    fn clear_local_state(&self) -> Result<RString, Error> {
+        let mut awareness = self.0.borrow_mut();
+        let id = awareness.client_id();
+        let clock = awareness
+            .iter()
+            .find(|(client, _)| *client == id)
+            .map(|(_, state)| state.clock)
+            .unwrap_or(0);
+        awareness.clean_local_state();
+        let mut clients = std::collections::HashMap::new();
+        clients.insert(
+            id,
+            yrs::sync::awareness::AwarenessUpdateEntry {
+                clock: clock + 1,
+                json: "null".into(),
+            },
+        );
+        let update = yrs::sync::awareness::AwarenessUpdate { clients };
+        Ok(binary_string(&Message::Awareness(update).encode_v1()))
+    }
+
+    /// Apply a presence frame from another client (the bytes a browser or
+    /// another process broadcast). Returns false for a frame that is not an
+    /// awareness message.
+    fn apply_update(&self, frame: RString) -> Result<bool, Error> {
+        let bytes = copy_bytes(frame);
+        let message = Message::decode_v1(&bytes).map_err(|e| yrb_error(e.to_string()))?;
+        match message {
+            Message::Awareness(update) => {
+                self.0
+                    .borrow_mut()
+                    .apply_update(update)
+                    .map_err(|e| yrb_error(e.to_string()))?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// Every client's state, as `{ client_id => state }`, the state being the
+    /// JSON each client set (parsed), or nil for a client that cleared it.
+    /// Each client's awareness clock. A client renews its state every few
+    /// seconds with a higher clock, so a clock that stops moving means the
+    /// client is gone without having said so. A mirror uses this to time
+    /// peers out the way browser clients do.
+    fn clocks(&self) -> Result<RHash, Error> {
+        let awareness = self.0.borrow();
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let out = ruby.hash_new();
+        for (client, state) in awareness.iter() {
+            out.aset(client.get(), state.clock)?;
+        }
+        Ok(out)
+    }
+
+    fn states(&self) -> Result<RHash, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let entries: Vec<(u64, Option<String>)> = self
+            .0
+            .borrow()
+            .iter()
+            .map(|(id, state)| (id.get(), state.data.as_ref().map(|d| d.to_string())))
+            .collect();
+        let out = ruby.hash_new();
+        for (id, data) in entries {
+            let value: Value = match data {
+                Some(json) => {
+                    let parsed: serde_json::Value = serde_json::from_str(&json)
+                        .map_err(|e| yrb_error(format!("presence state is not JSON: {e}")))?;
+                    json_to_ruby(&ruby, &parsed)
+                }
+                None => ruby.qnil().as_value(),
+            };
+            out.aset(id, value)?;
+        }
+        Ok(out)
+    }
+
+    fn frame(awareness: &Awareness) -> Result<RString, Error> {
+        let update = awareness.update().map_err(|e| yrb_error(e.to_string()))?;
+        Ok(binary_string(&Message::Awareness(update).encode_v1()))
+    }
+}
+
 /// For an event on the root sequence itself (a block added or removed), the
 /// ordinals affected. The root's children are all embedded blocks, so a
 /// sequence position is a block ordinal.
@@ -845,6 +979,33 @@ fn sticky_from_ruby(ruby: &Ruby, position: RHash) -> Result<yrs::StickyIndex, Er
     }
 }
 
+/// serde_json to Ruby, for presence states.
+fn json_to_ruby(ruby: &Ruby, v: &serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => ruby.qnil().as_value(),
+        serde_json::Value::Bool(b) => b.into_value_with(ruby),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => i.into_value_with(ruby),
+            None => n.as_f64().unwrap_or(0.0).into_value_with(ruby),
+        },
+        serde_json::Value::String(s) => s.as_str().into_value_with(ruby),
+        serde_json::Value::Array(a) => {
+            let arr = ruby.ary_new();
+            for x in a {
+                let _ = arr.push(json_to_ruby(ruby, x));
+            }
+            arr.as_value()
+        }
+        serde_json::Value::Object(o) => {
+            let h = ruby.hash_new();
+            for (k, x) in o {
+                let _ = h.aset(k.as_str(), json_to_ruby(ruby, x));
+            }
+            h.as_value()
+        }
+    }
+}
+
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("Y")?;
@@ -865,6 +1026,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbDoc::encode_state_as_update, -1),
     )?;
     doc_class.define_method("apply_update", method!(RbDoc::apply_update, 1))?;
+    doc_class.define_method("client_id", method!(RbDoc::client_id, 0))?;
     doc_class.define_method("native_index_at", method!(RbDoc::index_at, 2))?;
     doc_class.define_method(
         "apply_update_changes",
@@ -903,6 +1065,18 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     prosemirror_class.define_singleton_method("new", function!(RbProseMirror::native_new, 2))?;
     prosemirror_class.define_method("to_html", method!(RbProseMirror::native_to_html, -1))?;
     prosemirror_class.define_method("node_types", method!(RbProseMirror::node_types, -1))?;
+
+    let awareness_class = module.define_class("Awareness", ruby.class_object())?;
+    awareness_class.define_singleton_method("new", function!(RbAwareness::new, -1))?;
+    awareness_class.define_method("client_id", method!(RbAwareness::client_id, 0))?;
+    awareness_class.define_method("set_local_state", method!(RbAwareness::set_local_state, 1))?;
+    awareness_class.define_method(
+        "clear_local_state",
+        method!(RbAwareness::clear_local_state, 0),
+    )?;
+    awareness_class.define_method("apply_update", method!(RbAwareness::apply_update, 1))?;
+    awareness_class.define_method("states", method!(RbAwareness::states, 0))?;
+    awareness_class.define_method("clocks", method!(RbAwareness::clocks, 0))?;
 
     // Live shared-type handles.
     map::define(ruby, module)?;
