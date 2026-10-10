@@ -98,6 +98,16 @@ class ClientAppTest < Minitest::Test
     assert_match(/subscription rejected/, error.message)
   end
 
+  def test_a_client_can_leave_from_inside_its_own_callback
+    left = Queue.new
+    listener = client(name: "leaving").subscribe
+    listener.on_update { left << listener.unsubscribe }
+    writer = client(name: "leaving").subscribe
+    writer.edit { |doc| Y::Lexxy.append_paragraph(doc, "time to go") }
+
+    assert_same listener, left.pop(timeout: 5)
+  end
+
   def test_presence_reaches_others_and_is_cleared_when_the_agent_leaves
     watcher_presence = Y::Awareness.new
     watcher = client(name: "notes").on_awareness { |frame| watcher_presence.apply_update(frame) }.subscribe

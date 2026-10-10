@@ -398,7 +398,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         update = Y.update_from_message(bytes)
         return :noop unless update
 
-        sync_handle_document_update(update, encoded)
+        sync_handle_document_update(update, sync_relay_frame(update, encoded, bytes))
       when MSG_KIND_AWARENESS
         sync_distribute(encoded)
         :noop
@@ -420,6 +420,16 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       sync_record_change(update) # record before relay
       sync_distribute(encoded)
       :recorded
+    end
+
+    # A client's SyncStep2 answers the server's Step1 and is meant for the
+    # server. Peers get it as a plain update, so the only Step2 a client ever
+    # receives is the server's answer to its own handshake, which is how a
+    # client knows it has loaded.
+    def sync_relay_frame(update, encoded, bytes)
+      return encoded unless bytes.getbyte(1) == Y::MSG_SYNC_STEP2
+
+      Base64.strict_encode64(Y.wrap_update(update))
     end
 
     # Build a fresh document from the durable store (on_load). Callers validate

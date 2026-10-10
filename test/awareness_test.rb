@@ -57,6 +57,14 @@ class AwarenessTest < Minitest::Test
     assert_raises(Y::Error) { Y::Awareness.new.set_local_state("not json") }
   end
 
+  def test_a_large_unsigned_integer_in_a_state_keeps_its_value
+    sender = Y::Awareness.new
+    reader = Y::Awareness.new
+    reader.apply_update(sender.set_local_state(%({"id": #{(2**64) - 1}})))
+
+    assert_equal (2**64) - 1, reader.states[sender.client_id]["id"]
+  end
+
   def test_clocks_advance_when_a_client_renews_its_state
     ada = Y::Awareness.new(7)
     mirror = Y::Awareness.new(9)
