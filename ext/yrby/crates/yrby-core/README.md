@@ -37,8 +37,7 @@ through a `Relay`, then acknowledges it to its sender. Nothing is kept in
 memory between calls.
 
 `grant::GrantSigner` signs and verifies grants: HS256 JWTs that open one
-attribute of one document for a limited time. yrby-rails verifies the same
-grants.
+attribute of one document for a limited time.
 
 [`yrby-anycable`](https://github.com/jpcamara/yrby/tree/main/crates/yrby-anycable)
 runs the engine behind anycable-go.

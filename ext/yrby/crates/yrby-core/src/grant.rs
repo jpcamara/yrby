@@ -156,22 +156,6 @@ mod tests {
     }
 
     #[test]
-    fn verifies_a_grant_minted_by_yrby_rails() {
-        // Y::Collaborative::Grant.encode(subject: "Post/ruby-fixture", name: "body",
-        //   expires_at: Time.at(4102444800), secret: "yrby-interop-grant-secret")
-        const RUBY_GRANT: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
-            eyJhdWQiOiJ5cmJ5Iiwic3ViIjoiUG9zdC9ydWJ5LWZpeHR1cmUiLCJuYW1lIjoiYm9keSIsImV4cCI6NDEwMjQ0NDgwMH0.\
-            h0aeuF3PHde-M3zJzs4T3-CDo3TABplfNFpwDw-L834";
-        let signer = GrantSigner::new("yrby-interop-grant-secret");
-        assert_eq!(
-            signer.verify(RUBY_GRANT, "body").as_deref(),
-            Some("Post/ruby-fixture")
-        );
-        assert_eq!(signer.verify(RUBY_GRANT, "notes"), None);
-        assert_eq!(GrantSigner::new("other").verify(RUBY_GRANT, "body"), None);
-    }
-
-    #[test]
     fn refuses_an_unsigned_token() {
         // alg "none": the classic JWT downgrade.
         use base64::Engine;
