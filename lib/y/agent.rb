@@ -90,7 +90,13 @@ module Y
     def doc = @client.doc
 
     # Edit the document. Returns the update, or nil when nothing changed.
-    def edit(&) = @client.edit(&)
+    # Raises Y::Error once another agent holds the document, so a handler
+    # that outlived the lock stops writing.
+    def edit(&)
+      raise Y::Error, "another agent holds #{@document.key}" unless holding?
+
+      @client.edit(&)
+    end
 
     def presence=(state)
       @presence = state
@@ -117,9 +123,7 @@ module Y
 
     def join
       params = { grant: @document.grant(expires_in: @max_stay + LOCK_TTL), name: @document.name }
-      @client = Y::ActionCable::Client.new(@connect[:url], params: params, channel: @connect[:channel],
-                                                           headers: @connect[:headers], root: @connect[:root],
-                                                           logger: @logger)
+      @client = Y::ActionCable::Client.new(@connect[:url], params:, logger: @logger, **@connect.except(:url))
       @client.on_update { |_update, _doc, changed| @changes << (changed || []) }
       @client.on_awareness { |frame| see(frame) }
       @client.subscribe
@@ -129,7 +133,7 @@ module Y
     def follow
       started = now
       alone_since = nil
-      until @leaving || now - started > @max_stay || (@lock && !@lock.keep)
+      until @leaving || now - started > @max_stay || !holding?
         alone_since = alone?(started) ? alone_since || now : nil
         break if alone_since && now - alone_since > @idle
 
@@ -137,9 +141,11 @@ module Y
         next unless changed
 
         blocks = settle(changed)
-        @change_handlers.each { |handler| safely("on_change") { handler.call(blocks) } }
+        @change_handlers.each { |handler| safely("on_change") { handler.call(blocks) } if holding? }
       end
     end
+
+    def holding? = @lock.nil? || @lock.held?
 
     # People already in the document announce themselves only when they next
     # renew their presence, so the agent can't know it is alone until one
@@ -148,7 +154,6 @@ module Y
 
     # Waits for a burst of edits to pause and returns every block it touched.
     def settle(blocks)
-      blocks = blocks.dup
       while (more = @changes.pop(timeout: SETTLE))
         blocks |= more
       end
