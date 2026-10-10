@@ -3,15 +3,12 @@
 //! Every way in ends with the same connection identifiers, `{"user": "<pid>"}`,
 //! which every later command carries and [`connected_user`] reads.
 //!
+//! - **AnyCable JWT identification**. The page connects to anycable-go with
+//!   `?jid=<token>` from [`crate::Yrby::connection_token`], and anycable-go
+//!   identifies the connection itself, with no call to the app.
 //! - **Loco's own login** ([`LocoLogin`]). The app's login JWT, from the
-//!   `auth_token` cookie (a same-origin page sends it with the WebSocket), a
-//!   `?token=` query parameter (apps that keep the token in the browser, as
-//!   Loco's React starter does), or a `Bearer` header (grant requests).
-//! - **AnyCable JWT identification**, with the AnyCable transport. The page
-//!   connects to anycable-go with `?jid=<token>` from
-//!   [`crate::Yrby::connection_token`], and anycable-go identifies the
-//!   connection itself, with no call to the app. Connections without a token
-//!   fall back to the login cookie through anycable-go's connect call.
+//!   `auth_token` cookie (anycable-go forwards it with its connect call), a
+//!   `?token=` query parameter, or a `Bearer` header (grant requests).
 
 use anycable_rpc::proto::Env;
 use anycable_rpc::{Authenticator, RpcMeta};
@@ -181,28 +178,26 @@ mod tests {
 
         let cookie = format!("theme=dark; auth_token={token}; other=1");
         assert_eq!(
-            auth.connect(&meta, &env(Some(&cookie), "/yrby/cable"))
-                .await,
+            auth.connect(&meta, &env(Some(&cookie), "/cable")).await,
             user
         );
-        let url = format!("/yrby/cable?x=1&token={token}");
+        let url = format!("/cable?x=1&token={token}");
         assert_eq!(auth.connect(&meta, &env(None, &url)).await, user);
 
         // No token, a forged one, or another app's: refused.
-        assert_eq!(auth.connect(&meta, &env(None, "/yrby/cable")).await, None);
+        assert_eq!(auth.connect(&meta, &env(None, "/cable")).await, None);
         assert_eq!(
-            auth.connect(&meta, &env(None, "/yrby/cable?token=forged"))
-                .await,
+            auth.connect(&meta, &env(None, "/cable?token=forged")).await,
             None
         );
         let other = login("pid-7", "b3RoZXItc2VjcmV0");
-        let url = format!("/yrby/cable?token={other}");
+        let url = format!("/cable?token={other}");
         assert_eq!(auth.connect(&meta, &env(None, &url)).await, None);
 
         // Unless anonymous connections are allowed: then they carry no user.
         let open = LocoLogin::new(Some(LOGIN_SECRET), "auth_token", "token", true);
         assert_eq!(
-            open.connect(&meta, &env(None, "/yrby/cable")).await,
+            open.connect(&meta, &env(None, "/cable")).await,
             Some(json!({}))
         );
         // An app without a login secret identifies no one.
