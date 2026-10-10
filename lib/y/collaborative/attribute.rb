@@ -22,6 +22,10 @@ module Y
       # this to return before it acknowledges or broadcasts the change.
       def append(update) = document_row.append(update)
 
+      # A signed grant for this document, what a page or a Y::Agent subscribes
+      # with. See Y::Collaborative#collaborative_sgid.
+      def grant(expires_in: nil) = record.collaborative_sgid(name, expires_in:)
+
       # Edits the document from Ruby the way a browser does: yields the
       # current document, records what the block changed, and broadcasts it so
       # open editors apply it. Returns the update, or nil when the block

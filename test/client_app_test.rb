@@ -3,40 +3,17 @@
 require "test_helper"
 require "y/action_cable"
 require "y/action_cable/client"
-require "net/http"
-require "socket"
-require "tmpdir"
+require_relative "support/client_app"
 
 # The Ruby client against a Rails app running the shipped Y::DocumentChannel:
 # a process authenticated at connect, holding a signed grant, edits a
 # record's document and shows up as a participant. The app runs as a
 # subprocess (test/client_app/app.rb) so it has a database of its own.
 class ClientAppTest < Minitest::Test
-  TOKEN = "agent-test-token"
-
-  def self.app
-    @app ||= begin
-      dir = Dir.mktmpdir("yrby-client-app")
-      port = TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] }
-      env = { "PORT" => port.to_s, "CLIENT_APP_TOKEN" => TOKEN, "CLIENT_APP_DB" => File.join(dir, "app.sqlite3") }
-      out = IO.popen(env, [RbConfig.ruby, File.expand_path("client_app/app.rb", __dir__)], err: %i[child out])
-      raise "client app did not start" unless wait_for_ready(out)
-
-      Minitest.after_run do
-        Process.kill("TERM", out.pid)
-        Process.wait(out.pid)
-        FileUtils.remove_entry(dir)
-      end
-      port
-    end
-  end
-
-  def self.wait_for_ready(out)
-    out.each_line.any? { |line| line.strip == "ready" }
-  end
+  TOKEN = ClientApp::TOKEN
 
   def setup
-    @port = self.class.app
+    @port = ClientApp.port
     @clients = []
   end
 

@@ -7,6 +7,34 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `collaborative_document(:body).edit { |doc| ... }` edits a record's
+  document from Ruby. It records the change in the document's rows, encrypted
+  ones included, and broadcasts it to open editors.
+  `Y::ActionCable.broadcast(key, update)` sends an already recorded update.
+- `Y::ActionCable::Client` joins a document over the cable's websocket with a
+  grant, as a browser does. `edit` sends a change, every update is resent
+  until acked, and a dropped socket reconnects. `presence=` shows the client
+  to others and renews itself. `headers:` let `ApplicationCable::Connection`
+  authenticate the process. It needs the async-websocket gem.
+- `Y::Agent.run(post.collaborative_document(:body), url:, headers:,
+  presence:) { |agent| ... }` runs a Ruby process as a participant in a
+  document, from a job or anywhere else. It joins with a grant, calls
+  `on_change` with the blocks people changed once their typing settles, and
+  leaves when nobody else has been present for `idle` seconds or after
+  `max_stay`. One agent works on a document at a time, through a lock in
+  `Rails.cache`. Errors in handlers go to `on_error` and the agent keeps
+  going. `require "y/agent"` to use it.
+- `Attribute#grant(expires_in:)` returns the document's signed grant.
+
+### Fixed
+
+- The channel relays a client's SyncStep2 to peers as a plain update.
+  Relayed as is, a peer that was still joining could take it for the answer
+  to its own handshake and report itself loaded before it had the server's
+  state.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added
