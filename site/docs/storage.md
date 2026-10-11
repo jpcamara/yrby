@@ -189,8 +189,8 @@ The content survives as long as some client still has a copy.
 
 ## The store this site uses
 
-This site's shape demos (spreadsheet, whiteboard, kanban, code, and Tiptap)
-use the same store this page describes, on SQLite:
+This site's shape demos (spreadsheet, whiteboard, kanban, chat, code, and
+Tiptap) use the same store this page describes, on SQLite:
 
 ```ruby
 class DocumentChannel < ApplicationCable::Channel
