@@ -30,9 +30,7 @@ module Y
       { "__type" => "heading", "__tag" => tag.to_s, **ELEMENT_ATTRIBUTES }
     end
 
-    def self.quote_attributes
-      { "__type" => "quote", **ELEMENT_ATTRIBUTES }
-    end
+    def self.quote_attributes = { "__type" => "quote", **ELEMENT_ATTRIBUTES }
 
     # A code block. Its text nodes are `code-highlight` nodes.
     def self.code_attributes(language: "plain")
@@ -60,9 +58,7 @@ module Y
       { "__type" => list_item_type, "__value" => value, **ELEMENT_ATTRIBUTES }
     end
 
-    def self.list_item_type
-      "listitem"
-    end
+    def self.list_item_type = "listitem"
 
     # A link inside a block: an element holding its own text nodes.
     def self.link_attributes(url, title: nil)
@@ -131,15 +127,28 @@ module Y
     end
 
     # Remove the `at`-th block. Returns whether there was one.
-    def self.delete_block(doc, at, root: "root")
-      doc.get_xml_text(root).delete_xml_text(at)
+    def self.delete_block(doc, at, root: "root") = doc.get_xml_text(root).delete_xml_text(at)
+
+    # Append plain `text` to the end of `block` and return the block. This is
+    # the call for streaming into a block. Text must follow a text node's
+    # marker or Lexical drops it, so after a link, or in an empty block, it
+    # starts a text node of its own; otherwise it joins the last one.
+    def self.append_text(block, text)
+      if block.empty? || block.ends_with_xml_text?
+        write_text(block, { text: text })
+      else
+        block.insert(-1, text.to_s)
+      end
+      block
     end
 
     # Write `runs` at the end of `block`: a text node per run, a link element
-    # for a run with `link:`.
+    # for a run with `link:`. Runs may use string keys, as parsed JSON does.
     def self.write_runs(block, runs)
       Array(runs).each do |run|
-        run = { text: run } if run.is_a?(String)
+        run = run.is_a?(String) ? { text: run } : run.transform_keys(&:to_sym)
+        raise ArgumentError, "a run needs text: #{run.inspect}" unless run.key?(:text)
+
         if run[:link]
           link = block.push_xml_text(link_attributes(run[:link], title: run[:title]))
           write_text(link, run.except(:link, :title))
@@ -152,8 +161,8 @@ module Y
 
     def self.write_text(block, run)
       format = run.slice(*FORMAT.keys)
-      block.insert_embed(block.length, text_attributes(**format))
-      block.insert(block.length, run[:text].to_s)
+      block.insert_embed(-1, text_attributes(**format))
+      block.insert(-1, run[:text].to_s)
     end
     private_class_method :write_text
   end

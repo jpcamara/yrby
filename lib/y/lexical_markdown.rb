@@ -11,7 +11,7 @@ module Y
       BULLET = /\A[-*]\s+(.*)\z/
       NUMBERED = /\A\d+[.)]\s+(.*)\z/
       QUOTE = /\A>\s?(.*)\z/
-      FENCE = /\A```\s*(\S*)\s*\z/
+      FENCE = /\A```\s*([^\s`]*)[^`]*\z/ # the language, then any other info
       INLINE = /(\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|(?<![*\w])\*([^*]+)\*(?!\w)|(?<!\w)_([^_]+)_(?!\w))/
 
       module_function

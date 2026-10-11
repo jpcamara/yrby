@@ -149,4 +149,26 @@ class ArrayTest < Minitest::Test
     assert_equal 1, other.get_array("plan").size
     assert_equal "pending", other.get_array("plan").get_map(0)["status"]
   end
+
+  def test_a_record_handle_stays_on_its_record_when_others_are_inserted
+    doc = Y::Doc.new
+    tasks = doc.get_array("tasks")
+    tasks << { "title" => "a" }
+    tasks << { "title" => "b" }
+    b = tasks.get_map(1)
+    tasks.insert(0, { "title" => "new" })
+    b["done"] = true
+
+    assert_equal({ "title" => "b", "done" => true }, tasks[2])
+    assert_nil tasks[0]["done"]
+  end
+
+  def test_insert_at_minus_one_appends
+    list = Y::Doc.new.get_array("list")
+    list << 1
+    list << 2
+    list.insert(-1, 3)
+
+    assert_equal [1, 2, 3], list.to_a
+  end
 end

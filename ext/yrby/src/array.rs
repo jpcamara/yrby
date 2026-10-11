@@ -8,52 +8,43 @@
 //! The method that earns this type its place is `get_map`, which hands back a
 //! live handle to a map stored at an index. A list of records is the shape most
 //! collaborative state actually has (a plan, a board, a set of rows), and
-//! without an index-addressed handle you could read one but never edit it in
-//! place.
+//! without a handle you could read one but never edit it in place. The handle
+//! keeps the record's identity, so it stays on that record when others are
+//! inserted or removed around it.
 
 use magnus::{prelude::*, Error, Ruby, Value};
-use yrs::{Any, Array, Doc, Out, Transact};
+use yrs::branch::BranchID;
+use yrs::{Any, Array, ArrayRef, Doc, Out, Transact};
 
 use crate::map::RbMap;
+use crate::nogvl;
 use crate::read::out_to_any;
-use crate::shared::{any_to_ruby, resolve_array, ruby_to_invalue, to_in, Root, Seg};
+use crate::shared::{
+    any_to_ruby, element_index, guarded, identity, insert_index, resolve, ruby_to_invalue, to_in,
+    ORIGIN,
+};
 use crate::text::RbText;
-use crate::{nogvl, yrb_error};
 
 #[magnus::wrap(class = "Y::Array", free_immediately, size)]
 pub struct RbArray {
     doc: Doc,
-    kind: Root,
-    root: String,
-    path: Vec<Seg>,
-}
-
-/// Ruby index semantics: a negative index counts from the end. Returns `None`
-/// when the index falls outside the array, which every caller turns into `nil`
-/// or a no-op rather than an exception.
-fn absolute(index: i64, len: u32) -> Option<u32> {
-    let len = len as i64;
-    let i = if index < 0 { len + index } else { index };
-    (i >= 0 && i < len).then_some(i as u32)
+    id: BranchID,
 }
 
 impl RbArray {
-    pub fn root(doc: Doc, root: String) -> Self {
-        RbArray {
-            doc,
-            kind: Root::Array,
-            root,
-            path: Vec::new(),
-        }
+    pub fn new(doc: Doc, id: BranchID) -> Self {
+        RbArray { doc, id }
     }
 
-    pub fn at(doc: Doc, kind: Root, root: String, path: Vec<Seg>) -> Self {
-        RbArray {
-            doc,
-            kind,
-            root,
-            path,
-        }
+    /// The shared value at `index`, resolved now: what `get_map`, `get_array`
+    /// and `get_text` narrow to a handle.
+    fn child(&self, index: i64) -> Option<Out> {
+        let (doc, id) = (&self.doc, &self.id);
+        nogvl(move || {
+            let txn = doc.transact();
+            let a = resolve::<ArrayRef, _>(&txn, id)?;
+            a.get(&txn, element_index(index, a.len(&txn))?)
+        })
     }
 
     // --- reads ---
@@ -61,11 +52,11 @@ impl RbArray {
     /// `array[i]`: a snapshot value. Nested maps and arrays come back as deep
     /// `Hash`/`Array`; use `get_map` for a live handle instead.
     fn get(&self, index: i64) -> Value {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         let got: Option<Any> = nogvl(move || {
             let txn = doc.transact();
-            let a = resolve_array(&txn, kind, root, path)?;
-            let i = absolute(index, a.len(&txn))?;
+            let a = resolve::<ArrayRef, _>(&txn, id)?;
+            let i = element_index(index, a.len(&txn))?;
             a.get(&txn, i).map(|v| out_to_any(&txn, &v))
         });
         let ruby = Ruby::get().unwrap();
@@ -78,58 +69,34 @@ impl RbArray {
     /// A live `Y::Map` for the element at `index`, or `nil` if that element is
     /// absent or is not a map. Mutating it mutates the document.
     fn get_map(&self, index: i64) -> Option<RbMap> {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        let resolved: Option<u32> = nogvl(move || {
-            let txn = doc.transact();
-            let a = resolve_array(&txn, kind, root, path)?;
-            let i = absolute(index, a.len(&txn))?;
-            matches!(a.get(&txn, i), Some(Out::YMap(_))).then_some(i)
-        });
-        resolved.map(|i| {
-            let mut path = self.path.clone();
-            path.push(Seg::Index(i));
-            RbMap::at(self.doc.clone(), self.kind, self.root.clone(), path)
-        })
+        match self.child(index)? {
+            Out::YMap(m) => Some(RbMap::new(self.doc.clone(), identity(&m))),
+            _ => None,
+        }
     }
 
     /// A live `Y::Text` for text stored at `index`. An agent appending to one
     /// field of one record goes through here.
     fn get_text(&self, index: i64) -> Option<RbText> {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        let resolved: Option<u32> = nogvl(move || {
-            let txn = doc.transact();
-            let a = resolve_array(&txn, kind, root, path)?;
-            let i = absolute(index, a.len(&txn))?;
-            matches!(a.get(&txn, i), Some(Out::YText(_))).then_some(i)
-        });
-        resolved.map(|i| {
-            let mut path = self.path.clone();
-            path.push(Seg::Index(i));
-            RbText::at(self.doc.clone(), self.kind, self.root.clone(), path)
-        })
+        match self.child(index)? {
+            Out::YText(t) => Some(RbText::new(self.doc.clone(), identity(&t))),
+            _ => None,
+        }
     }
 
     /// A live `Y::Array` for a nested array at `index`.
     fn get_array(&self, index: i64) -> Option<Self> {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        let resolved: Option<u32> = nogvl(move || {
-            let txn = doc.transact();
-            let a = resolve_array(&txn, kind, root, path)?;
-            let i = absolute(index, a.len(&txn))?;
-            matches!(a.get(&txn, i), Some(Out::YArray(_))).then_some(i)
-        });
-        resolved.map(|i| {
-            let mut path = self.path.clone();
-            path.push(Seg::Index(i));
-            RbArray::at(self.doc.clone(), self.kind, self.root.clone(), path)
-        })
+        match self.child(index)? {
+            Out::YArray(a) => Some(RbArray::new(self.doc.clone(), identity(&a))),
+            _ => None,
+        }
     }
 
     fn size(&self) -> usize {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
-            resolve_array(&txn, kind, root, path)
+            resolve::<ArrayRef, _>(&txn, id)
                 .map(|a| a.len(&txn) as usize)
                 .unwrap_or(0)
         })
@@ -140,10 +107,10 @@ impl RbArray {
     }
 
     fn snapshot(&self) -> Vec<Any> {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
-            match resolve_array(&txn, kind, root, path) {
+            match resolve::<ArrayRef, _>(&txn, id) {
                 Some(a) => a.iter(&txn).map(|v| out_to_any(&txn, &v)).collect(),
                 None => Vec::new(),
             }
@@ -172,73 +139,60 @@ impl RbArray {
     /// Append a value. A Ruby `Hash` becomes a real nested `Y.Map`, so the
     /// element can be handed back later as a live handle by `get_map`.
     fn push(&self, value: Value) -> Result<Value, Error> {
-        let ruby = Ruby::get().unwrap();
-        let iv = ruby_to_invalue(&ruby, value)?;
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        nogvl(move || -> Result<(), String> {
-            let mut txn = doc.transact_mut();
-            let a = resolve_array(&txn, kind, root, path)
-                .ok_or_else(|| "array no longer exists".to_string())?;
-            a.push_back(&mut txn, to_in(iv));
-            Ok(())
-        })
-        .map_err(yrb_error)?;
-        Ok(value)
+        self.insert(-1, value)
     }
 
-    /// Insert at `index`. An index past the end appends; a negative index
-    /// counts from the end.
+    /// Insert at `index`, as `Array#insert` does: a negative index counts from
+    /// the end (-1 appends). An index past the end appends.
     fn insert(&self, index: i64, value: Value) -> Result<Value, Error> {
         let ruby = Ruby::get().unwrap();
         let iv = ruby_to_invalue(&ruby, value)?;
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        nogvl(move || -> Result<(), String> {
-            let mut txn = doc.transact_mut();
-            let a = resolve_array(&txn, kind, root, path)
-                .ok_or_else(|| "array no longer exists".to_string())?;
-            let len = a.len(&txn);
-            let at = if index < 0 {
-                (len as i64 + index).max(0) as u32
-            } else {
-                index.min(len as i64) as u32
-            };
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
+            let at = insert_index(index, a.len(&txn));
             a.insert(&mut txn, at, to_in(iv));
             Ok(())
-        })
-        .map_err(yrb_error)?;
+        })?;
         Ok(value)
     }
 
     /// Remove the element at `index`, returning its previous snapshot value.
-    fn delete_at(&self, index: i64) -> Value {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        let prev: Option<Any> = nogvl(move || {
-            let mut txn = doc.transact_mut();
-            let a = resolve_array(&txn, kind, root, path)?;
-            let i = absolute(index, a.len(&txn))?;
+    fn delete_at(&self, index: i64) -> Result<Value, Error> {
+        let (doc, id) = (&self.doc, &self.id);
+        let prev: Option<Any> = guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let Some(a) = resolve::<ArrayRef, _>(&txn, id) else {
+                return Ok(None);
+            };
+            let Some(i) = element_index(index, a.len(&txn)) else {
+                return Ok(None);
+            };
             // Convert before removing: a removed shared ref would dangle.
             let prev = a.get(&txn, i).map(|v| out_to_any(&txn, &v));
             a.remove(&mut txn, i);
-            prev
-        });
+            Ok(prev)
+        })?;
         let ruby = Ruby::get().unwrap();
-        match prev {
+        Ok(match prev {
             Some(a) => any_to_ruby(&ruby, &a),
             None => ruby.qnil().as_value(),
-        }
+        })
     }
 
-    fn clear(&self) {
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        nogvl(move || {
-            let mut txn = doc.transact_mut();
-            if let Some(a) = resolve_array(&txn, kind, root, path) {
+    fn clear(&self) -> Result<(), Error> {
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            if let Some(a) = resolve::<ArrayRef, _>(&txn, id) {
                 let len = a.len(&txn);
                 if len > 0 {
                     a.remove_range(&mut txn, 0, len);
                 }
             }
-        });
+            Ok(())
+        })
     }
 
     /// Replace the element at `index`. Yjs arrays have no in-place update, so
@@ -247,17 +201,15 @@ impl RbArray {
     fn set(&self, index: i64, value: Value) -> Result<Value, Error> {
         let ruby = Ruby::get().unwrap();
         let iv = ruby_to_invalue(&ruby, value)?;
-        let (doc, kind, root, path) = (&self.doc, self.kind, &self.root, &self.path);
-        nogvl(move || -> Result<(), String> {
-            let mut txn = doc.transact_mut();
-            let a = resolve_array(&txn, kind, root, path)
-                .ok_or_else(|| "array no longer exists".to_string())?;
-            let i = absolute(index, a.len(&txn)).ok_or_else(|| "index out of range".to_string())?;
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
+            let i = element_index(index, a.len(&txn)).ok_or("index out of range")?;
             a.remove(&mut txn, i);
             a.insert(&mut txn, i, to_in(iv));
             Ok(())
-        })
-        .map_err(yrb_error)?;
+        })?;
         Ok(value)
     }
 }
@@ -266,11 +218,8 @@ impl RbArray {
 /// `Y::Doc#get_array`.
 pub fn root_array(doc: &Doc, name: String) -> RbArray {
     let d = doc.clone();
-    let root = name.clone();
-    nogvl(move || {
-        d.get_or_insert_array(root.as_str());
-    });
-    RbArray::root(doc.clone(), name)
+    let id = nogvl(move || identity(&d.get_or_insert_array(name.as_str())));
+    RbArray::new(doc.clone(), id)
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
@@ -292,56 +241,4 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("to_a", magnus::method!(RbArray::to_a, 0))?;
     class.define_method("each", magnus::method!(RbArray::each, 0))?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn absolute_maps_negative_indexes_from_the_end() {
-        assert_eq!(absolute(0, 3), Some(0));
-        assert_eq!(absolute(2, 3), Some(2));
-        assert_eq!(absolute(-1, 3), Some(2));
-        assert_eq!(absolute(-3, 3), Some(0));
-    }
-
-    #[test]
-    fn absolute_rejects_out_of_range() {
-        assert_eq!(absolute(3, 3), None);
-        assert_eq!(absolute(-4, 3), None);
-        assert_eq!(absolute(0, 0), None);
-    }
-
-    #[test]
-    fn resolve_finds_a_map_nested_in_an_array() {
-        // The shape this type exists for: a list of records, addressed by index.
-        use yrs::{Map, MapPrelim};
-        let doc = Doc::new();
-        let arr = doc.get_or_insert_array("plan");
-        {
-            let mut txn = doc.transact_mut();
-            let step = arr.push_back(&mut txn, MapPrelim::default());
-            step.insert(&mut txn, "status", "pending");
-        }
-        let txn = doc.transact();
-        let step = crate::shared::resolve_map(&txn, Root::Array, "plan", &[Seg::Index(0)]).unwrap();
-        assert!(matches!(
-            step.get(&txn, "status"),
-            Some(Out::Any(Any::String(_)))
-        ));
-    }
-
-    #[test]
-    fn resolve_none_when_index_is_not_a_map() {
-        let doc = Doc::new();
-        let arr = doc.get_or_insert_array("plan");
-        {
-            let mut txn = doc.transact_mut();
-            arr.push_back(&mut txn, 5_i64);
-        }
-        let txn = doc.transact();
-        assert!(crate::shared::resolve_map(&txn, Root::Array, "plan", &[Seg::Index(0)]).is_none());
-        assert!(crate::shared::resolve_map(&txn, Root::Array, "plan", &[Seg::Index(9)]).is_none());
-    }
 }

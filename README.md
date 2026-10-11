@@ -299,10 +299,12 @@ map.delete("count")    # => 3 (the previous value)
 map.clear
 ```
 
-A handle is addressed by its root name plus a path and re-resolves on every
-operation, so it never caches a raw CRDT pointer that could dangle when the tree
-is mutated (possibly on another thread). A nested handle keeps working even as
-sibling keys change around it.
+A handle holds the identity of the shared type it points at, not a path to
+it, and looks the type up again on every operation, so it never caches a raw
+CRDT pointer that could dangle when the tree is mutated (possibly on another
+thread). A nested handle stays on its map as keys and elements change around
+it. Once that map is deleted, reads return nothing and writes raise
+`Y::Error`.
 
 ### Y::Array (live shared lists)
 
@@ -330,8 +332,10 @@ plan.delete_at(-1)             # => the removed value
 plan.clear
 ```
 
-Negative indexes count from the end, and an index outside the array reads as
-`nil` rather than raising, so a stale index from a concurrent edit is harmless.
+Indexes work as Ruby's do: a negative index counts from the end (so
+`insert(-1, value)` appends), and an index outside the array reads as `nil`.
+The handle `get_map` returns stays on its record when others are inserted or
+removed around it.
 
 ### Y::Text (live shared text)
 
@@ -352,6 +356,11 @@ body.length
 body.empty?
 body.clear
 ```
+
+Indexes are characters, as `String#index` counts them, whatever the text
+holds: accents, emoji, any script. `relative_position(index)` gives a caret
+that keeps its place as people edit, and `index_at(position)` says where it is
+now, for this text's own positions and for a person's caret from awareness.
 
 Every handle can reach any nested shared type: `get_map`, `get_array`, and
 `get_text` exist on both `Y::Map` and `Y::Array`, so a text field inside a
@@ -640,7 +649,9 @@ Rich-text editors built on Yjs keep their document in `XmlText` nodes.
 `Doc#get_xml_text` returns a live `Y::XmlText` handle with the operations that
 shape needs: `insert` a string, `insert_embed` a JSON value, `set_attribute`,
 and `push_xml_text(attributes)` to append a nested block and get its handle.
-Blocks are addressed by ordinal, so a handle stays valid after other edits.
+`xml_text(n)` returns a handle to the `n`-th nested block, or nil. A block
+handle stays on its block while people add and remove blocks around it.
+Indexes inside a block are characters, with each embed counting as one.
 
 `Y::Lexical` builds Lexical's exact node shape on top of that, so what Ruby
 appends renders the same as what a person typed and an open editor applies it
@@ -661,6 +672,7 @@ Lexxy's own list item type, `Y::Lexical.append_list` the standard one.
 Text can be formatted. Anywhere a helper takes text it also takes runs, an
 array of strings and hashes: `{ text: "bold", bold: true }`, and likewise
 `italic:`, `strikethrough:`, `underline:`, `code:`, or `link: "https://…"`.
+String keys work too, as parsed JSON has them.
 `append_quote` and `append_code(doc, code, language:)` add quotes and code
 blocks. `append_markdown(doc, text)` takes the subset of Markdown a model
 writes (headings, lists, quotes, fenced code, and inline formatting and
@@ -671,12 +683,15 @@ joined by newlines. The document can be edited in place, not only appended
 to. A block handle has `delete(index, length)` and `clear`; a parent has
 `insert_xml_text(at, attributes)` and `delete_xml_text(at)`. The helpers
 `insert_paragraph(doc, at, runs)`, `replace_runs(block, runs)`, and
-`delete_block(doc, at)` cover the common moves.
+`delete_block(doc, at)` cover the common moves. `append_text(block, text)`
+adds text at the end of a block; Lexical drops text that doesn't follow a
+text node, so after a link it starts a new one.
 
 `apply_update_changes(update, root)` applies an update and returns the
 ordinals of the top-level blocks it touched: a block edited (however deep),
-added, or removed. A process following a document reacts to the part that
-changed instead of diffing the text.
+added, or removed. Ordinals count blocks as `xml_text(n)` does, so a divider
+or an image doesn't shift them. A process following a document reacts to the
+part that changed instead of diffing the text.
 
 To put a change into a shared document, record the update it produced and
 send it to the document's subscribers (see "Streaming into a document"). A
@@ -688,23 +703,21 @@ one: the `{type, tname, item, assoc}` hash editors put in awareness as
 replayed document resolves in every open editor. Put it in the presence
 state and the agent has a caret people can see move.
 
-### Anchors: a block's identity while others edit
+### Anchors: a block's identity as a value
 
-A live handle addresses a block by its ordinal under the root, and a block
-someone inserts above moves every ordinal below it. A process that holds a
-block across a model call or a streamed write needs something steadier.
-`XmlText#anchor` returns a `Y::Anchor`: the relative position at the block's
-start plus the root's name, a plain value that serializes to JSON. Ask the
-document where the block is now with `Doc#block_at(anchor)`, which returns the
-ordinal or nil once the block is gone, or fetch the live handle with
-`Doc#find(anchor)`.
+A live handle stays on its block, but it lives in one process. An anchor is
+the same identity as a plain value that serializes to JSON, so a job can store
+it and pick the block up later. `XmlText#anchor` returns a `Y::Anchor`: a
+relative position that names the block itself, plus the root's name.
+`Doc#block_at(anchor)` returns the block's ordinal now, or nil once it is gone,
+and `Doc#find(anchor)` returns a live handle to it.
 
 ```ruby
 block = Y::Lexical.append_paragraph(doc, "Verify the canary rollout.")
 anchor = block.anchor
 doc.get_xml_text("root").insert_xml_text(0, Y::Lexical::PARAGRAPH_ATTRIBUTES)
 doc.block_at(anchor)                          # => 1
-doc.find(anchor).insert(doc.find(anchor).length, " Owner: SRE.")
+Y::Lexical.append_text(doc.find(anchor), " Owner: SRE.")
 Y::Anchor.from_json(anchor.to_json) == anchor # => true
 ```
 
@@ -715,14 +728,16 @@ rest), what a process keeps to put a block back the way it was.
 
 A process that types into a document over time, an agent writing as a model
 produces text, keeps one `Y::Doc` for the whole stream and sends each piece
-as its own diff. `Doc#diff` returns the update a block produced, or nil when
-it produced nothing:
+as its own diff. `Doc#diff` returns the update the block's writes produced,
+or nil when it wrote nothing. It holds only what the block wrote through
+handles on its own thread, so an update applied from elsewhere meanwhile
+stays out:
 
 ```ruby
 doc = Y::Doc.new
 paragraph = Y::Lexical.append_paragraph(doc, "")
 %w[one two three].each do |word|
-  update = doc.diff { paragraph.insert(paragraph.length, "#{word} ") }
+  update = doc.diff { Y::Lexical.append_text(paragraph, "#{word} ") }
   # record `update`, then send it to the document's subscribers
 end
 ```

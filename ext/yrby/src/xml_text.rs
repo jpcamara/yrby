@@ -4,74 +4,53 @@
 //! `XmlText` nodes: a root, blocks embedded in it, and inside a block a run of
 //! embeds and strings. This handle exposes exactly the operations that shape
 //! needs: read the text, set attributes, insert strings, insert embeds, and
-//! append a nested `XmlText` block and get a handle to it.
+//! add a nested `XmlText` block and get a handle to it.
 //!
 //! Same contract as the other handles: a transaction per operation inside
-//! `nogvl`, no cached branch pointer, Ruby touched only with the GVL held.
-//! Nested blocks are addressed by ordinal among their parent's embedded
-//! `XmlText`s, so a handle re-resolves correctly after other edits.
+//! `nogvl`, the branch resolved from its identity each time, Ruby touched only
+//! with the GVL held. A handle to a block stays on that block while people
+//! add and remove blocks around it; indexes inside a block are Ruby
+//! characters, with each embed counting as one.
 
-use magnus::{prelude::*, r_hash::ForEach, Error, RHash, Ruby, Value};
+use magnus::{prelude::*, Error, RHash, Ruby, Value};
+use yrs::branch::BranchID;
 use yrs::{
-    Any, Assoc, Doc, GetString, IndexScope, IndexedSequence, Out, StickyIndex, Text, Transact, Xml,
-    XmlTextPrelim,
+    Any, Assoc, Doc, GetString, IndexedSequence, Out, StickyIndex, Text, Transact, Xml,
+    XmlTextPrelim, XmlTextRef,
 };
 
+use crate::nogvl;
 use crate::shared::{
-    any_to_ruby, block_text, embedded_xml_text_count, embedded_xml_text_index, key_to_string,
-    resolve_xml_text, ruby_to_invalue, to_in, to_map_prelim, InValue, Root, Seg,
+    any_to_ruby, block_text, char_len, delete_span, element_index, embedded_xml_text_index,
+    embedded_xml_texts, ends_with_xml_text, guarded, hash_pairs, identity, insert_index, resolve,
+    ruby_to_invalue, to_in, to_map_prelim, to_units, InValue, Position, ORIGIN,
 };
-use crate::{nogvl, yrb_error};
+use crate::yrb_error;
 
 #[magnus::wrap(class = "Y::XmlText", free_immediately, size)]
 pub struct RbXmlText {
     doc: Doc,
+    id: BranchID,
+    /// The root this block lives under, which an anchor carries.
     root: String,
-    path: Vec<Seg>,
-}
-
-/// A relative position, computed without the GVL and turned into a Ruby Hash
-/// with it. Mirrors Yjs's RelativePosition JSON: inside a sequence it names
-/// the item to the right (or left); at the end of a nested type it names the
-/// type; at a root it names the root.
-enum RelPos {
-    Item(u64, u32),
-    Type(u64, u32),
-    Root(String),
-}
-
-fn clamp(index: i64, len: u32) -> u32 {
-    let len = len as i64;
-    let i = if index < 0 { len + index } else { index };
-    i.clamp(0, len) as u32
-}
-
-/// Read a Ruby Hash into `Send` pairs with the GVL held.
-fn hash_pairs(ruby: &Ruby, hash: RHash) -> Result<Vec<(String, InValue)>, Error> {
-    let mut pairs = Vec::new();
-    hash.foreach(|k: Value, v: Value| {
-        pairs.push((key_to_string(k)?, ruby_to_invalue(ruby, v)?));
-        Ok(ForEach::Continue)
-    })?;
-    Ok(pairs)
 }
 
 impl RbXmlText {
-    pub fn root(doc: Doc, root: String) -> Self {
-        RbXmlText {
-            doc,
-            root,
-            path: Vec::new(),
-        }
+    pub fn new(doc: Doc, id: BranchID, root: String) -> Self {
+        RbXmlText { doc, id, root }
+    }
+
+    fn child(&self, block: &XmlTextRef) -> Self {
+        RbXmlText::new(self.doc.clone(), identity(block), self.root.clone())
     }
 
     // --- reads ---
 
     fn to_s(&self) -> String {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
-            resolve_xml_text(&txn, Root::XmlText, root, path)
+            resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| x.get_string(&txn))
                 .unwrap_or_default()
         })
@@ -81,21 +60,22 @@ impl RbXmlText {
     /// nested blocks (a list's items) joined by newlines. What a process reads
     /// when it wants to know what a block says.
     fn text(&self) -> String {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
-            resolve_xml_text(&txn, Root::XmlText, root, path)
+            resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| block_text(&txn, &x))
                 .unwrap_or_default()
         })
     }
 
+    /// The length in characters, each embed counting as one.
     fn length(&self) -> usize {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
-            resolve_xml_text(&txn, Root::XmlText, root, path)
-                .map(|x| x.len(&txn) as usize)
+            resolve::<XmlTextRef, _>(&txn, id)
+                .map(|x| char_len(&txn, &x) as usize)
                 .unwrap_or(0)
         })
     }
@@ -112,10 +92,10 @@ impl RbXmlText {
     /// This block's attributes (`__type`, `__tag`, ...), as a Hash. What a
     /// process keeps to put a block back the way it was.
     fn attributes(&self) -> Result<RHash, Error> {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         let pairs: Vec<(String, Any)> = nogvl(move || {
             let txn = doc.transact();
-            match resolve_xml_text(&txn, Root::XmlText, root, path) {
+            match resolve::<XmlTextRef, _>(&txn, id) {
                 Some(x) => x
                     .attributes(&txn)
                     .map(|(key, value)| {
@@ -139,12 +119,38 @@ impl RbXmlText {
 
     /// How many `XmlText` blocks this one embeds.
     fn xml_text_count(&self) -> usize {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
-            resolve_xml_text(&txn, Root::XmlText, root, path)
-                .map(|x| embedded_xml_text_count(&txn, &x) as usize)
+            resolve::<XmlTextRef, _>(&txn, id)
+                .map(|x| embedded_xml_texts(&txn, &x).len())
                 .unwrap_or(0)
+        })
+    }
+
+    /// A live handle to the `n`-th embedded `XmlText` block, or nil when there
+    /// is none. A negative `n` counts from the last. The handle stays on that
+    /// block, wherever it moves.
+    fn xml_text(&self, n: i64) -> Option<Self> {
+        let (doc, id) = (&self.doc, &self.id);
+        let block = nogvl(move || {
+            let txn = doc.transact();
+            let blocks = embedded_xml_texts(&txn, &resolve::<XmlTextRef, _>(&txn, id)?);
+            let n = element_index(n, blocks.len() as u32)?;
+            Some(identity(&blocks[n as usize]))
+        })?;
+        Some(RbXmlText::new(self.doc.clone(), block, self.root.clone()))
+    }
+
+    /// Whether the last thing in this block is an embedded block (a link).
+    /// Text appended there needs a text node of its own.
+    fn ends_with_xml_text(&self) -> bool {
+        let (doc, id) = (&self.doc, &self.id);
+        nogvl(move || {
+            let txn = doc.transact();
+            resolve::<XmlTextRef, _>(&txn, id)
+                .map(|x| ends_with_xml_text(&txn, &x))
+                .unwrap_or(false)
         })
     }
 
@@ -154,31 +160,28 @@ impl RbXmlText {
     fn set_attribute(&self, key: String, value: Value) -> Result<Value, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let iv = ruby_to_invalue(&ruby, value)?;
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
-        nogvl(move || -> Result<(), String> {
-            let mut txn = doc.transact_mut();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             x.insert_attribute(&mut txn, key, to_in(iv));
             Ok(())
-        })
-        .map_err(yrb_error)?;
+        })?;
         Ok(value)
     }
 
-    /// Insert a string at `index` (clamped; negative counts from the end).
+    /// Insert a string at character `index`, as `String#insert` does: a
+    /// negative index counts from the end (-1 appends). Clamped into range.
     fn insert(&self, index: i64, chunk: String) -> Result<String, Error> {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
+        let (doc, id) = (&self.doc, &self.id);
         let text = chunk.clone();
-        nogvl(move || -> Result<(), String> {
-            let mut txn = doc.transact_mut();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
-            let at = clamp(index, x.len(&txn));
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            let at = to_units(&txn, &x, insert_index(index, char_len(&txn, &x)));
             x.insert(&mut txn, at, &text);
             Ok(())
-        })
-        .map_err(yrb_error)?;
+        })?;
         Ok(chunk)
     }
 
@@ -189,12 +192,11 @@ impl RbXmlText {
     fn insert_embed(&self, index: i64, value: Value) -> Result<Value, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let iv = ruby_to_invalue(&ruby, value)?;
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
-        nogvl(move || -> Result<(), String> {
-            let mut txn = doc.transact_mut();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
-            let at = clamp(index, x.len(&txn));
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            let at = to_units(&txn, &x, insert_index(index, char_len(&txn, &x)));
             match iv {
                 InValue::Map(entries) => {
                     x.insert_embed(&mut txn, at, to_map_prelim(entries));
@@ -204,14 +206,14 @@ impl RbXmlText {
                 }
             }
             Ok(())
-        })
-        .map_err(yrb_error)?;
+        })?;
         Ok(value)
     }
 
-    /// The Yjs relative position of `index` as the `{type, tname, item, assoc}`
-    /// hash editors put in awareness as a caret. `assoc` is "after" (the
-    /// default: the space before the item at `index`) or "before".
+    /// The Yjs relative position of character `index` as the `{type, tname,
+    /// item, assoc}` hash editors put in awareness as a caret. `assoc` is
+    /// "after" (the default: the space before the item at `index`) or
+    /// "before".
     fn native_relative_position(&self, index: i64, assoc: String) -> Result<RHash, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let assoc = if assoc == "before" {
@@ -219,162 +221,114 @@ impl RbXmlText {
         } else {
             Assoc::After
         };
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
-        let (pos, assoc) = nogvl(move || -> Result<(RelPos, i32), String> {
+        let (doc, id) = (&self.doc, &self.id);
+        let position = guarded(move || {
             let txn = doc.transact();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
-            let at = clamp(index, x.len(&txn));
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            let at = to_units(&txn, &x, insert_index(index, char_len(&txn, &x)));
             // Past the last item there is nothing to name, so Yjs anchors the
             // position to the type itself (the block, or the root). Same here.
             let sticky = x
                 .sticky_index(&txn, at, assoc)
                 .unwrap_or_else(|| StickyIndex::from_type(&txn, &x, assoc));
-            let pos = match sticky.scope() {
-                IndexScope::Relative(id) => RelPos::Item(id.client.get(), id.clock),
-                IndexScope::Nested(id) => RelPos::Type(id.client.get(), id.clock),
-                IndexScope::Root(name) => RelPos::Root(name.to_string()),
-            };
-            Ok((pos, sticky.assoc as i32))
-        })
-        .map_err(yrb_error)?;
-        let id = |client: u64, clock: u32| -> Result<RHash, Error> {
-            let h = ruby.hash_new();
-            h.aset("client", client)?;
-            h.aset("clock", clock)?;
-            Ok(h)
-        };
-        let h = ruby.hash_new();
-        h.aset("type", ruby.qnil())?;
-        h.aset("tname", ruby.qnil())?;
-        h.aset("item", ruby.qnil())?;
-        match pos {
-            RelPos::Item(c, k) => h.aset("item", id(c, k)?)?,
-            RelPos::Type(c, k) => h.aset("type", id(c, k)?)?,
-            RelPos::Root(name) => h.aset("tname", name)?,
-        }
-        h.aset("assoc", assoc)?;
-        Ok(h)
+            Ok(Position::new(sticky))
+        })?;
+        position.to_ruby(&ruby)
     }
 
-    /// Remove `length` units from `index`, both clamped, like `Y::Text#delete`.
+    /// The position that names this block itself: an anchor's position. It
+    /// resolves to this block for as long as the block exists, whatever
+    /// happens to the text inside it.
+    fn native_block_position(&self) -> Result<RHash, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let (doc, id) = (&self.doc, &self.id);
+        let position = guarded(move || {
+            let txn = doc.transact();
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            Ok(Position::new(StickyIndex::from_type(
+                &txn,
+                &x,
+                Assoc::After,
+            )))
+        })?;
+        position.to_ruby(&ruby)
+    }
+
+    /// Remove `length` characters from `index`, as `String#slice!` does: a
+    /// negative index counts from the end, and the length stops at the end.
     fn delete(&self, index: i64, length: i64) -> Result<(), Error> {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
-        nogvl(move || -> Result<(), String> {
-            let mut txn = doc.transact_mut();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
-            let len = x.len(&txn);
-            let at = clamp(index, len);
-            let count = length.max(0).min((len - at) as i64) as u32;
-            if count > 0 {
-                x.remove_range(&mut txn, at, count);
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            if let Some((from, to)) = delete_span(index, length, char_len(&txn, &x)) {
+                let (from, to) = (to_units(&txn, &x, from), to_units(&txn, &x, to));
+                if to > from {
+                    x.remove_range(&mut txn, from, to - from);
+                }
             }
             Ok(())
         })
-        .map_err(yrb_error)
     }
 
     /// Remove everything: markers, text, and embedded blocks.
     fn clear(&self) -> Result<(), Error> {
-        self.delete(0, i64::MAX)
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            let len = x.len(&txn);
+            if len > 0 {
+                x.remove_range(&mut txn, 0, len);
+            }
+            Ok(())
+        })
     }
 
     /// Insert a nested `XmlText` block with `attributes` before the `n`-th
-    /// embedded block (at the end when `n` is past the last) and return a
-    /// live handle to it. This is how a block goes between two others.
-    fn insert_xml_text(&self, n: i64, attributes: RHash) -> Result<RbXmlText, Error> {
+    /// embedded block and return a live handle to it. A negative `n` counts
+    /// from the end, so -1 adds it after the last; past the end it goes last.
+    fn insert_xml_text(&self, n: i64, attributes: RHash) -> Result<Self, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let pairs = hash_pairs(&ruby, attributes)?;
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
-        let ordinal = nogvl(move || -> Result<u32, String> {
-            let mut txn = doc.transact_mut();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
-            let count = embedded_xml_text_count(&txn, &x);
-            let ordinal = n.max(0).min(count as i64) as u32;
-            let at = if ordinal == count {
-                x.len(&txn)
-            } else {
-                embedded_xml_text_index(&txn, &x, ordinal).unwrap_or_else(|| x.len(&txn))
-            };
+        let (doc, id) = (&self.doc, &self.id);
+        let block = guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            let count = embedded_xml_texts(&txn, &x).len() as u32;
+            let ordinal = insert_index(n, count);
+            let at = embedded_xml_text_index(&txn, &x, ordinal).unwrap_or_else(|| x.len(&txn));
             let child = x.insert_embed(&mut txn, at, XmlTextPrelim::new(""));
             for (k, v) in pairs {
                 child.insert_attribute(&mut txn, k, to_in(v));
             }
-            Ok(ordinal)
-        })
-        .map_err(yrb_error)?;
-        let mut child_path = self.path.clone();
-        child_path.push(Seg::Embed(ordinal));
-        Ok(RbXmlText {
-            doc: self.doc.clone(),
-            root: self.root.clone(),
-            path: child_path,
-        })
+            Ok(child)
+        })?;
+        Ok(self.child(&block))
     }
 
-    /// Remove the `n`-th embedded block. Handles to later blocks now point one
-    /// ordinal earlier, as after any removal in a sequence.
+    /// Remove the `n`-th embedded block (a negative `n` counts from the
+    /// last). Returns whether there was one.
     fn delete_xml_text(&self, n: i64) -> Result<bool, Error> {
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
-        nogvl(move || -> Result<bool, String> {
-            let mut txn = doc.transact_mut();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
-            let Ok(n) = u32::try_from(n) else {
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            let count = embedded_xml_texts(&txn, &x).len() as u32;
+            let Some(at) =
+                element_index(n, count).and_then(|n| embedded_xml_text_index(&txn, &x, n))
+            else {
                 return Ok(false);
             };
-            match embedded_xml_text_index(&txn, &x, n) {
-                Some(at) => {
-                    x.remove_range(&mut txn, at, 1);
-                    Ok(true)
-                }
-                None => Ok(false),
-            }
+            x.remove_range(&mut txn, at, 1);
+            Ok(true)
         })
-        .map_err(yrb_error)
     }
 
     /// Append a nested `XmlText` block with `attributes` and return a live
     /// handle to it. This is how a paragraph is added to a Lexical document.
-    fn push_xml_text(&self, attributes: RHash) -> Result<RbXmlText, Error> {
-        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
-        let pairs = hash_pairs(&ruby, attributes)?;
-        let (doc, root, path) = (&self.doc, &self.root, &self.path);
-        let ordinal = nogvl(move || -> Result<u32, String> {
-            let mut txn = doc.transact_mut();
-            let x = resolve_xml_text(&txn, Root::XmlText, root, path)
-                .ok_or_else(|| "xml text no longer exists".to_string())?;
-            let ordinal = embedded_xml_text_count(&txn, &x);
-            let at = x.len(&txn);
-            let child = x.insert_embed(&mut txn, at, XmlTextPrelim::new(""));
-            for (k, v) in pairs {
-                child.insert_attribute(&mut txn, k, to_in(v));
-            }
-            Ok(ordinal)
-        })
-        .map_err(yrb_error)?;
-        let mut child_path = self.path.clone();
-        child_path.push(Seg::Embed(ordinal));
-        Ok(RbXmlText {
-            doc: self.doc.clone(),
-            root: self.root.clone(),
-            path: child_path,
-        })
-    }
-
-    /// A live handle to the `n`-th embedded `XmlText` block.
-    fn xml_text(&self, n: i64) -> Result<RbXmlText, Error> {
-        let n =
-            u32::try_from(n).map_err(|_| yrb_error(format!("block index {n} is out of range")))?;
-        let mut child_path = self.path.clone();
-        child_path.push(Seg::Embed(n));
-        Ok(RbXmlText {
-            doc: self.doc.clone(),
-            root: self.root.clone(),
-            path: child_path,
-        })
+    fn push_xml_text(&self, attributes: RHash) -> Result<Self, Error> {
+        self.insert_xml_text(-1, attributes)
     }
 }
 
@@ -386,7 +340,13 @@ pub fn root_xml_text(doc: &Doc, name: String) -> RbXmlText {
     nogvl(move || {
         d.get_or_insert_xml_fragment(root.as_str());
     });
-    RbXmlText::root(doc.clone(), name)
+    RbXmlText::new(doc.clone(), BranchID::Root(name.as_str().into()), name)
+}
+
+/// A handle to the block `id` names, under `root`. How `Doc#find` hands one
+/// back.
+pub fn handle(doc: &Doc, id: BranchID, root: String) -> RbXmlText {
+    RbXmlText::new(doc.clone(), id, root)
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
@@ -402,6 +362,10 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method(
         "xml_text_count",
         magnus::method!(RbXmlText::xml_text_count, 0),
+    )?;
+    class.define_method(
+        "ends_with_xml_text?",
+        magnus::method!(RbXmlText::ends_with_xml_text, 0),
     )?;
     class.define_method(
         "set_attribute",
@@ -424,9 +388,13 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
         "delete_xml_text",
         magnus::method!(RbXmlText::delete_xml_text, 1),
     )?;
-    class.define_method(
+    class.define_private_method(
         "native_relative_position",
         magnus::method!(RbXmlText::native_relative_position, 2),
+    )?;
+    class.define_private_method(
+        "native_block_position",
+        magnus::method!(RbXmlText::native_block_position, 0),
     )?;
     Ok(())
 }
