@@ -3,13 +3,11 @@
 require "json"
 
 module Y
-  # A block's identity while other people edit. A handle addresses a block by
-  # its ordinal under the root, and a block someone inserts above moves every
-  # ordinal below it, so an ordinal held across a model call or a streamed
-  # write can drift onto the wrong block. An anchor is the Yjs relative
-  # position at the block's start plus the root's name. It is a plain value:
-  # store it, send it, and ask the document where the block is now with
-  # `Doc#block_at(anchor)` or fetch it with `Doc#find(anchor)`.
+  # A block's identity as a plain value. A live handle already stays on its
+  # block while people edit, but it lives in one process; an anchor can be
+  # stored and sent, then turned back into the block's ordinal with
+  # `Doc#block_at(anchor)` or into a handle with `Doc#find(anchor)`. It is a
+  # Yjs relative position that names the block itself, plus the root's name.
   #
   #   anchor = block.anchor
   #   doc.block_at(anchor)   # => 3 (the block's ordinal now), or nil once it is gone

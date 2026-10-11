@@ -2,6 +2,8 @@ use magnus::{
     function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RHash, RString, Ruby,
     TryConvert, Value,
 };
+use std::sync::{Arc, Mutex};
+
 use yrs::sync::{Message, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
@@ -142,14 +144,18 @@ pub(crate) fn yrb_error(msg: String) -> Error {
 
 impl RbDoc {
     /// Create a new Doc with an optional client_id
+    ///
+    /// The document counts text in UTF-16 units, as Yjs does, so positions
+    /// agree with every editor's. The Ruby handles convert to characters.
     fn new(args: &[Value]) -> Result<Self, Error> {
-        let doc = if args.is_empty() {
-            Doc::new()
+        let mut options = if args.is_empty() {
+            yrs::Options::default()
         } else {
             let client_id: u64 = TryConvert::try_convert(args[0])?;
-            Doc::with_client_id(client_id)
+            yrs::Options::with_client_id(yrs::block::ClientID::new(client_id))
         };
-        Ok(RbDoc(doc))
+        options.offset_kind = yrs::OffsetKind::Utf16;
+        Ok(RbDoc(Doc::with_options(options)))
     }
 
     fn encode_state_vector(&self) -> RString {
@@ -271,10 +277,12 @@ impl RbDoc {
         map::root_map(&self.0, name)
     }
 
-    /// Apply `update` and report which top-level blocks of the root `XmlText`
-    /// named `root` it touched, as ordinals: a change inside a block, a block
-    /// added, or a block removed (the ordinal it had). This is what lets a
-    /// process following a document react to the part that changed.
+    /// Apply `update` and report which blocks of the root `XmlText` named
+    /// `root` it touched, as ordinals: a change inside a block, a block
+    /// added, or a block removed (the ordinal it had). Ordinals count the
+    /// root's `XmlText` blocks, as `xml_text(n)` does, so a divider or an
+    /// image above a block doesn't shift it. This is what lets a process
+    /// following a document react to the part that changed.
     fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
         let bytes = copy_bytes(update);
         let doc = &self.0;
@@ -284,13 +292,17 @@ impl RbDoc {
             let target = yrs::XmlTextRef::from(yrs::branch::BranchPtr::from(branch));
             let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
             let sink = hits.clone();
+            let root_ref = target.clone();
             let subscription = target.observe_deep(move |txn, events| {
+                let children = Children::of(txn, &root_ref);
                 let mut hits = sink.lock().unwrap();
                 for event in events.iter() {
                     match event.path().front() {
-                        Some(&yrs::types::PathSegment::Index(i)) => hits.push(i),
+                        Some(&yrs::types::PathSegment::Index(i)) if children.is_block(i) => {
+                            hits.push(children.ordinal(i))
+                        }
                         Some(_) => {}
-                        None => root_positions(txn, event, &mut hits),
+                        None => root_positions(txn, event, &children, &mut hits),
                     }
                 }
             });
@@ -315,9 +327,9 @@ impl RbDoc {
     }
 
     /// The ordinal of the top-level block of the root `XmlText` named `root`
-    /// that a relative position (the `{type, tname, item, assoc}` hash a peer
-    /// carries as a caret) falls in, or nil. This is how a process knows
-    /// which block a person is writing in.
+    /// that a relative position (an anchor's, or the `{type, tname, item,
+    /// assoc}` hash a peer carries as a caret) falls in, or nil. This is how
+    /// a process knows which block a person is writing in.
     fn block_at(&self, position: RHash, root: String) -> Result<Option<u32>, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let sticky = sticky_from_ruby(&ruby, position)?;
@@ -326,34 +338,56 @@ impl RbDoc {
             let txn = doc.transact();
             let target = sticky.get_offset(&txn)?.branch;
             let root_ref = shared::root_xml_text(&txn, root.as_str())?;
-            let mut ordinal = 0u32;
-            for d in root_ref.diff(&txn, yrs::types::text::YChange::identity) {
-                if let yrs::Out::YXmlText(block) = &d.insert {
-                    if contains_branch(&txn, block, target) {
-                        return Some(ordinal);
-                    }
-                    ordinal += 1;
-                }
-            }
-            None
+            shared::embedded_xml_texts(&txn, &root_ref)
+                .iter()
+                .position(|block| contains_branch(&txn, block, target))
+                .map(|ordinal| ordinal as u32)
         }))
     }
 
-    /// The character index in the root `Text` named `root` that a relative
-    /// position (a peer's caret from awareness, or an anchor) falls at, or
-    /// nil when it points elsewhere or the item is gone.
-    fn index_at(&self, position: RHash, root: String) -> Result<Option<u32>, Error> {
+    /// The block an anchor's position names, as a live handle, or nil once
+    /// the block is gone.
+    fn find(&self, position: RHash, root: String) -> Result<Option<xml_text::RbXmlText>, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let sticky = sticky_from_ruby(&ruby, position)?;
         let doc = &self.0;
-        Ok(nogvl(move || {
+        let id = nogvl(move || {
             let txn = doc.transact();
-            let offset = sticky.get_offset(&txn)?;
-            let text = txn.get_text(root.as_str())?;
-            let branch: &yrs::branch::Branch = text.as_ref();
-            let ptr = yrs::branch::BranchPtr::from(branch);
-            (ptr == offset.branch).then_some(offset.index)
-        }))
+            let branch = sticky.get_offset(&txn)?.branch;
+            let id = shared::identity(&yrs::XmlTextRef::from(branch));
+            let is_block = matches!(id, yrs::branch::BranchID::Root(_))
+                || matches!(branch.type_ref(), yrs::types::TypeRef::XmlText);
+            (is_block && shared::resolve::<yrs::XmlTextRef, _>(&txn, &id).is_some()).then_some(id)
+        });
+        Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
+    }
+
+    /// Start recording the updates this thread's handle writes make: what
+    /// `Doc#diff` returns. Updates applied from elsewhere stay out.
+    fn record_updates(&self) -> Recording {
+        let doc = &self.0;
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let sink = updates.clone();
+        let thread = std::thread::current().id();
+        let origin = yrs::Origin::from(shared::ORIGIN);
+        // Subscribing needs the document to itself for a moment, so it waits
+        // out a transaction another thread has open.
+        let subscription = nogvl(move || loop {
+            let (sink, origin) = (sink.clone(), origin.clone());
+            let subscribed = doc.observe_update_v1(move |txn, event| {
+                if txn.origin() == Some(&origin) && std::thread::current().id() == thread {
+                    sink.lock().unwrap().push(event.update.clone());
+                }
+            });
+            match subscribed {
+                Ok(subscription) => break subscription,
+                Err(_) => std::thread::yield_now(),
+            }
+        });
+        Recording {
+            updates,
+            subscription: Mutex::new(Some(subscription)),
+        }
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -737,24 +771,93 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // Module Initialization
 // ============================================================================
 
+/// The updates a `Doc#diff` block makes, collected as they commit. `finish`
+/// stops recording and returns them merged into one, or nil for none; it is
+/// safe to call twice.
+#[magnus::wrap(class = "Y::Doc::Recording", free_immediately, size)]
+struct Recording {
+    updates: Arc<Mutex<Vec<Vec<u8>>>>,
+    subscription: Mutex<Option<yrs::Subscription>>,
+}
+
+impl Recording {
+    fn finish(&self) -> Result<Option<RString>, Error> {
+        drop(self.subscription.lock().unwrap().take());
+        let updates = std::mem::take(&mut *self.updates.lock().unwrap());
+        match updates.len() {
+            0 => Ok(None),
+            1 => Ok(Some(binary_string(&updates[0]))),
+            _ => yrs::merge_updates_v1(&updates)
+                .map(|merged| Some(binary_string(&merged)))
+                .map_err(|e| yrb_error(e.to_string())),
+        }
+    }
+}
+
+/// A root's children in order: the document index each starts at and
+/// whether it is an `XmlText` block. Ordinals count only those, as
+/// `xml_text(n)` does; a divider or an image is a child but not a block.
+struct Children(Vec<(u32, bool)>);
+
+impl Children {
+    fn of<T: ReadTxn>(txn: &T, root: &yrs::XmlTextRef) -> Self {
+        let mut at = 0;
+        let mut children = Vec::new();
+        for d in root.diff(txn, yrs::types::text::YChange::identity) {
+            let (len, block) = match &d.insert {
+                yrs::Out::Any(yrs::Any::String(s)) => (s.encode_utf16().count() as u32, false),
+                yrs::Out::YXmlText(_) => (1, true),
+                _ => (1, false),
+            };
+            children.push((at, block));
+            at += len;
+        }
+        Children(children)
+    }
+
+    /// How many blocks come before document index `index`: the ordinal of a
+    /// block there.
+    fn ordinal(&self, index: u32) -> u32 {
+        self.0
+            .iter()
+            .filter(|(at, block)| *block && *at < index)
+            .count() as u32
+    }
+
+    fn is_block(&self, index: u32) -> bool {
+        self.0.iter().any(|(at, block)| *block && *at == index)
+    }
+}
+
 /// For an event on the root sequence itself (a block added or removed), the
-/// ordinals affected. The root's children are all embedded blocks, so a
-/// sequence position is a block ordinal.
-fn root_positions(txn: &yrs::TransactionMut, event: &yrs::types::Event, hits: &mut Vec<u32>) {
+/// ordinals affected. Positions are in the document after the change, which
+/// is what `children` describes.
+fn root_positions(
+    txn: &yrs::TransactionMut,
+    event: &yrs::types::Event,
+    children: &Children,
+    hits: &mut Vec<u32>,
+) {
     use yrs::types::{Change, Delta, Event};
     let mut pos = 0u32;
+    let removed = |pos: u32, n: u32, hits: &mut Vec<u32>| {
+        let ordinal = children.ordinal(pos);
+        hits.extend(ordinal..ordinal + n);
+    };
     match event {
         Event::XmlFragment(e) => {
             for change in e.delta(txn) {
                 match change {
                     Change::Retain(n) => pos += n,
                     Change::Added(items) => {
-                        for k in 0..items.len() as u32 {
-                            hits.push(pos + k);
+                        for item in items {
+                            if matches!(item, yrs::Out::YXmlText(_)) {
+                                hits.push(children.ordinal(pos));
+                            }
+                            pos += 1;
                         }
-                        pos += items.len() as u32;
                     }
-                    Change::Removed(n) => hits.extend(pos..pos + n),
+                    Change::Removed(n) => removed(pos, *n, hits),
                 }
             }
         }
@@ -762,11 +865,16 @@ fn root_positions(txn: &yrs::TransactionMut, event: &yrs::types::Event, hits: &m
             for delta in e.delta(txn) {
                 match delta {
                     Delta::Retain(n, _) => pos += n,
-                    Delta::Inserted(_, _) => {
-                        hits.push(pos);
-                        pos += 1;
+                    Delta::Inserted(item, _) => {
+                        if matches!(item, yrs::Out::YXmlText(_)) {
+                            hits.push(children.ordinal(pos));
+                        }
+                        pos += match item {
+                            yrs::Out::Any(yrs::Any::String(s)) => s.encode_utf16().count() as u32,
+                            _ => 1,
+                        };
                     }
-                    Delta::Deleted(n) => hits.extend(pos..pos + n),
+                    Delta::Deleted(n) => removed(pos, *n, hits),
                 }
             }
         }
@@ -865,12 +973,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbDoc::encode_state_as_update, -1),
     )?;
     doc_class.define_method("apply_update", method!(RbDoc::apply_update, 1))?;
-    doc_class.define_method("native_index_at", method!(RbDoc::index_at, 2))?;
     doc_class.define_method(
         "apply_update_changes",
         method!(RbDoc::apply_update_changes, 2),
     )?;
-    doc_class.define_method("native_block_at", method!(RbDoc::block_at, 2))?;
+    doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
+    doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
+    doc_class.define_private_method("record_updates", method!(RbDoc::record_updates, 0))?;
+    let recording = doc_class.define_class("Recording", ruby.class_object())?;
+    recording.define_method("finish", method!(Recording::finish, 0))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;

@@ -97,4 +97,25 @@ class TextTest < Minitest::Test
     assert_includes @body.to_s, "human"
     assert_includes @body.to_s, "agent"
   end
+
+  def test_indexes_count_characters_not_bytes
+    text = Y::Doc.new.get_text("t")
+    text << "héllo 😀 日本"
+
+    assert_equal "héllo 😀 日本".length, text.length
+    text.delete(1, 1)
+    text.insert(text.to_s.index("日"), "→")
+    text.delete(text.to_s.index("😀"), 1)
+
+    assert_equal "hllo  →日本", text.to_s
+  end
+
+  def test_negative_indexes_read_as_ruby_strings_do
+    text = Y::Doc.new.get_text("t")
+    text << "abc"
+    text.insert(-1, "X")
+    text.delete(-2, 1)
+
+    assert_equal "abX", text.to_s
+  end
 end

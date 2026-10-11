@@ -37,4 +37,52 @@ class DocDiffTest < Minitest::Test
     assert_operator second.bytesize, :<, doc.encode_state_as_update.bytesize,
                     "a diff is about its chunk, not the document"
   end
+
+  def test_a_block_that_writes_nothing_is_nil_even_after_deletions
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    text << "abc"
+    text.delete(0, 1)
+
+    assert_nil(doc.diff { text.to_s })
+  end
+
+  def test_a_chunk_stays_small_however_much_was_deleted_before
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    200.times do |i|
+      text << "x#{i} "
+      text.delete(text.length - 2, 1)
+    end
+
+    assert_operator doc.diff { text << "y" }.bytesize, :<, 40
+  end
+
+  def test_an_update_applied_during_the_block_is_left_out
+    doc = Y::Doc.new
+    remote = Y::Doc.new
+    remote.get_text("theirs") << "from a peer"
+    update = doc.diff do |d|
+      d.apply_update(remote.encode_state_as_update)
+      d.get_text("mine") << "from ruby"
+    end
+    fresh = Y::Doc.new
+    fresh.apply_update(update)
+
+    assert_equal "", fresh.read_text("theirs").to_s
+    assert_equal "from ruby", fresh.read_text("mine")
+  end
+
+  def test_another_threads_writes_are_left_out
+    doc = Y::Doc.new
+    update = doc.diff do |d|
+      Thread.new { d.get_text("theirs") << "other thread" }.join
+      d.get_text("mine") << "this thread"
+    end
+    fresh = Y::Doc.new
+    fresh.apply_update(update)
+
+    assert_equal "", fresh.read_text("theirs").to_s
+    assert_equal "this thread", fresh.read_text("mine")
+  end
 end

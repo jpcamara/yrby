@@ -59,4 +59,25 @@ class DocChangesTest < Minitest::Test
 
     assert_empty @peer.apply_update_changes(update, "root")
   end
+
+  # Yjs, as Lexxy stores it: a paragraph "first", a horizontal divider (a
+  # Y.XmlElement, not a block a handle reaches), and a paragraph "second".
+  # EDITED appends " edited" to "second".
+  WITH_DIVIDER = "AQ7H6MC8CgAHAQRyb290BofH6MC8CgADCVVOREVGSU5FRIfH6MC8CgEGKADH6MC8CgAGX190eXBlAXcJcGFyYWdyYXBoKADH" \
+                 "6MC8CgIGX190eXBlAXcJcGFyYWdyYXBoKADH6MC8CgEGX190eXBlAXcSaG9yaXpvbnRhbF9kaXZpZGVyBwDH6MC8CgABKADH" \
+                 "6MC8CgYGX190eXBlAXcEdGV4dCgAx+jAvAoGCF9fZm9ybWF0AX0AhMfowLwKBgVmaXJzdAcAx+jAvAoCASgAx+jAvAoOBl9f" \
+                 "dHlwZQF3BHRleHQoAMfowLwKDghfX2Zvcm1hdAF9AITH6MC8Cg4Gc2Vjb25kAA=="
+  EDITED = "AQHH6MC8CheEx+jAvAoWByBlZGl0ZWQA"
+
+  def test_a_divider_above_doesnt_shift_the_ordinal
+    doc = Y::Doc.new
+    doc.apply_update(WITH_DIVIDER.unpack1("m"))
+    root = doc.get_xml_text("root")
+    anchor = root.xml_text(1).anchor
+    changed = doc.apply_update_changes(EDITED.unpack1("m"), "root")
+
+    assert_equal [1], changed
+    assert_equal "second edited", root.xml_text(1).text
+    assert_equal 1, doc.block_at(anchor)
+  end
 end

@@ -134,7 +134,7 @@ class XmlTextTest < Minitest::Test
     root = doc.get_xml_text("root")
 
     refute root.delete_xml_text(2**32)
-    assert_raises(Y::Error) { root.xml_text(2**32) }
+    assert_nil root.xml_text(2**32)
     assert_equal "keep me", root.xml_text(0).text
   end
 
@@ -280,14 +280,18 @@ class XmlTextTest < Minitest::Test
     assert_equal after, peer.get_xml_text("root").xml_text(0).relative_position(6)
   end
 
-  def test_a_stale_block_handle_is_a_no_op_not_an_error
-    doc = Y::Doc.new
-    root = doc.get_xml_text("root")
-    missing = root.xml_text(5)
+  def test_there_is_no_handle_to_a_block_that_does_not_exist
+    assert_nil Y::Doc.new.get_xml_text("root").xml_text(5)
+  end
 
-    assert_equal "", missing.to_s
-    assert_equal 0, missing.length
-    assert_raises(Y::Error) { missing.insert(0, "x") }
+  def test_a_handle_to_a_deleted_block_reads_empty_and_refuses_writes
+    doc = Y::Doc.new
+    block = Y::Lexxy.append_paragraph(doc, "gone soon")
+    doc.get_xml_text("root").delete_xml_text(0)
+
+    assert_equal "", block.text
+    assert_equal 0, block.length
+    assert_raises(Y::Error) { block.insert(0, "x") }
   end
 
   def test_a_block_can_be_found_again_after_a_block_is_inserted_above
@@ -334,5 +338,102 @@ class XmlTextTest < Minitest::Test
     assert_equal "root", anchor.root
     assert_equal 1, doc.block_at(anchor)
     assert_raises(ArgumentError) { doc.block_at(anchor.position) }
+  end
+
+  def test_indexes_inside_a_block_count_characters
+    doc = Y::Doc.new
+    block = Y::Lexxy.append_paragraph(doc, "héllo 😀 world")
+
+    assert_equal 1 + "héllo 😀 world".length, block.length
+    block.delete(2, 1) # the é: index 0 is the text node's marker
+    block.delete(6, 2) # the emoji and the space after it
+
+    assert_equal "hllo world", block.text
+  end
+
+  def test_a_link_goes_where_its_ordinal_says_after_non_ascii_text
+    doc = Y::Doc.new
+    block = Y::Lexxy.append_paragraph(doc, ["日本語", { text: "docs", link: "https://x.io" }, " tail"])
+
+    link = block.insert_xml_text(0, Y::Lexxy.link_attributes("https://y.io"))
+    Y::Lexxy.write_runs(link, "new")
+
+    assert_equal "日本語newdocs tail", block.text
+    assert block.delete_xml_text(1)
+    assert_equal "日本語new tail", block.text
+  end
+
+  def test_a_handle_stays_on_its_block_when_a_block_is_inserted_above
+    agent = Y::Doc.new
+    mine = Y::Lexxy.append_paragraph(agent, "Agent says:")
+    person = Y::Doc.new
+    person.apply_update(agent.encode_state_as_update)
+    Y::Lexxy.insert_paragraph(person, 0, "Intro by a person")
+    agent.apply_update(person.encode_state_as_update(agent.encode_state_vector))
+
+    Y::Lexxy.append_text(mine, " streamed")
+
+    assert_equal "Intro by a person\nAgent says: streamed", agent.read_xml("root")
+  end
+
+  def test_negative_block_ordinals_count_from_the_last
+    doc = Y::Doc.new
+    Y::Lexxy.append_paragraph(doc, "one")
+    Y::Lexxy.append_paragraph(doc, "two")
+    Y::Lexxy.insert_paragraph(doc, -1, "three")
+
+    assert_equal "three", doc.get_xml_text("root").xml_text(-1).text
+  end
+
+  def test_text_appended_after_a_link_gets_a_text_node_of_its_own
+    doc = Y::Doc.new
+    block = Y::Lexxy.append_paragraph(doc, ["see ", { text: "docs", link: "https://x.io" }])
+
+    assert_predicate block, :ends_with_xml_text?
+    Y::Lexxy.append_text(block, " more")
+    Y::Lexxy.append_text(block, "!")
+
+    # marker + "see ", the link, then one new marker + " more!"
+    assert_equal 1 + 4 + 1 + 1 + 6, block.length
+    assert_equal "see docs more!", block.text
+  end
+
+  def test_text_appended_to_an_empty_block_gets_a_text_node
+    doc = Y::Doc.new
+    block = Y::Lexxy.append_paragraph(doc, [])
+    Y::Lexxy.append_text(block, "hi")
+
+    assert_equal 3, block.length
+    assert_equal "<p>hi</p>", Y::Lexxy.new(doc).to_html("root")
+  end
+
+  def test_runs_parsed_from_json_keep_their_text_and_links
+    doc = Y::Doc.new
+    runs = JSON.parse('[{"text":"hello ","bold":true},{"text":"docs","link":"https://x.io"}]')
+    Y::Lexxy.append_paragraph(doc, runs)
+
+    assert_equal '<p><strong>hello </strong><a href="https://x.io">docs</a></p>',
+                 Y::Lexxy.new(doc).to_html("root")
+    assert_raises(ArgumentError) { Y::Lexxy.append_paragraph(doc, [{ "bold" => true }]) }
+  end
+
+  def test_a_fence_with_more_than_a_language_still_opens_a_code_block
+    doc = Y::Doc.new
+    Y::Lexxy.append_markdown(doc, "```ruby title=\"x.rb\"\nputs 1\n```\nafter")
+
+    assert_equal "<pre data-language=\"ruby\">puts 1</pre><p>after</p>", Y::Lexxy.new(doc).to_html("root")
+  end
+
+  def test_find_returns_the_block_an_anchor_was_taken_from
+    doc = Y::Doc.new
+    list = Y::Lexxy.append_list(doc, %w[one two])
+    paragraph = Y::Lexxy.append_paragraph(doc, "hello world")
+    item = doc.find(list.xml_text(1).anchor)
+    anchor = paragraph.anchor
+    paragraph.delete(1, 6) # its first word, so the anchor's block outlives its text
+
+    assert_equal "two", item.text
+    assert_equal "world", doc.find(anchor).text
+    assert_equal 1, doc.block_at(anchor)
   end
 end
