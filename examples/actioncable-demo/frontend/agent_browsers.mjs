@@ -66,7 +66,11 @@ async function typeRound(round, perDigit) {
   console.log(`\n--- Round ${round}: ${N} browsers each type '${PER}' chars at once ---`)
   // Real DOM focus per session (agent-browser keyboard targets the focused
   // element; Tiptap's programmatic focus alone doesn't take), then type all
-  // sessions concurrently.
+  // sessions concurrently. ProseMirror counts clicks less than 500ms apart at
+  // the same spot as double and triple clicks, and a triple click selects the
+  // whole paragraph, which the typing would then replace. On a fast runner a
+  // round takes under 500ms, so wait before clicking again.
+  await sleep(600)
   await Promise.all(SESSIONS.map((s) => ab(s, "click", ".ProseMirror")))
   await Promise.all(SESSIONS.map((s, i) => ab(s, "keyboard", "type", DIGITS[i].repeat(PER))))
 
