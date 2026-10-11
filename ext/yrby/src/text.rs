@@ -16,8 +16,8 @@ use yrs::{Assoc, Doc, GetString, IndexedSequence, StickyIndex, Text, TextRef, Tr
 
 use crate::nogvl;
 use crate::shared::{
-    char_len, delete_span, guarded, identity, insert_index, resolve, to_chars, to_units, Position,
-    ORIGIN,
+    char_len, delete_span, end_or_units, guarded, identity, insert_index, resolve, to_chars,
+    to_units, Position, ORIGIN,
 };
 use crate::yrb_error;
 
@@ -56,7 +56,11 @@ impl RbText {
     }
 
     fn is_empty(&self) -> bool {
-        self.length() == 0
+        let (doc, id) = (&self.doc, &self.id);
+        nogvl(move || {
+            let txn = doc.transact();
+            resolve::<TextRef, _>(&txn, id).is_none_or(|t| t.len(&txn) == 0)
+        })
     }
 
     // --- writes ---
@@ -84,7 +88,7 @@ impl RbText {
         guarded(move || {
             let mut txn = doc.transact_mut_with(ORIGIN);
             let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
-            let at = to_units(&txn, &t, insert_index(index, char_len(&txn, &t)));
+            let at = end_or_units(&txn, &t, index);
             t.insert(&mut txn, at, &text);
             Ok(())
         })?;

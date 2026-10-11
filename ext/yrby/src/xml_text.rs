@@ -22,8 +22,9 @@ use yrs::{
 use crate::nogvl;
 use crate::shared::{
     any_to_ruby, block_text, char_len, delete_span, element_index, embedded_xml_text_index,
-    embedded_xml_texts, ends_with_xml_text, guarded, hash_pairs, identity, insert_index, resolve,
-    ruby_to_invalue, to_in, to_map_prelim, to_units, InValue, Position, ORIGIN,
+    embedded_xml_texts, end_or_units, ends_with_xml_text, guarded, hash_pairs, identity,
+    insert_index, resolve, ruby_to_invalue, to_in, to_map_prelim, to_units, InValue, Position,
+    ORIGIN,
 };
 use crate::yrb_error;
 
@@ -81,7 +82,11 @@ impl RbXmlText {
     }
 
     fn is_empty(&self) -> bool {
-        self.length() == 0
+        let (doc, id) = (&self.doc, &self.id);
+        nogvl(move || {
+            let txn = doc.transact();
+            resolve::<XmlTextRef, _>(&txn, id).is_none_or(|x| x.len(&txn) == 0)
+        })
     }
 
     /// The name of the root this block lives under; an anchor carries it.
@@ -178,7 +183,7 @@ impl RbXmlText {
         guarded(move || {
             let mut txn = doc.transact_mut_with(ORIGIN);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            let at = to_units(&txn, &x, insert_index(index, char_len(&txn, &x)));
+            let at = end_or_units(&txn, &x, index);
             x.insert(&mut txn, at, &text);
             Ok(())
         })?;

@@ -436,4 +436,13 @@ class XmlTextTest < Minitest::Test
     assert_equal "world", doc.find(anchor).text
     assert_equal 1, doc.block_at(anchor)
   end
+
+  def test_an_anchor_finds_nothing_under_another_root
+    doc = Y::Doc.new
+    anchor = Y::Lexxy.append_paragraph(doc, "in root").anchor
+    elsewhere = Y::Anchor.new(position: anchor.position, root: "other")
+
+    assert_nil doc.find(elsewhere)
+    assert_nil doc.block_at(elsewhere)
+  end
 end

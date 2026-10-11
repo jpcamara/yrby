@@ -68,6 +68,8 @@ class DocChangesTest < Minitest::Test
                  "6MC8CgYGX190eXBlAXcEdGV4dCgAx+jAvAoGCF9fZm9ybWF0AX0AhMfowLwKBgVmaXJzdAcAx+jAvAoCASgAx+jAvAoOBl9f" \
                  "dHlwZQF3BHRleHQoAMfowLwKDghfX2Zvcm1hdAF9AITH6MC8Cg4Gc2Vjb25kAA=="
   EDITED = "AQHH6MC8CheEx+jAvAoWByBlZGl0ZWQA"
+  # Deletes the divider.
+  DIVIDER_REMOVED = "AAHH6MC8CgIBAQUB"
 
   def test_a_divider_above_doesnt_shift_the_ordinal
     doc = Y::Doc.new
@@ -79,5 +81,13 @@ class DocChangesTest < Minitest::Test
     assert_equal [1], changed
     assert_equal "second edited", root.xml_text(1).text
     assert_equal 1, doc.block_at(anchor)
+  end
+
+  def test_removing_a_divider_changes_no_block
+    doc = Y::Doc.new
+    doc.apply_update(WITH_DIVIDER.unpack1("m"))
+
+    assert_empty doc.apply_update_changes(DIVIDER_REMOVED.unpack1("m"), "root")
+    assert_equal "first\nsecond", doc.read_xml("root")
   end
 end

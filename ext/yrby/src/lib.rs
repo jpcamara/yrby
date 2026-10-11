@@ -293,6 +293,7 @@ impl RbDoc {
             let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
             let sink = hits.clone();
             let root_ref = target.clone();
+            let before = Children::of(&doc.transact(), &target);
             let subscription = target.observe_deep(move |txn, events| {
                 let children = Children::of(txn, &root_ref);
                 let mut hits = sink.lock().unwrap();
@@ -302,7 +303,7 @@ impl RbDoc {
                             hits.push(children.ordinal(i))
                         }
                         Some(_) => {}
-                        None => root_positions(txn, event, &children, &mut hits),
+                        None => root_positions(txn, event, &before, &children, &mut hits),
                     }
                 }
             });
@@ -350,14 +351,17 @@ impl RbDoc {
     fn find(&self, position: RHash, root: String) -> Result<Option<xml_text::RbXmlText>, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let sticky = sticky_from_ruby(&ruby, position)?;
-        let doc = &self.0;
+        let (doc, name) = (&self.0, root.as_str());
         let id = nogvl(move || {
             let txn = doc.transact();
             let branch = sticky.get_offset(&txn)?.branch;
             let id = shared::identity(&yrs::XmlTextRef::from(branch));
             let is_block = matches!(id, yrs::branch::BranchID::Root(_))
                 || matches!(branch.type_ref(), yrs::types::TypeRef::XmlText);
-            (is_block && shared::resolve::<yrs::XmlTextRef, _>(&txn, &id).is_some()).then_some(id)
+            let in_root = shared::identity(&yrs::XmlTextRef::from(shared::top(branch)))
+                == yrs::branch::BranchID::Root(name.into());
+            (is_block && in_root && shared::resolve::<yrs::XmlTextRef, _>(&txn, &id).is_some())
+                .then_some(id)
         });
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
@@ -827,54 +831,69 @@ impl Children {
     fn is_block(&self, index: u32) -> bool {
         self.0.iter().any(|(at, block)| *block && *at == index)
     }
+
+    /// How many blocks start in `from..to`.
+    fn blocks_in(&self, from: u32, to: u32) -> u32 {
+        self.0
+            .iter()
+            .filter(|(at, block)| *block && (from..to).contains(at))
+            .count() as u32
+    }
 }
 
-/// For an event on the root sequence itself (a block added or removed), the
-/// ordinals affected. Positions are in the document after the change, which
-/// is what `children` describes.
+/// For an event on the root sequence itself (blocks added or removed), the
+/// ordinals affected. A delta walks the root as it was (`before`): retained
+/// and removed children advance through it, inserted ones through the root
+/// as it is now (`after`). An added block reports its new ordinal, a removed
+/// one the ordinal it had, and a divider or image reports nothing.
 fn root_positions(
     txn: &yrs::TransactionMut,
     event: &yrs::types::Event,
-    children: &Children,
+    before: &Children,
+    after: &Children,
     hits: &mut Vec<u32>,
 ) {
     use yrs::types::{Change, Delta, Event};
-    let mut pos = 0u32;
-    let removed = |pos: u32, n: u32, hits: &mut Vec<u32>| {
-        let ordinal = children.ordinal(pos);
-        hits.extend(ordinal..ordinal + n);
+    let (mut old, mut new) = (0u32, 0u32);
+    let added = |item: &yrs::Out, new: &mut u32, hits: &mut Vec<u32>| {
+        if matches!(item, yrs::Out::YXmlText(_)) {
+            hits.push(after.ordinal(*new));
+        }
+        *new += match item {
+            yrs::Out::Any(yrs::Any::String(s)) => s.encode_utf16().count() as u32,
+            _ => 1,
+        };
+    };
+    let removed = |old: u32, n: u32, hits: &mut Vec<u32>| {
+        let first = before.ordinal(old);
+        hits.extend(first..first + before.blocks_in(old, old + n));
     };
     match event {
         Event::XmlFragment(e) => {
             for change in e.delta(txn) {
                 match change {
-                    Change::Retain(n) => pos += n,
+                    Change::Retain(n) => (old, new) = (old + n, new + n),
                     Change::Added(items) => {
                         for item in items {
-                            if matches!(item, yrs::Out::YXmlText(_)) {
-                                hits.push(children.ordinal(pos));
-                            }
-                            pos += 1;
+                            added(item, &mut new, hits);
                         }
                     }
-                    Change::Removed(n) => removed(pos, *n, hits),
+                    Change::Removed(n) => {
+                        removed(old, *n, hits);
+                        old += n;
+                    }
                 }
             }
         }
         Event::XmlText(e) => {
             for delta in e.delta(txn) {
                 match delta {
-                    Delta::Retain(n, _) => pos += n,
-                    Delta::Inserted(item, _) => {
-                        if matches!(item, yrs::Out::YXmlText(_)) {
-                            hits.push(children.ordinal(pos));
-                        }
-                        pos += match item {
-                            yrs::Out::Any(yrs::Any::String(s)) => s.encode_utf16().count() as u32,
-                            _ => 1,
-                        };
+                    Delta::Retain(n, _) => (old, new) = (old + n, new + n),
+                    Delta::Inserted(item, _) => added(item, &mut new, hits),
+                    Delta::Deleted(n) => {
+                        removed(old, *n, hits);
+                        old += n;
                     }
-                    Delta::Deleted(n) => removed(pos, *n, hits),
                 }
             }
         }
