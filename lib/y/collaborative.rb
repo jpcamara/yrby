@@ -2,6 +2,7 @@
 
 require "active_support/concern"
 require "global_id"
+require "y/action_cable"
 
 module Y
   # The signed token that connects a page to a channel for record-backed
