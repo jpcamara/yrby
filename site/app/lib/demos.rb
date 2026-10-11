@@ -50,6 +50,13 @@ module Demos
       read: Reader.new(root: "cards", kind: :array)
     ),
     Demo.new(
+      slug: "chat",
+      title: "Chat",
+      shape: "Y.Array of Y.Maps",
+      blurb: "Messages with reactions. The other window sees what you type before you send it.",
+      read: Reader.new(root: "messages", kind: :array)
+    ),
+    Demo.new(
       slug: "codemirror",
       title: "Code",
       shape: "Y.Text",
