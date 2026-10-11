@@ -37,9 +37,7 @@ class ReviewAgent
   # person has moved on to the next line, so a pause mid-question doesn't
   # get a reply to half of it.
   def answer(index)
-    return if index >= root.xml_text_count
-
-    block = root.xml_text(index)
+    block = root.xml_text(index) or return
     question = block.text.to_s[ASK, 1].to_s.strip
     return if question.empty? || @answered.include?(block.anchor) || !finished?(question, index)
 
@@ -72,7 +70,7 @@ class ReviewAgent
   def append(anchor, text)
     @agent.edit do |doc|
       block = doc.find(anchor)
-      block&.insert(block.length, text)
+      Y::Lexxy.append_text(block, text) if block
     end
     move_caret(anchor)
   end
