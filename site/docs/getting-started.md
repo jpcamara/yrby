@@ -147,7 +147,7 @@ Chrome.
 
 The same channel also syncs Yjs documents that aren't text, such as a whiteboard
 on a `Y.Map`, a kanban board on a `Y.Array`, or a spreadsheet on a `Y.Array` of
-nested `Y.Map`s. This site has six [live demos](/demos). In the Lexxy one,
+nested `Y.Map`s. This site has seven [live demos](/demos). In the Lexxy one,
 built on [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime), the
 server renders the rich text to HTML with `Y::Lexxy` after every change and
 saves it to a plain column.
