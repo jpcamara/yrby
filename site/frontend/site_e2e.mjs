@@ -149,6 +149,11 @@ check("both windows converge on both people's text",
 const chips = (s) => js(s, `JSON.stringify([...document.querySelectorAll("#presence .chip")].map((e) => e.textContent).sort())`)
 await waitFor("presence lists two people", async () => JSON.parse((await chips(B)) || "[]").length === 2)
 check("B sees two people in the room", JSON.parse(await chips(B)).length === 2)
+// Names are random and can repeat, so "(you)" must follow the connection.
+for (const s of [A, B]) {
+  const you = JSON.parse(await chips(s)).filter((t) => t.endsWith("(you)")).length
+  check(`${s} marks exactly one chip as (you)`, you === 1)
+}
 
 // Presence went over `send`, the guarded server path, and not as an AnyCable
 // whisper. This public demo hides whisper from the provider (see room.js), so
