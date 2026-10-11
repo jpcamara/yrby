@@ -3,21 +3,21 @@
 // reactions }. `reactions` is a nested Y.Map from participant id to emoji, so
 // two people reacting at once write different keys and both are kept.
 //
-// What you're typing isn't in the document. It goes in your awareness state as
-// `draft`, and the other windows render it as a bubble that fills in as you
-// type. The server relays awareness to the room and never stores it, so drafts
-// don't add to the document's history, and a closed tab takes its draft with
-// it. Sending pushes a message and clears the draft.
+// Nobody sees what you type until you send it. While you type, your awareness
+// state carries `typing: true`, and never the text. The other windows show one
+// typing bubble for everyone who is typing, like iMessage. The server relays
+// awareness to the room and never stores it, so a closed tab clears it too.
 //
 // All text from the document and from awareness is set with textContent.
 import * as Y from "yjs"
 import { connectRoom, uid, user, wireStoredPanel } from "./room.js"
 
-const MAX_LENGTH = 1000 // characters per message, and per draft
+const MAX_LENGTH = 1000 // characters per message
 const MAX_MESSAGES = 200 // the room keeps the newest 200
 const REACTIONS = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
 const RUN_GAP = 5 * 60 * 1000 // a new name and time line after 5 minutes
 const LONG_PRESS = 450 // ms
+const TYPING_IDLE = 15000 // ms without a keystroke before you stop showing as typing
 
 // This window's participant id. Messages and reactions are keyed by it. Like
 // the name and color in room.js, it's new on every page load.
@@ -37,10 +37,10 @@ thread.id = "thread"
 thread.setAttribute("role", "log")
 thread.setAttribute("aria-label", "Messages")
 const list = el("div", "chat-list")
-const empty = el("p", "chat-empty", "No messages yet. Type something, and the other window sees it as you type.")
-const drafts = el("div", "chat-drafts")
-drafts.setAttribute("aria-live", "off")
-thread.append(empty, list, drafts)
+const empty = el("p", "chat-empty", "No messages yet. Start typing, and the other window shows that you're typing.")
+const typing = el("div", "chat-typing-slot")
+typing.setAttribute("aria-live", "polite")
+thread.append(empty, list, typing)
 
 const jump = el("button", "chat-jump", "New messages ↓")
 jump.type = "button"
@@ -231,33 +231,49 @@ function renderMessages() {
   list.replaceChildren(...rows)
 }
 
-// --- Drafts -------------------------------------------------------------------
-// One bubble per person with a non-empty draft, in their color, ending in a
-// blinking caret. It goes away when they send or clear the box.
-function renderDrafts() {
-  const bubbles = []
+// --- Typing -------------------------------------------------------------------
+// One bubble with animated dots for everyone else who is typing, and a line
+// that names them. It never holds anyone's text.
+function typingLabel(names) {
+  if (names.length === 1) return `${names[0]} is typing`
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing`
+  if (names.length === 3) return `${names[0]}, ${names[1]}, and ${names[2]} are typing`
+  return `${names[0]}, ${names[1]}, and ${names.length - 2} others are typing`
+}
+
+function renderTyping() {
+  const people = []
   for (const [clientId, state] of awareness.getStates()) {
-    if (clientId === awareness.clientID || !state?.user) continue
-    const text = clip(state.draft)
-    if (!text.trim()) continue
-    const color = safeColor(state.user.color)
-    const row = el("div", "chat-row theirs chat-draft")
-    row.dataset.client = String(clientId)
-    const meta = el("div", "chat-meta")
-    const name = el("span", "chat-name", clip(state.user.name).slice(0, 40))
-    name.style.setProperty("--peer", color)
-    meta.append(name, el("span", "chat-time", "typing"))
-    const bubble = el("div", "chat-bubble")
-    bubble.style.setProperty("--peer", color)
-    bubble.append(el("span", "chat-draft-text", text), el("span", "chat-caret"))
-    row.append(meta, bubble)
-    bubbles.push(row)
+    if (clientId === awareness.clientID || state?.typing !== true || !state.user) continue
+    people.push({ name: clip(state.user.name).slice(0, 40), color: safeColor(state.user.color) })
   }
-  drafts.replaceChildren(...bubbles)
+  if (people.length === 0) return typing.replaceChildren()
+
+  const row = el("div", "chat-row theirs chat-typing")
+  const meta = el("div", "chat-meta")
+  const dots = el("span", "chat-typing-who")
+  for (const p of people.slice(0, 5)) {
+    const dot = el("span", "chat-typing-dot")
+    dot.style.setProperty("--peer", p.color)
+    dots.append(dot)
+  }
+  meta.append(dots, el("span", "chat-typing-label", typingLabel(people.map((p) => p.name))))
+  const bubble = el("div", "chat-bubble")
+  bubble.setAttribute("aria-hidden", "true")
+  bubble.append(el("span", "chat-ellipsis"), el("span", "chat-ellipsis"), el("span", "chat-ellipsis"))
+  row.append(meta, bubble)
+  typing.replaceChildren(row)
 }
 
 // --- Composer -----------------------------------------------------------------
-const setDraft = (text) => awareness.setLocalStateField("draft", clip(text))
+// Only changes go out: true when you start, false when you send, clear the
+// box, or stop for TYPING_IDLE. Keystrokes in between send nothing.
+let idle = null
+function setTyping(on) {
+  clearTimeout(idle)
+  if (on) idle = setTimeout(() => setTyping(false), TYPING_IDLE)
+  if ((awareness.getLocalState()?.typing === true) !== on) awareness.setLocalStateField("typing", on)
+}
 
 function grow() {
   input.style.height = "auto"
@@ -287,13 +303,13 @@ function sendMessage() {
   })
   input.value = ""
   grow()
-  setDraft("")
+  setTyping(false)
   toBottom()
 }
 
 input.addEventListener("input", () => {
   grow()
-  setDraft(input.value)
+  setTyping(input.value.trim() !== "")
 })
 input.addEventListener("keydown", (e) => {
   // Shift+Enter adds a line. Enter during IME composition picks a candidate.
@@ -315,21 +331,16 @@ document.addEventListener("click", (e) => {
   if (pickerFor && !e.target.closest?.(".chat-bubble, .chat-picker")) { pickerFor = null; renderMessages() }
 })
 
-// A reconnect resets the awareness state to just the user (see connectRoom),
-// so share the draft again.
-provider.onStatusChange(({ status }) => {
-  if (status === "synced" && input.value) setDraft(input.value)
-})
 
 messages.observeDeep((events) => {
   // Only a new message counts as news. A reaction changes a nested map.
   const added = events.some((e) => e.target === messages && e.changes.added.size > 0)
   keepPinned(renderMessages, { announce: added })
 })
-awareness.on("change", () => keepPinned(renderDrafts))
+awareness.on("change", () => keepPinned(renderTyping))
 
 renderMessages()
-renderDrafts()
+renderTyping()
 wireStoredPanel(ydoc)
 provider.whenSynced.then(toBottom)
 provider.connect()
