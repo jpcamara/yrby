@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Starts Falcon, the Rails server behind thrust.
+#
+# thrust runs this command. Before it does, thrust sets PORT to its TARGET_PORT
+# (thruster's internal/service.go calls os.Setenv("PORT", ...)). That's all the
+# proxy tells its upstream. Puma reads PORT on its own, but Falcon takes a
+# --bind URL, so this script converts it.
+#
+# Documents live in the database (Y::Document), so any worker can serve any
+# room, and several workers are fine for the documents. The throttle
+# accounting is per process: Rooms seats, caps, and byte counts,
+# ConnectionGuard budgets, and Rack::Attack counters. With N workers, each one
+# enforces its own copy, so the caps can get up to N times looser. The site
+# runs one process by default so each limit is counted in one place.
+# FALCON_COUNT turns on forked workers, and FALCON_THREADS with it switches to
+# Falcon's hybrid container (forks x threads). Use them for load tests, or for
+# deployments that accept approximate caps. See "Why one process by default"
+# in site/README.md.
+set -euo pipefail
+
+COUNT="${FALCON_COUNT:-${WEB_CONCURRENCY:-1}}"
+THREADS="${FALCON_THREADS:-0}"
+
+# Plain http, because Falcon defaults to https with a self-signed cert. Bind to
+# loopback only. thrust and the embedded anycable-go are the only clients, and
+# both connect over localhost. Binding all interfaces would expose Falcon
+# directly, skipping the proxy's MAX_REQUEST_BODY and making the RPC mount
+# reachable from the network.
+if [ "$THREADS" != "0" ]; then
+  exec bundle exec falcon serve --bind "http://127.0.0.1:${PORT:-3000}" \
+    --hybrid --forks "$COUNT" --threads "$THREADS"
+else
+  exec bundle exec falcon serve --bind "http://127.0.0.1:${PORT:-3000}" --count "$COUNT"
+fi
