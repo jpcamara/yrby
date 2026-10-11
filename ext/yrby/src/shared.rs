@@ -21,10 +21,11 @@ use magnus::{
     prelude::*, r_hash::ForEach, Error, Float, Integer, IntoValue, RArray, RHash, RString, Ruby,
     Value,
 };
-use yrs::branch::{BranchID, BranchPtr};
+use yrs::branch::{Branch, BranchID, BranchPtr};
 use yrs::types::text::YChange;
 use yrs::{
-    Any, Hook, In, IndexScope, MapPrelim, Out, ReadTxn, SharedRef, StickyIndex, Text, XmlTextRef,
+    Any, Hook, In, IndexScope, MapPrelim, Out, ReadTxn, SharedRef, StickyIndex, Text, Xml, XmlOut,
+    XmlTextRef,
 };
 
 use crate::{nogvl, yrb_error};
@@ -92,6 +93,17 @@ pub fn delete_span(index: i64, length: i64, len: u32) -> Option<(u32, u32)> {
     }
     let count = length.clamp(0, len - start);
     Some((start as u32, (start + count) as u32))
+}
+
+/// The document index for `insert(index, ...)`. Appending (-1), what a
+/// streaming writer does chunk after chunk, goes straight to the end without
+/// walking the sequence.
+pub fn end_or_units<T: ReadTxn, S: Text>(txn: &T, seq: &S, index: i64) -> u32 {
+    if index == -1 {
+        seq.len(txn)
+    } else {
+        to_units(txn, seq, insert_index(index, char_len(txn, seq)))
+    }
 }
 
 /// A sequence's contents in order: strings, and embeds (a text node's
@@ -179,6 +191,20 @@ pub fn root_xml_text<T: ReadTxn>(txn: &T, root: &str) -> Option<XmlTextRef> {
     let fragment = txn.get_xml_fragment(root)?;
     let branch: &yrs::branch::Branch = fragment.as_ref();
     Some(XmlTextRef::from(BranchPtr::from(branch)))
+}
+
+/// The root `branch` lives under, found by walking up its XML parents.
+pub fn top(branch: BranchPtr) -> BranchPtr {
+    let mut at = branch;
+    while let Some(parent) = XmlTextRef::from(at).parent() {
+        let branch: &Branch = match &parent {
+            XmlOut::Element(e) => e.as_ref(),
+            XmlOut::Fragment(f) => f.as_ref(),
+            XmlOut::Text(t) => t.as_ref(),
+        };
+        at = BranchPtr::from(branch);
+    }
+    at
 }
 
 /// The `XmlText`s embedded in `parent`, in order.
