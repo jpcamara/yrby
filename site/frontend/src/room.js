@@ -171,19 +171,21 @@ function refuseFiles() {
 // doesn't store it, so this list only shows live connections. There are two
 // state shapes. The demos set { user: { name, color } }. Lexical bindings
 // (lexxy-realtime's cursors) set { name, color } at the top level and replace
-// whatever was there. This reads both.
+// whatever was there. This reads both. Names are picked at random and can
+// repeat, so "(you)" goes by awareness client id, not by name.
 export function renderPresence(provider) {
   const el = presenceEl()
   if (!el) return
+  const self = provider.awareness.clientID
   el.replaceChildren(
-    ...[...provider.awareness.getStates().values()]
-      .map((state) => state.user || (state.name ? { name: state.name, color: state.color } : null))
-      .filter(Boolean)
-      .map((u) => {
+    ...[...provider.awareness.getStates()]
+      .map(([id, state]) => [id, state.user || (state.name ? { name: state.name, color: state.color } : null)])
+      .filter(([, u]) => u)
+      .map(([id, u]) => {
         const chip = document.createElement("span")
         chip.className = "chip"
         chip.style.background = u.color
-        chip.textContent = u.name === user.name ? `${u.name} (you)` : u.name
+        chip.textContent = id === self ? `${u.name} (you)` : u.name
         return chip
       }),
   )
