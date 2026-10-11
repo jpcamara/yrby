@@ -627,7 +627,7 @@ There are seven demo pages, picked to cover different Yjs shapes:
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges, with sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map, the way canvas tools store shapes |
 | Kanban | `Y.Array` | A move is one `map.set`, so concurrent moves never conflict |
-| Chat | `Y.Array` of `Y.Map`s | Drafts shown live through awareness, and reactions keyed by person so they merge |
+| Chat | `Y.Array` of `Y.Map`s | Typing shown through awareness without the text, and reactions keyed by person so they merge |
 | Code | `Y.Text` | CodeMirror 6 with remote cursors and selections |
 
 ### The Lexxy demo
