@@ -197,6 +197,18 @@ class DemosTest < ActionDispatch::IntegrationTest
     )
   end
 
+  test "the stored endpoint reads chat messages with their reactions per person" do
+    Y::Document.append("chat/room1", Updates::MESSAGES_ARRAY)
+
+    get "/demos/chat/room1/stored"
+
+    assert_response :success
+    message = JSON.parse(response.parsed_body["body"]).sole
+
+    assert_equal "hi", message["text"]
+    assert_equal({ "p1" => "❤️", "p2" => "👍" }, message["reactions"])
+  end
+
   test "the stored endpoint sorts keys in nested objects" do
     Y::Document.append("spreadsheet/room1", Updates::ROWS_ARRAY)
 
