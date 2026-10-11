@@ -53,7 +53,7 @@ module Demos
       slug: "chat",
       title: "Chat",
       shape: "Y.Array of Y.Maps",
-      blurb: "Messages with reactions. The other window sees what you type before you send it.",
+      blurb: "Messages with reactions. Everyone sees who is typing, and a message shows up only when it's sent.",
       read: Reader.new(root: "messages", kind: :array)
     ),
     Demo.new(
