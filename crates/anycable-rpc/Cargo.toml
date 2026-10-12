@@ -1,0 +1,38 @@
+[package]
+name = "anycable-rpc"
+readme = "README.md"
+description = "Write an AnyCable RPC backend in Rust: the anycable-go gRPC service, ActionCable-style channels, and an HTTP broadcaster"
+repository = "https://github.com/jpcamara/yrby"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["JP Camara <johnpcamara@gmail.com>"]
+license = "MIT"
+keywords = ["anycable", "actioncable", "websocket", "axum", "rpc"]
+categories = ["web-programming::websocket", "network-programming"]
+
+[features]
+# TLS for broadcasting to an https:// anycable-go. Off by default: the
+# broadcast endpoint is usually a private address next to the app.
+rustls = ["reqwest/rustls"]
+
+[dependencies]
+async-trait = "0.1.92"
+hex = "0.4.3"
+hmac = "0.13.0"
+prost = "0.14.4"
+reqwest = { version = "0.13.5", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+tonic = "0.14.5"
+tonic-prost = "0.14.5"
+tracing = "0.1.44"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-stream = { version = "0.1.19", features = ["net"] }
+
+[build-dependencies]
+protoc-bin-vendored = "3.2.0"
+tonic-prost-build = "0.14.5"
