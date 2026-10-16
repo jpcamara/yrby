@@ -11,6 +11,29 @@ module Y
   # nodes are declarative hashes, nodes with logic are plain methods mapped
   # in NODES.
   class Lexxy < Lexical
+    # Lexxy's list items are its own node type (it leaves a list when you press
+    # Enter on an empty item), so lists written for a Lexxy editor use it.
+    def self.list_item_type
+      "early_escape_listitem"
+    end
+
+    # Lexxy's code block is its own node type, with a syntax-highlight flag.
+    def self.code_attributes(language: "plain")
+      { **super, "__type" => "early_escape_code", "__isSyntaxHighlightSupported" => true }
+    end
+
+    # Lexxy links carry rel="noreferrer".
+    def self.link_attributes(url, title: nil)
+      { **super, "__rel" => "noreferrer" }
+    end
+
+    # Lexxy puts a quote's text inside a paragraph within the quote block.
+    def self.append_quote(doc, runs, root: "root")
+      quote = doc.get_xml_text(root).push_xml_text(quote_attributes)
+      write_runs(quote.push_xml_text(PARAGRAPH_ATTRIBUTES), runs)
+      quote
+    end
+
     # A cursor-placement placeholder; empty ones export to nothing.
     def self.provisional_paragraph(node)
       node.content.empty? ? "" : "<p>#{node.content}</p>"
@@ -101,6 +124,8 @@ module Y
 
     NODES = {
       # Lexxy's replacement for Lexical's CodeNode.
+      # Lexxy wraps a quote's content in a paragraph.
+      "quote" => { tag: "blockquote", contains: :blocks },
       "early_escape_code" => { tag: "pre", attrs: { "data-language" => :language } },
       "horizontal_divider" => { tag: "hr", void: true },
       "provisonal_paragraph" => method(:provisional_paragraph), # (sic: Lexxy's spelling)
@@ -109,6 +134,8 @@ module Y
       "wrapped_table_node" => { contains: :blocks, render: method(:table) },
       "tablecell" => { contains: :blocks, render: method(:table_cell) },
       "listitem" => { contains: :blocks, render: method(:list_item) },
+      # Lexxy's own list item (it leaves the list on Enter in an empty item).
+      "early_escape_listitem" => { contains: :blocks, render: method(:list_item) },
       "action_text_attachment" => method(:upload),
       "action_text_attachment_upload" => method(:pending_upload),
       "custom_action_text_attachment" => method(:mention)
