@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title><%= content_for(:title).presence || "Shared page · yrby" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%# Each room belongs to whoever opened it and is deleted later. %>
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#ffffff">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%# Tells createConsumer() where the cable server is. %>
+    <%= action_cable_meta_tag %>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <%# bun builds space.css with the page's JS: Lexxy's styles, lexxy-realtime's
+        caret styles, and frontend/src/space.css. %>
+    <link rel="stylesheet" href="<%= busted "/space.css" %>">
+    <%= javascript_include_tag busted("/space.js"), defer: true, skip_pipeline: true %>
+  </head>
+  <body class="space">
+    <%= yield %>
+  </body>
+</html>

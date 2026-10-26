@@ -698,20 +698,35 @@ read the server's `{ notice: ... }` messages. `yrby-client`'s provider ignores
 messages it doesn't recognize. The mixin it builds reaches the provider through
 a closure and doesn't use `this`, so wrapping its `received` handler is safe.
 
-### The demo agent
+### The shared page with agents
 
-"Invite the agent" on the Lexxy demo starts a Ruby agent in the room. It
-joins over the cable with the room's token, the way a browser does, says
-hello, reviews what's written, and answers any line that starts with
-`@agent`. Its replies stream into the document with its caret at the end of
-the words.
+`/space` opens a Lexxy room as a shared page (`/demos/lexxy/:room/space`).
+It's the same room and the same Note as the Lexxy demo, laid out like a
+document app. Each person on the page can invite their own agent, a Ruby
+process that joins over the cable with the room's token, the way a browser
+does.
 
-- `DemosController#agent` takes the POST. It checks that the Origin is this
-  site and that the room has a note, then takes the room's seat in
-  `AgentSeats` and enqueues `ReviewAgentJob`.
-- `ReviewAgentJob` runs `Y::Agent` from yrby-rails, which holds the
-  connection, the presence, and the one-agent-per-room lock. `ReviewAgent`
-  (`app/agents/`) decides what the agent writes.
+To ask for a change, select text in one paragraph and choose "Ask for
+change". The request goes into the document's `asks` map, so every browser on
+the page shows it:
+
+1. The person's agent claims it. Its selection covers the asked-about text,
+   and its presence says it's working and since when. The page shows a
+   "Working for Ns" pill under the paragraph.
+2. Its proposed wording streams into the request as the model writes.
+3. Anyone on the page can Accept, Undo, or ask for a change. Accept replaces
+   the selected characters in that person's browser, as an ordinary edit, so
+   the server records it and `note.body` updates like it does after typing.
+   Until then the page itself doesn't change.
+
+- `DemosController#agent` takes the POST, with the person's id, name, and
+  color in the query string. It checks that the Origin is this site and that
+  the room has a note, takes the person's seat in `AgentSeats`, and enqueues
+  `PageAgentJob`.
+- `PageAgentJob` runs `Y::Agent` from yrby-rails, which holds the connection
+  and the presence. Its one-agent-per-document lock is off, because each
+  person brings an agent; `AgentSeats` counts them instead. `PageAgent`
+  (`app/agents/`) answers the asks and documents their fields.
 - Jobs run on Active Job's async adapter, in this process, with one thread
   per agent.
 - `AgentModel` calls Fireworks AI through ruby_llm when `FIREWORKS_API_KEY`
@@ -722,9 +737,10 @@ The limits, in `config/limits.rb`:
 
 | Limit | Default | Why |
 |---|---|---|
-| `MAX_AGENTS` | 3 | each agent holds a thread and a connection while it stays |
+| `MAX_AGENTS` | 6 | each agent holds a thread and a connection while it stays |
+| `MAX_AGENTS_PER_ROOM` | 3 | one per person, and more than three on a page is hard to follow |
 | `AGENT_INVITES_PER_HOUR` | 6 per IP | an invitation starts a model call |
-| `AGENT_CALLS_PER_DAY` | 300 | caps the model bill; past it the agent says so in the document |
+| `AGENT_CALLS_PER_DAY` | 300 | caps the model bill; past it the request says so |
 | `AGENT_IDLE` | 60 s | the agent leaves once nobody else is in the room |
 | `AGENT_MAX_STAY` | 15 min | and after this however busy the room is |
 

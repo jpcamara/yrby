@@ -18,22 +18,30 @@ class AgentModel
     Be brief and concrete.
   TEXT
 
-  REVIEW = <<~TEXT.freeze
-    In two or three sentences, say what this document is for and one concrete
-    way to make it better.
+  REWRITE = <<~TEXT.freeze
+    Someone selected part of a paragraph in the document. Here is the
+    paragraph, with the selection between [[ and ]]:
 
-    Document:
-    %s
+    %<paragraph>s
+
+    They asked: %<prompt>s
+    %<previous>s
+    Reply with only the new text to put in place of the selection, so the
+    paragraph still reads correctly around it. Keep the text outside the
+    brackets out of your reply. One paragraph, no line breaks, no brackets,
+    no quotes, no explanation.
+
+    The whole document, for context:
+    %<document>s
   TEXT
 
-  ANSWER = <<~TEXT.freeze
-    Someone in the document asked: %s
+  PREVIOUS = <<~TEXT.freeze
 
-    Answer in two or three sentences, from what the document says where it
-    helps.
+    Your last proposal was:
 
-    Document:
     %s
+
+    Change that proposal the way they asked.
   TEXT
 
   def self.default = ENV["FIREWORKS_API_KEY"].to_s.empty? ? Canned.new : new
@@ -42,9 +50,13 @@ class AgentModel
     @seats = seats
   end
 
-  def review(text, &) = stream(format(REVIEW, text), &)
-
-  def answer(question, text, &) = stream(format(ANSWER, question, text), &)
+  # Streams the replacement for the selection marked [[like this]] in
+  # `paragraph`, as `prompt` asks. `previous` is the agent's earlier proposal
+  # when they asked for a change to it.
+  def rewrite(paragraph, prompt, document, previous: nil, &)
+    previous = previous.to_s.empty? ? "" : format(PREVIOUS, previous)
+    stream(format(REWRITE, paragraph:, prompt:, previous:, document:), &)
+  end
 
   private
 
@@ -69,7 +81,7 @@ class AgentModel
     RubyLLM.configure do |c|
       c.openai_api_key = ENV.fetch("FIREWORKS_API_KEY")
       c.openai_api_base = FIREWORKS_BASE
-      c.request_timeout = 60
+      c.request_timeout = 20 # a proposal takes a second or two; a stall should fail fast
     end
     RubyLLM.chat(model: MODEL, provider: :openai, assume_model_exists: true).with_instructions(INSTRUCTIONS)
   end
@@ -83,18 +95,12 @@ class AgentModel
     end
   end
 
-  # The stand-in without a key. It streams word by word, as a model does.
+  # The stand-in without a key. It streams word by word, as a model does, and
+  # says it's canned.
   class Canned
-    REPLY = "I'm the demo agent running without a model key, so this is a canned reply. " \
-            "With a key I'd read the document and answer for real.".freeze
-
-    def review(_text, &) = stream(&)
-    def answer(_question, _text, &) = stream(&)
-
-    private
-
-    def stream
-      REPLY.scan(/\S+\s*/).each do |word|
+    def rewrite(paragraph, _prompt, _document, previous: nil)
+      selection = previous.presence || paragraph[/\[\[(.*)\]\]/m, 1] || paragraph
+      "(No model key, so here is your text back.) #{selection}".scan(/\S+\s*/).each do |word|
         sleep 0.05
         yield word
       end

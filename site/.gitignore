@@ -17,6 +17,8 @@
 /public/codemirror.js
 /public/document.js
 /public/hero.js
+/public/space.js
+/public/space.css
 /public/*.js.map
 
 # Built stylesheet (Tailwind via `bun run build:css`)

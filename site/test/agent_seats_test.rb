@@ -1,16 +1,18 @@
 require "test_helper"
 
 class AgentSeatsTest < ActiveSupport::TestCase
-  test "one agent per room, and a limit across rooms" do
-    seats = AgentSeats.new(max: 2)
+  test "one agent per person in a room, a limit per room, and a limit across rooms" do
+    seats = AgentSeats.new(max: 3, per_room: 2)
 
-    assert_equal :ok, seats.take("a")
-    assert_equal :here, seats.take("a")
-    assert_equal :ok, seats.take("b")
-    assert_equal :full, seats.take("c")
-    seats.release("a")
+    assert_equal :ok, seats.take("a", "ada")
+    assert_equal :here, seats.take("a", "ada")
+    assert_equal :ok, seats.take("a", "linus")
+    assert_equal :full, seats.take("a", "grace")
+    assert_equal :ok, seats.take("b", "ada")
+    assert_equal :full, seats.take("c", "ada")
+    seats.release("a", "ada")
 
-    assert_equal :ok, seats.take("c")
+    assert_equal :ok, seats.take("c", "ada")
   end
 
   test "model calls stop at the daily budget and start again the next day" do

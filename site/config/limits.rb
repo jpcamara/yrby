@@ -189,7 +189,11 @@ module Limits
 
   # Agents running at once, across all rooms. Each one holds a thread and a
   # cable connection for as long as it stays, and each model call costs money.
-  MAX_AGENTS = Integer(ENV.fetch("MAX_AGENTS", 3))
+  MAX_AGENTS = Integer(ENV.fetch("MAX_AGENTS", 6))
+
+  # Agents in one room. Each person can bring their own, and three agents
+  # working on one page is already a lot to follow.
+  MAX_AGENTS_PER_ROOM = 3
 
   # Invitations one IP can make in an hour (Rack::Attack).
   AGENT_INVITES_PER_HOUR = 6

@@ -18,23 +18,35 @@ class AgentInviteTest < ActionDispatch::IntegrationTest
     Note.delete_all
   end
 
-  def invite(room = ROOM, origin: "http://www.example.com", **)
-    post "/demos/lexxy/#{room}/agent", headers: { "Origin" => origin }, **
+  ADA = { owner: "0b6c4f0e-ada0-4c1e-9d55-6a8e0c1f2a11", name: "Ada", color: "#f87171" }.freeze
+  LINUS = { owner: "7d2e1a90-11e5-4a8b-b2c3-9f0e7d6c5b44", name: "Linus", color: "#22d3ee" }.freeze
+
+  def invite(room = ROOM, person = ADA, origin: "http://www.example.com", **)
+    post "/demos/lexxy/#{room}/agent?#{person.to_query}", headers: { "Origin" => origin }, **
   end
 
-  test "an invitation takes the room's seat and starts the agent" do
-    assert_enqueued_with(job: ReviewAgentJob, args: [ROOM, "http://www.example.com"]) { invite }
+  def owner(person) = { id: person[:owner], name: person[:name], color: person[:color] }
+
+  test "an invitation takes the person's seat and starts their agent" do
+    assert_enqueued_with(job: PageAgentJob, args: [ROOM, "http://www.example.com", owner(ADA)]) { invite }
 
     assert_response :accepted
     assert_equal "joining", response.parsed_body["status"]
     assert_equal 1, AgentSeats.current.count
   end
 
-  test "a room with an agent says so and starts no other" do
+  test "a person whose agent is in the room starts no other" do
     invite
 
     assert_no_enqueued_jobs { invite }
     assert_equal "here", response.parsed_body["status"]
+  end
+
+  test "each person in a room brings their own agent" do
+    invite
+
+    assert_enqueued_with(job: PageAgentJob, args: [ROOM, "http://www.example.com", owner(LINUS)]) { invite(ROOM, LINUS) }
+    assert_equal 2, AgentSeats.current.count
   end
 
   test "past the agent limit an invitation is turned away" do
@@ -46,6 +58,12 @@ class AgentInviteTest < ActionDispatch::IntegrationTest
     assert_no_enqueued_jobs { invite("agentroom3") }
     assert_response :service_unavailable
     assert_equal "busy", response.parsed_body["status"]
+  end
+
+  test "an invitation without a person to belong to is refused" do
+    assert_no_enqueued_jobs { invite(ROOM, ADA.merge(color: "red")) }
+
+    assert_response :unprocessable_content
   end
 
   test "an invitation from another site is refused" do
@@ -74,11 +92,11 @@ class AgentInviteTest < ActionDispatch::IntegrationTest
   end
 
   test "the job gives the seat back when the agent leaves" do
-    AgentSeats.current.take(ROOM)
+    AgentSeats.current.take(ROOM, ADA[:owner])
     run = Y::Agent.method(:run)
     Y::Agent.define_singleton_method(:run) { |*, **| raise "the model is down" }
 
-    assert_raises(RuntimeError) { ReviewAgentJob.perform_now(ROOM, "http://www.example.com") }
+    assert_raises(RuntimeError) { PageAgentJob.perform_now(ROOM, "http://www.example.com", owner(ADA)) }
     assert_equal 0, AgentSeats.current.count
   ensure
     Y::Agent.define_singleton_method(:run, run)

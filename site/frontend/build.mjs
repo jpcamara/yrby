@@ -59,6 +59,8 @@ const ENTRIES = [
   // attachments="false", so that import never runs. Marking it external stops
   // the bundler from trying to resolve it.
   { entry: "src/lexxy.js", external: ["@rails/activestorage"] },
+  // The Lexxy room as a shared page with agents (demos/space.html.erb).
+  { entry: "src/space.js", external: ["@rails/activestorage"] },
   "src/tiptap.js",       // Y.XmlFragment via Tiptap's Collaboration extension
   "src/spreadsheet.js",  // Y.Array of row Y.Maps, cells nested as Y.Maps
   "src/whiteboard.js",   // Y.Map of shape records

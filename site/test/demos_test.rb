@@ -126,6 +126,35 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %(attachments="false")
   end
 
+  test "/space starts a new room's shared page" do
+    get "/space"
+
+    assert_response :redirect
+    assert_match %r{/demos/lexxy/[A-Za-z0-9_-]+/space\z}, response.location
+  end
+
+  test "the shared page joins the Lexxy room's note and creates nothing on a GET" do
+    get "/demos/lexxy/room1/space"
+
+    assert_response :success
+    assert_equal 0, Note.count, "the page must not create the note on a GET"
+    element = response.body[/<yrby-document [^>]+>/]
+
+    assert_includes element, %(channel="NoteChannel")
+    assert_equal Note.room_token("room1", :body), element[/grant="([^"]+)"/, 1]
+    assert_includes response.body, %(doc-id="lexxy/room1")
+    assert_includes response.body, %(attachments="false")
+    assert_includes response.body, "/space.js"
+    assert_includes response.body, %(data-url="/demos/lexxy/room1/agent")
+    assert_includes response.headers["Cache-Control"], "no-store"
+  end
+
+  test "a malformed room on the shared page is not found" do
+    get "/demos/lexxy/#{"x" * 40}/space"
+
+    assert_response :not_found
+  end
+
   test "the body endpoint returns the rendered body column" do
     note = Note.create!(room: "room1", body: "<h1>from Ruby</h1>")
 
