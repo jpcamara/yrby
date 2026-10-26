@@ -189,6 +189,41 @@ BASE=http://127.0.0.1:3000 node pixels_wasm_e2e.mjs
 LIVE_ARTIST=1 BASE=http://127.0.0.1:3000 node pixels_wasm_e2e.mjs
 ```
 
+### Optional experiment: the studio compiled by Spinel
+
+`/docs/demo/pixels/spinel` runs the same studio as Ruby compiled ahead of time
+by [Spinel](https://github.com/matz/spinel). There is no Ruby interpreter in
+the page. `experiments/spinel-wasm/src/pixel_studio.rb` becomes a 1.4 MB
+WebAssembly module that starts in tens of milliseconds, against about 29 MB
+for the ruby.wasm runtime.
+
+Ruby owns the same things as in the ruby.wasm page: painting, tools, strokes,
+keyboard, undo, rendering, cursors, presence and the artist panel.
+`src/host.js` is the browser surface it imports, about 40 small functions:
+element properties by id, the current event's fields, the canvas, fetch, and
+the yrby-wasm-client document over ywasm. Values cross as numbers, strings
+and JSON. Client IDs cross as strings, because Integer is 32-bit on wasm32.
+
+Spinel's library mode (`--ext-init`, `--ext-entry`) emits the program with an
+init function in place of `main`, so the module stays alive and JavaScript
+calls `dispatch(code)` for each event. `src/exports.c` wraps those entries so
+a Ruby raise reaches JavaScript as an error instead of trapping the module.
+
+Building the module needs a Spinel checkout built with `make && make wasm-rt`
+and [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) 34 or later:
+
+```bash
+cd examples/actioncable-demo/frontend/experiments/spinel-wasm
+SPINEL_HOME=~/src/spinel WASI_SDK=/opt/wasi-sdk ./build-wasm.sh
+npm ci --ignore-scripts && npm run build
+```
+
+```bash
+# From frontend/, after building the optional assets:
+BASE=http://127.0.0.1:3000 node pixels_spinel_e2e.mjs
+LIVE_ARTIST=1 BASE=http://127.0.0.1:3000 node pixels_spinel_e2e.mjs
+```
+
 ### The agent, over the websocket
 
 The Lexxy page's "Invite the agent" starts a Ruby agent (`ReviewAgent`) in the
