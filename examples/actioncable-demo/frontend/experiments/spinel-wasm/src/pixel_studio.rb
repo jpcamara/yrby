@@ -2,10 +2,13 @@
 
 # Pixel Bay's studio in Ruby, compiled ahead of time to WebAssembly by Spinel.
 # Ruby owns the studio: painting, tools, strokes, keyboard, undo, rendering,
-# cursors, presence and the artist panel. host.js owns the browser surface:
-# DOM events, the canvas, fetch, and the yrby-wasm-client document over ywasm.
-# Every crossing is one of the Host functions below.
+# cursors, presence and the artist panel. It also owns the document, through
+# yrs linked into the same module (yrs.rb), and the sync protocol (sync.rb).
+# host.js owns the browser surface: DOM events, the canvas, fetch and the
+# ActionCable socket. Every crossing is one of the Host functions below.
 require "json"
+require_relative "yrs"
+require_relative "sync"
 
 module Host
   ffi_func :host_log, [:str], :void
@@ -45,19 +48,16 @@ module Host
   ffi_func :host_invite, [:str, :str, :int], :void
   ffi_func :host_abort, [:int], :void
 
-  # The shared document, through yrby-wasm-client. Values cross as JSON.
-  ffi_func :host_connect, [:str], :void
-  ffi_func :host_online, [:bool], :void
-  ffi_func :host_status, [], :str
-  ffi_func :host_presence, [:str], :void
-  ffi_func :host_map_json, [:str], :str
-  ffi_func :host_map_get, [:str, :str], :str
-  ffi_func :host_map_set, [:str, :str, :str], :void
-  ffi_func :host_begin, [:str], :void
-  ffi_func :host_commit, [], :void
-  ffi_func :host_undo_create, [:str, :str, :int], :void
-  ffi_func :host_undo, [:int], :void
-  ffi_func :host_can_undo, [], :bool
+  ffi_func :host_now, [], :double
+  ffi_func :host_random, [], :int
+
+  # The ActionCable subscription. Its callbacks arrive as CABLE_* dispatches.
+  ffi_func :host_cable_open, [:str, :str], :void
+  ffi_func :host_cable_send, [:str, :int], :void
+  ffi_func :host_cable_close, [], :void
+
+  # Answers window.__spinelPixel.client, the page's inspection hook.
+  ffi_func :host_reply, [:str], :void
 end
 
 class Studio
@@ -67,6 +67,7 @@ class Studio
   NAMES = ["Midnight", "Slate", "Fog", "Silver", "Cream", "White", "Bridge red", "Coral", "Apricot", "Sunshine", "Evergreen", "Sage", "Ocean", "Sky", "Lavender", "Rose"].freeze
   DARK_INDICATOR = [3, 4, 5, 8, 9, 11, 13, 15].freeze
   ORIGIN = "pixel-bay-human"
+  LOCAL = "yrby-wasm-local"
   CANVAS = "mural-canvas"
 
   # Dispatch codes. A swatch click is SWATCH + its color index.
@@ -89,9 +90,9 @@ class Studio
   BRIEF_BLUR = 17
   INVITE = 18
   STOP_ARTIST = 19
-  DOC_CHANGE = 20
-  STATUS = 21
-  UNDO_CHANGE = 22
+  CABLE_CONNECTED = 20
+  CABLE_DISCONNECTED = 21
+  CABLE_REJECTED = 22
   FRAME = 23
   BRIEF_TIMER = 24
   INVITE_TIMER = 25
@@ -100,7 +101,14 @@ class Studio
   INVITE_DONE = 28
   INVITE_ERROR = 29
   SHARED = 30
+  CABLE_MESSAGE = 31
+  RESEND_TIMER = 32
+  RENEW_TIMER = 33
+  PAGESHOW = 34
+  INSPECT_STATUS = 35
+  INSPECT_MAP = 36
   SWATCH = 100
+  RENEW_MS = 10_000
 
   def initialize
     @selected = 7
@@ -130,20 +138,32 @@ class Studio
     @name = saved_name
     @color = COLORS[[6, 10, 12, 14].sample]
     @presence_cell = ""
+    @can_undo = true
+    @resume = false
+    @document = Document.new(Host.host_random)
+    @document.track_undo("pixels", ORIGIN, 60_000)
+    @sync = Sync.new(@document, "DocumentChannel", Host.host_get("pixel-studio", "dataset.documentId"),
+      JSON.generate(presence_state))
   end
 
   def start
-    Host.host_connect(JSON.generate({ "channel" => "DocumentChannel",
-      "params" => { "id" => Host.host_get("pixel-studio", "dataset.documentId") },
-      "localState" => presence_state }))
-    Host.host_undo_create("pixels", ORIGIN, 60_000)
+    @sync.connect
+    Host.host_timeout(RENEW_MS, RENEW_TIMER)
     build_palette
     bind
     Host.host_prop("your-name", "value", @name)
-    Host.host_text("wasm-runtime", "#{RUBY_ENGINE} #{RUBY_VERSION} · compiled Ruby · wasm32-wasi · Yrs WASM")
+    Host.host_text("wasm-runtime", "#{RUBY_ENGINE} #{RUBY_VERSION} · compiled Ruby · wasm32-wasi · yrs linked in")
     Host.host_flag("wasm-toggle-connection", "disabled", false)
     update_status
     schedule_render
+  end
+
+  # After each dispatch: send local edits, then redraw what changed.
+  def settle
+    @sync.flush
+    doc_changed if @document.changed?
+    update_status if @sync.status_changed?
+    update_undo
   end
 
   def handle(code)
@@ -162,19 +182,25 @@ class Studio
     when ERASER then choose_tool("eraser")
     when UNDO then undo_stroke
     when GRID then toggle_grid
-    when TOGGLE_CONNECTION then Host.host_online(@offline)
+    when TOGGLE_CONNECTION then @sync.offline? ? @sync.connect : @sync.disconnect
     when NAME_CHANGE then change_name
     when SHARE then Host.host_share
     when SHARED then toast("Room link copied. Bring a friend to the bay.")
     when RESIZE then schedule_render
     when PAGEHIDE then pagehide
+    when PAGESHOW then @sync.connect if @resume && Host.host_ev_bool("persisted")
     when BRIEF_INPUT then brief_input
     when BRIEF_BLUR, BRIEF_TIMER then flush_brief
     when INVITE then invite_artist
     when STOP_ARTIST then stop_artist
-    when DOC_CHANGE then doc_changed
-    when STATUS then update_status
-    when UNDO_CHANGE then update_undo
+    when CABLE_CONNECTED then @sync.connected
+    when CABLE_DISCONNECTED then @sync.disconnected
+    when CABLE_REJECTED then @sync.rejected
+    when CABLE_MESSAGE then receive(Host.host_ev_str("json"))
+    when RESEND_TIMER then @sync.resend
+    when RENEW_TIMER then renew
+    when INSPECT_STATUS then Host.host_reply(@sync.status_json)
+    when INSPECT_MAP then Host.host_reply(@document.json(Host.host_ev_str("name")))
     when FRAME then frame
     when INVITE_TIMER then invite_timed_out
     when TOAST_TIMER then Host.host_flag("studio-toast", "hidden", true)
@@ -243,13 +269,11 @@ class Studio
     Host.host_listen("window", "resize", RESIZE)
     Host.host_listen("canvas-wrap", "resize", RESIZE)
     Host.host_listen("window", "pagehide", PAGEHIDE)
+    Host.host_listen("window", "pageshow", PAGESHOW)
     Host.host_listen("artist-brief", "input", BRIEF_INPUT)
     Host.host_listen("artist-brief", "blur", BRIEF_BLUR)
     Host.host_listen("invite-artist", "submit", INVITE)
     Host.host_listen("remove-artist", "click", STOP_ARTIST)
-    Host.host_listen("client", "change", DOC_CHANGE)
-    Host.host_listen("client", "status", STATUS)
-    Host.host_listen("undo", "change", UNDO_CHANGE)
   end
 
   # Pointer and keyboard painting
@@ -263,7 +287,7 @@ class Studio
     Host.host_capture(CANVAS, @active_pointer, true)
     @previous_x = @hit_x
     @previous_y = @hit_y
-    Host.host_undo(0)
+    @document.stop_capturing
     point_at(@hit_x, @hit_y)
     paint_cells([[@hit_x, @hit_y]])
   end
@@ -307,7 +331,7 @@ class Studio
     @active_pointer = -1
     @previous_x = -1
     Host.host_capture(CANVAS, pointer, false)
-    Host.host_undo(0)
+    @document.stop_capturing
     hide_cursor if Host.host_ev_str("pointerType") == "touch"
   end
 
@@ -335,18 +359,18 @@ class Studio
   end
 
   def paint_cells(cells)
-    Host.host_begin(ORIGIN)
-    cells.each do |cell|
-      x = cell[0]
-      y = cell[1]
-      next unless x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT
-      key = "#{x},#{y}"
-      color = @tool == "eraser" ? color_of(Host.host_map_get("scene", key)) : @selected
-      next if Host.host_map_get("pixels", key) == color.to_s
-      Host.host_map_set("pixels", key, color.to_s)
-      @paint_count += 1
+    @document.write(ORIGIN) do
+      cells.each do |cell|
+        x = cell[0]
+        y = cell[1]
+        next unless x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT
+        key = "#{x},#{y}"
+        color = @tool == "eraser" ? palette_index(@document.get_int("scene", key, 0)) : @selected
+        next if @document.get_int("pixels", key, -1) == color
+        @document.set_int("pixels", key, color)
+        @paint_count += 1
+      end
     end
-    Host.host_commit
     Host.host_attr(CANVAS, "data-ruby-paints", @paint_count.to_s)
   end
 
@@ -375,7 +399,7 @@ class Studio
     if control && key.downcase == "z"
       Host.host_ev_prevent
       if Host.host_ev_bool("shiftKey")
-        Host.host_undo(2)
+        @document.redo
       else
         undo_stroke
       end
@@ -402,26 +426,27 @@ class Studio
       point_at((@cell_x + dx).clamp(0, WIDTH - 1), (@cell_y + dy).clamp(0, HEIGHT - 1))
     elsif key == " " || key == "Enter"
       Host.host_ev_prevent
-      Host.host_undo(0)
+      @document.stop_capturing
       paint_cells([[@cell_x, @cell_y]])
-      Host.host_undo(0)
+      @document.stop_capturing
     end
   end
 
   def undo_stroke
-    Host.host_undo(0)
-    Host.host_undo(1)
+    @document.stop_capturing
+    @document.undo
     update_undo
   end
 
-  def update_undo = Host.host_flag("undo-stroke", "disabled", !Host.host_can_undo)
+  def update_undo
+    can_undo = @document.can_undo?
+    return if can_undo == @can_undo
+    @can_undo = can_undo
+    Host.host_flag("undo-stroke", "disabled", !can_undo)
+  end
 
   # A shared map value as a palette index; anything else is Midnight.
-  def color_of(json)
-    return 0 unless json.match?(/\A\d+\z/)
-    value = json.to_i
-    value <= 15 ? value : 0
-  end
+  def palette_index(value) = value >= 0 && value <= 15 ? value : 0
 
   # Rendering
 
@@ -443,8 +468,8 @@ class Studio
 
   def layer(name)
     colors = Array.new(WIDTH * HEIGHT, -1)
-    JSON.parse(Host.host_map_json(name)).each do |key, value|
-      next unless key.match?(/\A\d+,\d+\z/) && value.is_a?(Integer) && value >= 0 && value <= 15
+    @document.each_int(name) do |key, value|
+      next unless value >= 0 && value <= 15 && key.match?(/\A\d+,\d+\z/)
       parts = key.split(",")
       x = parts[0].to_i
       y = parts[1].to_i
@@ -491,16 +516,22 @@ class Studio
 
   # Connection, presence and cursors
 
+  def receive(message)
+    @sync.received(message)
+  rescue => error
+    @sync.fail(error.message)
+  end
+
+  def renew
+    @sync.renew
+    Host.host_timeout(RENEW_MS, RENEW_TIMER)
+  end
+
   def update_status
-    status = JSON.parse(Host.host_status)
-    @synced = status["synced"] == true
-    @offline = status["offline"] == true
-    @client_id = status["clientID"].to_s
-    @peers = []
-    peers = status["peers"]
-    if peers.is_a?(Array)
-      peers.each { |peer| @peers << peer if peer.is_a?(Hash) && peer["user"].is_a?(Hash) }
-    end
+    @synced = @sync.synced?
+    @offline = @sync.offline?
+    @client_id = @sync.client_id.to_s
+    @peers = @sync.peers.select { |peer| peer["user"].is_a?(Hash) }
     connection = if @synced
       "Live · a shared canvas"
     elsif @offline
@@ -511,9 +542,9 @@ class Studio
     Host.host_text("connection-status", connection)
     Host.host_prop("connection-dot", "className", @synced ? "live-dot" : @offline ? "live-dot offline" : "live-dot connecting")
     Host.host_text("wasm-toggle-connection", @offline ? "Reconnect" : "Disconnect")
-    pending = status["pending"].to_s.to_i
+    pending = @sync.pending
     Host.host_text("wasm-pending", pending > 0 ? "#{pending} local updates waiting to sync" : "All local edits acknowledged")
-    error = status["error"].to_s
+    error = @sync.error
     Host.host_flag("wasm-error", "hidden", error.empty?)
     Host.host_text("wasm-error", error)
     render_presence
@@ -529,7 +560,7 @@ class Studio
   def publish_cell(cell)
     return if @presence_cell == cell
     @presence_cell = cell
-    Host.host_presence(JSON.generate(presence_state))
+    @sync.presence = JSON.generate(presence_state)
   end
 
   def local?(peer) = peer["clientID"].to_s == @client_id
@@ -611,13 +642,17 @@ class Studio
     @name = name unless name.empty?
     Host.host_prop("your-name", "value", @name)
     Host.host_storage_set("pixel-bay-name", @name)
-    Host.host_presence(JSON.generate(presence_state))
+    @sync.presence = JSON.generate(presence_state)
     render_cursors
   end
 
+  # Leave the room on the way out; a page restored from the back-forward cache
+  # rejoins it.
   def pagehide
     flush_brief
     Host.host_abort(@invite_token) if @invite_token > 0
+    @resume = !@sync.offline?
+    @sync.disconnect
   end
 
   # The AI artist
@@ -632,7 +667,8 @@ class Studio
     Host.host_clear_timeout(@brief_timer) if @brief_timer > 0
     @brief_timer = 0
     return unless @brief_dirty
-    Host.host_map_set("mural", "brief", JSON.generate(Host.host_get("artist-brief", "value")[0, 240]))
+    brief = Host.host_get("artist-brief", "value")[0, 240]
+    @document.write(LOCAL) { @document.set_string("mural", "brief", brief) }
     @brief_dirty = false
   end
 
@@ -643,7 +679,7 @@ class Studio
 
   def render_artist
     present = artist_present?
-    mural = JSON.parse(Host.host_map_json("mural"))
+    mural = JSON.parse(@document.json("mural"))
     phase = mural_text(mural, "phase")
     stopped = mural["enabled"] == false
     if present
@@ -729,7 +765,7 @@ class Studio
     render_artist
     cancel_invite_timer
     @invite_timer = Host.host_timeout(15_000, INVITE_TIMER)
-    stop_version = JSON.parse(Host.host_map_json("mural"))["stop_version"]
+    stop_version = JSON.parse(@document.json("mural"))["stop_version"]
     Host.host_invite(Host.host_get("invite-artist", "action"), stop_version.is_a?(String) ? stop_version : "", @invite_token)
   end
 
@@ -776,10 +812,10 @@ class Studio
     hex = "0123456789abcdef"
     stop_version = ""
     32.times { stop_version += hex[rand(16)] }
-    Host.host_begin("yrby-wasm-local")
-    Host.host_map_set("mural", "stop_version", JSON.generate(stop_version))
-    Host.host_map_set("mural", "enabled", "false")
-    Host.host_commit
+    @document.write(LOCAL) do
+      @document.set_string("mural", "stop_version", stop_version)
+      @document.set_bool("mural", "enabled", false)
+    end
     Host.host_abort(@invite_token) if @invite_token > 0
     @invite_token = 0
     cancel_invite_timer
@@ -801,11 +837,13 @@ module Pixel
 
   def self.start
     studio.start
+    studio.settle
     0
   end
 
   def self.dispatch(code)
     studio.handle(code)
+    studio.settle unless code == Studio::INSPECT_STATUS || code == Studio::INSPECT_MAP
     0
   end
 end

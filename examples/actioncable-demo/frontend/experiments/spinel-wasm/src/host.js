@@ -1,9 +1,8 @@
 // Hosts the Spinel-compiled Pixel Bay studio. pixel_studio.rb runs as native
-// WebAssembly with no Ruby interpreter; this file is the browser surface it
-// imports: DOM events, the canvas, fetch, and the yrby-wasm-client document.
+// WebAssembly with no Ruby interpreter, and yrs is linked into the same module.
+// This file is the browser surface it imports: DOM events, the canvas, fetch,
+// and the ActionCable socket the sync protocol runs over.
 import { createConsumer } from "@rails/actioncable"
-import { createClient } from "yrby-wasm-client"
-import initYrs, * as Y from "./vendor/ywasm-browser.js"
 
 const root = document.getElementById("pixel-studio")
 const runtime = document.getElementById("wasm-runtime")
@@ -13,12 +12,12 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 let wasm
-let client
-let undo
 let current = null
 let depth = 0
 const queue = []
-const listeners = { client: {}, undo: {} }
+let consumer = null
+let subscription = null
+let reply = ""
 
 // Strings into Ruby share one buffer: Ruby copies a returned :str at once.
 let scratch = 0
@@ -43,8 +42,8 @@ function give(value) {
   return scratch
 }
 
-// One Ruby call at a time. An event that arrives while Ruby is running (a
-// client callback fired by a Ruby write, say) waits for the call to finish.
+// One Ruby call at a time. An event that arrives while Ruby is running waits
+// for the call to finish.
 function dispatch(code, event = null) {
   if (depth > 0) {
     queue.push([code, event])
@@ -71,14 +70,6 @@ function element(id) {
   return document.getElementById(id)
 }
 const bool = value => value !== 0
-
-// Ruby gets client IDs as strings: they are uint32, past a 32-bit Integer.
-function statusJSON() {
-  const status = JSON.parse(client.getStatus())
-  status.clientID = String(status.clientID)
-  for (const peer of status.peers) peer.clientID = String(peer.clientID)
-  return JSON.stringify(status)
-}
 
 function eventFields(event) {
   const target = event.target
@@ -120,10 +111,39 @@ async function invite(url, stopVersion, token) {
   }
 }
 
+const CABLE_CONNECTED = 20
+const CABLE_DISCONNECTED = 21
+const CABLE_REJECTED = 22
 const INVITE_RESPONSE = 27
 const INVITE_DONE = 28
 const INVITE_ERROR = 29
 const SHARED = 30
+const CABLE_MESSAGE = 31
+const INSPECT_STATUS = 35
+const INSPECT_MAP = 36
+
+// Cable callbacks can fire inside create(); deliver them afterwards, and only
+// for the current subscription.
+function cable(channel, id) {
+  consumer ??= createConsumer()
+  const later = (code, event) => queueMicrotask(() => { if (subscription === created) dispatch(code, event) })
+  const created = consumer.subscriptions.create({ channel, id }, {
+    received: message => later(CABLE_MESSAGE, { values: { json: JSON.stringify(message) } }),
+    connected: () => later(CABLE_CONNECTED),
+    disconnected: () => later(CABLE_DISCONNECTED),
+    rejected: () => later(CABLE_REJECTED),
+  })
+  subscription = created
+  consumer.connect()
+}
+
+// Reads Ruby's state for tests and the console, outside any other call.
+function inspect(code, values) {
+  if (depth > 0) throw new Error("The studio is busy")
+  reply = ""
+  dispatch(code, values && { values })
+  return reply
+}
 
 function field(name) {
   if (!current) return undefined
@@ -143,10 +163,6 @@ const host = {
   host_listen(target, type, code) {
     const id = read(target)
     const name = read(type)
-    if (id === "client" || id === "undo") {
-      listeners[id][name] = code
-      return
-    }
     if (name === "resize" && id !== "window") {
       new ResizeObserver(() => dispatch(code)).observe(element(id))
       return
@@ -214,28 +230,27 @@ const host = {
   host_invite: (url, stopVersion, token) => { invite(read(url), read(stopVersion), token) },
   host_abort: token => invites.get(token)?.abort(),
 
-  host_connect(options) {
-    client = createClient({ ...JSON.parse(read(options)), Y, consumer: createConsumer(), manageConsumer: true })
-    client.onChange(() => listeners.client.change && dispatch(listeners.client.change))
-    client.onStatus(() => listeners.client.status && dispatch(listeners.client.status))
-    window.__spinelPixel.client = client
-    client.connect()
+  host_now: () => Date.now(),
+  // A client ID. 31 bits stays a machine Integer in 32-bit wasm Ruby.
+  host_random: () => (crypto.getRandomValues(new Uint32Array(1))[0] >>> 1) || 1,
+
+  host_cable_open: (channel, id) => cable(read(channel), read(id)),
+  host_cable_send(update, sequence) {
+    const message = { update: read(update) }
+    if (sequence >= 0) message.id = sequence
+    subscription?.send(message)
   },
-  host_online: on => (bool(on) ? client.connect() : client.disconnect()),
-  host_status: () => give(statusJSON()),
-  host_presence: json => client.setPresenceJSON(read(json)),
-  host_map_json: name => give(client.map(read(name)).readJSON()),
-  host_map_get: (name, key) => give(client.map(read(name)).getJSON(read(key))),
-  host_map_set: (name, key, json) => client.map(read(name)).setJSON(read(key), read(json)),
-  host_begin: origin => client.beginTransaction(read(origin)),
-  host_commit: () => client.endTransaction(),
-  host_undo_create(scope, origin, timeout) {
-    undo = client.createUndoManager([read(scope)], read(origin), timeout)
-    undo.onChange(() => listeners.undo.change && dispatch(listeners.undo.change))
+  // Let a final presence frame go out before the subscription closes.
+  host_cable_close() {
+    const previous = subscription
+    subscription = null
+    queueMicrotask(() => {
+      previous?.unsubscribe()
+      if (!subscription) consumer?.disconnect()
+    })
   },
-  // 0 stops capturing, so the next paint starts its own undo step.
-  host_undo: action => (action === 0 ? undo.stopCapturing() : action === 1 ? undo.undo() : undo.redo()),
-  host_can_undo: () => (undo.canUndo ? 1 : 0),
+
+  host_reply: text => { reply = read(text) },
 }
 
 function wasi() {
@@ -249,6 +264,12 @@ function wasi() {
     imports: {
       environ_sizes_get: (count, size) => { view().setUint32(count, 0, true); view().setUint32(size, 0, true); return 0 },
       environ_get: () => 0,
+      random_get(pointer, length) {
+        for (let at = 0; at < length; at += 65536) {
+          crypto.getRandomValues(memory().subarray(pointer + at, pointer + Math.min(length, at + 65536)))
+        }
+        return 0
+      },
       clock_time_get(_id, _precision, out) {
         view().setBigUint64(out, BigInt(Math.round(performance.timeOrigin * 1e6 + performance.now() * 1e6)), true)
         return 0
@@ -296,17 +317,17 @@ try {
   if (!root || !runtime || !context) throw new Error("The studio is missing its shared interface")
   window.__spinelPixel = { ready: false, errors: [] }
   runtime.textContent = "Loading the Spinel module…"
-  const [bytes] = await Promise.all([
-    fetch("/spinel-wasm/pixel_studio.wasm").then(response => {
-      if (!response.ok) throw new Error(`pixel_studio.wasm: HTTP ${response.status}`)
-      return response.arrayBuffer()
-    }),
-    initYrs("/spinel-wasm/ywasm_bg.wasm"),
-  ])
+  const response = await fetch("/spinel-wasm/pixel_studio.wasm")
+  if (!response.ok) throw new Error(`pixel_studio.wasm: HTTP ${response.status}`)
+  const bytes = await response.arrayBuffer()
   const system = wasi()
   const started = performance.now()
   const { instance } = await WebAssembly.instantiate(bytes, { env: host, wasi_snapshot_preview1: system.proxy() })
   wasm = instance.exports
+  window.__spinelPixel.client = {
+    getStatus: () => inspect(INSPECT_STATUS),
+    map: name => ({ readJSON: () => inspect(INSPECT_MAP, { name }) }),
+  }
   wasm._initialize()
   if (wasm.init() !== 0) throw new Error(window.__spinelPixel.errors.at(-1) ?? "Ruby raised while loading")
   depth++
@@ -320,7 +341,8 @@ try {
   window.__spinelPixel.dispatch = dispatch
   window.__spinelPixel.ready = true
 } catch (error) {
-  window.__spinelPixel?.client?.destroy?.()
+  subscription?.unsubscribe()
+  consumer?.disconnect()
   const message = document.getElementById("wasm-error")
   if (message) {
     message.hidden = false
