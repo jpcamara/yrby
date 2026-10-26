@@ -39,6 +39,10 @@ These are new, and they may change in a minor release. See
 
 ### Fixed
 
+- Appending to a record's collaborative document no longer loads the stored
+  snapshot. The channel appends once per change, so every keystroke read the
+  whole document from the database and threw it away, which cost more as the
+  document grew. Documents looked up by key already skipped it.
 - The channel relays a client's SyncStep2 to peers as a plain update.
   Relayed as is, a peer that was still joining could take it for the answer
   to its own handshake and report itself loaded before it had the server's
