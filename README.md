@@ -76,13 +76,19 @@ doc = post.collaborative_document(:body).y_doc
 doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
-Install the gem and the npm package:
+Install the gem and run its generator:
 
 ```
-gem install yrby-rails # depends on yrby
-npm install yrby-client yjs y-protocols @rails/actioncable
-
+bundle add yrby-rails # depends on yrby
 bin/rails generate yrby:install && bin/rails db:migrate
+```
+
+In an app that uses import maps, the generator pins `yrby-client`, `yjs`, and
+`@rails/actioncable` to JavaScript the gem ships. With a bundler, install the
+npm packages instead:
+
+```
+npm install yrby-client yjs y-protocols @rails/actioncable
 ```
 
 ## Contents

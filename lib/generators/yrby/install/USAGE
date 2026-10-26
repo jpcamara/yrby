@@ -1,7 +1,9 @@
 Description:
     Creates the migration for the gem's document storage (Y::Document +
     Y::DocumentUpdate). The models and Y::DocumentChannel ship in the gem,
-    so the migration is the only file this adds to your app.
+    so the migration is the only file this adds to your app. If the app has
+    config/importmap.rb, it also pins yrby-client, yjs, and @rails/actioncable
+    to the JavaScript the gem ships.
 
 Example:
     bin/rails generate yrby:install
