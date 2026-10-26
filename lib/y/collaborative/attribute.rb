@@ -19,8 +19,10 @@ module Y
       def load_state = existing_row&.load_state
 
       # Records one change and returns once it's saved. The channel waits for
-      # this to return before it acknowledges or broadcasts the change.
-      def append(update) = document_row.append(update)
+      # this to return before it acknowledges or broadcasts the change. It
+      # runs once per change, so it finds the row without its snapshot, and
+      # falls back to document_row only to create or adopt one.
+      def append(update) = (existing_row || document_row).append(update)
 
       # Builds a new Y::Doc from storage on every call.
       def y_doc

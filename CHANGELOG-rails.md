@@ -7,6 +7,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Appending to a record's collaborative document no longer loads the stored
+  snapshot. The channel appends once per change, so every keystroke read the
+  whole document from the database and threw it away, which cost more as the
+  document grew. Documents looked up by key already skipped it.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added
