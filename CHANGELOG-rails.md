@@ -41,6 +41,12 @@ These are new, and they may change in a minor release. See
 
 ### Added
 
+- `bin/rails generate yrby:install` pins `yrby-client`, `yrby-client/element`,
+  `yjs`, and `@rails/actioncable` when the app has `config/importmap.rb`. The
+  gem ships `yrby/yrby-client.js` and `yrby/yjs.js` for those pins, so an
+  import-map app needs no npm packages. Each shared module has one pin, so the
+  page and its editor binding load one copy of yjs. Pins the app already has
+  are left alone.
 - `collaborative_document(name)` answers `grant(expires_in:)` and `channel`:
   the grant a page or client subscribes with, and the channel that accepts
   it. A gem with its own grants and channel, such as lexxy-realtime, returns
