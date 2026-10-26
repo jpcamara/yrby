@@ -192,29 +192,46 @@ LIVE_ARTIST=1 BASE=http://127.0.0.1:3000 node pixels_wasm_e2e.mjs
 ### Optional experiment: the studio compiled by Spinel
 
 `/docs/demo/pixels/spinel` runs the same studio as Ruby compiled ahead of time
-by [Spinel](https://github.com/matz/spinel). There is no Ruby interpreter in
-the page. `experiments/spinel-wasm/src/pixel_studio.rb` becomes a 1.4 MB
-WebAssembly module that starts in tens of milliseconds, against about 29 MB
-for the ruby.wasm runtime.
+by [Spinel](https://github.com/matz/spinel), with
+[yrs](https://github.com/y-crdt/y-crdt) linked into the same WebAssembly module.
+There is no Ruby interpreter and no separate CRDT runtime in the page. The
+module is 1.8 MB (0.6 MB gzipped) and starts in tens of milliseconds, against
+about 29 MB for the ruby.wasm runtime.
 
 Ruby owns the same things as in the ruby.wasm page: painting, tools, strokes,
-keyboard, undo, rendering, cursors, presence and the artist panel.
-`src/host.js` is the browser surface it imports, about 40 small functions:
-element properties by id, the current event's fields, the canvas, fetch, and
-the yrby-wasm-client document over ywasm. Values cross as numbers, strings
-and JSON. Client IDs cross as strings, because Integer is 32-bit on wasm32.
+keyboard, undo, rendering, cursors, presence and the artist panel. It also owns
+the document and the sync protocol:
+
+- `src/yrs.rb` calls yrs's C API (yffi) through Spinel's `ffi_func`: one Doc
+  with the four shared maps, transactions, an undo manager, state vectors and
+  diffs. `src/yrs_glue.c` covers the calls that pass a struct by value or return
+  memory Ruby has to copy, and queues each committed update for Ruby to take.
+- `src/sync.rb` speaks the y-websocket protocol over ActionCable: the sync
+  handshake, acknowledged delivery of local updates with resends, and presence
+  (Yjs awareness) encoded by hand.
+
+`src/host.js` is the browser surface Ruby imports: element properties by id,
+the current event's fields, the canvas, fetch, and the ActionCable subscription,
+which carries base64 frames in both directions.
 
 Spinel's library mode (`--ext-init`, `--ext-entry`) emits the program with an
 init function in place of `main`, so the module stays alive and JavaScript
 calls `dispatch(code)` for each event. `src/exports.c` wraps those entries so
 a Ruby raise reaches JavaScript as an error instead of trapping the module.
+Integer is 32 bits on wasm32, so the build passes `--int-overflow=promote` for
+the 53-bit client IDs other peers use.
 
-Building the module needs a Spinel checkout built with `make && make wasm-rt`
-and [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) 34 or later:
+Building the module needs a Spinel checkout built with `make && make wasm-rt`,
+[wasi-sdk](https://github.com/WebAssembly/wasi-sdk) 34 or later, and a y-crdt
+checkout at v0.28.0 with Rust's `wasm32-wasip1` target. `build-wasm.sh` applies
+`yffi-wasi.patch` first: yrs leaves out its default undo options on
+WebAssembly, and yffi's `yundo_manager` uses them.
 
 ```bash
+git clone --branch v0.28.0 https://github.com/y-crdt/y-crdt.git ~/src/y-crdt
+rustup target add wasm32-wasip1
 cd examples/actioncable-demo/frontend/experiments/spinel-wasm
-SPINEL_HOME=~/src/spinel WASI_SDK=/opt/wasi-sdk ./build-wasm.sh
+SPINEL_HOME=~/src/spinel WASI_SDK=/opt/wasi-sdk YCRDT=~/src/y-crdt ./build-wasm.sh
 npm ci --ignore-scripts && npm run build
 ```
 

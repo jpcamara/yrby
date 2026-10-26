@@ -27,6 +27,5 @@
 
 # Opt-in Spinel/WASM browser experiment
 /frontend/experiments/spinel-wasm/node_modules/
-/frontend/experiments/spinel-wasm/src/vendor/
 /frontend/experiments/spinel-wasm/build/
 /public/spinel-wasm/

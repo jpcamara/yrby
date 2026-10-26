@@ -6,8 +6,6 @@
     "build": "bun build.mjs"
   },
   "dependencies": {
-    "@rails/actioncable": "8.1.300",
-    "ywasm": "0.28.0",
-    "yrby-wasm-client": "file:../../../../../packages/wasm-client"
+    "@rails/actioncable": "8.1.300"
   }
 }
