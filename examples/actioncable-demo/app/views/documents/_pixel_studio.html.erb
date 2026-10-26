@@ -1,3 +1,4 @@
+<% spinel = local_assigns[:engine] == :spinel %>
 <% content_for :title, experimental ? "Pixel Bay · Paint the bay. In Ruby." : "Pixel Bay · shared pixel painting" %>
 <% content_for :head do %>
 <style>
@@ -93,20 +94,20 @@
       <section class="studio-people" aria-labelledby="people-heading"><h2 class="section-label" id="people-heading">Here in the studio <span id="presence-count">Just you</span></h2><div class="presence-list" id="presence-list"></div><label class="name-row" for="your-name">YOU ARE <input class="name-input" id="your-name" aria-label="Your display name" maxlength="24" autocomplete="off" spellcheck="false"></label></section>
       <% if experimental %>
         <section class="wasm-runtime-card" aria-labelledby="wasm-runtime-heading">
-          <h2 class="section-label" id="wasm-runtime-heading">Experimental Ruby client</h2>
+          <h2 class="section-label" id="wasm-runtime-heading"><%= spinel ? "Experimental compiled Ruby client" : "Experimental Ruby client" %></h2>
           <div class="wasm-runtime-controls">
             <p id="wasm-runtime" role="status">Loading Ruby…</p>
             <button class="outline-button" id="wasm-toggle-connection" type="button" disabled>Disconnect</button>
           </div>
           <p id="wasm-pending" role="status">Loading the browser client…</p>
           <p class="wasm-runtime-help">Try it: disconnect, paint in both studios, then reconnect to merge your marks.</p>
-          <a class="wasm-runtime-source" href="/ruby-wasm/pixel_peer.rb" target="_blank" rel="noopener">Read the Ruby source ↗</a>
+          <a class="wasm-runtime-source" href="<%= spinel ? "/spinel-wasm/pixel_studio.rb" : "/ruby-wasm/pixel_peer.rb" %>" target="_blank" rel="noopener">Read the Ruby source ↗</a>
           <div id="wasm-error" role="alert" hidden></div>
         </section>
       <% end %>
     </aside>
   </div>
 
-  <footer class="studio-footer"><span class="footer-signature"><i aria-hidden="true"></i> One canvas. Everyone’s marks.</span><span><% if experimental %>Ruby WASM experiment · yrby<% else %><%= link_to "Ruby/WASM experiment ↗", document_pixels_wasm_path(@document_id), target: "_blank", rel: "noopener" %> · Built with yrby + Ruby<% end %></span></footer>
+  <footer class="studio-footer"><span class="footer-signature"><i aria-hidden="true"></i> One canvas. Everyone’s marks.</span><span><% if experimental %><%= spinel ? "Spinel WASM experiment · yrby" : "Ruby WASM experiment · yrby" %><% else %><%= link_to "Ruby/WASM experiment ↗", document_pixels_wasm_path(@document_id), target: "_blank", rel: "noopener" %> · Built with yrby + Ruby<% end %></span></footer>
   <div class="toast" id="studio-toast" role="status" hidden></div>
 </main>

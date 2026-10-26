@@ -33,6 +33,11 @@ class DocumentsController < ApplicationController
     pixels
   end
 
+  # The same studio compiled ahead of time by Spinel: no Ruby interpreter.
+  def pixels_spinel
+    pixels
+  end
+
   # One agent per document: a second invite while the first is still there
   # is answered with 409 and nothing starts.
   AGENTS = {} # rubocop:disable Style/MutableConstant -- the registry of running agent threads
