@@ -41,6 +41,22 @@ class CollaborativeAttributeTest < ActionCable::Channel::TestCase
     assert_instance_of Y::EncryptedDocument, @page.collaborative_document(:secret).document_row
   end
 
+  # The channel appends once per change. Loading the snapshot each time
+  # would cost more as the document grows, and append never reads it.
+  def test_append_to_an_existing_document_skips_the_snapshot
+    %i[body secret].each do |name|
+      attribute = @page.collaborative_document(name)
+      attribute.append(UPDATE)
+
+      reads = []
+      record = ->(*, payload) { reads << payload[:sql] if payload[:sql].match?(/\ASELECT .*FROM "y_documents"/) }
+      ActiveSupport::Notifications.subscribed(record, "sql.active_record") { attribute.append(UPDATE) }
+
+      refute_empty reads, name
+      reads.each { |sql| refute_match(/"y_documents"\.\*|"state"/, sql, name) }
+    end
+  end
+
   def test_key_does_not_create_a_document_row
     attribute = @page.collaborative_document(:body)
 
