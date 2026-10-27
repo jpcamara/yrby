@@ -11,6 +11,7 @@ class AgentModel
 
   FIREWORKS_BASE = "https://api.fireworks.ai/inference/v1".freeze
   MODEL = ENV.fetch("AGENT_MODEL", "accounts/fireworks/routers/glm-5p3-fast")
+  TIMEOUT = /timeout|timed out/i
 
   INSTRUCTIONS = <<~TEXT.freeze
     You are a helpful colleague inside a shared document that people are editing
@@ -63,13 +64,15 @@ class AgentModel
   # Fireworks speaks the OpenAI API. A fresh chat per call: ruby_llm sends a
   # reasoning model's earlier reasoning back with the history, and Fireworks
   # rejects that. Low reasoning effort answers in about a second.
-  def stream(prompt)
+  #
+  # A call that stalls before any words arrive is tried once more. Once words
+  # have arrived, people are watching the proposal, so a stall fails instead
+  # of starting it over.
+  def stream(prompt, &)
     raise Error, "the demo's model budget for today is used up" unless @seats.spend_call
 
-    chat.with_thinking(effort: "low").ask(prompt) do |chunk|
-      text = chunk.content.to_s
-      yield text unless text.empty?
-    end
+    stalled = ask(prompt, again: true, &) == :stalled
+    ask(prompt, again: false, &) if stalled
   rescue Error
     raise
   rescue StandardError => e
@@ -77,11 +80,29 @@ class AgentModel
     raise Error, describe(e)
   end
 
+  # Streams one call. With `again`, a timeout before any words returns
+  # :stalled instead of raising.
+  def ask(prompt, again:)
+    streamed = false
+    chat.with_thinking(effort: "low").ask(prompt) do |chunk|
+      text = chunk.content.to_s
+      next if text.empty?
+
+      streamed = true
+      yield text
+    end
+  rescue StandardError => e
+    raise if streamed || !again || !"#{e.class} #{e.message}".match?(TIMEOUT)
+
+    Rails.logger.warn("AgentModel: #{e.class}: #{e.message}; trying once more")
+    :stalled
+  end
+
   def chat
     RubyLLM.configure do |c|
       c.openai_api_key = ENV.fetch("FIREWORKS_API_KEY")
       c.openai_api_base = FIREWORKS_BASE
-      c.request_timeout = 20 # a proposal takes a second or two; a stall should fail fast
+      c.request_timeout = 8 # a proposal takes a second or two; a stall should fail fast
     end
     RubyLLM.chat(model: MODEL, provider: :openai, assume_model_exists: true).with_instructions(INSTRUCTIONS)
   end
@@ -89,7 +110,7 @@ class AgentModel
   def describe(error)
     case "#{error.class} #{error.message}"
     when /\b429\b|rate.?limit/i then "the model is rate limited; try again in a minute"
-    when /timeout|timed out/i then "the model timed out"
+    when TIMEOUT then "the model timed out"
     when /\b401\b|unauthor/i then "the model rejected the site's key"
     else "the model call failed"
     end
