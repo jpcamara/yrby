@@ -16,14 +16,13 @@ class PageAgentJob < ActiveJob::Base
   # joins the cable at that origin, unless AGENT_CABLE_URL names another way
   # in, and sends it as its Origin, which the cable checks like a browser's.
   #
-  # Each person in a room can bring an agent, so Y::Agent's one-agent-per-
-  # document lock is off (lock: nil). AgentSeats counts agents per room and
-  # per person instead.
+  # Each person in a room can bring an agent, so the lock is per person
+  # (as:). AgentSeats also caps how many agents a room and the site take.
   def perform(room, origin, owner)
     owner = owner.symbolize_keys
     url = ENV.fetch("AGENT_CABLE_URL") { "#{origin.sub(/\Ahttp/, "ws")}/cable" }
     page_agent = nil
-    Y::Agent.run(RoomDocument.new(room), url: url, channel: "NoteChannel", lock: nil,
+    Y::Agent.run(RoomDocument.new(room), url: url, channel: "NoteChannel", as: owner[:id],
                                          headers: { "Origin" => origin },
                                          idle: Limits::AGENT_IDLE, max_stay: Limits::AGENT_MAX_STAY) do |agent|
       page_agent = PageAgent.new(agent, owner: PageAgent::Owner.new(**owner))
