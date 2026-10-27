@@ -301,9 +301,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-    # The caller's headers, plus an Origin unless they set one.
+    # The caller's headers, plus an Origin unless they set one. It's a new
+    # array each time, because async-websocket adds the handshake's key to
+    # the one it's given, and a reconnect has to send only its own key.
     def request_headers
-      @headers.any? { |name, _| name == "origin" } ? @headers : [["origin", origin], *@headers]
+      headers = @headers.dup
+      headers.unshift(["origin", origin]) unless headers.any? { |name, _| name == "origin" }
+      headers
     end
 
     # Action Cable checks the origin against the host unless forgery
