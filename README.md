@@ -979,9 +979,11 @@ editor next renews its presence, so the agent waits one renewal window, 15
 seconds, before it decides it is alone. It always clears its presence and
 unsubscribes on the way out.
 
-One agent works on a document at a time. The lock is in `Rails.cache` by
-default, so it holds across processes when the cache is shared. Pass
-`lock:` for another `ActiveSupport::Cache` store. A thread renews it while
+One agent works on a document at a time. Pass `as:` to allow one per person
+instead, such as `as: person` when each person can bring their own agent. A
+record is named by its GlobalID. The lock is in `Rails.cache` by default,
+so it holds across processes when the cache is shared. Pass `lock:` for
+another `ActiveSupport::Cache` store. A thread renews it while
 the agent stays, so a slow model call doesn't let it lapse. `run` returns
 `:busy` without joining when another agent holds the document, and `:left`
 otherwise. Cache stores can't compare and set in one step, so a process that

@@ -4,7 +4,7 @@ require "securerandom"
 
 module Y
   class Agent
-    # The one-agent-per-document lock: a key in an ActiveSupport::Cache store
+    # The agent lock: a key in an ActiveSupport::Cache store
     # holding this agent's token. It is written only if absent, and a thread
     # of its own renews it every LOCK_TTL / 3 seconds while the agent stays,
     # however long a handler or a model call takes. It lapses LOCK_TTL
@@ -17,6 +17,15 @@ module Y
     # comes back, it can briefly overlap the agent that took over. Its next
     # renewal sees the other token and it stops.
     class Lock
+      # One key per document, or per document and `as` when it's given. A
+      # record is named by its GlobalID, so a Person and a Team with the same
+      # id don't share a key.
+      def self.key(document, as)
+        return "yrby:agent:#{document.key}" if as.nil?
+
+        "yrby:agent:#{document.key}:#{as.respond_to?(:to_global_id) ? as.to_global_id : as}"
+      end
+
       def initialize(store, key)
         @store = store
         @key = key

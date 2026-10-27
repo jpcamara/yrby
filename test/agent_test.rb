@@ -93,6 +93,15 @@ class AgentTest < Minitest::Test
     assert_equal :busy, agent.join(5)&.value
   end
 
+  # With as:, each person can bring one agent, and a second for the same
+  # person is turned away.
+  def test_one_agent_per_person_with_as
+    @lock.write(Y::Agent::Lock.key(@document, "ada"), "Ada's agent")
+
+    assert_equal :busy, agent(as: "ada").join(5)&.value
+    assert_equal :left, agent(as: "linus", max_stay: 1).join(10)&.value
+  end
+
   def test_an_error_in_a_handler_is_reported_and_the_agent_carries_on
     ada = person
     names = roster(ada)

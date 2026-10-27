@@ -26,9 +26,11 @@ module Y
   # agent has stayed `max_stay` seconds, or a handler calls `leave`. It
   # always clears its presence and unsubscribes on the way out.
   #
-  # Only one agent works on a document at a time. The lock lives in `lock:`,
-  # Rails.cache by default, so it holds across processes when the cache is
-  # shared. `run` returns :busy without joining when another agent holds it.
+  # Only one agent works on a document at a time. Pass `as:` to allow one
+  # per person instead, such as `as: person` for the agent a person brought.
+  # The lock lives in `lock:`, Rails.cache by default, so it holds across
+  # processes when the cache is shared. `run` returns :busy without joining
+  # when another agent holds it.
   #
   # An error in the block or a handler is logged and passed to on_error, and
   # the agent keeps going.
@@ -50,13 +52,13 @@ module Y
     # Y::DocumentChannel subclass, and `root:` the root XmlText that
     # on_change reports blocks of.
     def initialize(document, url:, headers: {}, presence: nil, channel: "Y::DocumentChannel", root: "root", # rubocop:disable Metrics/ParameterLists -- the document, the connection, and how long to stay
-                   idle: IDLE, max_stay: MAX_STAY, lock: Agent.default_lock, logger: Agent.default_logger)
+                   idle: IDLE, max_stay: MAX_STAY, as: nil, lock: Agent.default_lock, logger: Agent.default_logger)
       @document = document
       @connect = { url: url, headers: headers, channel: channel, root: root }
       @presence = presence
       @idle = idle
       @max_stay = max_stay
-      @lock = lock && Lock.new(lock, "yrby:agent:#{document.key}")
+      @lock = lock && Lock.new(lock, Lock.key(document, as))
       @logger = logger
       @changes = Thread::Queue.new
       @change_handlers = []

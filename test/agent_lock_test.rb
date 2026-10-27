@@ -61,4 +61,16 @@ class AgentLockTest < Minitest::Test
 
     refute_nil @store.read("yrby:agent:doc"), "the successor's lock survives"
   end
+
+  Document = Data.define(:key)
+  Person = Data.define(:to_global_id)
+
+  def test_a_lock_per_document_or_per_document_and_person
+    doc = Document.new(key: "post/1/body")
+
+    assert_equal "yrby:agent:post/1/body", Y::Agent::Lock.key(doc, nil)
+    assert_equal "yrby:agent:post/1/body:ada", Y::Agent::Lock.key(doc, "ada")
+    assert_equal "yrby:agent:post/1/body:gid://app/Person/1",
+                 Y::Agent::Lock.key(doc, Person.new(to_global_id: "gid://app/Person/1"))
+  end
 end

@@ -24,7 +24,7 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   `on_change` with the blocks people changed once their typing settles, and
   leaves when nobody else has been present for `idle` seconds or after
   `max_stay`. One agent works on a document at a time, through a lock in
-  `Rails.cache`. Errors in handlers go to `on_error` and the agent keeps
+  `Rails.cache`, or one per person with `as: person`. Errors in handlers go to `on_error` and the agent keeps
   going. `require "y/agent"` to use it.
 - `Attribute#grant(expires_in:)` returns the document's signed grant.
 
