@@ -66,10 +66,10 @@ class ActionCableClientServerTest < Minitest::Test
     @clients.each(&:unsubscribe)
   end
 
-  def client(key = @key)
+  def client(key = @key, **)
     client = Y::ActionCable::Client.new("ws://127.0.0.1:#{self.class.port}/cable",
                                         channel: "ActionCableClientServerTest::RoomChannel", params: { id: key },
-                                        logger: Logger.new(File::NULL))
+                                        logger: Logger.new(File::NULL), **)
     @clients << client
     client
   end
@@ -114,6 +114,19 @@ class ActionCableClientServerTest < Minitest::Test
     first.send_awareness(frame)
 
     assert_equal frame, seen.pop(timeout: 5)
+  end
+
+  # Each reconnect is a new handshake with a new key. The caller's headers
+  # go out again as they were given.
+  def test_a_client_that_sets_its_origin_reconnects_after_a_drop
+    origin = client(headers: { "Origin" => "http://127.0.0.1:#{self.class.port}" }).subscribe
+    ActionCable.server.connections.each(&:close)
+    update = origin.doc.diff { |d| Y::Lexical.append_paragraph(d, "after the drop") }
+    origin.send_update(update)
+
+    wait_until(timeout: 10) { !origin.pending? }
+
+    assert_includes STORE_LOCK.synchronize { STORE[@key].dup }, update
   end
 
   def test_a_rejected_subscription_raises
