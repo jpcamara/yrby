@@ -1,0 +1,189 @@
+<% content_for :title, "lexxy-realtime: collaborative Lexxy editing for Rails" %>
+<% content_for :description, "lexxy-realtime makes Basecamp's Lexxy editor collaborative with a model macro, a form helper, and a generator. Several people can edit the same rich text field, and the gem saves the HTML back to the record after each change. It's built on yrby." %>
+<% content_for :canonical, canonical_url("/lexxy") %>
+
+<section class="pt-6 pb-14 sm:pt-14">
+  <p class="font-mono text-xs tracking-[0.14em] text-rose-500 uppercase">lexxy-realtime · a separate gem, built on yrby</p>
+  <h1 class="mt-3 max-w-3xl font-serif text-5xl leading-[1.02] font-normal tracking-tight text-zinc-100 sm:text-6xl">
+    Collaborative editing for Lexxy
+  </h1>
+  <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
+    Lexxy is Basecamp's rich text editor for Action Text, built on Lexical.
+    <code>lexxy-realtime</code> lets several people type in the same field
+    and see each other's text and cursors as they go. You add one line to the
+    model and one to the form, then run a generator.
+  </p>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    lexxy-realtime installs yrby-rails and yrby-client for you and does the
+    editor setup. If you use a different editor, or no editor, use
+    <%= link_to "yrby-rails", doc_path("getting-started"), class: "text-accent underline decoration-rose-400/40 underline-offset-2" %>
+    directly.
+  </p>
+
+  <div class="mt-8 max-w-2xl space-y-4">
+    <%= code_sheet "app/models/post.rb", "model" do %><div class="px-2 py-3"><%= sample_lexxy_model %></div><% end %>
+    <%= code_sheet "app/views/posts/_form.html.erb", "view" do %><div class="px-2 py-3"><%= sample_lexxy_form %></div><% end %>
+    <%= code_sheet "terminal", nil do %><div class="px-2 py-3"><%= sample_lexxy_install %></div><% end %>
+  </div>
+
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    Import <code>lexxy-realtime</code> wherever you import Lexxy. The channel
+    ships in the gem, so there's no channel to write. Render the form only for
+    users who may edit the record, then open it in two browsers and type.
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    <code>post.body</code> is still Action Text.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    While people are editing, lexxy-realtime keeps the body's Yjs state in
+    yrby's <code>Y::Document</code> tables. After each change, it renders
+    that state to HTML in Ruby with <code>Y::Lexxy</code> and saves the result
+    to <code>post.body</code>. That HTML matches what Lexxy would have
+    submitted itself, so search, mailers, and show pages work without
+    changes.
+  </p>
+  <p class="mt-4">
+    <%= link_to "Watch the saved HTML update as you type →", demo_path("lexxy"), rel: "nofollow",
+                class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    The channel ships in the gem.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    The form helper wraps the Lexxy editor in yrby-client's
+    <code>&lt;yrby-document&gt;</code> element and puts a
+    <code>&lt;lexxy-collaboration&gt;</code> element inside the editor:
+  </p>
+  <div class="mt-5 max-w-2xl"><%= sample_lexxy_markup %></div>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    <code>&lt;yrby-document&gt;</code> subscribes to the channel with the
+    signed grant and holds the post's Yjs document, the provider, and any
+    edits the server hasn't confirmed yet. When the document first syncs,
+    <code>&lt;lexxy-collaboration&gt;</code> binds the editor to it. The editor
+    stays inert until then, so nobody types into a document that can't sync.
+  </p>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    The grant is a signed GlobalID for one record and one field.
+    <code>LexxyRealtime::DocumentChannel</code> extends yrby-rails'
+    <code>Y::DocumentChannel</code> and looks up the record from the grant. It
+    rejects a grant that's missing, tampered with, expired, or made for another
+    field, a record that's been deleted, and a field that isn't declared with
+    <code>has_collaborative_rich_text</code>. The grant has its own purpose, so
+    <code>Y::DocumentChannel</code> rejects it, and a client can't skip the
+    Action Text rendering by subscribing to the parent channel.
+  </p>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    A valid grant means your app rendered the form for this user. To also check
+    the user's current permissions when they subscribe, give the channel an
+    <code>authorize_document</code> block. It runs inside the channel, so
+    <code>current_user</code> and your other connection identifiers work.
+    If it returns false or nil, the channel rejects the subscription before it
+    sends anything.
+  </p>
+  <div class="mt-5 max-w-2xl"><%= sample_lexxy_authorize %></div>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    Grants expire, and the page can renew them.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    A grant lasts a month by default, which is GlobalID's default under Rails.
+    Pass <code>expires_in:</code> to shorten it. The grant is part of the
+    rendered page, and Action Cable resubscribes with it after every network
+    drop, so an editor whose grant expired stops syncing at its next reconnect.
+    Pair <code>expires_in:</code> with <code>refresh:</code>, the URL of an
+    action that returns a new grant:
+  </p>
+  <div class="mt-5 max-w-2xl space-y-4">
+    <%= sample_lexxy_refresh_form %>
+    <%= sample_lexxy_refresh_action %>
+  </div>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    When the server rejects the subscription, <code>&lt;yrby-document&gt;</code>
+    fetches that URL with the session cookie and resubscribes with the new
+    grant. It keeps the Yjs document and any edits the server hasn't
+    confirmed. The action hands out write access, so its check has to be at
+    least as strict as the page that renders the form. If the refresh fails,
+    the editor stops syncing until the page reloads.
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    Import maps or a bundler.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    With import maps, the generator pins the JavaScript files the gem ships,
+    one for each module the page must load only once. It keeps pins your app
+    already has, so it's safe to run again after an upgrade.
+  </p>
+  <div class="mt-5 max-w-2xl"><%= sample_lexxy_pins %></div>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    <code>@37signals/lexxy</code> points at Lexxy's own file, and
+    lexxy-realtime gets Lexical from it, so the page loads one copy of each.
+    yrby-client and Yjs are separate files, so any of your own code that
+    imports them gets the same copies lexxy-realtime uses. With a bundler,
+    run <code>npm install lexxy-realtime</code>. npm and bun install its peers
+    (<code>lexical</code>, <code>yjs</code>, and the rest). Either way, the
+    entry point imports the same two packages:
+  </p>
+  <div class="mt-5 max-w-2xl"><%= sample_lexxy_imports %></div>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    <code>&lt;yrby-document&gt;</code> creates an <code>@rails/actioncable</code>
+    consumer from the page's <code>action-cable-url</code> meta tag. To use
+    <code>@anycable/web</code>, set the consumer once at boot, before any
+    editor mounts. The function runs the first time an editor needs a consumer:
+  </p>
+  <div class="mt-5 max-w-2xl"><%= sample_lexxy_anycable %></div>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    Custom nodes and encryption.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    Any custom Lexical nodes you've registered sync like the rest of the
+    editor's content. When <code>Y::Lexxy</code> doesn't know a node, it
+    renders what it can: a container or inline wrapper keeps its text, and an
+    embed that keeps its content in attributes renders nothing. Pass
+    <code>nodes:</code> to <code>has_collaborative_rich_text</code> with a
+    render rule for each of your node types. When a document has node types
+    with no rule, the gem logs a warning that names them.
+  </p>
+  <p class="mt-4 max-w-2xl leading-7 text-zinc-400">
+    To encrypt a field, pass <code>encrypted: true</code> to
+    <code>has_collaborative_rich_text</code>. Both the Action Text body and
+    the <code>Y::Document</code> rows are then stored with Active Record
+    encryption.
+  </p>
+</section>
+
+<section class="border-t border-zinc-800/70 py-14">
+  <h2 class="font-serif text-3xl font-normal tracking-tight text-zinc-100 sm:text-4xl">
+    Built on yrby.
+  </h2>
+  <p class="mt-3 max-w-2xl leading-7 text-zinc-400">
+    lexxy-realtime is a small layer on top of yrby, which the rest of this
+    site documents. yrby does the syncing, the saving, and the HTML
+    rendering, over Action Cable or AnyCable. The gem's channel is yrby-rails'
+    <code>Y::DocumentChannel</code> plus the Action Text rendering, and the
+    <code>&lt;yrby-document&gt;</code> element comes from yrby-client.
+  </p>
+  <div class="mt-5 space-y-1 font-mono text-sm text-zinc-500">
+    <p><span class="text-accent">bundle add lexxy-realtime</span> &nbsp;·&nbsp; <span class="text-accent">bin/rails generate lexxy_realtime:install</span></p>
+  </div>
+  <nav class="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-400">
+    <a class="hover:text-accent" href="https://github.com/jpcamara/lexxy-realtime">GitHub</a>
+    <a class="hover:text-accent" href="https://rubygems.org/gems/lexxy-realtime">RubyGems</a>
+    <a class="hover:text-accent" href="https://www.npmjs.com/package/lexxy-realtime">npm</a>
+    <%= link_to "Live demo", demo_path("lexxy"), rel: "nofollow", class: "hover:text-accent" %>
+    <%= link_to "yrby docs", doc_path("getting-started"), class: "hover:text-accent" %>
+  </nav>
+</section>

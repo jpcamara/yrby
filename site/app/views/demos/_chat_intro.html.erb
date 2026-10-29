@@ -1,0 +1,15 @@
+<p>
+  The thread is a <code>Y.Array</code> named <code>messages</code>. Each
+  message is a <code>Y.Map</code> with its text, author, and time, plus a
+  nested <code>Y.Map</code> of reactions keyed by person. Two people reacting
+  to the same message write different keys, so both reactions are kept.
+  Choosing your reaction again deletes your key. The room keeps the last 200
+  messages.
+</p>
+<p>
+  Nobody sees what you type until you send it. While you type, your awareness
+  state says you're typing, and nothing more. The server passes awareness to
+  the room but doesn't save it. If several people type at once, they share one
+  typing bubble. Enter sends, and Shift+Enter starts a new line. Click or
+  long-press a message to react.
+</p>

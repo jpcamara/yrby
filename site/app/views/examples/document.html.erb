@@ -1,0 +1,36 @@
+<% content_for :title, "A record-backed editor · yrby" %>
+<% content_for :head do %>
+  <script type="module" src="<%= busted "/document.js" %>"></script>
+<% end %>
+<div class="docs-body max-w-3xl">
+  <p class="text-sm text-accent">Example</p>
+  <h1>A record-backed editor</h1>
+  <p>Open this page in two windows and type in either one. Rails saves the
+    text to its database, and the button below reads it back in Ruby.</p>
+  <p>Everyone who visits this page edits the same text, and it's cleared
+    after a day with no activity. Don't type anything private.</p>
+</div>
+<p id="document-status" role="status" class="my-4 text-sm text-zinc-400">Connecting…</p>
+<template id="document-template">
+<%= collaborative_document_tag @document, :body, id: "document-editor", class: "block rounded-lg border border-zinc-700 bg-zinc-900 p-3" do %>
+  <div data-editor-mount aria-label="Shared document"></div>
+<% end %>
+</template>
+<div id="document-container"></div>
+<section class="docs-body mt-8 max-w-3xl">
+  <h2>Read back from Rails</h2>
+  <button id="read-document" class="rounded border border-zinc-600 px-3 py-2 text-sm">Read saved text</button>
+  <pre id="stored-document" aria-live="polite">Type something, then select “Read saved text”.</pre>
+  <%= code_block "ruby", "doc = @document.collaborative_document(:body).y_doc\ndoc.read_text(\"content\")" %>
+  <h2>How it's wired</h2>
+  <p>The view renders <code>collaborative_document_tag</code>. Once the
+    Yjs document syncs, the page's script attaches CodeMirror to it. When the
+    lease's abort signal fires, the script removes CodeMirror again. The
+    document session keeps any edits the server hasn't confirmed yet, so
+    removing the editor doesn't lose them.</p>
+  <p>This page runs the published gems and client. The site adds the same
+    limits to the gem's channel that the public demos use. In your own app, check
+    that the user can edit the record before you render the tag.</p>
+  <p><a href="/docs/getting-started">Getting started</a> ·
+    <a href="/docs/javascript-client">The JavaScript client</a></p>
+</section>

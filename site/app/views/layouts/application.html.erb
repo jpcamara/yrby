@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-zinc-950">
+  <head>
+    <%
+      page_title = content_for(:title).presence || "yrby: real-time collaborative editing for Rails"
+      page_desc  = content_for(:description).presence ||
+        "Real-time collaborative editing for Rails. yrby syncs Yjs documents over Action Cable, stores them in your database with Active Record, and renders them to HTML in Ruby. It needs no Node process and no third-party service."
+      page_canonical = content_for(:canonical).presence || canonical_url
+    %>
+    <title><%= page_title %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="description" content="<%= page_desc %>">
+    <meta name="theme-color" content="#ece8e0">
+    <link rel="canonical" href="<%= page_canonical %>">
+
+    <%# Open Graph tags control link previews in Slack, Discord, X, Mastodon,
+        and elsewhere. og:image is a static card in public/. %>
+    <meta property="og:site_name" content="yrby">
+    <meta property="og:title" content="<%= page_title %>">
+    <meta property="og:description" content="<%= page_desc %>">
+    <meta property="og:type" content="<%= content_for(:og_type).presence || "website" %>">
+    <meta property="og:url" content="<%= page_canonical %>">
+    <meta property="og:image" content="<%= canonical_host %>/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="<%= page_title %>">
+    <meta name="twitter:description" content="<%= page_desc %>">
+    <meta name="twitter:image" content="<%= canonical_host %>/og.png">
+
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%# Tells createConsumer() where the cable server is. %>
+    <%= action_cable_meta_tag %>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <%# `bun run build:css` builds this with Tailwind v4. It's served as a
+        static file, like the demo bundles. %>
+    <link rel="stylesheet" href="<%= busted "/site.css" %>">
+    <%= yield :head %>
+  </head>
+
+  <%# overflow-x-clip keeps a stray wide element from scrolling the page
+      sideways. Wide content like code blocks scrolls inside its own
+      overflow-x-auto container. %>
+  <body class="flex min-h-dvh flex-col overflow-x-clip">
+    <a href="#main" class="skip-link">Skip to content</a>
+    <header class="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
+      <div class="mx-auto flex max-w-6xl items-center gap-5 px-5 py-3 sm:gap-7">
+        <a class="wordmark font-serif text-[1.75rem] leading-none font-medium tracking-tight whitespace-nowrap text-zinc-100" href="/">
+          yrby<%= caret_mark("ml-0.5 text-rose-500") %>
+        </a>
+        <nav class="flex items-center gap-4 text-[0.95rem] whitespace-nowrap text-zinc-400 sm:gap-5">
+          <%= link_to "Docs", doc_path("getting-started"), class: "hover:text-zinc-100" %>
+          <%= link_to "Demos", demos_path, class: "hover:text-zinc-100" %>
+          <a class="hover:text-zinc-100" href="/lexxy">lexxy-realtime</a>
+        </nav>
+        <nav class="ml-auto flex items-center gap-5 text-[0.95rem] text-zinc-400">
+          <a class="hidden rounded-full border border-zinc-700 px-2.5 py-0.5 font-mono text-xs text-zinc-500 hover:text-zinc-100 sm:inline"
+             href="https://github.com/jpcamara/yrby/blob/main/CHANGELOG.md">v<%= Y::VERSION %></a>
+          <a class="hidden hover:text-zinc-100 sm:inline" href="https://github.com/jpcamara/yrby">GitHub</a>
+          <a class="hidden hover:text-zinc-100 sm:inline" href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
+        </nav>
+      </div>
+    </header>
+
+    <%# A page that draws its own full-width bands sets content_for(:full_bleed)
+        and lays out its own containers. Every other page gets the standard one. %>
+    <% if content_for?(:full_bleed) %>
+      <main id="main" class="w-full flex-1"><%= yield %></main>
+    <% else %>
+      <main id="main" class="mx-auto w-full max-w-6xl flex-1 px-5 py-10"><%= yield %></main>
+    <% end %>
+
+    <footer class="border-t border-zinc-800">
+      <div class="mx-auto flex max-w-6xl flex-col gap-6 px-5 py-10 text-sm text-zinc-500 md:flex-row md:items-start">
+        <a class="font-serif text-2xl leading-none text-zinc-100" href="/">yrby<%= caret_mark("ml-0.5 text-rose-500") %></a>
+        <div class="max-w-xl space-y-2 md:flex-1">
+          <p>
+            MIT licensed. Built on y-crdt, Magnus, and rb-sys. The docs on
+            this site are copied from the
+            <a class="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-accent" href="https://github.com/jpcamara/yrby/blob/main/README.md">README</a>,
+            and if the two ever disagree, the README is correct.
+          </p>
+          <p>
+            Demo rooms are public. Anyone with the link can edit one, and a room
+            nobody has touched for a day is deleted, so don't type anything you
+            want to keep.
+          </p>
+        </div>
+        <nav class="flex gap-5 text-zinc-400">
+          <a class="hover:text-zinc-100" href="https://github.com/jpcamara/yrby">GitHub</a>
+          <a class="hover:text-zinc-100" href="https://rubygems.org/gems/yrby-rails">RubyGems</a>
+          <a class="hover:text-zinc-100" href="https://www.npmjs.com/package/yrby-client">npm</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
