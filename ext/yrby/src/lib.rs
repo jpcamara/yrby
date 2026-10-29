@@ -1,14 +1,22 @@
 use magnus::{
-    function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RString, Ruby,
+    function, method, prelude::*, Error, ExceptionClass, IntoValue, RArray, RHash, RString, Ruby,
     TryConvert, Value,
 };
-use yrs::sync::{Message, SyncMessage};
+use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
+
+use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{Doc, GetString, ReadTxn, Transact};
+use yrs::{DeepObservable, Doc, GetString, ReadTxn, Text, Transact};
 
+mod array;
+mod map;
 mod protocol;
 mod read;
+mod shared;
+mod text;
+mod xml_text;
 use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
 use protocol::{
@@ -37,6 +45,10 @@ fn assert_thread_safe() {
     is_send_sync::<Doc>();
     is_send_sync::<RbLexical>();
     is_send_sync::<RbProseMirror>();
+    is_send_sync::<map::RbMap>();
+    is_send_sync::<array::RbArray>();
+    is_send_sync::<text::RbText>();
+    is_send_sync::<xml_text::RbXmlText>();
 }
 
 /// Run `f` with the GVL (Global VM Lock) released, so other Ruby threads,
@@ -60,7 +72,7 @@ fn assert_thread_safe() {
 ///
 /// Panics inside the closure are caught and re-raised (resumed) after the GVL
 /// is reacquired, where magnus converts them to Ruby exceptions.
-fn nogvl<F, R>(f: F) -> R
+pub(crate) fn nogvl<F, R>(f: F) -> R
 where
     F: FnOnce() -> R + Send,
     R: Send,
@@ -119,7 +131,7 @@ fn copy_bytes(s: RString) -> Vec<u8> {
 /// native decode/apply failures surface as a project-specific error rather than
 /// a generic RuntimeError. Falls back to RuntimeError only if the class somehow
 /// can't be resolved.
-fn yrb_error(msg: String) -> Error {
+pub(crate) fn yrb_error(msg: String) -> Error {
     let ruby = Ruby::get().unwrap();
     let class = ruby
         .eval::<ExceptionClass>("Y::Error")
@@ -133,14 +145,24 @@ fn yrb_error(msg: String) -> Error {
 
 impl RbDoc {
     /// Create a new Doc with an optional client_id
+    ///
+    /// The document counts text in UTF-16 units, as Yjs does, so positions
+    /// agree with every editor's. The Ruby handles convert to characters.
     fn new(args: &[Value]) -> Result<Self, Error> {
-        let doc = if args.is_empty() {
-            Doc::new()
+        let mut options = if args.is_empty() {
+            yrs::Options::default()
         } else {
             let client_id: u64 = TryConvert::try_convert(args[0])?;
-            Doc::with_client_id(client_id)
+            yrs::Options::with_client_id(yrs::block::ClientID::new(client_id))
         };
-        Ok(RbDoc(doc))
+        options.offset_kind = yrs::OffsetKind::Utf16;
+        Ok(RbDoc(Doc::with_options(options)))
+    }
+
+    /// The id this document writes its own edits under. Presence for the same
+    /// writer uses it too, so editors tie a caret to its author's edits.
+    fn client_id(&self) -> u64 {
+        self.0.client_id().get()
     }
 
     fn encode_state_vector(&self) -> RString {
@@ -234,6 +256,149 @@ impl RbDoc {
         let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))
             .map_err(yrb_error)?;
         Ok(binary_string(&update))
+    }
+
+    /// A live `Y::Array` handle to the root array named `name` (created if
+    /// absent). Writes through it mutate the document and sync to every peer.
+    fn get_array(&self, name: String) -> array::RbArray {
+        array::root_array(&self.0, name)
+    }
+
+    /// A live `Y::Text` handle to the root text named `name` (created if
+    /// absent). This is what an agent appends into.
+    fn get_text(&self, name: String) -> text::RbText {
+        text::root_text(&self.0, name)
+    }
+
+    /// A live `Y::XmlText` handle to the root xml text named `name` (created
+    /// if absent). Rich-text editors keep their document here; this is how a
+    /// Ruby process writes a paragraph into one.
+    fn get_xml_text(&self, name: String) -> xml_text::RbXmlText {
+        xml_text::root_xml_text(&self.0, name)
+    }
+
+    /// A live `Y::Map` handle to the root map named `name` (created if absent).
+    /// Unlike `read_map` (a JSON snapshot), the returned handle reads and *writes*
+    /// the actual shared map, with the same thread-safety guarantees as the Doc.
+    fn get_map(&self, name: String) -> map::RbMap {
+        map::root_map(&self.0, name)
+    }
+
+    /// Apply `update` and report which blocks of the root `XmlText` named
+    /// `root` it touched, as ordinals: a change inside a block, a block
+    /// added, or a block removed (the ordinal it had). Ordinals count the
+    /// root's `XmlText` blocks, as `xml_text(n)` does, so a divider or an
+    /// image above a block doesn't shift it. This is what lets a process
+    /// following a document react to the part that changed.
+    fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
+        let bytes = copy_bytes(update);
+        let doc = &self.0;
+        let changed = nogvl(move || -> Result<Vec<u32>, String> {
+            let fragment = doc.get_or_insert_xml_fragment(root.as_str());
+            let branch: &yrs::branch::Branch = fragment.as_ref();
+            let target = yrs::XmlTextRef::from(yrs::branch::BranchPtr::from(branch));
+            let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+            let sink = hits.clone();
+            let root_ref = target.clone();
+            let before = Children::of(&doc.transact(), &target);
+            let subscription = target.observe_deep(move |txn, events| {
+                let children = Children::of(txn, &root_ref);
+                let mut hits = sink.lock().unwrap();
+                for event in events.iter() {
+                    match event.path().front() {
+                        Some(&yrs::types::PathSegment::Index(i)) if children.is_block(i) => {
+                            hits.push(children.ordinal(i))
+                        }
+                        Some(_) => {}
+                        None => root_positions(txn, event, &before, &children, &mut hits),
+                    }
+                }
+            });
+            let parsed = yrs::Update::decode_v1(&bytes).map_err(|e| e.to_string())?;
+            {
+                let mut txn = doc.transact_mut();
+                txn.apply_update(parsed).map_err(|e| e.to_string())?;
+            }
+            drop(subscription);
+            let mut out = hits.lock().unwrap().clone();
+            out.sort_unstable();
+            out.dedup();
+            Ok(out)
+        })
+        .map_err(yrb_error)?;
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let array = ruby.ary_new();
+        for i in changed {
+            array.push(i)?;
+        }
+        Ok(array)
+    }
+
+    /// The ordinal of the top-level block of the root `XmlText` named `root`
+    /// that a relative position (an anchor's, or the `{type, tname, item,
+    /// assoc}` hash a peer carries as a caret) falls in, or nil. This is how
+    /// a process knows which block a person is writing in.
+    fn block_at(&self, position: RHash, root: String) -> Result<Option<u32>, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let sticky = sticky_from_ruby(&ruby, position)?;
+        let doc = &self.0;
+        Ok(nogvl(move || {
+            let txn = doc.transact();
+            let target = sticky.get_offset(&txn)?.branch;
+            let root_ref = shared::root_xml_text(&txn, root.as_str())?;
+            shared::embedded_xml_texts(&txn, &root_ref)
+                .iter()
+                .position(|block| contains_branch(&txn, block, target))
+                .map(|ordinal| ordinal as u32)
+        }))
+    }
+
+    /// The block an anchor's position names, as a live handle, or nil once
+    /// the block is gone.
+    fn find(&self, position: RHash, root: String) -> Result<Option<xml_text::RbXmlText>, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let sticky = sticky_from_ruby(&ruby, position)?;
+        let (doc, name) = (&self.0, root.as_str());
+        let id = nogvl(move || {
+            let txn = doc.transact();
+            let branch = sticky.get_offset(&txn)?.branch;
+            let id = shared::identity(&yrs::XmlTextRef::from(branch));
+            let is_block = matches!(id, yrs::branch::BranchID::Root(_))
+                || matches!(branch.type_ref(), yrs::types::TypeRef::XmlText);
+            let in_root = shared::identity(&yrs::XmlTextRef::from(shared::top(branch)))
+                == yrs::branch::BranchID::Root(name.into());
+            (is_block && in_root && shared::resolve::<yrs::XmlTextRef, _>(&txn, &id).is_some())
+                .then_some(id)
+        });
+        Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
+    }
+
+    /// Start recording the updates this thread's handle writes make: what
+    /// `Doc#diff` returns. Updates applied from elsewhere stay out.
+    fn record_updates(&self) -> Recording {
+        let doc = &self.0;
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let sink = updates.clone();
+        let thread = std::thread::current().id();
+        let origin = yrs::Origin::from(shared::ORIGIN);
+        // Subscribing needs the document to itself for a moment, so it waits
+        // out a transaction another thread has open.
+        let subscription = nogvl(move || loop {
+            let (sink, origin) = (sink.clone(), origin.clone());
+            let subscribed = doc.observe_update_v1(move |txn, event| {
+                if txn.origin() == Some(&origin) && std::thread::current().id() == thread {
+                    sink.lock().unwrap().push(event.update.clone());
+                }
+            });
+            match subscribed {
+                Ok(subscription) => break subscription,
+                Err(_) => std::thread::yield_now(),
+            }
+        });
+        Recording {
+            updates,
+            subscription: Mutex::new(Some(subscription)),
+        }
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -617,6 +782,358 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // Module Initialization
 // ============================================================================
 
+/// The updates a `Doc#diff` block makes, collected as they commit. `finish`
+/// stops recording and returns them merged into one, or nil for none; it is
+/// safe to call twice.
+#[magnus::wrap(class = "Y::Doc::Recording", free_immediately, size)]
+struct Recording {
+    updates: Arc<Mutex<Vec<Vec<u8>>>>,
+    subscription: Mutex<Option<yrs::Subscription>>,
+}
+
+impl Recording {
+    fn finish(&self) -> Result<Option<RString>, Error> {
+        drop(self.subscription.lock().unwrap().take());
+        let updates = std::mem::take(&mut *self.updates.lock().unwrap());
+        match updates.len() {
+            0 => Ok(None),
+            1 => Ok(Some(binary_string(&updates[0]))),
+            _ => yrs::merge_updates_v1(&updates)
+                .map(|merged| Some(binary_string(&merged)))
+                .map_err(|e| yrb_error(e.to_string())),
+        }
+    }
+}
+
+/// A root's children in order: the document index each starts at and
+/// whether it is an `XmlText` block. Ordinals count only those, as
+/// `xml_text(n)` does; a divider or an image is a child but not a block.
+struct Children(Vec<(u32, bool)>);
+
+impl Children {
+    fn of<T: ReadTxn>(txn: &T, root: &yrs::XmlTextRef) -> Self {
+        let mut at = 0;
+        let mut children = Vec::new();
+        for d in root.diff(txn, yrs::types::text::YChange::identity) {
+            let (len, block) = match &d.insert {
+                yrs::Out::Any(yrs::Any::String(s)) => (s.encode_utf16().count() as u32, false),
+                yrs::Out::YXmlText(_) => (1, true),
+                _ => (1, false),
+            };
+            children.push((at, block));
+            at += len;
+        }
+        Children(children)
+    }
+
+    /// How many blocks come before document index `index`: the ordinal of a
+    /// block there.
+    fn ordinal(&self, index: u32) -> u32 {
+        self.0
+            .iter()
+            .filter(|(at, block)| *block && *at < index)
+            .count() as u32
+    }
+
+    fn is_block(&self, index: u32) -> bool {
+        self.0.iter().any(|(at, block)| *block && *at == index)
+    }
+
+    /// How many blocks start in `from..to`.
+    fn blocks_in(&self, from: u32, to: u32) -> u32 {
+        self.0
+            .iter()
+            .filter(|(at, block)| *block && (from..to).contains(at))
+            .count() as u32
+    }
+}
+
+/// A presence handle a Ruby process can use to appear as a live collaborator.
+///
+/// Wraps a yrs `Awareness`. `set_local_state` takes a JSON string (the shape the
+/// editor renders, e.g. `{"name":"Agent","color":"#7c3aed"}`) and returns the
+/// y-protocol awareness frame to broadcast. Browsers subscribed to the document
+/// apply it as another participant. `clear_local_state` returns the frame that
+/// removes this presence. The bytes are the same wire format Yjs and
+/// y-protocols use, so no client change is needed.
+#[magnus::wrap(class = "Y::Awareness", free_immediately, size)]
+struct RbAwareness(RefCell<Awareness>);
+
+impl RbAwareness {
+    fn new(args: &[Value]) -> Result<Self, Error> {
+        let doc = if args.is_empty() || args[0].is_nil() {
+            Doc::new()
+        } else {
+            let client_id: u64 = TryConvert::try_convert(args[0])?;
+            Doc::with_client_id(client_id)
+        };
+        Ok(RbAwareness(RefCell::new(Awareness::new(doc))))
+    }
+
+    /// This presence's client id, stable for the life of the handle.
+    fn client_id(&self) -> u64 {
+        self.0.borrow().client_id().get()
+    }
+
+    /// Set this client's presence from a JSON string and return the awareness
+    /// frame to broadcast.
+    fn set_local_state(&self, json: String) -> Result<RString, Error> {
+        let value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| yrb_error(format!("Y::Awareness state must be JSON: {e}")))?;
+        let mut awareness = self.0.borrow_mut();
+        awareness
+            .set_local_state(value)
+            .map_err(|e| yrb_error(e.to_string()))?;
+        Self::frame(&awareness)
+    }
+
+    /// Remove this client's presence and return the frame that tells peers to
+    /// drop it: an entry with the next clock and a null state, as y-protocols
+    /// encodes a removal. yrs's own clean just forgets the client, and a
+    /// frame built from that says nothing, so peers would wait for a timeout.
+    fn clear_local_state(&self) -> Result<RString, Error> {
+        let mut awareness = self.0.borrow_mut();
+        let id = awareness.client_id();
+        let clock = awareness
+            .iter()
+            .find(|(client, _)| *client == id)
+            .map(|(_, state)| state.clock)
+            .unwrap_or(0);
+        awareness.clean_local_state();
+        let mut clients = std::collections::HashMap::new();
+        clients.insert(
+            id,
+            yrs::sync::awareness::AwarenessUpdateEntry {
+                clock: clock + 1,
+                json: "null".into(),
+            },
+        );
+        let update = yrs::sync::awareness::AwarenessUpdate { clients };
+        Ok(binary_string(&Message::Awareness(update).encode_v1()))
+    }
+
+    /// Apply a presence frame from another client (the bytes a browser or
+    /// another process broadcast). Returns false for a frame that is not an
+    /// awareness message.
+    fn apply_update(&self, frame: RString) -> Result<bool, Error> {
+        let bytes = copy_bytes(frame);
+        let message = Message::decode_v1(&bytes).map_err(|e| yrb_error(e.to_string()))?;
+        match message {
+            Message::Awareness(update) => {
+                self.0
+                    .borrow_mut()
+                    .apply_update(update)
+                    .map_err(|e| yrb_error(e.to_string()))?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// Every client's state, as `{ client_id => state }`, the state being the
+    /// JSON each client set (parsed), or nil for a client that cleared it.
+    /// Each client's awareness clock. A client renews its state every few
+    /// seconds with a higher clock, so a clock that stops moving means the
+    /// client is gone without having said so. A mirror uses this to time
+    /// peers out the way browser clients do.
+    fn clocks(&self) -> Result<RHash, Error> {
+        let awareness = self.0.borrow();
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let out = ruby.hash_new();
+        for (client, state) in awareness.iter() {
+            out.aset(client.get(), state.clock)?;
+        }
+        Ok(out)
+    }
+
+    fn states(&self) -> Result<RHash, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let entries: Vec<(u64, Option<String>)> = self
+            .0
+            .borrow()
+            .iter()
+            .map(|(id, state)| (id.get(), state.data.as_ref().map(|d| d.to_string())))
+            .collect();
+        let out = ruby.hash_new();
+        for (id, data) in entries {
+            let value: Value = match data {
+                Some(json) => {
+                    let parsed: serde_json::Value = serde_json::from_str(&json)
+                        .map_err(|e| yrb_error(format!("presence state is not JSON: {e}")))?;
+                    json_to_ruby(&ruby, &parsed)
+                }
+                None => ruby.qnil().as_value(),
+            };
+            out.aset(id, value)?;
+        }
+        Ok(out)
+    }
+
+    fn frame(awareness: &Awareness) -> Result<RString, Error> {
+        let update = awareness.update().map_err(|e| yrb_error(e.to_string()))?;
+        Ok(binary_string(&Message::Awareness(update).encode_v1()))
+    }
+}
+
+/// For an event on the root sequence itself (blocks added or removed), the
+/// ordinals affected. A delta walks the root as it was (`before`): retained
+/// and removed children advance through it, inserted ones through the root
+/// as it is now (`after`). An added block reports its new ordinal, a removed
+/// one the ordinal it had, and a divider or image reports nothing.
+fn root_positions(
+    txn: &yrs::TransactionMut,
+    event: &yrs::types::Event,
+    before: &Children,
+    after: &Children,
+    hits: &mut Vec<u32>,
+) {
+    use yrs::types::{Change, Delta, Event};
+    let (mut old, mut new) = (0u32, 0u32);
+    let added = |item: &yrs::Out, new: &mut u32, hits: &mut Vec<u32>| {
+        if matches!(item, yrs::Out::YXmlText(_)) {
+            hits.push(after.ordinal(*new));
+        }
+        *new += match item {
+            yrs::Out::Any(yrs::Any::String(s)) => s.encode_utf16().count() as u32,
+            _ => 1,
+        };
+    };
+    let removed = |old: u32, n: u32, hits: &mut Vec<u32>| {
+        let first = before.ordinal(old);
+        hits.extend(first..first + before.blocks_in(old, old + n));
+    };
+    match event {
+        Event::XmlFragment(e) => {
+            for change in e.delta(txn) {
+                match change {
+                    Change::Retain(n) => (old, new) = (old + n, new + n),
+                    Change::Added(items) => {
+                        for item in items {
+                            added(item, &mut new, hits);
+                        }
+                    }
+                    Change::Removed(n) => {
+                        removed(old, *n, hits);
+                        old += n;
+                    }
+                }
+            }
+        }
+        Event::XmlText(e) => {
+            for delta in e.delta(txn) {
+                match delta {
+                    Delta::Retain(n, _) => (old, new) = (old + n, new + n),
+                    Delta::Inserted(item, _) => added(item, &mut new, hits),
+                    Delta::Deleted(n) => {
+                        removed(old, *n, hits);
+                        old += n;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether `branch` is `block` itself or embedded anywhere inside it.
+fn contains_branch<T: ReadTxn>(
+    txn: &T,
+    block: &yrs::XmlTextRef,
+    branch: yrs::branch::BranchPtr,
+) -> bool {
+    let this: &yrs::branch::Branch = block.as_ref();
+    if yrs::branch::BranchPtr::from(this) == branch {
+        return true;
+    }
+    for d in block.diff(txn, yrs::types::text::YChange::identity) {
+        if let yrs::Out::YXmlText(child) = &d.insert {
+            if contains_branch(txn, child, branch) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn hash_get(ruby: &Ruby, h: RHash, key: &str) -> Option<Value> {
+    h.get(ruby.to_symbol(key))
+        .or_else(|| h.get(key))
+        .filter(|v| !v.is_nil())
+}
+
+/// A yrs sticky index from the `{type, tname, item, assoc}` hash Yjs uses.
+fn sticky_from_ruby(ruby: &Ruby, position: RHash) -> Result<yrs::StickyIndex, Error> {
+    use yrs::{Assoc, IndexScope, StickyIndex};
+    let assoc = match hash_get(ruby, position, "assoc") {
+        Some(v) => {
+            let n: i64 = TryConvert::try_convert(v)?;
+            if n < 0 {
+                Assoc::Before
+            } else {
+                Assoc::After
+            }
+        }
+        None => Assoc::After,
+    };
+    let id_of = |key: &str| -> Result<Option<yrs::block::ID>, Error> {
+        let Some(v) = hash_get(ruby, position, key) else {
+            return Ok(None);
+        };
+        let h = RHash::from_value(v).ok_or_else(|| yrb_error(format!("{key} must be a hash")))?;
+        let client: u64 = TryConvert::try_convert(
+            hash_get(ruby, h, "client").ok_or_else(|| yrb_error("missing client".into()))?,
+        )?;
+        let clock: u32 = TryConvert::try_convert(
+            hash_get(ruby, h, "clock").ok_or_else(|| yrb_error("missing clock".into()))?,
+        )?;
+        Ok(Some(yrs::block::ID::new(
+            yrs::block::ClientID::new(client),
+            clock,
+        )))
+    };
+    if let Some(item) = id_of("item")? {
+        return Ok(StickyIndex::from_id(item, assoc));
+    }
+    if let Some(ty) = id_of("type")? {
+        return Ok(StickyIndex::new(IndexScope::Nested(ty), assoc));
+    }
+    match hash_get(ruby, position, "tname") {
+        Some(v) => {
+            let name: String = TryConvert::try_convert(v)?;
+            Ok(StickyIndex::new(IndexScope::Root(name.into()), assoc))
+        }
+        None => Err(yrb_error("a position needs item, type, or tname".into())),
+    }
+}
+
+/// serde_json to Ruby, for presence states.
+fn json_to_ruby(ruby: &Ruby, v: &serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => ruby.qnil().as_value(),
+        serde_json::Value::Bool(b) => b.into_value_with(ruby),
+        serde_json::Value::Number(n) => match (n.as_i64(), n.as_u64()) {
+            (Some(i), _) => i.into_value_with(ruby),
+            (None, Some(u)) => u.into_value_with(ruby),
+            _ => n.as_f64().unwrap_or(0.0).into_value_with(ruby),
+        },
+        serde_json::Value::String(s) => s.as_str().into_value_with(ruby),
+        serde_json::Value::Array(a) => {
+            let arr = ruby.ary_new();
+            for x in a {
+                let _ = arr.push(json_to_ruby(ruby, x));
+            }
+            arr.as_value()
+        }
+        serde_json::Value::Object(o) => {
+            let h = ruby.hash_new();
+            for (k, x) in o {
+                let _ = h.aset(k.as_str(), json_to_ruby(ruby, x));
+            }
+            h.as_value()
+        }
+    }
+}
+
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("Y")?;
@@ -637,6 +1154,16 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(RbDoc::encode_state_as_update, -1),
     )?;
     doc_class.define_method("apply_update", method!(RbDoc::apply_update, 1))?;
+    doc_class.define_method("client_id", method!(RbDoc::client_id, 0))?;
+    doc_class.define_method(
+        "apply_update_changes",
+        method!(RbDoc::apply_update_changes, 2),
+    )?;
+    doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
+    doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
+    doc_class.define_private_method("record_updates", method!(RbDoc::record_updates, 0))?;
+    let recording = doc_class.define_class("Recording", ruby.class_object())?;
+    recording.define_method("finish", method!(Recording::finish, 0))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
@@ -647,6 +1174,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "compacted_state_update",
         method!(RbDoc::compacted_state_update, 0),
     )?;
+    doc_class.define_method("get_map", method!(RbDoc::get_map, 1))?;
+    doc_class.define_method("get_array", method!(RbDoc::get_array, 1))?;
+    doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
+    doc_class.define_method("get_xml_text", method!(RbDoc::get_xml_text, 1))?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
     doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
@@ -665,6 +1196,24 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     prosemirror_class.define_singleton_method("new", function!(RbProseMirror::native_new, 2))?;
     prosemirror_class.define_method("to_html", method!(RbProseMirror::native_to_html, -1))?;
     prosemirror_class.define_method("node_types", method!(RbProseMirror::node_types, -1))?;
+
+    let awareness_class = module.define_class("Awareness", ruby.class_object())?;
+    awareness_class.define_singleton_method("new", function!(RbAwareness::new, -1))?;
+    awareness_class.define_method("client_id", method!(RbAwareness::client_id, 0))?;
+    awareness_class.define_method("set_local_state", method!(RbAwareness::set_local_state, 1))?;
+    awareness_class.define_method(
+        "clear_local_state",
+        method!(RbAwareness::clear_local_state, 0),
+    )?;
+    awareness_class.define_method("apply_update", method!(RbAwareness::apply_update, 1))?;
+    awareness_class.define_method("states", method!(RbAwareness::states, 0))?;
+    awareness_class.define_method("clocks", method!(RbAwareness::clocks, 0))?;
+
+    // Live shared-type handles.
+    map::define(ruby, module)?;
+    array::define(ruby, module)?;
+    text::define(ruby, module)?;
+    xml_text::define(ruby, module)?;
 
     // Stateless protocol codec, as Y module functions.
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;

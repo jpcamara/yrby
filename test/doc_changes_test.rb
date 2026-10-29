@@ -1,0 +1,93 @@
+# frozen_string_literal: true
+
+require "test_helper"
+
+# apply_update_changes applies an update and says which top-level blocks it
+# touched, so a process following a document can react to the part that
+# changed instead of diffing the whole text.
+class DocChangesTest < Minitest::Test
+  def setup
+    @src = Y::Doc.new
+    Y::Lexxy.append_paragraph(@src, "one")
+    Y::Lexxy.append_paragraph(@src, "two")
+    Y::Lexxy.append_list(@src, %w[a b])
+    @peer = Y::Doc.new
+    @peer.apply_update(@src.encode_state_as_update)
+  end
+
+  def test_an_edit_inside_a_block_names_that_block
+    update = @src.diff { @src.get_xml_text("root").xml_text(1).insert(4, " more") }
+
+    assert_equal [1], @peer.apply_update_changes(update, "root")
+    assert_equal "one\ntwo more\na\nb", @peer.read_xml("root")
+  end
+
+  def test_an_edit_deep_inside_a_list_names_the_list
+    update = @src.diff { @src.get_xml_text("root").xml_text(2).xml_text(1).insert(2, "!") }
+
+    assert_equal [2], @peer.apply_update_changes(update, "root")
+  end
+
+  def test_a_block_added_or_inserted_names_its_ordinal
+    appended = @src.diff { Y::Lexxy.append_paragraph(@src, "three") }
+
+    assert_equal [3], @peer.apply_update_changes(appended, "root")
+
+    inserted = @src.diff { Y::Lexical.insert_paragraph(@src, 1, "between") }
+
+    assert_equal [1], @peer.apply_update_changes(inserted, "root")
+    assert_equal "one\nbetween\ntwo\na\nb\nthree", @peer.read_xml("root")
+  end
+
+  def test_a_block_removed_names_the_ordinal_it_had
+    update = @src.diff { @src.get_xml_text("root").delete_xml_text(0) }
+
+    assert_equal [0], @peer.apply_update_changes(update, "root")
+    assert_equal "two\na\nb", @peer.read_xml("root")
+  end
+
+  def test_blocks_removed_together_name_every_ordinal_they_had
+    update = @src.diff { @src.get_xml_text("root").delete(0, 2) }
+
+    assert_equal [0, 1], @peer.apply_update_changes(update, "root")
+    assert_equal "a\nb", @peer.read_xml("root")
+  end
+
+  def test_an_update_already_applied_changes_nothing
+    update = @src.diff { Y::Lexxy.append_paragraph(@src, "three") }
+    @peer.apply_update_changes(update, "root")
+
+    assert_empty @peer.apply_update_changes(update, "root")
+  end
+
+  # Yjs, as Lexxy stores it: a paragraph "first", a horizontal divider (a
+  # Y.XmlElement, not a block a handle reaches), and a paragraph "second".
+  # EDITED appends " edited" to "second".
+  WITH_DIVIDER = "AQ7H6MC8CgAHAQRyb290BofH6MC8CgADCVVOREVGSU5FRIfH6MC8CgEGKADH6MC8CgAGX190eXBlAXcJcGFyYWdyYXBoKADH" \
+                 "6MC8CgIGX190eXBlAXcJcGFyYWdyYXBoKADH6MC8CgEGX190eXBlAXcSaG9yaXpvbnRhbF9kaXZpZGVyBwDH6MC8CgABKADH" \
+                 "6MC8CgYGX190eXBlAXcEdGV4dCgAx+jAvAoGCF9fZm9ybWF0AX0AhMfowLwKBgVmaXJzdAcAx+jAvAoCASgAx+jAvAoOBl9f" \
+                 "dHlwZQF3BHRleHQoAMfowLwKDghfX2Zvcm1hdAF9AITH6MC8Cg4Gc2Vjb25kAA=="
+  EDITED = "AQHH6MC8CheEx+jAvAoWByBlZGl0ZWQA"
+  # Deletes the divider.
+  DIVIDER_REMOVED = "AAHH6MC8CgIBAQUB"
+
+  def test_a_divider_above_doesnt_shift_the_ordinal
+    doc = Y::Doc.new
+    doc.apply_update(WITH_DIVIDER.unpack1("m"))
+    root = doc.get_xml_text("root")
+    anchor = root.xml_text(1).anchor
+    changed = doc.apply_update_changes(EDITED.unpack1("m"), "root")
+
+    assert_equal [1], changed
+    assert_equal "second edited", root.xml_text(1).text
+    assert_equal 1, doc.block_at(anchor)
+  end
+
+  def test_removing_a_divider_changes_no_block
+    doc = Y::Doc.new
+    doc.apply_update(WITH_DIVIDER.unpack1("m"))
+
+    assert_empty doc.apply_update_changes(DIVIDER_REMOVED.unpack1("m"), "root")
+    assert_equal "first\nsecond", doc.read_xml("root")
+  end
+end

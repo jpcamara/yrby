@@ -101,6 +101,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
+- [Experimental: writing from Ruby, and agents](#experimental-writing-from-ruby-and-agents)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
 - [Message Type Constants](#message-type-constants)
@@ -117,7 +118,9 @@ primitives. By default the Ruby side treats a document as opaque CRDT state. It
 applies updates, answers sync handshakes, and records deltas without reading
 the contents, and the browser editor decides what shape the document has. When
 you do need to look inside, `Doc#read_text` and `Doc#read_map` rebuild it in
-Ruby.
+Ruby, and live handles (`Doc#get_map`, `get_array`, `get_text`,
+`get_xml_text`) write to it. The handles are
+[experimental](docs/experimental.md).
 
 ## Durability and delivery
 
@@ -1073,6 +1076,23 @@ server acks it again. Awareness is ephemeral and isn't acked.
 The browser clients manage presence (cursors, selections). The server doesn't
 set or hold presence state, and it relays awareness frames without reading
 them. See `yrby-client` for the client-side awareness API.
+
+## Experimental: writing from Ruby, and agents
+
+These APIs are new. They may change in any minor release, and they aren't
+covered by yrby's usual compatibility promise.
+[docs/experimental.md](docs/experimental.md) documents them:
+
+- Live `Y::Map`, `Y::Array`, and `Y::Text` handles that write to a document
+- Writing Lexical rich text from Ruby, with `Y::Lexical` and `Y::Lexxy`
+- Anchors: a block's identity as a value
+- Streaming into a document with `Doc#diff`
+- Editing a record's document from Ruby
+- Joining a document from a Ruby process, with `Y::ActionCable::Client`
+- Agents, with `Y::Agent`
+
+`require "y/action_cable/client"` and `require "y/agent"` print a warning in
+Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 
 ## Thread Safety
 
