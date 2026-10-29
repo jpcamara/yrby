@@ -550,6 +550,164 @@
   }
 
   /* -------------------------------------------------------------------------
+   * Chat (#chat; the JS builds the thread and the composer). Your messages
+   * sit on the right in your color, and other people's on the left on
+   * newsprint. Peer colors are light, so bubble text stays ink. Everyone else
+   * who is typing shares one bubble of bouncing dots, with their colors and
+   * names above it.
+   * ---------------------------------------------------------------------- */
+  .chat-frame {
+    @apply relative flex flex-col overflow-hidden rounded-xl border
+           border-zinc-800 bg-panel;
+  }
+
+  .chat-thread {
+    @apply flex h-[min(30rem,62vh)] flex-col overflow-y-auto overscroll-contain
+           px-3 py-4 sm:px-5;
+  }
+
+  /* Short threads sit at the bottom, above the composer. */
+  .chat-list {
+    @apply mt-auto;
+  }
+
+  .chat-empty {
+    @apply my-auto px-6 text-center text-sm leading-6 text-zinc-500;
+  }
+
+  .chat-row {
+    @apply mt-0.5 flex flex-col items-start;
+  }
+
+  .chat-row.mine {
+    @apply items-end;
+  }
+
+  .chat-row:has(> .chat-meta) {
+    @apply mt-3;
+  }
+
+  .chat-meta {
+    @apply mb-1 flex items-center gap-1.5 px-3 text-[11px] leading-none
+           text-zinc-600;
+  }
+
+  .chat-name {
+    @apply flex items-center gap-1 font-semibold text-zinc-500;
+  }
+
+  .chat-name::before {
+    content: "";
+    @apply inline-block h-2 w-2 rounded-full;
+    background: var(--peer);
+  }
+
+  .chat-bubble {
+    @apply max-w-[78%] cursor-pointer rounded-[1.15rem] rounded-bl-md
+           bg-zinc-950 px-3.5 py-2 text-[0.95rem] leading-snug
+           whitespace-pre-wrap text-ink [overflow-wrap:anywhere];
+  }
+
+  .chat-row.mine .chat-bubble {
+    @apply rounded-[1.15rem] rounded-br-md;
+  }
+
+  .chat-typing .chat-bubble {
+    @apply flex cursor-default items-center gap-1 py-3;
+  }
+
+  .chat-typing-who {
+    @apply flex -space-x-0.5;
+  }
+
+  .chat-typing-dot {
+    @apply inline-block h-2 w-2 rounded-full ring-1 ring-panel;
+    background: var(--peer);
+  }
+
+  .chat-typing-label {
+    @apply font-semibold text-zinc-500;
+  }
+
+  .chat-ellipsis {
+    @apply inline-block h-2 w-2 rounded-full bg-zinc-500;
+    animation: chat-bounce 1.2s ease-in-out infinite;
+  }
+
+  .chat-ellipsis:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .chat-ellipsis:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes chat-bounce {
+    0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-3px); }
+  }
+
+  .chat-reactions {
+    @apply relative -mt-1.5 flex gap-1 px-2;
+  }
+
+  .chat-reaction {
+    @apply flex items-center gap-1 rounded-full border border-zinc-800
+           bg-panel px-1.5 py-px text-xs leading-5 shadow-sm shadow-black/10;
+  }
+
+  .chat-reaction.mine {
+    @apply border-rose-500/50 bg-rose-500/5;
+  }
+
+  .chat-reaction-count {
+    @apply font-semibold text-zinc-400 tabular-nums;
+  }
+
+  .chat-picker {
+    @apply mb-1 flex gap-0.5 rounded-full border border-zinc-800 bg-panel
+           px-1.5 py-1 shadow-md shadow-black/15;
+  }
+
+  .chat-pick {
+    @apply h-8 w-8 cursor-pointer rounded-full text-lg leading-none
+           hover:bg-zinc-900;
+  }
+
+  .chat-pick[aria-pressed="true"] {
+    @apply bg-rose-500/10 ring-1 ring-rose-500/50;
+  }
+
+  .chat-jump {
+    @apply absolute bottom-17 left-1/2 -translate-x-1/2 cursor-pointer
+           rounded-full bg-ink px-3 py-1 text-xs font-semibold text-white
+           shadow-md;
+  }
+
+  .chat-composer {
+    @apply flex items-end gap-2 border-t border-zinc-800 bg-zinc-900 p-2.5;
+  }
+
+  /* 16px text on phones, so iOS doesn't zoom in when the box gets focus. */
+  .chat-input {
+    @apply max-h-40 min-w-0 flex-1 resize-none rounded-[1.2rem] border
+           border-zinc-700 bg-panel px-3.5 py-2 text-base leading-snug
+           text-zinc-200 outline-none placeholder:text-zinc-600
+           focus:border-rose-500/60 sm:text-[0.95rem];
+  }
+
+  .chat-send {
+    @apply cursor-pointer rounded-full bg-accent-strong px-4 py-2 text-sm
+           font-semibold text-white hover:bg-rose-600;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat-ellipsis {
+      animation: none;
+    }
+  }
+
+  /* -------------------------------------------------------------------------
    * Demo and docs list cards (server-rendered, used on the home page and the
    * demo index).
    * ---------------------------------------------------------------------- */

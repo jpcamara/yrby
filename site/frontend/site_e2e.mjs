@@ -149,6 +149,11 @@ check("both windows converge on both people's text",
 const chips = (s) => js(s, `JSON.stringify([...document.querySelectorAll("#presence .chip")].map((e) => e.textContent).sort())`)
 await waitFor("presence lists two people", async () => JSON.parse((await chips(B)) || "[]").length === 2)
 check("B sees two people in the room", JSON.parse(await chips(B)).length === 2)
+// Names are random and can repeat, so "(you)" must follow the connection.
+for (const s of [A, B]) {
+  const you = JSON.parse(await chips(s)).filter((t) => t.endsWith("(you)")).length
+  check(`${s} marks exactly one chip as (you)`, you === 1)
+}
 
 // Presence went over `send`, the guarded server path, and not as an AnyCable
 // whisper. This public demo hides whisper from the provider (see room.js), so
@@ -216,7 +221,82 @@ await ab(A, "press", "Enter")
 check("a card added in one window reaches the other",
   !!(await converge("added card", cardText, (v) => v.includes("card from A"))))
 
+// --- 5) Chat: typing over awareness, messages and reactions in the document ---
+await openBoth(`/demos/chat/${ROOM}`)
+
+const typingIn = (s) => js(s, `JSON.stringify([...document.querySelectorAll(".chat-typing .chat-typing-label")].map((e) => e.textContent))`)
+const sentTexts = (s) => js(s, `JSON.stringify(window.__yrby.messages.toArray().map((m) => m.get("text")))`)
+const nameOf = (s) => js(s, `window.__yrby.user.name`)
+
+// A types without sending. B sees that A is typing, but not what. Nothing is
+// in the document or in A's awareness state but the flag.
+await clickAt(A, "#chat-input")
+await ab(A, "keyboard", "type", "secret plan")
+const nameA = await nameOf(A)
+check("B sees that A is typing",
+  await waitFor("typing shown", async () => (await typingIn(B)) === JSON.stringify([`${nameA} is typing`])))
+check("B's page doesn't hold A's unsent text",
+  (await js(B, `document.querySelector("#chat").textContent.includes("secret plan")`)) === false)
+check("A's awareness carries no text",
+  (await js(B, `JSON.stringify([...window.__yrby.provider.awareness.getStates().values()]).includes("secret")`)) === false)
+check("unsent text isn't written to the document", (await sentTexts(B)) === "[]")
+check("A doesn't see a typing bubble for itself", (await typingIn(A)) === "[]")
+
+// B types too, while A is still typing. Each window shows the other person
+// in a single typing bubble.
+await clickAt(B, "#chat-input")
+await ab(B, "keyboard", "type", "hello")
+const nameB = await nameOf(B)
+await clickAt(A, "#chat-input")
+await ab(A, "keyboard", "type", " now")
+check("both people typing show in each other's window",
+  await waitFor("both typing", async () =>
+    (await typingIn(A)) === JSON.stringify([`${nameB} is typing`]) &&
+    (await typingIn(B)) === JSON.stringify([`${nameA} is typing`])))
+check("there's one typing bubble per window",
+  (await js(A, `document.querySelectorAll(".chat-typing").length`)) === 1)
+await ab(B, "press", "Enter")
+check("B's message shows only once sent",
+  !!(await converge("B sent", sentTexts, (v) => v === JSON.stringify(["hello"]))))
+
+// Shift+Enter adds a line. Enter sends, and the typing bubble goes away.
+await clickAt(A, "#chat-input")
+await ab(A, "press", "Shift+Enter")
+await ab(A, "keyboard", "type", "<b>two</b>")
+await ab(A, "press", "Enter")
+check("the sent message reaches both browsers",
+  !!(await converge("sent message", sentTexts, (v) => v === JSON.stringify(["hello", "secret plan now\n<b>two</b>"]))))
+check("the typing bubble clears after A sends",
+  await waitFor("typing cleared", async () => (await typingIn(B)) === "[]"))
+check("A's composer is empty after sending", (await js(A, `document.querySelector("#chat-input").value`)) === "")
+check("message text renders as text, not markup",
+  (await js(B, `(() => { const b = [...document.querySelectorAll(".chat-row.theirs .chat-bubble")].at(-1); return !!b && !b.querySelector("b") && b.textContent.includes("<b>two</b>") })()`)) === true)
+
+// An empty message isn't sent.
+await clickAt(A, "#chat-input")
+await ab(A, "press", "Enter")
+await sleep(800)
+check("an empty message isn't sent", JSON.parse(await sentTexts(A)).length === 2)
+
+// B reacts with a thumbs up, and A sees it. Then A adds a heart to the same
+// message. The two reactions are different keys, so both stay.
+const badges = (s) => js(s, `JSON.stringify([...document.querySelectorAll(".chat-reaction")].map((e) => e.textContent).sort())`)
+await clickAt(B, ".chat-row.theirs:last-child .chat-bubble")
+await clickAt(B, '.chat-pick[data-emoji="👍"]')
+check("A sees B's reaction",
+  await waitFor("reaction on A", async () => (await badges(A)) === JSON.stringify(["👍"])))
+await clickAt(A, ".chat-row.mine:last-child .chat-bubble")
+await clickAt(A, '.chat-pick[data-emoji="❤️"]')
+check("both reactions show in both browsers",
+  !!(await converge("two reactions", badges, (v) => v === JSON.stringify(["❤️", "👍"].sort()))))
+
+// Choosing the same reaction again removes it.
+await clickAt(B, ".chat-row.theirs:last-child .chat-bubble")
+await clickAt(B, '.chat-pick[data-emoji="👍"]')
+check("choosing a reaction again removes it",
+  !!(await converge("reaction removed", badges, (v) => v === JSON.stringify(["❤️"]))))
+
 await ab(A, "close", "--all")
 console.log("")
 if (failures > 0) { console.log(`FAILED: ${failures} check(s) failed`); process.exit(1) }
-console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban")
+console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban, chat")
