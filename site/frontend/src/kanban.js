@@ -47,6 +47,10 @@ const columnUnder = (x, y) =>
 const clearDropTargets = () =>
   ORDER.forEach((id) => lists[id].parentElement.classList.remove("drop-target"))
 
+// The card this page is dragging. render() leaves it where the pointer is, so
+// someone else's change mid-drag doesn't drop it.
+let dragging = null
+
 // Drag a card between columns by its grip. The grip has touch-action: none so
 // a touch drag doesn't scroll the page. The card body still scrolls and
 // selects text normally.
@@ -57,6 +61,7 @@ function makeCardDraggable(el, grip, m) {
     const offX = e.clientX - rect.left
     const offY = e.clientY - rect.top
     el.setPointerCapture(e.pointerId)
+    dragging = el
     el.classList.add("dragging")
     el.style.width = `${rect.width}px`
 
@@ -72,32 +77,47 @@ function makeCardDraggable(el, grip, m) {
       el.removeEventListener("pointermove", onMove)
       el.removeEventListener("pointerup", onUp)
       clearDropTargets()
+      dragging = null
+      el.classList.remove("dragging")
+      el.style.cssText = ""
       const over = columnUnder(ev.clientX, ev.clientY)
       if (over && over !== m.get("column")) m.set("column", over)
-      else render() // dropped outside a column, so put it back
+      else render() // not moved here, but someone else may have moved it
     }
     el.addEventListener("pointermove", onMove)
     el.addEventListener("pointerup", onUp)
   })
 }
 
+function cardElement(m) {
+  const el = document.createElement("div")
+  el.className = "card"
+  el.innerHTML = `<span class="grip" title="Drag to move" aria-hidden="true">⠿</span>` +
+    `<span class="t">${esc(m.get("text"))}</span>` +
+    `<button class="del" data-a="del" title="Delete card" aria-label="Delete card">×</button>`
+  el.querySelector('[data-a="del"]').onclick = () => {
+    const i = cards.toArray().indexOf(m)
+    if (i >= 0) cards.delete(i, 1)
+  }
+  makeCardDraggable(el, el.querySelector(".grip"), m)
+  return el
+}
+
+// One element per card, kept across renders. Each render puts the elements in
+// array order under their columns and removes the ones for deleted cards.
+const elements = new Map()
+
 function render() {
-  for (const id of ORDER) lists[id].innerHTML = ""
-  cards.toArray().forEach((m) => {
+  const live = new Set(cards.toArray())
+  for (const [m, el] of elements) if (!live.has(m)) { el.remove(); elements.delete(m) }
+  for (const m of live) {
+    if (!elements.has(m)) elements.set(m, cardElement(m))
+    const el = elements.get(m)
+    if (el === dragging) continue
     const list = lists[m.get("column")]
-    if (!list) return
-    const el = document.createElement("div")
-    el.className = "card"
-    el.innerHTML = `<span class="grip" title="Drag to move" aria-hidden="true">⠿</span>` +
-      `<span class="t">${esc(m.get("text"))}</span>` +
-      `<button class="del" data-a="del" title="Delete card" aria-label="Delete card">×</button>`
-    el.querySelector('[data-a="del"]').onclick = () => {
-      const i = cards.toArray().indexOf(m)
-      if (i >= 0) cards.delete(i, 1)
-    }
-    makeCardDraggable(el, el.querySelector(".grip"), m)
-    list.appendChild(el)
-  })
+    if (list) list.appendChild(el)
+    else el.remove()
+  }
 }
 cards.observeDeep(render)
 
