@@ -6,7 +6,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
 
 - Live handles that write to a document from Ruby: `Doc#get_map`,
   `get_array`, `get_text`, and `get_xml_text` return `Y::Map`, `Y::Array`,

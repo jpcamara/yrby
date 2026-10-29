@@ -7,7 +7,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
 
 - `collaborative_document(:body).edit { |doc| ... }` edits a record's
   document from Ruby. It records the change in the document's rows, encrypted

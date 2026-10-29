@@ -11,6 +11,10 @@ require "json"
 require "logger"
 require "y/action_cable/client/session"
 
+# y/agent loads this file too, so one warning covers both.
+warn "yrby: Y::ActionCable::Client and Y::Agent are experimental and may change in a minor release. " \
+     "Warning[:experimental] = false turns this off.", category: :experimental
+
 module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # A Ruby process that joins a document the way a browser does: over the
   # cable's websocket, as a client of the document channel. It holds a
