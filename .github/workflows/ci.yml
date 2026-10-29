@@ -54,6 +54,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3 # the same Bun as the demo e2e job, see there
       - run: bun install --frozen-lockfile
       - run: bunx eslint .
 
@@ -169,6 +171,10 @@ jobs:
           bundler-cache: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
+        with:
+          # 1.4.4 resolves rhino-editor's nested Tiptap 3 packages differently,
+          # and the demo frontend build can't find @tiptap/extensions.
+          bun-version: 1.4.3
 
       # anycable-go: the Go WebSocket gateway for the AnyCable e2e run. Pinned
       # binary from releases (no extra action dependency).
@@ -196,7 +202,7 @@ jobs:
         run: npm ci && npm run build
       - name: Build frontend bundle
         working-directory: examples/actioncable-demo/frontend
-        run: bun install && bun run build
+        run: bun install --frozen-lockfile && bun run build
 
       # A real Tiptap editor runs headless (JSDOM) and Y::Tiptap must
       # reproduce its getHTML() from the raw doc bytes. The gem's fixture
