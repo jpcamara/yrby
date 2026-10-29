@@ -221,6 +221,38 @@ await ab(A, "press", "Enter")
 check("a card added in one window reaches the other",
   !!(await converge("added card", cardText, (v) => v.includes("card from A"))))
 
+// B holds a card mid-drag while A moves another one. A's move redraws B's
+// board, and B's card has to survive that, so both moves land.
+const centerOf = (s, find) => js(s, `JSON.stringify((() => { const r = (${find}).getBoundingClientRect(); return [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)] })())`).then(JSON.parse)
+const grip = (s, text) => centerOf(s, `[...document.querySelectorAll(".card")].find((c) => c.querySelector(".t").textContent === ${JSON.stringify(text)}).querySelector(".grip")`)
+const column = (s, title) => centerOf(s, `[...document.querySelectorAll(".col")].find((c) => c.querySelector("h3").textContent === ${JSON.stringify(title)})`)
+const mouse = (s, ...args) => ab(s, "mouse", ...args.map(String))
+const cardColumns = (s) => js(s, `JSON.stringify(window.__yrby.cards.toArray().map((c) => c.get("text") + ":" + c.get("column")).sort())`)
+
+for (const s of SESSIONS) await ab(s, "scrollintoview", "#board")
+const [bx, by] = await grip(B, "Design the API")
+const [dx, dy] = await column(B, "Done")
+await mouse(B, "move", bx, by)
+await mouse(B, "down")
+await mouse(B, "move", (bx + dx) / 2, (by + dy) / 2)
+
+const [ax, ay] = await grip(A, "Write the gem")
+const [ex, ey] = await column(A, "Done")
+await mouse(A, "move", ax, ay)
+await mouse(A, "down")
+await mouse(A, "move", (ax + ex) / 2, (ay + ey) / 2)
+await mouse(A, "move", ex, ey)
+await mouse(A, "up")
+await waitFor("B sees A's move", async () => (await cardColumns(B))?.includes("Write the gem:done"))
+check("B's card is still held mid-drag after A's move",
+  (await js(B, `document.querySelector(".card.dragging .t")?.textContent`)) === "Design the API")
+
+await mouse(B, "move", dx, dy)
+await mouse(B, "up")
+check("two cards dragged at the same time both land",
+  !!(await converge("both drags", cardColumns,
+    (v) => v.includes("Design the API:done") && v.includes("Write the gem:done"))))
+
 // --- 5) Chat: typing over awareness, messages and reactions in the document ---
 await openBoth(`/demos/chat/${ROOM}`)
 
