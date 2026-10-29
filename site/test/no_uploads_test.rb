@@ -2,8 +2,42 @@ require "test_helper"
 
 # The site doesn't accept files. These tests check that, because a later
 # change like adding images to the rich text demo could break it without
-# anyone noticing.
+# anyone noticing. This file covers the frameworks, the boot guard
+# (config/initializers/no_upload_frameworks.rb), and the routes. "No uploads"
+# in README.md lists the other layers and their tests.
 class NoUploadsTest < ActionDispatch::IntegrationTest
+  test "the app booted with neither Active Storage nor Action Text" do
+    assert_empty NoUploadFrameworks.loaded
+    assert_not defined?(ActiveStorage::Engine)
+    assert_not defined?(ActionText::Engine)
+  end
+
+  test "the boot guard names each upload framework it finds" do
+    assert_equal ["Active Storage"], NoUploadFrameworks.loaded(->(name) { name == "ActiveStorage::Engine" })
+    assert_equal ["Action Text"], NoUploadFrameworks.loaded(->(name) { name == "ActionText::Engine" })
+
+    error = assert_raises(RuntimeError) { NoUploadFrameworks.check!(->(_name) { true }) }
+    assert_includes error.message, "Active Storage and Action Text are loaded"
+    assert_includes error.message, "accepts no uploads"
+  end
+
+  test "the boot guard runs in every environment" do
+    initializer = Rails.root.join("config/initializers/no_upload_frameworks.rb").read
+
+    assert_match(/^NoUploadFrameworks\.check!$/, initializer, "the check must run unconditionally at boot")
+  end
+
+  test "no route matches the Active Storage or direct upload paths" do
+    %w[/rails/active_storage/blobs/redirect/x/y.png /rails/active_storage/disk/x/y.png
+       /rails/active_storage/direct_uploads /rails/direct_uploads].each do |path|
+      %i[get post put].each do |verb|
+        assert_raises(ActionController::RoutingError, "#{verb.upcase} #{path} must not route") do
+          Rails.application.routes.recognize_path(path, method: verb)
+        end
+      end
+    end
+  end
+
   test "Active Storage is not loaded" do
     # The gems are in the lockfile because lexxy-realtime depends on the rails
     # meta-gem, but nothing requires them. There's no constant, engine, route,
@@ -14,7 +48,10 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
   test "Active Record is loaded for the document store and the other frameworks are not" do
     assert Object.const_defined?("ActiveRecord"), "Y::Document uses ActiveRecord, so it must be loaded"
 
-    %w[ActionMailer ActionMailbox ActiveJob].each do |framework|
+    # Active Job is loaded for the demo agent, on the in-process async adapter.
+    # Active Storage would need it, but the boot guard refuses Active Storage
+    # on its own.
+    %w[ActionMailer ActionMailbox].each do |framework|
       assert_not Object.const_defined?(framework), "#{framework} should not be loaded"
     end
 
@@ -32,11 +69,13 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     assert_empty paths.grep(%r{blob|upload|attachment|rails/active_storage})
   end
 
-  test "every HTTP route is a GET" do
-    # The one exception is AnyCable's RPC endpoint, which matches any verb.
-    # Only the embedded anycable-go calls it, over localhost with the AnyCable
-    # secret, and RoomGuarded throttles every channel it reaches.
-    routes = Rails.application.routes.routes.reject { |route| route.path.spec.to_s == "/_anycable" }
+  test "every HTTP route is a GET but the agent invitation" do
+    # AnyCable's RPC endpoint matches any verb. Only the embedded anycable-go
+    # calls it, over localhost with the AnyCable secret, and RoomGuarded
+    # throttles every channel it reaches. Inviting the agent is a POST with no
+    # body, which the method gate lets through only on that path.
+    exceptions = ["/_anycable", "/demos/lexxy/:room/agent(.:format)"]
+    routes = Rails.application.routes.routes.reject { |route| exceptions.include?(route.path.spec.to_s) }
 
     assert_equal ["GET"], routes.map(&:verb).uniq, "found a write endpoint, but this site only reads over HTTP"
   end
@@ -60,16 +99,16 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
                         "the ActiveStorage upload client must not be bundled"
   end
 
-  test "POST and PUT are refused, including multipart uploads" do
+  test "a multipart upload is refused on every path" do
     file = Rack::Test::UploadedFile.new(StringIO.new("x" * 1024), "image/png", original_filename: "x.png")
 
-    %w[/ /demos /docs/getting-started].each do |path|
+    %w[/ /demos /docs/getting-started /rails/active_storage/direct_uploads].each do |path|
       post path, params: { file: file }
 
-      assert_response :not_found, "POST #{path} must not route"
+      assert_response :unsupported_media_type, "POST #{path} must be refused before it's parsed"
       put path, params: { file: file }
 
-      assert_response :not_found, "PUT #{path} must not route"
+      assert_response :unsupported_media_type, "PUT #{path} must be refused before it's parsed"
     end
   end
 

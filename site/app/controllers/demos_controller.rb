@@ -1,6 +1,10 @@
 # The live demos. None of these responses can be cached, because every page
 # belongs to a room and the room's state changes.
 class DemosController < ApplicationController
+  # The invite is a fetch from the demo page. The site has no sessions to
+  # hold a CSRF token, so #agent checks that the request's Origin is this
+  # site instead.
+  skip_forgery_protection only: :agent
   before_action :no_store
   before_action :load_demo, only: %i[new_room show]
 
@@ -48,6 +52,40 @@ class DemosController < ApplicationController
     render json: { body: note&.body }
   end
 
+  # The Lexxy room as a page with agents: the same document as the Lexxy demo,
+  # laid out like a shared page, where each person can invite their own agent
+  # and ask it to change a selection.
+  def space
+    @room = params[:room].to_s
+    return head :not_found unless Demos.valid_room?(@room)
+
+    @document_key = Demos.document_key("lexxy", @room)
+    @note_grant = Note.room_token(@room, :body)
+    render layout: "space"
+  end
+
+  # /space starts a new room's page.
+  def new_space = redirect_to(demo_space_path(Demos.new_room))
+
+  # Invites one person's agent into a Lexxy room. The agent runs as a
+  # PageAgentJob in this process and leaves when the room empties. The
+  # person's id, name, and color come in the query string, because the
+  # method gate only lets this POST through with no body.
+  def agent
+    room = params[:room].to_s
+    return head :not_found unless Demos.valid_room?(room) && Note.exists?(room: room)
+    return head :forbidden unless request.origin == request.base_url
+
+    owner = agent_owner or return head(:unprocessable_content)
+    case AgentSeats.current.take(room, owner[:id])
+    when :ok
+      PageAgentJob.perform_later(room, request.base_url, owner)
+      render json: { status: "joining" }, status: :accepted
+    when :here then render json: { status: "here" }
+    else render json: { status: "busy" }, status: :service_unavailable
+    end
+  end
+
   # The shape demos' version of #body. It loads the stored Y::Document and
   # reads it in Ruby with read_text, read_xml, read_map, or read_array. Like
   # #body, it's read-only and anonymous. It never creates a document, so a
@@ -68,6 +106,15 @@ class DemosController < ApplicationController
   def load_demo
     @demo = Demos.find(params[:demo])
     head :not_found if @demo.nil?
+  end
+
+  # The inviting person, as the page knows them: a random id, one of the
+  # demo's names, and a color.
+  def agent_owner
+    id, name, color = params.values_at(:owner, :name, :color).map(&:to_s)
+    return unless id.match?(/\A[A-Za-z0-9-]{8,64}\z/) && name.match?(/\A[\p{L} ]{1,24}\z/) && color.match?(/\A#\h{6}\z/)
+
+    { id:, name:, color: }
   end
 
   def no_store

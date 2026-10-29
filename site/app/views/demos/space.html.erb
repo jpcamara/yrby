@@ -1,0 +1,59 @@
+<%# The Lexxy room as a shared page with agents. It's the same room and the
+    same Note as /demos/lexxy/:room, with the same hand-written
+    lexxy-realtime markup (see demos/_lexxy.html.erb for why it's written out).
+    frontend/src/space.js adds the agents. %>
+<div class="space-app">
+  <nav class="space-rail" aria-label="Site">
+    <%= link_to root_path, class: "rail-mark", title: "yrby home" do %>y<% end %>
+    <span class="rail-item is-active" title="Pages">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z M14 3v5h5" /></svg>
+    </span>
+    <%= link_to demo_room_path("lexxy", @room), class: "rail-item", title: "Open this room in the Lexxy demo" do %>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+    <% end %>
+    <%= link_to doc_path("getting-started"), class: "rail-item", title: "yrby docs" do %>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>
+    <% end %>
+  </nav>
+
+  <main class="space-main">
+    <header class="space-top">
+      <div class="space-crumbs">
+        <span class="crumb-dim">Pages</span>
+        <span class="crumb-sep">/</span>
+        <span>Shared page</span>
+        <span id="status" class="space-status">Connecting…</span>
+      </div>
+      <div class="space-actions">
+        <div id="avatars" class="avatars" aria-label="People and agents on this page"></div>
+        <button id="invite-agent" type="button" class="pill pill-outline" data-url="<%= demo_agent_path(@room) %>" hidden>
+          <i class="pill-icon agent-dot" aria-hidden="true"></i><span>Invite your agent</span>
+        </button>
+        <button id="share" type="button" class="pill pill-outline">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 14v5h14v-5" /></svg><span>Share</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="space-scroll">
+      <article class="space-page">
+        <h1 class="page-title">Shared page</h1>
+        <p class="page-hint">
+          Select some text and choose <strong>Ask for change</strong>. Your agent joins and
+          proposes new wording, and anyone on the page can accept it. Share the link to
+          bring in someone else and their agent.
+        </p>
+
+        <yrby-document grant="<%= @note_grant %>" name="body" channel="NoteChannel">
+          <lexxy-editor id="editor" name="body" attachments="false" markdown="false" toolbar="false"
+                        placeholder="Start writing…">
+            <lexxy-collaboration doc-id="<%= @document_key %>"></lexxy-collaboration>
+          </lexxy-editor>
+        </yrby-document>
+      </article>
+    </div>
+  </main>
+</div>
+
+<p id="toast" class="space-toast" role="status" hidden></p>
+<p id="notice" class="space-toast is-notice" role="alert" hidden></p>

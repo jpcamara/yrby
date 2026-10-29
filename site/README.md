@@ -366,28 +366,31 @@ them off.
 ### No uploads
 
 The site accepts no files. A public, anonymous write surface with a file
-endpoint is a free file host. The throttles above all limit what a stranger can
-use up, and this app has no reason to hand out disk or object storage at all.
-So the app has no upload path to configure:
+endpoint is a free file host, and this app has no reason to hand out disk or
+object storage. Four small pieces keep it that way.
 
-- Active Storage isn't loaded. The app requires only the Rails frameworks it
-  needs, including Active Record for document storage. The activestorage and
-  actiontext gems are in the bundle, because lexxy-realtime depends on the
-  `rails` meta-gem, but nothing requires them, so no upload engine or route
-  is mounted.
-- There are no upload routes, no direct-upload endpoints, and no multipart
-  handling.
-- The Tiptap demo uses StarterKit only. It has no Image extension, so the
-  editor's schema has no node a file could become. The Lexxy demo mounts its
-  editor with `attachments="false"`, which removes Lexxy's upload buttons and
-  its file paste and drop handlers. Lexxy's upload code imports
-  `@rails/activestorage`, which the app doesn't install, and `build.mjs` marks
-  that import as external.
-- `frontend/src/room.js` refuses files before any editor sees them. On every
-  demo page it cancels `paste`, `drop`, and `dragover` events that carry files,
-  in the capture phase on `document`. The Tiptap editor also returns "handled"
-  from its own `handlePaste` and `handleDrop` for those events. Text pastes
-  work normally.
+- **Boot guard.** `config/initializers/no_upload_frameworks.rb` stops the app
+  from booting if Active Storage or Action Text is loaded. The gems are in the
+  bundle, because lexxy-realtime depends on the `rails` meta-gem, but the app
+  requires only the frameworks it uses. If a later change requires them, boot
+  fails instead of mounting upload routes.
+- **Method gate.** `config/initializers/method_gate.rb` answers any multipart
+  body with 415, and any method other than GET and HEAD with 405, before
+  routing. The one exception is the AnyCable RPC endpoint, which anycable-go
+  POSTs to and Rack::Attack keeps private. The cable's WebSocket upgrade is a
+  GET.
+- **CSP.** `img-src` is `'self'`, with no `data:` or `blob:`, and `media-src`
+  and `frame-src` are `'none'`. An image embedded in a document can't load. The
+  frontend build writes Lexxy's inline SVG chevrons out as files and fails if a
+  `data:` URL is left in a stylesheet.
+- **Cable check.** The editors don't offer uploads (the Tiptap demo has no
+  Image extension, the Lexxy demo sets `attachments="false"`, and
+  `frontend/src/room.js` cancels file pastes and drops), but a client can send
+  any Yjs update. `RoomGuarded` drops a document update that contains a
+  `data:` or `blob:` URL (`app/lib/embedded_files.rb`) before yrby sees it, the
+  same way it drops a write to a full room: not stored, not relayed, not acked.
+  Later edits from that tab build on the dropped one, so they stop syncing
+  too. The page gets a `file_refused` notice once and asks the person to reload.
 
 ### Process-local counters
 
@@ -695,6 +698,60 @@ a different document key.
 read the server's `{ notice: ... }` messages. `yrby-client`'s provider ignores
 messages it doesn't recognize. The mixin it builds reaches the provider through
 a closure and doesn't use `this`, so wrapping its `received` handler is safe.
+
+### The shared page with agents
+
+`/space` opens a Lexxy room as a shared page (`/demos/lexxy/:room/space`).
+It's the same room and the same Note as the Lexxy demo, laid out like a
+document app. Each person on the page can invite their own agent, a Ruby
+process that joins over the cable with the room's token, the way a browser
+does.
+
+To ask for a change, select text in one paragraph and choose "Ask for
+change". The request goes into the document's `asks` map, so every browser on
+the page shows it:
+
+1. The person's agent claims it. Its selection covers the asked-about text,
+   and its presence says it's working and since when. The page shows a
+   "Working for Ns" pill under the paragraph.
+2. Its proposed wording streams into the request as the model writes.
+3. Anyone on the page can Accept, Undo, or ask for a change. Accept replaces
+   the selected characters in that person's browser, as an ordinary edit, so
+   the server records it and `note.body` updates like it does after typing.
+   Until then the page itself doesn't change.
+
+- `DemosController#agent` takes the POST, with the person's id, name, and
+  color in the query string. It checks that the Origin is this site and that
+  the room has a note, takes the person's seat in `AgentSeats`, and enqueues
+  `PageAgentJob`.
+- `PageAgentJob` runs `Y::Agent` from yrby-rails, which holds the connection
+  and the presence. Its one-agent-per-document lock is off, because each
+  person brings an agent; `AgentSeats` counts them instead. `PageAgent`
+  (`app/agents/`) answers the asks and documents their fields.
+- Jobs run on Active Job's async adapter, in this process, with one thread
+  per agent.
+- `AgentModel` calls Fireworks AI through ruby_llm when `FIREWORKS_API_KEY`
+  is set, and streams a canned reply otherwise, so development and tests run
+  without a key. `AGENT_MODEL` picks the model.
+
+The limits, in `config/limits.rb`:
+
+| Limit | Default | Why |
+|---|---|---|
+| `MAX_AGENTS` | 6 | each agent holds a thread and a connection while it stays |
+| `MAX_AGENTS_PER_ROOM` | 3 | one per person, and more than three on a page is hard to follow |
+| `AGENT_INVITES_PER_HOUR` | 6 per IP | an invitation starts a model call |
+| `AGENT_CALLS_PER_DAY` | 300 | caps the model bill; past it the request says so |
+| `AGENT_IDLE` | 60 s | the agent leaves once nobody else is in the room |
+| `AGENT_MAX_STAY` | 15 min | and after this however busy the room is |
+
+The agent joins at the origin the inviting browser used. Set
+`AGENT_CABLE_URL` to send it another way, such as straight to the local
+proxy.
+
+The invitation is the one POST the method gate lets through: no body, and
+only on `/demos/lexxy/:room/agent`. Active Job is loaded for it. Active
+Storage still isn't, and the boot guard checks that separately.
 
 ### Building the bundles and the stylesheet
 

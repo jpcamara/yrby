@@ -6,6 +6,7 @@ require "active_record/railtie"
 require "action_controller/railtie"
 require "action_view/railtie"
 require "action_cable/engine"
+require "active_job/railtie"
 require "rails/test_unit/railtie"
 
 require "bundler"
@@ -27,6 +28,12 @@ module Site
     # LexxyRealtime::DocumentChannel, which NoteChannel extends. The gem's
     # engine would add this directory, and this app doesn't load the engine.
     config.eager_load_paths << File.join(Gem.loaded_specs.fetch("lexxy-realtime").full_gem_path, "app/channels")
+
+    # Demo agents run as jobs in this process, one thread each, so the pool
+    # is as large as the number of agents allowed at once. DemosController#agent
+    # turns invitations away past that, so nothing waits in the queue.
+    config.active_job.queue_adapter =
+      ActiveJob::QueueAdapters::AsyncAdapter.new(min_threads: 0, max_threads: Limits::MAX_AGENTS)
 
     # Deny all framing, since the demos aren't meant to be embedded.
     # ActionDispatch::Response copies default_headers in a railtie initializer,

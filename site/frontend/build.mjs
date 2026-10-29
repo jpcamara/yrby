@@ -15,7 +15,9 @@
 //   bun build.mjs            # one-shot build
 //   bun build.mjs --watch    # rebuild on change
 /* global Bun */
-import { dirname, resolve } from "node:path"
+import { createHash } from "node:crypto"
+import { readFileSync, writeFileSync } from "node:fs"
+import { basename, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -57,6 +59,8 @@ const ENTRIES = [
   // attachments="false", so that import never runs. Marking it external stops
   // the bundler from trying to resolve it.
   { entry: "src/lexxy.js", external: ["@rails/activestorage"] },
+  // The Lexxy room as a shared page with agents (demos/space.html.erb).
+  { entry: "src/space.js", external: ["@rails/activestorage"] },
   "src/tiptap.js",       // Y.XmlFragment via Tiptap's Collaboration extension
   "src/spreadsheet.js",  // Y.Array of row Y.Maps, cells nested as Y.Maps
   "src/whiteboard.js",   // Y.Map of shape records
@@ -66,6 +70,26 @@ const ENTRIES = [
   "src/codemirror.js",   // Y.Text
   "src/hero.js",         // the home page replay; no Yjs, no cable
 ]
+
+// The CSP's img-src is 'self' only (config/initializers/content_security_policy.rb),
+// so a stylesheet can't load a data: image. Lexxy's stylesheet draws the
+// chevron on its code-language picker with inline SVG data: URLs. This writes
+// each one to public/ as its own file (named by content hash, so it caches
+// safely) and points the stylesheet at it. A data: URL that's left over fails
+// the build, so a Lexxy upgrade that adds one shows up here, not as a CSP
+// error in the browser.
+const DATA_SVG = /url\(\s*(["'])data:image\/svg\+xml,(.*?)\1\s*\)/g
+
+function externalizeDataImages(cssPath) {
+  const css = readFileSync(cssPath, "utf8").replace(DATA_SVG, (_match, _quote, data) => {
+    const svg = decodeURIComponent(data)
+    const name = `lexxy-icon-${createHash("sha256").update(svg).digest("hex").slice(0, 12)}.svg`
+    writeFileSync(resolve(here, "../public", name), svg)
+    return `url("/${name}")`
+  })
+  if (css.includes("data:")) throw new Error(`${basename(cssPath)} still has a data: URL, which the CSP blocks`)
+  writeFileSync(cssPath, css)
+}
 
 async function buildEntry(spec) {
   const { entry, external = [] } = typeof spec === "string" ? { entry: spec } : spec
@@ -82,6 +106,9 @@ async function buildEntry(spec) {
   if (!result.success) {
     for (const log of result.logs) console.error(log)
     return false
+  }
+  for (const output of result.outputs) {
+    if (output.path.endsWith(".css")) externalizeDataImages(output.path)
   }
   console.log(`built ../public/${entry.replace("src/", "")}`)
   return true

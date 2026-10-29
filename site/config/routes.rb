@@ -26,6 +26,10 @@ Rails.application.routes.draw do
   get "demos/:demo", to: "demos#new_room", as: :demo
   # The Lexxy demo's stored HTML column (see DemosController#body).
   get "demos/lexxy/:room/body", to: "demos#body", as: :demo_note_body
+  post "demos/lexxy/:room/agent", to: "demos#agent", as: :demo_agent
+  # The Lexxy room as a shared page with agents. /space starts a new room.
+  get "space", to: "demos#new_space"
+  get "demos/lexxy/:room/space", to: "demos#space", as: :demo_space
   # The server-side read for the other demos: Ruby rebuilds the document from
   # stored state (see DemosController#stored).
   get "demos/:demo/:room/stored", to: "demos#stored", as: :demo_stored

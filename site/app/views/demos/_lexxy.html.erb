@@ -19,6 +19,11 @@
     buttons from the toolbar and turns off file paste and drop in the editor.
     room.js also blocks dropped and pasted files for the whole page, and the
     app doesn't include Active Storage. %>
+<%# The same room as a shared page, where each person can bring an agent. %>
+<p class="mb-3 text-sm text-zinc-400">
+  <%= link_to "Open this room as a shared page with agents →", demo_space_path(@room), class: "text-accent hover:underline" %>
+</p>
+
 <yrby-document grant="<%= @note_grant %>" name="body" channel="NoteChannel">
   <lexxy-editor id="editor" class="lexxy-content" name="body" attachments="false" markdown="false"
                 placeholder="Start writing…">
