@@ -74,6 +74,12 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm ci
       - run: npm test
+      # The gem ships these for import-map apps. A rebuild must match them.
+      - name: Import-map assets are current
+        run: |
+          npm run build:importmap
+          git status --porcelain -- ../../app/assets/javascript
+          test -z "$(git status --porcelain -- ../../app/assets/javascript)"
 
   browser:
     name: Element browser tests (Chrome)

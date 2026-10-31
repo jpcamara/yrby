@@ -18,6 +18,8 @@ require "action_controller/railtie"
 require "action_view/railtie"
 require "action_cable/engine"
 require "yrby-rails"
+require "rails/generators"
+require "generators/yrby/install/install_generator"
 require "puma"
 require "fileutils"
 
@@ -121,6 +123,41 @@ class BrowserController < ActionController::Base
     HTML
   end
 
+  # The pins yrby:install adds, served the way an import-map app serves them.
+  PINS = Yrby::Generators::InstallGenerator::IMPORTMAP_PINS
+  IMPORTMAP = { imports: PINS.transform_values { |path| "/importmap/#{path}" } }.freeze
+  IMPORTMAP_FILES = {
+    "yrby/yrby-client.js" => File.expand_path("../../app/assets/javascript/yrby/yrby-client.js", __dir__),
+    "yrby/yjs.js" => File.expand_path("../../app/assets/javascript/yrby/yjs.js", __dir__),
+    "actioncable.esm.js" => File.join(Gem.loaded_specs["actioncable"].full_gem_path,
+                                      "app/assets/javascripts/actioncable.esm.js")
+  }.freeze
+
+  def importmap
+    cookies.signed[:browser_user] = "editor"
+    @page = Page.find(1)
+    render inline: <<~ERB, layout: false
+      <!doctype html><html><head><title>yrby import map</title>
+      <meta name="action-cable-url" content="/cable">
+      <script type="importmap"><%== BrowserController::IMPORTMAP.to_json %></script>
+      <script type="module">
+        import "yrby-client/element"
+        import * as Y from "yjs"
+        document.addEventListener("yrby:synced", ({ detail }) => {
+          window.importmapDoc = detail.doc
+          window.sameYjs = detail.doc instanceof Y.Doc
+        })
+      </script>
+      </head><body>
+      <%= collaborative_document_tag @page, :pinned, id: "pinned-doc" %>
+      </body></html>
+    ERB
+  end
+
+  def importmap_asset
+    send_file IMPORTMAP_FILES.fetch(params[:path]), type: "text/javascript", disposition: "inline"
+  end
+
   def state
     attribute = Page.find(1).collaborative_document(params[:name])
     document = attribute.document_row
@@ -161,6 +198,8 @@ BrowserApplication.routes.draw do
   get "/grant", to: "browser#grant"
   get "/favicon.ico", to: ->(_env) { [204, {}, []] }
   get "/assets/:file", to: "browser#asset", constraints: { file: %r{[^/]+} }
+  get "/importmap", to: "browser#importmap"
+  get "/importmap/*path", to: "browser#importmap_asset", format: false
 end
 server = Puma::Server.new(BrowserApplication)
 server.add_tcp_listener "127.0.0.1", Integer(ENV.fetch("PORT", "3789"))

@@ -7,6 +7,15 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bin/rails generate yrby:install` pins `yrby-client`, `yrby-client/element`,
+  `yjs`, and `@rails/actioncable` when the app has `config/importmap.rb`. The
+  gem ships `yrby/yrby-client.js` and `yrby/yjs.js` for those pins, so an
+  import-map app needs no npm packages. Each shared module has one pin, so the
+  page and its editor binding load one copy of yjs. Pins the app already has
+  are left alone.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added

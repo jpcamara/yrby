@@ -6,7 +6,8 @@ require "global_id/railtie" # so signed grants work even when the app doesn't lo
 
 module Yrby
   # The Rails engine. Autoloads the gem's models (Y::Document,
-  # Y::DocumentUpdate) from app/models.
+  # Y::DocumentUpdate) from app/models. Rails adds app/assets/javascript to
+  # the asset paths, so the import-map pins resolve without an initializer.
   class Engine < ::Rails::Engine
     initializer "yrby.collaborative" do
       ActiveSupport.on_load(:active_record) { include Y::Collaborative }
