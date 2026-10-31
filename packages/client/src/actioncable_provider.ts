@@ -95,6 +95,11 @@ export class ActionCableProvider {
   #resolveSynced!: () => void;
   #onDocUpdate = (): void => this.#refreshStatus(); // a local edit may have made the queue non-empty
   #page: { hide: () => void; show: (event: PageTransitionEvent) => void } | null = null;
+  // The presence disconnect() removed, which the next connect() puts back.
+  // y-protocols ignores setLocalStateField while the local state is null, so
+  // presence an app set once at setup would otherwise stay gone after a
+  // renew() or a reconnect.
+  #presence: Record<string, unknown> | null = null;
 
   /**
    * Resolves once the document has first caught up with the server. Most
@@ -183,6 +188,12 @@ export class ActionCableProvider {
     if (this.#state.phase !== "disconnected") return;
     const attempt: Attempt = {};
     this.#state = { phase: "subscribing", attempt };
+    // Presence the app set while disconnected wins. resume() sends it once the
+    // transport is up. An awareness listener can disconnect or destroy us here.
+    const presence = this.#presence;
+    this.#presence = null;
+    if (presence && this.awareness.getLocalState() === null) this.awareness.setLocalState(presence);
+    if (!this.#subscribing(attempt)) return;
     // A consumer may invoke callbacks inside create(), before the subscription
     // is installed, so on() defers those by one microtask.
     const on = <A extends unknown[]>(callback: (...args: A) => void) => (...args: A): void => {
@@ -275,6 +286,7 @@ export class ActionCableProvider {
       // From here the provider ignores the old subscription's callbacks, but the
       // subscription can still send our presence removal before its deferred
       // unsubscribe.
+      this.#presence = this.awareness.getLocalState();
       this.session.removeLocalAwareness();
       this.session.pause();
       this.#unsubscribe(state.subscription);
