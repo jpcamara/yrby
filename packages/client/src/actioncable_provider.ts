@@ -100,6 +100,13 @@ export class ActionCableProvider {
   // presence an app set once at setup would otherwise stay gone after a
   // renew() or a reconnect.
   #presence: Record<string, unknown> | null = null;
+  // Any presence change the app makes while disconnected replaces that, a
+  // change to null included, so a cursor the app cleared stays cleared.
+  #onAwarenessUpdate = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }): void => {
+    if (this.#state.phase !== "disconnected") return;
+    const id = this.awareness.clientID;
+    if (added.includes(id) || updated.includes(id) || removed.includes(id)) this.#presence = null;
+  };
 
   /**
    * Resolves once the document has first caught up with the server. Most
@@ -135,6 +142,7 @@ export class ActionCableProvider {
       catch (callbackError) { console.warn("[yrby] onError callback failed:", callbackError, "while reporting:", error); }
     };
     this.awareness = new ProviderAwareness(doc, this.#onError);
+    this.awareness.on("update", this.#onAwarenessUpdate);
 
     this.session = new YProtocolSession(doc, {
       awareness: this.awareness,
@@ -188,11 +196,11 @@ export class ActionCableProvider {
     if (this.#state.phase !== "disconnected") return;
     const attempt: Attempt = {};
     this.#state = { phase: "subscribing", attempt };
-    // Presence the app set while disconnected wins. resume() sends it once the
-    // transport is up. An awareness listener can disconnect or destroy us here.
+    // resume() sends the restored presence once the transport is up. An
+    // awareness listener can disconnect or destroy us here.
     const presence = this.#presence;
     this.#presence = null;
-    if (presence && this.awareness.getLocalState() === null) this.awareness.setLocalState(presence);
+    if (presence) this.awareness.setLocalState(presence);
     if (!this.#subscribing(attempt)) return;
     // A consumer may invoke callbacks inside create(), before the subscription
     // is installed, so on() defers those by one microtask.
@@ -302,6 +310,7 @@ export class ActionCableProvider {
   }
   #destroyOwned(): void {
     this.session.destroy();
+    this.awareness.off("update", this.#onAwarenessUpdate);
     this.awareness.destroy();
     this.doc.off("update", this.#onDocUpdate);
   }

@@ -328,6 +328,31 @@ test("presence comes back after a rejection renews the grant", async t => {
   assert.deepEqual(presenceSent(renewed.sent, awareness.clientID), { user: "dana", cursor: 5 }, "later field updates reach peers");
 });
 
+test("an editor released during a grant refresh doesn't come back with the renewal", async t => {
+  const { consumer, store } = setup(t);
+  let respond;
+  stubFetch(t, () => new Promise(resolve => { respond = resolve; }));
+  const lease = store.acquire(refreshing), session = lease.session, { awareness } = session.provider;
+  await tick();
+  const first = consumer.created[0];
+  first.handlers.connected();
+  sync(first);
+  lease.setPresence({ user: "dana" });
+  session.doc.getText("content").insert(0, "unacked");
+  first.handlers.rejected();
+  await tick();
+  lease.release();
+  await tick();
+  assert.equal(session.state, "open", "pending work keeps the session open");
+  respond(jsonResponse({ grant: "renewed" }));
+  await tick(); await tick();
+  const renewed = consumer.created.at(-1);
+  assert.notEqual(renewed, first);
+  renewed.handlers.connected();
+  assert.equal(awareness.getLocalState(), null);
+  assert.equal(presenceSent(renewed.sent, awareness.clientID), null, "peers see no cursor");
+});
+
 test("a failed refresh blocks the session with the refresh error", async t => {
   const { consumer, store } = setup(t);
   const calls = stubFetch(t, () => jsonResponse({ error: "forbidden" }, 403));
