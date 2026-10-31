@@ -2,5 +2,7 @@
 # direct dependency. @payloadcms/richtext-lexical (cross_render.mjs) would
 # otherwise drag in its admin-UI peer tree — payload is the one peer its
 # HTML converter path needs at runtime, and it is listed explicitly.
+# rhino-editor's Tiptap 3 extensions peer on @tiptap/extensions and
+# @tiptap/extension-list, so those two are listed too.
 [install]
 peer = false

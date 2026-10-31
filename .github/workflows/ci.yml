@@ -196,7 +196,7 @@ jobs:
         run: npm ci && npm run build
       - name: Build frontend bundle
         working-directory: examples/actioncable-demo/frontend
-        run: bun install && bun run build
+        run: bun install --frozen-lockfile && bun run build
 
       # A real Tiptap editor runs headless (JSDOM) and Y::Tiptap must
       # reproduce its getHTML() from the raw doc bytes. The gem's fixture
