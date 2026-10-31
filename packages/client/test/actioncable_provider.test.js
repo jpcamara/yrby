@@ -4,6 +4,7 @@ import * as Y from "yjs";
 import * as encoding from "lib0/encoding";
 import { Awareness } from "y-protocols/awareness";
 import { ActionCableProvider, MessageType, fromBase64, toBase64 } from "../dist/index.js";
+import { presenceSent } from "./session_helpers.js";
 
 // A fake ActionCable/AnyCable consumer. `withWhisper` exposes AnyCable's
 // client-to-client whisper method so tests can verify awareness uses it without
@@ -567,9 +568,10 @@ test("renew restores presence, so later field updates still reach peers", (t) =>
   assert.deepEqual(p.awareness.getLocalState(), { user: "dana" }, "presence is back after the resubscribe");
   const whispersBefore = c.calls.whisper.length;
   c.deliverConnected();
-  assert.ok(c.calls.whisper.length > whispersBefore, "the new subscription announces it");
+  const whispers = () => c.calls.whisper.slice(whispersBefore);
+  assert.deepEqual(presenceSent(whispers(), p.awareness.clientID), { user: "dana" }, "the new subscription announces it");
   p.awareness.setLocalStateField("cell", "B2");
-  assert.deepEqual(p.awareness.getLocalState(), { user: "dana", cell: "B2" });
+  assert.deepEqual(presenceSent(whispers(), p.awareness.clientID), { user: "dana", cell: "B2" });
 });
 
 test("presence the app sets while disconnected wins over the one disconnect() removed", (t) => {
