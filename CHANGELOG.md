@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- yrby-client: `connect()` restores the presence that `disconnect()` removed,
+  unless the app set or cleared presence in between. Before this, a `renew()` (which
+  document sessions call with a renewed grant) or a manual reconnect left the
+  local awareness state `null`, and y-protocols ignores `setLocalStateField`
+  while it is `null`, so the user stayed invisible to peers until reload.
+
 ## yrby-client 0.7.0 - 2026-10-08
 
 This release updates yrby-client only. The gems are unchanged.

@@ -4,6 +4,7 @@ import * as Y from "yjs";
 import * as encoding from "lib0/encoding";
 import { Awareness } from "y-protocols/awareness";
 import { ActionCableProvider, MessageType, fromBase64, toBase64 } from "../dist/index.js";
+import { presenceSent } from "./session_helpers.js";
 
 // A fake ActionCable/AnyCable consumer. `withWhisper` exposes AnyCable's
 // client-to-client whisper method so tests can verify awareness uses it without
@@ -555,6 +556,60 @@ test("renew keeps the queue and awareness and replays pending edits on the new s
   c.deliverConnected(); // the new subscription connects
   const replayed = c.calls.send.filter((m) => m.id !== undefined).length;
   assert.ok(replayed > sentBefore, "the unacked updates are replayed on the new subscription");
+});
+
+test("renew restores presence, so later field updates still reach peers", (t) => {
+  const c = fakeConsumer({ withWhisper: true });
+  const p = makeProvider(t, new Y.Doc(), c, { id: "rn3", grant: "old" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalStateField("user", "dana");
+  p.renew({ grant: "new" });
+  assert.deepEqual(p.awareness.getLocalState(), { user: "dana" }, "presence is back after the resubscribe");
+  const whispersBefore = c.calls.whisper.length;
+  c.deliverConnected();
+  const whispers = () => c.calls.whisper.slice(whispersBefore);
+  assert.deepEqual(presenceSent(whispers(), p.awareness.clientID), { user: "dana" }, "the new subscription announces it");
+  p.awareness.setLocalStateField("cell", "B2");
+  assert.deepEqual(presenceSent(whispers(), p.awareness.clientID), { user: "dana", cell: "B2" });
+});
+
+test("presence the app sets while disconnected wins over the one disconnect() removed", (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "pr1" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalState({ user: "old" });
+  p.disconnect();
+  p.awareness.setLocalState({ user: "new" });
+  p.connect();
+  assert.deepEqual(p.awareness.getLocalState(), { user: "new" });
+});
+
+test("presence the app clears while disconnected stays cleared", (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "pr3" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalState({ user: "old" });
+  p.disconnect();
+  p.awareness.setLocalState(null);
+  p.connect();
+  assert.equal(p.awareness.getLocalState(), null);
+});
+
+test("destroy() from an awareness listener during the presence restore stops connect()", (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "pr2" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalState({ user: "erin" });
+  p.disconnect();
+  const subscriptions = c.calls.subscriptions.length;
+  p.awareness.on("change", () => p.destroy());
+  p.connect();
+  assert.equal(c.calls.subscriptions.length, subscriptions, "no new subscription");
+  assert.throws(() => p.connect(), /destroyed/);
 });
 
 test("disconnect() removes both page lifecycle handlers", (t) => {

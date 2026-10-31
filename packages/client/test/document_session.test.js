@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as Y from "yjs";
 import { DocumentSessionStore } from "../dist/index.js";
-import { fakeConsumer, sync, ack, tick } from "./session_helpers.js";
+import { fakeConsumer, sync, ack, tick, presenceSent } from "./session_helpers.js";
 const descriptor = { grant: "g", name: "body" };
 function setup(t) {
   const consumer = fakeConsumer();
@@ -307,6 +307,50 @@ test("rejection with a refresh URL renews the grant once and resumes the same se
   ack(renewed);
   await tick();
   assert.equal(session.hasPending, false);
+});
+
+test("presence comes back after a rejection renews the grant", async t => {
+  const { consumer, store } = setup(t);
+  stubFetch(t, () => jsonResponse({ grant: "renewed" }));
+  const lease = store.acquire(refreshing), { awareness } = lease.session.provider;
+  await tick();
+  const first = consumer.created[0];
+  first.handlers.connected();
+  sync(first);
+  lease.setPresence({ user: "dana" });
+  first.handlers.rejected();
+  await tick(); await tick();
+  const renewed = consumer.created.at(-1);
+  assert.notEqual(renewed, first);
+  renewed.handlers.connected();
+  assert.deepEqual(presenceSent(renewed.sent, awareness.clientID), { user: "dana" }, "the renewed subscription announces it");
+  awareness.setLocalStateField("cursor", 5);
+  assert.deepEqual(presenceSent(renewed.sent, awareness.clientID), { user: "dana", cursor: 5 }, "later field updates reach peers");
+});
+
+test("an editor released during a grant refresh doesn't come back with the renewal", async t => {
+  const { consumer, store } = setup(t);
+  let respond;
+  stubFetch(t, () => new Promise(resolve => { respond = resolve; }));
+  const lease = store.acquire(refreshing), session = lease.session, { awareness } = session.provider;
+  await tick();
+  const first = consumer.created[0];
+  first.handlers.connected();
+  sync(first);
+  lease.setPresence({ user: "dana" });
+  session.doc.getText("content").insert(0, "unacked");
+  first.handlers.rejected();
+  await tick();
+  lease.release();
+  await tick();
+  assert.equal(session.state, "open", "pending work keeps the session open");
+  respond(jsonResponse({ grant: "renewed" }));
+  await tick(); await tick();
+  const renewed = consumer.created.at(-1);
+  assert.notEqual(renewed, first);
+  renewed.handlers.connected();
+  assert.equal(awareness.getLocalState(), null);
+  assert.equal(presenceSent(renewed.sent, awareness.clientID), null, "peers see no cursor");
 });
 
 test("a failed refresh blocks the session with the refresh error", async t => {
