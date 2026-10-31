@@ -586,6 +586,18 @@ test("presence the app sets while disconnected wins over the one disconnect() re
   assert.deepEqual(p.awareness.getLocalState(), { user: "new" });
 });
 
+test("presence the app clears while disconnected stays cleared", (t) => {
+  const c = fakeConsumer();
+  const p = makeProvider(t, new Y.Doc(), c, { id: "pr3" });
+  p.connect();
+  c.deliverConnected();
+  p.awareness.setLocalState({ user: "old" });
+  p.disconnect();
+  p.awareness.setLocalState(null);
+  p.connect();
+  assert.equal(p.awareness.getLocalState(), null);
+});
+
 test("destroy() from an awareness listener during the presence restore stops connect()", (t) => {
   const c = fakeConsumer();
   const p = makeProvider(t, new Y.Doc(), c, { id: "pr2" });
