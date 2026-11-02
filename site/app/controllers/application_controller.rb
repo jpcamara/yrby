@@ -19,7 +19,7 @@ class ApplicationController < ActionController::Base
   # Thruster's request log has no Referer, so pages note where a visitor came
   # from. Only links from other sites: a click within the site isn't a source.
   def log_referrer
-    return unless request.get? && request.format.html?
+    return unless request.get? && response.media_type == "text/html"
 
     host = URI.parse(request.referer.to_s).host
     return if host.nil? || own_host?(host)
