@@ -117,4 +117,26 @@ class PagesTest < ActionDispatch::IntegrationTest
 
     DocPage.all.each { |entry| assert_includes response.body, "/docs/#{entry.slug}" }
   end
+
+  test "a visit from another site logs the referrer" do
+    assert_includes referrer_log("https://news.ycombinator.com/"),
+                    "Referred from https://news.ycombinator.com/ to /lexxy"
+  end
+
+  test "a click within the site doesn't log a referrer" do
+    assert_empty referrer_log("http://www.example.com/docs/getting-started")
+    assert_empty referrer_log(nil)
+  end
+
+  private
+
+  def referrer_log(referrer)
+    log = StringIO.new
+    logger = Rails.logger
+    Rails.logger = ActionController::Base.logger = ActiveSupport::Logger.new(log)
+    get "/lexxy", headers: { "Referer" => referrer }.compact
+    log.string.lines.grep(/Referred from/).join
+  ensure
+    Rails.logger = ActionController::Base.logger = logger
+  end
 end
