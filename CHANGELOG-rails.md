@@ -7,6 +7,26 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `collaborative_document(name)` answers `grant(expires_in:)` and `channel`:
+  the grant a page or client subscribes with, and the channel that accepts
+  it. A gem with its own grants and channel, such as lexxy-realtime, returns
+  its own document with both.
+
+### Changed
+
+- `collaborative_document_tag` renders the document's grant and channel, so
+  it works for a gem that returns its own document. `channel:` still
+  overrides the channel.
+
+### Deprecated
+
+- `collaborative_sgid(name, expires_in:)`. Use
+  `collaborative_document(name).grant(expires_in:)`. It logs through
+  `Y.deprecator`, which the engine adds to `Rails.application.deprecators`,
+  and goes away in yrby-rails 0.9.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added

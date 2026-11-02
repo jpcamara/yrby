@@ -9,15 +9,18 @@ module Y
     #
     # renders the auto-connecting element:
     #
-    #   <yrby-document grant="<signed sgid>" name="body"></yrby-document>
+    #   <yrby-document channel="Y::DocumentChannel" grant="<signed grant>" name="body"></yrby-document>
     #
     # Importing "yrby-client/element" registers the element. It subscribes to
-    # Y::DocumentChannel by itself and exposes the synced Y.Doc through its
+    # the document's channel by itself and exposes the synced Y.Doc through its
     # `doc` property and `yrby:synced` event, much like the element behind
     # turbo_stream_from.
     #
-    # The grant is a signed GlobalID scoped to this record and attribute
-    # (record.collaborative_sgid(name)). Only render the tag on pages where
+    # The grant and channel come from record.collaborative_document(name), so
+    # the tag works for any gem that returns its own document, such as
+    # lexxy-realtime. Pass channel: for an app's own Y::DocumentChannel
+    # subclass. The grant is scoped to this record and attribute. Only render
+    # the tag on pages where
     # the user may edit the record, because by default anyone holding the
     # grant can open the document. To also check the user's current
     # permissions when they subscribe, use Y::DocumentChannel.authorize_document.
@@ -30,18 +33,18 @@ module Y
     # expires_in: limits how long the grant lasts. refresh: is a URL the
     # element fetches a new grant from when a subscription is rejected, so it
     # can resubscribe without a page load. The app's action there re-runs its
-    # own authorization and renders { grant: record.collaborative_sgid(name) }:
+    # own authorization and renders { grant: record.collaborative_document(name).grant }:
     #
     #   <%= collaborative_document_tag @post, :body, expires_in: 10.minutes,
     #                                  refresh: grant_post_path(@post) %>
     module Helper
       def collaborative_document_tag(record, name, expires_in: nil, refresh: nil, **, &)
-        grant = record.collaborative_sgid(name, **{ expires_in: expires_in }.compact)
-        attributes = { grant: grant, name: name }
+        document = record.collaborative_document(name)
+        attributes = { grant: document.grant(expires_in:), name: name }
         attributes[:refresh] = refresh if refresh
-        # The helper's attributes go last because a later key wins in a keyword
-        # splat, so a template can't override the grant or the name.
-        tag.yrby_document(**, **attributes, &)
+        # A later key wins in a keyword splat. A template can pass its own
+        # channel, but it can't override the grant or the name.
+        tag.yrby_document(channel: document.channel, **, **attributes, &)
       end
     end
   end

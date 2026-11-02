@@ -59,7 +59,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     Page.delete_all
   end
 
-  def grant = @page.collaborative_sgid(:body)
+  def grant = @page.collaborative_document(:body).grant
 
   def test_session_routing_nonce_does_not_select_or_authorize_a_document
     subscribe grant: grant, name: "body", session_id: "browser-session"
@@ -298,7 +298,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
 
   def test_an_encrypted_attribute_stores_ciphertext_and_still_syncs
     secret = SecretPage.create!(title: "classified")
-    subscribe grant: secret.collaborative_sgid(:body), name: "body"
+    subscribe grant: secret.collaborative_document(:body).grant, name: "body"
 
     assert_predicate subscription, :confirmed?
 
@@ -339,7 +339,7 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
   def test_encrypted_accessor_writes_are_readable_through_the_channel
     secret = SecretPage.create!(title: "accessor")
     secret.collaborative_document(:body).append(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
-    subscribe grant: secret.collaborative_sgid(:body), name: "body"
+    subscribe grant: secret.collaborative_document(:body).grant, name: "body"
 
     client = Y::Doc.new
     perform :receive, "update" => Base64.strict_encode64(client.sync_step1)

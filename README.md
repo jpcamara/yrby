@@ -680,7 +680,7 @@ gets blocked at the next reconnect. To avoid that, pair `expires_in:` with
 # app/controllers/posts_controller.rb
 def grant
   @post = current_user.posts.find(params[:id])   # your own authorization, again
-  render json: { grant: @post.collaborative_sgid(:body, expires_in: 10.minutes) }
+  render json: { grant: @post.collaborative_document(:body).grant(expires_in: 10.minutes) }
 end
 ```
 
@@ -744,7 +744,7 @@ up the record from it, so the page decides which document the client gets.
 
 ```erb
 <%# the view picks the document and signs it %>
-<%= tag.div data: { grant: post.collaborative_sgid(:body) } %>
+<%= tag.div data: { grant: post.collaborative_document(:body).grant } %>
 ```
 
 ```ruby

@@ -58,6 +58,10 @@ class CollaborativeHelperTest < Minitest::Test
     end
   end
 
+  def test_renders_the_channel_the_document_names
+    assert_includes collaborative_document_tag(@page, :body), 'channel="Y::DocumentChannel"'
+  end
+
   # Points the tag at a one-attribute subclass of the shipped channel.
   def test_channel_option_names_the_channel_the_element_subscribes_to
     html = collaborative_document_tag(@page, :body, channel: "PostDocumentChannel")

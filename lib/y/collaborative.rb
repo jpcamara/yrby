@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/concern"
+require "active_support/deprecation"
 require "global_id"
 
 module Y
@@ -12,7 +13,7 @@ module Y
   # record up from it. The token is a signed GlobalID scoped to one attribute.
   #
   #   # the view
-  #   tag.div data: { grant: post.collaborative_sgid(:body) }
+  #   tag.div data: { grant: post.collaborative_document(:body).grant }
   #
   #   # the channel
   #   def authorized?(_key)
@@ -28,6 +29,10 @@ module Y
   #
   # The engine includes this into ActiveRecord::Base so any channel's
   # authorized? can use it. lexxy-realtime uses the same token flow.
+  # Warns about yrby-rails methods that are going away. The engine adds it to
+  # Rails.application.deprecators, so the app's deprecation settings apply.
+  def self.deprecator = @deprecator ||= ActiveSupport::Deprecation.new("0.9", "yrby-rails")
+
   module Collaborative
     extend ActiveSupport::Concern
 
@@ -39,7 +44,7 @@ module Y
       # shipped one can both resolve the same tokens for an attribute.
       def sgid_purpose(name) = "yrby/#{name}"
 
-      # Looks up the record for a token from `collaborative_sgid(name)`.
+      # Looks up the record for a grant from `collaborative_document(name).grant`.
       # Returns nil for an invalid, tampered, expired, or wrong-attribute
       # token, and for a record that no longer exists.
       def locate(sgid, name)
@@ -76,20 +81,17 @@ module Y
     end
 
     # Returns the document for one attribute, stored the way the model
-    # declared. It responds to load_state, append, y_doc, and key.
+    # declared. It responds to load_state, append, y_doc, key, grant,
+    # and channel.
     def collaborative_document(name)
       Attribute.new(self, name)
     end
 
-    # A signed token that a channel can pass to Y::Collaborative.locate to get
-    # this record back, for this attribute only. Pass expires_in: to limit how
-    # long the grant lasts. Without it GlobalID's own default applies, which is
-    # one month under Rails. We pass the option through only when it's given,
-    # because an explicit nil would mean "never expire".
+    # Deprecated. Use collaborative_document(name).grant. This one always
+    # signs yrby's own grant, as it did before.
     def collaborative_sgid(name, expires_in: nil)
-      options = { for: Y::Collaborative.sgid_purpose(name) }
-      options[:expires_in] = expires_in if expires_in
-      to_sgid(**options).to_s
+      Y.deprecator.warn("collaborative_sgid(name) is deprecated. Use collaborative_document(name).grant instead.")
+      Attribute.new(self, name).grant(expires_in:)
     end
   end
 end
