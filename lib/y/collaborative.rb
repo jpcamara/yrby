@@ -3,6 +3,7 @@
 require "active_support/concern"
 require "active_support/deprecation"
 require "global_id"
+require "y/action_cable"
 
 module Y
   # The signed token that connects a page to a channel for record-backed
@@ -81,7 +82,7 @@ module Y
     end
 
     # Returns the document for one attribute, stored the way the model
-    # declared. It responds to load_state, append, y_doc, key, grant,
+    # declared. It responds to load_state, append, edit, y_doc, key, grant,
     # and channel.
     def collaborative_document(name)
       Attribute.new(self, name)

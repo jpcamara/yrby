@@ -7,6 +7,16 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
+
+- `collaborative_document(:body).edit { |doc| ... }` edits a record's
+  document from Ruby. It records the change in the document's rows, encrypted
+  ones included, and broadcasts it to open editors.
+  `Y::ActionCable.broadcast(key, update)` sends an already recorded update.
+
 ### Added
 
 - `collaborative_document(name)` answers `grant(expires_in:)` and `channel`:
@@ -26,6 +36,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   `collaborative_document(name).grant(expires_in:)`. It logs through
   `Y.deprecator`, which the engine adds to `Rails.application.deprecators`,
   and goes away in yrby-rails 0.9.
+
+### Fixed
+
+- The channel relays a client's SyncStep2 to peers as a plain update.
+  Relayed as is, a peer that was still joining could take it for the answer
+  to its own handshake and report itself loaded before it had the server's
+  state.
 
 ## [0.7.0] - 2026-10-01
 

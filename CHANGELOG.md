@@ -6,6 +6,35 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
+
+- Live handles that write to a document from Ruby: `Doc#get_map`,
+  `get_array`, `get_text`, and `get_xml_text` return `Y::Map`, `Y::Array`,
+  `Y::Text`, and `Y::XmlText`. A write is a CRDT edit, so a person editing the
+  same document keeps their change. A handle stays on the shared type it was
+  made for while others edit around it, and releases the GVL like `Doc`.
+  Indexes are Ruby characters, and negative indexes count from the end as in
+  Ruby.
+- `Doc#diff { }` returns the update the block's writes produced, or nil when
+  it wrote nothing. It is the unit a process records and sends as it writes.
+- `Y::Lexical` and `Y::Lexxy` write Lexical's node shape: `append_paragraph`,
+  `append_heading`, `append_list`, `append_quote`, `append_code`,
+  `append_markdown`, `insert_paragraph`, `append_text`, `replace_runs`, and
+  `delete_block`.
+  Text takes formatted runs (`bold:`, `italic:`, `code:`, `link:`, and so on).
+  What Ruby writes renders the same as what a person typed.
+- `Y::Anchor`, from `XmlText#anchor`, is a block's identity as a value to
+  store or send. `Doc#block_at` and `Doc#find` resolve it.
+  `relative_position(index)` builds the Yjs caret shape editors put in
+  awareness, and `Text#index_at(position)` resolves one.
+- `Doc#apply_update_changes(update, root)` applies an update and returns the
+  ordinals of the top-level blocks it touched.
+- `Y::Awareness` builds and reads presence frames, and `Doc#client_id` returns
+  the id a document writes under.
+
 ### Changed
 
 - yrby and the renderer crates are on yrs 0.28. yrs 0.28 replaced the number
@@ -17,10 +46,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - yrby-client: `connect()` restores the presence that `disconnect()` removed,
-  unless the app set or cleared presence in between. Before this, a `renew()` (which
-  document sessions call with a renewed grant) or a manual reconnect left the
-  local awareness state `null`, and y-protocols ignores `setLocalStateField`
-  while it is `null`, so the user stayed invisible to peers until reload.
+  unless the app set or cleared presence in between. Before this, a `renew()`
+  (which document sessions call with a renewed grant) or a manual reconnect
+  left the local awareness state `null`, and y-protocols ignores
+  `setLocalStateField` while it is `null`, so the user stayed invisible to
+  peers until reload.
 
 ## yrby-client 0.7.0 - 2026-10-08
 

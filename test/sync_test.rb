@@ -242,6 +242,25 @@ class SyncTest < Minitest::Test
     assert_equal [7], acks_in(transmits)
   end
 
+  # A client's Step2 answers the server's Step1. Relayed as is, a peer would
+  # read it as the answer to its own handshake and think it had loaded.
+  def test_a_clients_sync_step2_is_relayed_as_an_update
+    store = []
+    broadcasts = []
+    helper = helper_for(store: store, broadcasts: broadcasts)
+    client = Y::Doc.new
+    client.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+    step2 = client.handle_sync_message(Y::Doc.new.sync_step1)[2]
+
+    assert_equal Y::MSG_SYNC_STEP2, step2.getbyte(1)
+
+    helper.sync_receive({ "update" => Base64.strict_encode64(step2) }, "doc-key")
+    relayed = Base64.strict_decode64(broadcasts.sole)
+
+    assert_equal Y::MSG_SYNC_UPDATE, relayed.getbyte(1)
+    assert_equal store.sole, Y.update_from_message(relayed)
+  end
+
   def test_no_ack_without_id
     helper = helper_for
 
