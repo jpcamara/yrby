@@ -377,7 +377,7 @@ impl RbDoc {
     }
 
     /// Start recording the updates this thread's handle writes make: what
-    /// `Doc#diff` returns. Updates applied from elsewhere stay out.
+    /// `Doc#edit` returns. Updates applied from elsewhere stay out.
     fn record_updates(&self) -> Recording {
         let doc = &self.0;
         let updates = Arc::new(Mutex::new(Vec::new()));
@@ -786,7 +786,7 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // Module Initialization
 // ============================================================================
 
-/// The updates a `Doc#diff` block makes, collected as they commit. `finish`
+/// The updates a `Doc#edit` block makes, collected as they commit. `finish`
 /// stops recording and returns them merged into one, or nil for none; it is
 /// safe to call twice.
 #[magnus::wrap(class = "Y::Doc::Recording", free_immediately, size)]

@@ -30,7 +30,7 @@ use yrs::{
 
 use crate::{nogvl, yrb_error};
 
-/// The origin of every transaction a handle opens. `Doc#diff` records only
+/// The origin of every transaction a handle opens. `Doc#edit` returns only
 /// these, so an update applied from elsewhere while it runs stays out.
 pub const ORIGIN: &str = "yrby";
 

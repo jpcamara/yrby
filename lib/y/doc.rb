@@ -3,12 +3,17 @@
 module Y
   # Ruby-side conveniences over the native document.
   class Doc
-    # The update the block's writes produced, as one Yjs update, or nil when
-    # it wrote nothing. It holds only what the block wrote through handles on
-    # this thread: an update applied from elsewhere while it runs is not in
-    # it. This is the unit a long-lived process records and broadcasts as it
-    # streams into a document, one call per chunk.
-    def diff
+    # Runs the block, which edits this document through handles, and returns
+    # the update its writes produced, or nil when it wrote nothing. The
+    # document has the edit either way. The update is what a process saves
+    # and broadcasts, one call per chunk as it streams into a document.
+    #
+    # The update holds the handle writes made on this thread while the block
+    # runs, so an update applied from elsewhere stays out. In a reactor,
+    # another fiber's handle writes to this document during the block are in
+    # it too. Applying an update twice changes nothing, so that only adds
+    # bytes.
+    def edit
       recording = record_updates
       yield self
       recording.finish

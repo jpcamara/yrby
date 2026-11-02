@@ -54,7 +54,7 @@ class CollaborativeEditTest < ActionCable::Channel::TestCase
   def test_an_edit_merges_with_a_browser_edit_it_never_saw
     body = @page.collaborative_document(:body)
     browser = Y::Doc.new
-    browser_update = browser.diff { browser.get_text("content").push("typed ") }
+    browser_update = browser.edit { browser.get_text("content").push("typed ") }
     ruby_update = body.edit { |doc| doc.get_text("content").push("written") }
     body.append(browser_update)
 

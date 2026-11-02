@@ -18,8 +18,9 @@ These are new, and they may change in a minor release. See
   made for while others edit around it, and releases the GVL like `Doc`.
   Indexes are Ruby characters, and negative indexes count from the end as in
   Ruby.
-- `Doc#diff { }` returns the update the block's writes produced, or nil when
-  it wrote nothing. It is the unit a process records and sends as it writes.
+- `Doc#edit { }` runs a block that writes to the document and returns the
+  update its writes produced, or nil when it wrote nothing. It is the unit a
+  process saves and sends as it writes.
 - `Y::Lexical` and `Y::Lexxy` write Lexical's node shape: `append_paragraph`,
   `append_heading`, `append_list`, `append_quote`, `append_code`,
   `append_markdown`, `insert_paragraph`, `append_text`, `replace_runs`, and
