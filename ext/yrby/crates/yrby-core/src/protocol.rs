@@ -12,7 +12,7 @@ use yrs::{Doc, ReadTxn, StateVector, Transact, Update, WriteTxn};
 
 /// Classify a frame: a non-zero code only for exactly one well-formed message
 /// that consumes the whole buffer (the codes are the match arms below).
-pub(crate) fn classify_message(bytes: &[u8]) -> u8 {
+pub fn classify_message(bytes: &[u8]) -> u8 {
     let mut decoder = DecoderV1::new(Cursor::new(bytes));
     let msg = match Message::decode(&mut decoder) {
         Ok(msg) => msg,
@@ -34,7 +34,7 @@ pub(crate) fn classify_message(bytes: &[u8]) -> u8 {
 /// Merge the document-update deltas (Update / SyncStep2 payloads) carried by a
 /// frame into one update, or `None` if the frame carries no document change
 /// (a request, an awareness update, or a no-op handshake SyncStep2).
-pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
+pub fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
     let mut decoder = DecoderV1::new(Cursor::new(bytes));
     let mut updates: Vec<Vec<u8>> = Vec::new();
     for msg in MessageReader::new(&mut decoder) {
@@ -79,7 +79,7 @@ pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String>
 /// So the clock lower bound serves only as a cheap definitive REJECT; "ready"
 /// is decided by trial-integrating on a throwaway probe seeded with the doc's
 /// integrated state: ready iff nothing parks.
-pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
+pub fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     // Partial order: "not covered" includes incomparable: not ready either way.
     let lower_covered = doc.transact().state_vector() >= update.state_vector_lower();
@@ -131,7 +131,7 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
 /// server had already integrated. The exact comparison removes that duplication
 /// while still never dropping a real deletion. Assumes the update is already
 /// causally ready.
-pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
+pub fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     let has_deletes = !update.delete_set().is_empty();
 
@@ -222,7 +222,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
 /// True if the doc holds un-integrable pending structs or a pending delete set:
 /// blocks that couldn't integrate because a causally-prior update is missing. A
 /// pure read; does not mutate.
-pub(crate) fn has_pending(doc: &Doc) -> bool {
+pub fn has_pending(doc: &Doc) -> bool {
     let txn = doc.transact();
     txn.store().pending_update().is_some() || txn.store().pending_ds().is_some()
 }
@@ -239,7 +239,7 @@ pub(crate) fn has_pending(doc: &Doc) -> bool {
 ///
 /// Non-destructive: the prune happens only on the throwaway copy; `doc` keeps its
 /// pending, so a genuine gap still heals if its missing dependency later arrives.
-pub(crate) fn integrated_update(doc: &Doc, sv: &StateVector) -> Result<Vec<u8>, String> {
+pub fn integrated_update(doc: &Doc, sv: &StateVector) -> Result<Vec<u8>, String> {
     // Pending check and encode share ONE transaction. With two, a concurrent
     // gappy apply_update could slip between them and the encode would serve
     // the very pending this function exists to exclude.
@@ -274,10 +274,10 @@ mod tests {
         let doc = Doc::new();
         let text = doc.get_or_insert_text("content");
         text.insert(&mut doc.transact_mut(), 0, content);
-        let update = doc
-            .transact()
-            .encode_state_as_update_v1(&yrs::StateVector::default());
-        update
+        // Edition 2024 drops the transaction before `doc`, so the tail
+        // expression borrows safely.
+        doc.transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default())
     }
 
     fn update_frame(content: &str) -> Vec<u8> {
@@ -900,8 +900,8 @@ mod tests {
         // is guaranteed by using a single transaction. What this catches is
         // coarser: encoding outside the lock, or a fast path skipping the
         // pending check.
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         let (first, dependent) = gap_pair();
         let doc = StdArc::new(Doc::new());
