@@ -141,7 +141,7 @@ class BrowserController < ActionController::Base
     name = params.require(:name)
     return head :forbidden unless name != "body" || page.body_editor == cookies.signed[:browser_user]
 
-    render json: { grant: page.collaborative_sgid(name, expires_in: 2.seconds) }
+    render json: { grant: page.collaborative_document(name).grant(expires_in: 2.seconds) }
   end
 
   def asset

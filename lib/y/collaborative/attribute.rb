@@ -22,6 +22,24 @@ module Y
       # this to return before it acknowledges or broadcasts the change.
       def append(update) = document_row.append(update)
 
+      # A signed grant for this document, what a page or a Ruby client
+      # subscribes with. It's a signed GlobalID scoped to this attribute, and
+      # Y::Collaborative.locate turns it back into the record. Pass
+      # expires_in: to limit how long it lasts. Without it GlobalID's own
+      # default applies, which is one month under Rails. The option goes
+      # through only when it's given, because an explicit nil would mean
+      # "never expire".
+      def grant(expires_in: nil)
+        options = { for: Y::Collaborative.sgid_purpose(name) }
+        options[:expires_in] = expires_in if expires_in
+        record.to_sgid(**options).to_s
+      end
+
+      # The channel that accepts this document's grant. A gem with its own
+      # grants and channel, such as lexxy-realtime, returns its own document
+      # with both.
+      def channel = "Y::DocumentChannel"
+
       # Builds a new Y::Doc from storage on every call.
       def y_doc
         Y::Doc.new.tap do |doc|
