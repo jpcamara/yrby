@@ -24,6 +24,9 @@ Rails.application.configure do
   end
 
   config.log_tags = [:request_id]
+  # Falcon, unlike Puma, leaves stdout block-buffered, and the log would only
+  # reach the journal when the buffer filled or the process exited.
+  $stdout.sync = true
   config.logger = ActiveSupport::TaggedLogging.logger($stdout)
   config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
   config.silence_healthcheck_path = "/up"
