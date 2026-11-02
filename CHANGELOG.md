@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- yrby and the renderer crates are on yrs 0.28. yrs 0.28 replaced the number
+  variants of `Any` with `Any::Number(Number::Int | Number::Float)`. Because
+  the crates take yrs types, this is a breaking release for them:
+  `lexical-yjs-html` 0.2.0, `prosemirror-yjs-html` 0.2.0, and
+  `yjs-html-core` 0.2.0 need yrs 0.28.
+
 ### Fixed
 
 - yrby-client: `connect()` restores the presence that `disconnect()` removed,
