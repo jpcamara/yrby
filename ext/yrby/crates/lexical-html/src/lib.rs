@@ -67,8 +67,8 @@ mod readme_examples {}
 pub use yjs_html_core::*;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, GetString, Map, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
-    XmlOut, XmlTextRef,
+    Any, GetString, Map, Number, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment,
+    XmlFragmentRef, XmlOut, XmlTextRef,
 };
 
 // Lexical text format bitmask (lexical 0.44).
@@ -391,13 +391,11 @@ fn open_block<T: ReadTxn>(
             push_block_children(txn, t, depth, "</tr>", false, stack);
         }
         "tablecell" => {
-            let header = matches!(
-                t.get_attribute(txn, "__headerState"),
-                Some(Out::Any(Any::Number(n))) if n > 0.0
-            ) || matches!(
-                t.get_attribute(txn, "__headerState"),
-                Some(Out::Any(Any::BigInt(n))) if n > 0
-            );
+            let header = match t.get_attribute(txn, "__headerState") {
+                Some(Out::Any(Any::Number(Number::Int(n)))) => n > 0,
+                Some(Out::Any(Any::Number(Number::Float(n)))) => n > 0.0,
+                _ => false,
+            };
             let close = if header {
                 em.push_str("<th>");
                 "</th>"
@@ -562,8 +560,8 @@ fn open_listitem<T: ReadTxn>(
     rules: &Rules,
 ) {
     let value = match t.get_attribute(txn, "__value") {
-        Some(Out::Any(Any::Number(n))) => n as i64,
-        Some(Out::Any(Any::BigInt(n))) => n,
+        Some(Out::Any(Any::Number(Number::Int(n)))) => n,
+        Some(Out::Any(Any::Number(Number::Float(n)))) => n as i64,
         _ => 1,
     };
     let checked = match t.get_attribute(txn, "__checked") {
@@ -669,8 +667,8 @@ fn render_inline<T: ReadTxn>(
                     _ => {
                         is_tab = false;
                         format = match m.get(txn, "__format") {
-                            Some(Out::Any(Any::Number(n))) => n as u32,
-                            Some(Out::Any(Any::BigInt(n))) => n as u32,
+                            Some(Out::Any(Any::Number(Number::Int(n)))) => n as u32,
+                            Some(Out::Any(Any::Number(Number::Float(n)))) => n as u32,
                             _ => 0,
                         };
                         style = match m.get(txn, "__style") {
@@ -1167,8 +1165,14 @@ mod tests {
         let frag = txn.get_xml_fragment("root").unwrap();
         let html = render(&txn, &frag).unwrap();
 
-        assert!(html.contains("rocks"), "marked text survives without a rule: {html}");
-        assert!(!html.contains("<mark"), "no wrapper is invented for it: {html}");
+        assert!(
+            html.contains("rocks"),
+            "marked text survives without a rule: {html}"
+        );
+        assert!(
+            !html.contains("<mark"),
+            "no wrapper is invented for it: {html}"
+        );
         assert!(html.contains("#ruby"), "hashtag text survives: {html}");
     }
 

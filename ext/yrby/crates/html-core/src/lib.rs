@@ -18,7 +18,7 @@
 //! every binding and caller.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use yrs::{Any, Out, ReadTxn, Xml};
+use yrs::{Any, Number, Out, ReadTxn, Xml};
 
 /// One piece of renderer output. `Html` is finished markup; `Deferred` is a
 /// callback node whose markup the caller supplies after the render, carrying
@@ -216,12 +216,12 @@ pub fn xml_ref_attr<T: ReadTxn, N: Xml>(txn: &T, node: &N, name: &str) -> Option
 pub fn any_attr_string(any: &Any) -> Option<String> {
     match any {
         Any::String(s) => Some(s.to_string()),
-        Any::Number(n) => Some(if n.fract() == 0.0 {
+        Any::Number(Number::Int(n)) => Some(format!("{n}")),
+        Any::Number(Number::Float(n)) => Some(if n.fract() == 0.0 {
             format!("{}", *n as i64)
         } else {
             format!("{n}")
         }),
-        Any::BigInt(n) => Some(format!("{n}")),
         Any::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
         _ => None,
     }

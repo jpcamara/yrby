@@ -52,8 +52,8 @@ pub use yjs_html_core::*;
 use yrs::types::Attrs;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, GetString, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut,
-    XmlTextRef,
+    Any, GetString, Number, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
+    XmlOut, XmlTextRef,
 };
 
 // The block tree is walked on a heap stack, so depth can't overflow the
@@ -874,8 +874,8 @@ fn str_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<String
 
 fn num_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<i64> {
     match e.get_attribute(txn, name) {
-        Some(Out::Any(Any::Number(n))) => Some(n as i64),
-        Some(Out::Any(Any::BigInt(n))) => Some(n),
+        Some(Out::Any(Any::Number(Number::Int(n)))) => Some(n),
+        Some(Out::Any(Any::Number(Number::Float(n)))) => Some(n as i64),
         _ => None,
     }
 }

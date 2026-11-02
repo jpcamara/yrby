@@ -10,8 +10,8 @@ fixtures captured from a live editor.
 
 ```toml
 [dependencies]
-lexical-yjs-html = "0.1"
-yrs = { version = "0.27", features = ["sync"] }
+lexical-yjs-html = "0.2"
+yrs = { version = "0.28", features = ["sync"] }
 ```
 
 The input is a Yjs update: bytes from a durable store, from a provider, or

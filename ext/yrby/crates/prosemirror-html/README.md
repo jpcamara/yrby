@@ -11,8 +11,8 @@ output byte-for-byte to fixtures captured from a live Tiptap editor.
 
 ```toml
 [dependencies]
-prosemirror-yjs-html = "0.1"
-yrs = { version = "0.27", features = ["sync"] }
+prosemirror-yjs-html = "0.2"
+yrs = { version = "0.28", features = ["sync"] }
 ```
 
 The input is a Yjs update: bytes from a durable store, from a provider, or
