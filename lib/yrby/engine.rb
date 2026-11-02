@@ -12,5 +12,9 @@ module Yrby
       ActiveSupport.on_load(:active_record) { include Y::Collaborative }
       ActiveSupport.on_load(:action_view) { include Y::Collaborative::Helper }
     end
+
+    initializer "yrby.deprecator" do |app|
+      app.deprecators[:yrby] = Y.deprecator
+    end
   end
 end
