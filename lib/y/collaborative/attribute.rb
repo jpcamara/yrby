@@ -50,7 +50,7 @@ module Y
       #   end
       def edit
         doc = y_doc
-        update = doc.diff { yield doc }
+        update = doc.edit { yield doc }
         return unless update
 
         append(update)

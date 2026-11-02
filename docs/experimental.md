@@ -202,17 +202,18 @@ rest), what a process keeps to put a block back the way it was.
 
 A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
-as its own diff. `Doc#diff` returns the update the block's writes produced,
-or nil when it wrote nothing. It holds only what the block wrote through
-handles on its own thread, so an update applied from elsewhere meanwhile
-stays out:
+as its own update. `Doc#edit` runs a block that writes to the document and
+returns the update its writes produced, or nil when it wrote nothing. It
+holds only what was written through handles on this thread, so an update
+applied from elsewhere meanwhile stays out. In a reactor, another fiber's
+handle writes to the same document during the block are included too:
 
 ```ruby
 doc = Y::Doc.new
 paragraph = Y::Lexical.append_paragraph(doc, "")
 %w[one two three].each do |word|
-  update = doc.diff { Y::Lexical.append_text(paragraph, "#{word} ") }
-  # record `update`, then Y::ActionCable.broadcast(key, update)
+  update = doc.edit { Y::Lexical.append_text(paragraph, "#{word} ") }
+  # save `update`, then Y::ActionCable.broadcast(key, update)
 end
 ```
 
