@@ -119,7 +119,8 @@ class DocTransactTest < Minitest::Test
           read_map: d.read_map("state"), read_text: d.read_text("t"), read_xml: d.read_xml("root"),
           html: Y::Lexxy.new(d).to_html, block_at: d.block_at(block.anchor), find: d.find(block.anchor)&.text,
           names: d.root_names.sort, update: d.encode_state_as_update.bytesize, vector: d.encode_state_vector.bytesize,
-          pending: d.pending?
+          pending: d.pending?, ready: d.update_ready?(d.encode_state_as_update),
+          advances: d.update_advances?(d.encode_state_as_update), compacted: d.compacted_state_update.bytesize
         }
       end
     end
@@ -137,6 +138,9 @@ class DocTransactTest < Minitest::Test
     assert_operator seen[:update], :>, 2
     assert_operator seen[:vector], :>, 1
     refute seen[:pending]
+    assert seen[:ready]
+    refute seen[:advances], "the block's own state is already in the document"
+    assert_operator seen[:compacted], :>, 2
   end
 
   def test_a_new_root_inside_the_block
@@ -401,23 +405,27 @@ class DocTransactTest < Minitest::Test
     assert_equal "from the block from a fiber ", fresh.read_text("t")
   end
 
-  def test_fibers_under_a_scheduler_take_turns_inside_a_block
+  # Under a scheduler, a task that runs while the block waits joins its
+  # transaction: the other task's write is in the block's update.
+  def test_fibers_under_a_scheduler_join_the_block
     doc = Y::Doc.new
-    finishes do
+    update = finishes do
       Async do |task|
-        writer = task.async do
-          doc.transact do |d|
+        editor = task.async do
+          doc.edit do |d|
             d.get_text("t") << "a"
             task.yield
             d.get_text("t") << "c"
           end
         end
         task.async { doc.get_text("t") << "b" }
-        writer.wait
-      end
+        editor.wait
+      end.wait
     end
+    fresh = Y::Doc.new
+    fresh.apply_update(update)
 
-    assert_equal "abc", doc.read_text("t")
+    assert_equal "abc", fresh.read_text("t")
   end
 
   # --- garbage collection ---
