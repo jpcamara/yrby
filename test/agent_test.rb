@@ -88,6 +88,20 @@ class AgentTest < Minitest::Test
     assert_equal :left, run.join(Y::ActionCable::Client::RENEW + 10)&.value
   end
 
+  # Outside a reactor, run starts one on the calling thread and holds it
+  # until the agent leaves, so a job's thread is the agent's.
+  def test_the_agent_runs_on_the_calling_thread
+    thread = task = nil
+    run = agent(max_stay: 1) do
+      thread = Thread.current
+      task = Async::Task.current?
+    end
+
+    assert_equal :left, run.join(10)&.value
+    assert_equal run, thread
+    assert task, "the agent runs in a reactor"
+  end
+
   def test_a_second_agent_on_the_same_document_is_turned_away
     @lock.write("yrby:agent:#{@document.key}", "another agent")
 
