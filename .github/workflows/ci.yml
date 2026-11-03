@@ -33,8 +33,12 @@ jobs:
         run: cargo fmt --manifest-path ext/yrby/Cargo.toml -- --check
       - name: clippy
         run: cargo clippy --manifest-path ext/yrby/Cargo.toml --all-targets -- -D warnings
+      # The handle tests run inside an embedded Ruby, so the test binary
+      # loads libruby from Ruby's libdir.
       - name: cargo test (Rust unit tests)
-        run: cargo test --manifest-path ext/yrby/Cargo.toml
+        run: |
+          export LD_LIBRARY_PATH="$(ruby -e 'print RbConfig::CONFIG["libdir"]')"
+          cargo test --manifest-path ext/yrby/Cargo.toml
 
       # Ruby: build the extension, run the test suite, lint.
       - name: compile
