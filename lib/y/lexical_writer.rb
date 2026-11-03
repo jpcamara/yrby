@@ -9,7 +9,9 @@ module Y
   # followed by the characters; a run of formatted text is its own marker and
   # characters. These helpers build exactly that shape, so what Ruby writes
   # renders the same as what a person typed, and an open editor applies it as
-  # an ordinary remote edit.
+  # an ordinary remote edit. Each helper writes its block in one transaction,
+  # so another thread or a peer never sees a block without its text, or text
+  # under the wrong marker.
   class Lexical
     ELEMENT_ATTRIBUTES = {
       "__format" => 0, "__style" => "", "__indent" => 0, "__dir" => nil,
@@ -86,27 +88,19 @@ module Y
 
     # Append a code block. Lines stay as they are; `language:` names the syntax.
     def self.append_code(doc, code, language: "plain", root: "root")
-      block = doc.get_xml_text(root).push_xml_text(code_attributes(language: language))
-      block.insert_embed(0, CODE_TEXT_ATTRIBUTES)
-      block.insert(1, code.to_s)
-      block
+      doc.get_xml_text(root).push_xml_text(code_attributes(language: language),
+                                           [CODE_TEXT_ATTRIBUTES, code.to_s])
     end
 
     # Append a list of `items` (each a string or runs) and return the live list.
     def self.append_list(doc, items, ordered: false, root: "root")
-      list = doc.get_xml_text(root).push_xml_text(list_attributes(ordered: ordered))
-      items.each_with_index do |runs, i|
-        item = list.push_xml_text(list_item_attributes(i + 1))
-        write_runs(item, runs)
-      end
-      list
+      entries = items.each_with_index.map { |runs, i| [list_item_attributes(i + 1), content(runs)] }
+      doc.get_xml_text(root).push_xml_text(list_attributes(ordered: ordered), entries)
     end
 
     # Append a block with `attributes` holding `runs`.
     def self.append_block(doc, attributes, runs, root: "root")
-      block = doc.get_xml_text(root).push_xml_text(attributes)
-      write_runs(block, runs)
-      block
+      doc.get_xml_text(root).push_xml_text(attributes, content(runs))
     end
 
     # --- editing in place ---
@@ -114,17 +108,11 @@ module Y
     # Insert a paragraph before the `at`-th block (at the end when past the
     # last) and return it.
     def self.insert_paragraph(doc, at, runs, root: "root")
-      block = doc.get_xml_text(root).insert_xml_text(at, PARAGRAPH_ATTRIBUTES)
-      write_runs(block, runs)
-      block
+      doc.get_xml_text(root).insert_xml_text(at, PARAGRAPH_ATTRIBUTES, content(runs))
     end
 
     # Replace everything in a block with `runs`.
-    def self.replace_runs(block, runs)
-      block.clear
-      write_runs(block, runs)
-      block
-    end
+    def self.replace_runs(block, runs) = block.replace(content(runs))
 
     # Remove the `at`-th block. Returns whether there was one.
     def self.delete_block(doc, at, root: "root") = doc.get_xml_text(root).delete_xml_text(at)
@@ -133,37 +121,22 @@ module Y
     # the call for streaming into a block. Text must follow a text node's
     # marker or Lexical drops it, so after a link, or in an empty block, it
     # starts a text node of its own; otherwise it joins the last one.
-    def self.append_text(block, text)
-      if block.empty? || block.ends_with_xml_text?
-        write_text(block, { text: text })
-      else
-        block.insert(-1, text.to_s)
-      end
-      block
-    end
+    def self.append_text(block, text) = block.append_text(text.to_s, TEXT_ATTRIBUTES)
 
-    # Write `runs` at the end of `block`: a text node per run, a link element
-    # for a run with `link:`. Runs may use string keys, as parsed JSON does.
-    def self.write_runs(block, runs)
-      Array(runs).each do |run|
+    # Write `runs` at the end of `block`.
+    def self.write_runs(block, runs) = block.append(content(runs))
+
+    # `runs` as block content (see `XmlText#insert_xml_text`): a text node,
+    # its marker then its text, per run, and a link element holding one for a
+    # run with `link:`. Runs may use string keys, as parsed JSON does.
+    def self.content(runs)
+      Array(runs).flat_map do |run|
         run = run.is_a?(String) ? { text: run } : run.transform_keys(&:to_sym)
         raise ArgumentError, "a run needs text: #{run.inspect}" unless run.key?(:text)
 
-        if run[:link]
-          link = block.push_xml_text(link_attributes(run[:link], title: run[:title]))
-          write_text(link, run.except(:link, :title))
-        else
-          write_text(block, run)
-        end
+        text = [text_attributes(**run.slice(*FORMAT.keys)), run[:text].to_s]
+        run[:link] ? [[link_attributes(run[:link], title: run[:title]), text]] : text
       end
-      block
     end
-
-    def self.write_text(block, run)
-      format = run.slice(*FORMAT.keys)
-      block.insert_embed(-1, text_attributes(**format))
-      block.insert(-1, run[:text].to_s)
-    end
-    private_class_method :write_text
   end
 end

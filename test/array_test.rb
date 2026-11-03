@@ -17,9 +17,9 @@ class ArrayTest < Minitest::Test
     assert_equal [], @plan.to_a
   end
 
-  def test_push_appends_and_returns_the_value
-    assert_equal "one", @plan.push("one")
-    @plan << "two"
+  def test_push_appends_and_returns_the_array
+    assert_same @plan, @plan.push("one")
+    assert_same @plan, @plan << "two"
 
     assert_equal %w[one two], @plan.to_a
     assert_equal 2, @plan.length

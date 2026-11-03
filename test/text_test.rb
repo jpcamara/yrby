@@ -17,9 +17,9 @@ class TextTest < Minitest::Test
     assert_predicate @body, :empty?
   end
 
-  def test_push_appends_and_returns_the_chunk
-    assert_equal "hello", @body.push("hello")
-    @body << " world"
+  def test_push_appends_and_returns_the_text
+    assert_same @body, @body.push("hello")
+    assert_same @body, @body << " world"
 
     assert_equal "hello world", @body.to_s
     assert_equal 11, @body.size

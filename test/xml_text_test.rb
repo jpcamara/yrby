@@ -462,4 +462,44 @@ class XmlTextTest < Minitest::Test
     assert_nil doc.find(elsewhere)
     assert_nil doc.block_at(elsewhere)
   end
+
+  def test_a_markdown_link_to_an_unsafe_scheme_is_plain_text
+    doc = Y::Doc.new
+    Y::Lexxy.append_markdown(doc, "[click](javascript:alert(1)) and [docs](/docs)")
+
+    assert_equal '<p>click and <a href="/docs">docs</a></p>',
+                 Y::Lexxy.new(doc).to_html("root")
+  end
+
+  def test_a_markdown_link_keeps_parentheses_in_its_url
+    runs = Y::Lexical::Markdown.runs("see [Ruby](https://en.wikipedia.org/wiki/Ruby_(programming_language)).")
+
+    assert_equal ["see ", { text: "Ruby", link: "https://en.wikipedia.org/wiki/Ruby_(programming_language)" }, "."],
+                 runs
+  end
+
+  # A link written another way, or by a peer, still can't run script: the
+  # renderer sends it nowhere, as Lexical's own link node does.
+  def test_a_stored_javascript_link_renders_as_about_blank
+    doc = Y::Doc.new
+    Y::Lexical.append_paragraph(doc, [{ text: "click", link: "javascript:alert(1)" }])
+
+    assert_includes Y::Lexical.new(doc).to_html("root"), 'href="about:blank"'
+  end
+
+  # Each run is one transaction, so two threads writing runs into the same
+  # block never put one run's text under the other's marker.
+  def test_runs_written_from_two_threads_keep_their_own_format
+    doc = Y::Doc.new
+    block = Y::Lexical.append_paragraph(doc, "")
+    writers = [{ bold: true, text: "B" }, { italic: true, text: "I" }].map do |run|
+      Thread.new { 500.times { Y::Lexical.write_runs(block, [run]) } }
+    end
+    writers.each(&:join)
+    html = Y::Lexical.new(doc).to_html("root")
+
+    assert_empty html.scan(%r{<strong>([^<]*)</strong>}).join.delete("B")
+    assert_empty html.scan(%r{<em>([^<]*)</em>}).join.delete("I")
+    assert_equal 1000, block.text.length
+  end
 end

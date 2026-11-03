@@ -17,7 +17,8 @@ These are new, and they may change in a minor release. See
   same document keeps their change. A handle stays on the shared type it was
   made for while others edit around it, and releases the GVL like `Doc`.
   Indexes are Ruby characters, and negative indexes count from the end as in
-  Ruby.
+  Ruby. `push`, `<<`, and `insert` return the receiver, and `each`
+  without a block an Enumerator, as Ruby's own do.
 - `Doc#edit { }` runs a block that writes to the document and returns the
   update its writes produced, or nil when it wrote nothing. It is the unit a
   process saves and sends as it writes.
@@ -26,7 +27,13 @@ These are new, and they may change in a minor release. See
   `append_markdown`, `insert_paragraph`, `append_text`, `replace_runs`, and
   `delete_block`.
   Text takes formatted runs (`bold:`, `italic:`, `code:`, `link:`, and so on).
-  What Ruby writes renders the same as what a person typed.
+  What Ruby writes renders the same as what a person typed. Each helper
+  writes its block in one transaction. `XmlText#push_xml_text` and
+  `insert_xml_text` take the new block's content, and `append` and
+  `replace` write content into a block.
+- The Lexical and ProseMirror renderers refuse a link to a script: Lexical
+  sends it to `about:blank` and ProseMirror empties its `href`, as each
+  editor does. `append_markdown` writes such a link as plain text.
 - `Y::Anchor`, from `XmlText#anchor`, is a block's identity as a value to
   store or send. `Doc#block_at` and `Doc#find` resolve it.
   `relative_position(index)` builds the Yjs caret shape editors put in

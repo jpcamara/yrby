@@ -389,7 +389,7 @@ pub fn hash_pairs(ruby: &Ruby, hash: RHash) -> Result<Vec<(String, InValue)>, Er
 /// How deep a Hash or Array written to a document may nest, as many levels as
 /// JSON's default `max_nesting`. Converting one that contains itself would
 /// otherwise recurse until the stack overflows.
-const MAX_NESTING: usize = 100;
+pub const MAX_NESTING: usize = 100;
 
 fn pairs_at(ruby: &Ruby, hash: RHash, depth: usize) -> Result<Vec<(String, InValue)>, Error> {
     let mut pairs = Vec::new();

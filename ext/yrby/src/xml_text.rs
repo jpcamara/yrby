@@ -12,11 +12,11 @@
 //! add and remove blocks around it; indexes inside a block are Ruby
 //! characters, with each embed counting as one.
 
-use magnus::{prelude::*, Error, RHash, Ruby, Value};
+use magnus::{prelude::*, typed_data::Obj, Error, RArray, RHash, RString, Ruby, Value};
 use yrs::branch::BranchID;
 use yrs::{
-    Any, Assoc, Doc, GetString, IndexedSequence, Out, StickyIndex, Text, Transact, Xml,
-    XmlTextPrelim, XmlTextRef,
+    Any, Assoc, Doc, GetString, IndexedSequence, Out, StickyIndex, Text, Transact, TransactionMut,
+    Xml, XmlTextPrelim, XmlTextRef,
 };
 
 use crate::nogvl;
@@ -24,7 +24,7 @@ use crate::shared::{
     any_to_ruby, block_text, char_len, delete_span, element_index, embedded_xml_text_index,
     embedded_xml_texts, end_or_units, ends_with_xml_text, guarded, hash_pairs, identity,
     insert_index, resolve, ruby_to_invalue, to_in, to_map_prelim, to_units, InValue, Position,
-    ORIGIN,
+    MAX_NESTING, ORIGIN,
 };
 use crate::yrb_error;
 
@@ -293,9 +293,12 @@ impl RbXmlText {
     /// Insert a nested `XmlText` block with `attributes` before the `n`-th
     /// embedded block and return a live handle to it. A negative `n` counts
     /// from the end, so -1 adds it after the last; past the end it goes last.
-    fn insert_xml_text(&self, n: i64, attributes: RHash) -> Result<Self, Error> {
+    /// `content` (see `Piece`) is written into the block in the same
+    /// transaction, so no one sees the block before what it holds.
+    fn insert_xml_text(&self, n: i64, attributes: RHash, content: RArray) -> Result<Self, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
-        let pairs = hash_pairs(&ruby, attributes)?;
+        let attributes = hash_pairs(&ruby, attributes)?;
+        let content = Piece::read_all(&ruby, content, 0)?;
         let (doc, id) = (&self.doc, &self.id);
         let block = guarded(move || {
             let mut txn = doc.transact_mut_with(ORIGIN);
@@ -303,14 +306,70 @@ impl RbXmlText {
             let count = embedded_xml_texts(&txn, &x).len() as u32;
             let ordinal = insert_index(n, count);
             let at = embedded_xml_text_index(&txn, &x, ordinal).unwrap_or_else(|| x.len(&txn));
-            let child = x.insert_embed(&mut txn, at, XmlTextPrelim::new(""));
-            for (k, v) in pairs {
-                child.insert_attribute(&mut txn, k, to_in(v));
-            }
+            let child = Piece::Block(attributes, content).write(&mut txn, &x, at);
             // The block's identity, not the block: see `Child`.
-            Ok(identity(&child))
+            Ok(identity(&child.expect("a block piece writes a block")))
         })?;
         Ok(self.child(block))
+    }
+
+    /// Append `content` (see `Piece`) to the end of this block, in one
+    /// transaction. Returns the block.
+    fn append(rb_self: Obj<Self>, content: RArray) -> Result<Obj<Self>, Error> {
+        rb_self.write_content(content, false)?;
+        Ok(rb_self)
+    }
+
+    /// Replace everything in this block with `content`, in one transaction,
+    /// so no one sees it empty in between. Returns the block.
+    fn replace(rb_self: Obj<Self>, content: RArray) -> Result<Obj<Self>, Error> {
+        rb_self.write_content(content, true)?;
+        Ok(rb_self)
+    }
+
+    fn write_content(&self, content: RArray, clear: bool) -> Result<(), Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let content = Piece::read_all(&ruby, content, 0)?;
+        let (doc, id) = (&self.doc, &self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            if clear {
+                let len = x.len(&txn);
+                if len > 0 {
+                    x.remove_range(&mut txn, 0, len);
+                }
+            }
+            let mut at = x.len(&txn);
+            for piece in content {
+                piece.write(&mut txn, &x, at);
+                at = x.len(&txn);
+            }
+            Ok(())
+        })
+    }
+
+    /// Append `text` to the end of this block. When the block is empty or
+    /// ends with an embedded block, `marker` is embedded before the text:
+    /// Lexical keeps a text node's characters after its marker, and drops
+    /// text that has none. The check and the write are one transaction, so
+    /// another writer can't change the end in between. Returns the block.
+    fn append_text(rb_self: Obj<Self>, text: String, marker: RHash) -> Result<Obj<Self>, Error> {
+        let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let marker = hash_pairs(&ruby, marker)?;
+        let (doc, id) = (&rb_self.doc, &rb_self.id);
+        guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+            let mut at = x.len(&txn);
+            if at == 0 || ends_with_xml_text(&txn, &x) {
+                x.insert_embed(&mut txn, at, to_map_prelim(marker));
+                at += 1;
+            }
+            x.insert(&mut txn, at, &text);
+            Ok(())
+        })?;
+        Ok(rb_self)
     }
 
     /// Remove the `n`-th embedded block (a negative `n` counts from the
@@ -330,11 +389,79 @@ impl RbXmlText {
             Ok(true)
         })
     }
+}
 
-    /// Append a nested `XmlText` block with `attributes` and return a live
-    /// handle to it. This is how a paragraph is added to a Lexical document.
-    fn push_xml_text(&self, attributes: RHash) -> Result<Self, Error> {
-        self.insert_xml_text(-1, attributes)
+/// A piece of a block's content, read from Ruby with the GVL held: a String
+/// is text, a Hash an embed (Lexical's marker before a text node's
+/// characters), and an `[attributes, content]` pair a block of its own.
+enum Piece {
+    Text(String),
+    Embed(Vec<(String, InValue)>),
+    Block(Vec<(String, InValue)>, Vec<Piece>),
+}
+
+impl Piece {
+    fn read_all(ruby: &Ruby, content: RArray, depth: usize) -> Result<Vec<Piece>, Error> {
+        if depth > MAX_NESTING {
+            return Err(Error::new(
+                ruby.exception_arg_error(),
+                format!("blocks nest too deep (at most {MAX_NESTING})"),
+            ));
+        }
+        content
+            .into_iter()
+            .map(|value| Piece::read(ruby, value, depth))
+            .collect()
+    }
+
+    fn read(ruby: &Ruby, value: Value, depth: usize) -> Result<Piece, Error> {
+        if let Some(s) = RString::from_value(value) {
+            return Ok(Piece::Text(s.to_string()?));
+        }
+        if let Some(h) = RHash::from_value(value) {
+            return Ok(Piece::Embed(hash_pairs(ruby, h)?));
+        }
+        if let Some(pair) = RArray::from_value(value).filter(|a| a.len() == 2) {
+            let attributes: RHash = pair.entry(0)?;
+            let content: RArray = pair.entry(1)?;
+            return Ok(Piece::Block(
+                hash_pairs(ruby, attributes)?,
+                Piece::read_all(ruby, content, depth + 1)?,
+            ));
+        }
+        Err(Error::new(
+            ruby.exception_arg_error(),
+            format!(
+                "content is Strings, Hashes, and [attributes, content] pairs, not {}",
+                value.inspect()
+            ),
+        ))
+    }
+
+    /// Writes the piece into `x` at document index `at`. Returns the block a
+    /// block piece wrote.
+    fn write(self, txn: &mut TransactionMut, x: &XmlTextRef, at: u32) -> Option<XmlTextRef> {
+        match self {
+            Piece::Text(text) => {
+                x.insert(txn, at, &text);
+                None
+            }
+            Piece::Embed(entries) => {
+                x.insert_embed(txn, at, to_map_prelim(entries));
+                None
+            }
+            Piece::Block(attributes, content) => {
+                let block = x.insert_embed(txn, at, XmlTextPrelim::new(""));
+                for (k, v) in attributes {
+                    block.insert_attribute(txn, k, to_in(v));
+                }
+                for piece in content {
+                    let end = block.len(txn);
+                    piece.write(txn, &block, end);
+                }
+                Some(block)
+            }
+        }
     }
 }
 
@@ -383,16 +510,15 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     )?;
     class.define_method("insert", magnus::method!(RbXmlText::insert, 2))?;
     class.define_method("insert_embed", magnus::method!(RbXmlText::insert_embed, 2))?;
-    class.define_method(
-        "push_xml_text",
-        magnus::method!(RbXmlText::push_xml_text, 1),
-    )?;
+    class.define_method("append", magnus::method!(RbXmlText::append, 1))?;
+    class.define_method("replace", magnus::method!(RbXmlText::replace, 1))?;
+    class.define_method("append_text", magnus::method!(RbXmlText::append_text, 2))?;
     class.define_method("xml_text", magnus::method!(RbXmlText::xml_text, 1))?;
     class.define_method("delete", magnus::method!(RbXmlText::delete, 2))?;
     class.define_method("clear", magnus::method!(RbXmlText::clear, 0))?;
-    class.define_method(
-        "insert_xml_text",
-        magnus::method!(RbXmlText::insert_xml_text, 2),
+    class.define_private_method(
+        "native_insert_xml_text",
+        magnus::method!(RbXmlText::insert_xml_text, 3),
     )?;
     class.define_method(
         "delete_xml_text",
@@ -417,13 +543,17 @@ mod tests {
     use crate::shared::test_support::{doc, hash, rb};
     use rb_sys_test_helpers::ruby_test;
 
+    fn nothing() -> RArray {
+        Ruby::get().unwrap().ary_new()
+    }
+
     fn root() -> RbXmlText {
         root_xml_text(&doc(), "root".into()).unwrap()
     }
 
     fn paragraph(root: &RbXmlText, words: &str) -> RbXmlText {
         let block = root
-            .push_xml_text(hash(&[("__type", rb("paragraph"))]))
+            .insert_xml_text(-1, hash(&[("__type", rb("paragraph"))]), nothing())
             .unwrap();
         block.insert(-1, words.into()).unwrap();
         block
@@ -468,7 +598,7 @@ mod tests {
         paragraph(&root, "one");
         paragraph(&root, "three");
         let two = root
-            .insert_xml_text(1, hash(&[("__type", rb("paragraph"))]))
+            .insert_xml_text(1, hash(&[("__type", rb("paragraph"))]), nothing())
             .unwrap();
         two.insert(0, "two".into()).unwrap();
         assert_eq!(root.text().unwrap(), "one\ntwo\nthree");
@@ -489,7 +619,7 @@ mod tests {
         let root = root();
         paragraph(&root, "one");
         let two = paragraph(&root, "two");
-        root.insert_xml_text(0, hash(&[("__type", rb("paragraph"))]))
+        root.insert_xml_text(0, hash(&[("__type", rb("paragraph"))]), nothing())
             .unwrap();
         root.delete_xml_text(1).unwrap();
         two.insert(-1, "!".into()).unwrap();
@@ -524,7 +654,8 @@ mod tests {
         let root = root();
         let item = paragraph(&root, "see ");
         assert!(!item.ends_with_xml_text().unwrap());
-        item.push_xml_text(hash(&[("__type", rb("link"))])).unwrap();
+        item.insert_xml_text(-1, hash(&[("__type", rb("link"))]), nothing())
+            .unwrap();
         assert!(item.ends_with_xml_text().unwrap());
     }
 
@@ -569,5 +700,50 @@ mod tests {
         let again = handle(&block.doc, block.id.clone(), "root".into());
         assert_eq!(again.text().unwrap(), "one");
         assert_eq!(again.root_name(), "root");
+    }
+
+    fn content(pieces: &[Value]) -> RArray {
+        let content = nothing();
+        for piece in pieces {
+            content.push(*piece).unwrap();
+        }
+        content
+    }
+
+    #[ruby_test]
+    fn a_block_is_inserted_with_its_content() {
+        let root = root();
+        let marker = hash(&[("__type", rb("text"))]).as_value();
+        let link = content(&[
+            hash(&[("__type", rb("link"))]).as_value(),
+            content(&[marker, rb("docs")]).as_value(),
+        ]);
+        let block = root
+            .insert_xml_text(
+                -1,
+                hash(&[("__type", rb("paragraph"))]),
+                content(&[marker, rb("see "), link.as_value()]),
+            )
+            .unwrap();
+        assert_eq!(block.length().unwrap(), 6);
+        assert_eq!(block.xml_text_count().unwrap(), 1);
+        assert_eq!(block.text().unwrap(), "see docs");
+    }
+
+    #[ruby_test]
+    fn content_can_replace_a_block_or_be_appended_to_it() {
+        let block = paragraph(&root(), "old");
+        block.write_content(content(&[rb("new")]), true).unwrap();
+        assert_eq!(block.text().unwrap(), "new");
+        block.write_content(content(&[rb("er")]), false).unwrap();
+        assert_eq!(block.text().unwrap(), "newer");
+    }
+
+    #[ruby_test]
+    fn content_that_is_not_text_embeds_or_blocks_raises() {
+        let err = paragraph(&root(), "")
+            .write_content(content(&[rb(1)]), false)
+            .unwrap_err();
+        assert!(err.to_string().contains("content is Strings"), "{err}");
     }
 }

@@ -122,14 +122,19 @@ record inside a list is directly addressable.
 Rich-text editors built on Yjs keep their document in `XmlText` nodes.
 `Doc#get_xml_text` returns a live `Y::XmlText` handle with the operations that
 shape needs: `insert` a string, `insert_embed` a JSON value, `set_attribute`,
-and `push_xml_text(attributes)` to append a nested block and get its handle.
-`xml_text(n)` returns a handle to the `n`-th nested block, or nil. A block
-handle stays on its block while people add and remove blocks around it.
-Indexes inside a block are characters, with each embed counting as one.
+and `push_xml_text(attributes, content)` to append a nested block and get its
+handle. `content` is written into the block in the same transaction: an Array
+of Strings (text), Hashes (embeds), and `[attributes, content]` pairs (nested
+blocks). `append(content)` and `replace(content)` write content into a block
+the same way. `xml_text(n)` returns a handle to the `n`-th nested block, or
+nil. A block handle stays on its block while people add and remove blocks
+around it. Indexes inside a block are characters, with each embed counting as
+one.
 
 `Y::Lexical` builds Lexical's exact node shape on top of that, so what Ruby
 appends renders the same as what a person typed and an open editor applies it
-as an ordinary remote edit:
+as an ordinary remote edit. Each helper writes its block in one transaction,
+so a peer or another thread never sees a block without its text:
 
 ```ruby
 doc = Y::Doc.new
@@ -150,12 +155,16 @@ String keys work too, as parsed JSON has them.
 `append_quote` and `append_code(doc, code, language:)` add quotes and code
 blocks. `append_markdown(doc, text)` takes the subset of Markdown a model
 writes (headings, lists, quotes, fenced code, and inline formatting and
-links) and appends it as blocks.
+links) and appends it as blocks. A link must be `http`, `https`, `mailto`,
+`sms`, `tel`, or a path; a `javascript:` link stays plain text. The renderers
+also refuse one stored some other way: `Y::Lexical` sends it to
+`about:blank`, as Lexical's link node does, and `Y::ProseMirror` empties its
+`href`, as Tiptap's link mark does.
 
 A block handle's `text` is what it says, markers skipped and nested blocks
 joined by newlines. The document can be edited in place, not only appended
 to. A block handle has `delete(index, length)` and `clear`; a parent has
-`insert_xml_text(at, attributes)` and `delete_xml_text(at)`. The helpers
+`insert_xml_text(at, attributes, content)` and `delete_xml_text(at)`. The helpers
 `insert_paragraph(doc, at, runs)`, `replace_runs(block, runs)`, and
 `delete_block(doc, at)` cover the common moves. `append_text(block, text)`
 adds text at the end of a block; Lexical drops text that doesn't follow a

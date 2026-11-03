@@ -10,7 +10,7 @@
 //! person typing in the same paragraph while the agent appends does not lose
 //! their edit and neither does the agent.
 
-use magnus::{prelude::*, Error, RHash, Ruby};
+use magnus::{prelude::*, typed_data::Obj, Error, RHash, Ruby};
 use yrs::branch::{Branch, BranchID, BranchPtr};
 use yrs::{Assoc, Doc, GetString, IndexedSequence, StickyIndex, Text, TextRef, Transact};
 
@@ -65,34 +65,32 @@ impl RbText {
 
     // --- writes ---
 
-    /// Append to the end. The operation an agent streaming output performs over
-    /// and over, so it stays a single insert at the current length.
-    fn push(&self, chunk: String) -> Result<String, Error> {
-        let (doc, id) = (&self.doc, &self.id);
-        let text = chunk.clone();
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
-            let at = t.len(&txn);
-            t.insert(&mut txn, at, &text);
-            Ok(())
-        })?;
-        Ok(chunk)
+    /// Append to the end and return the text, as `String#<<` does. The
+    /// operation an agent streaming output performs over and over, so it stays
+    /// a single insert at the current length.
+    fn push(rb_self: Obj<Self>, chunk: String) -> Result<Obj<Self>, Error> {
+        rb_self.insert_at(-1, chunk)?;
+        Ok(rb_self)
     }
 
-    /// Insert at character `index`, as `String#insert` does: a negative index
-    /// counts from the end (-1 appends). Clamped into range.
-    fn insert(&self, index: i64, chunk: String) -> Result<String, Error> {
+    /// Insert at character `index` and return the text, as `String#insert`
+    /// does.
+    fn insert(rb_self: Obj<Self>, index: i64, chunk: String) -> Result<Obj<Self>, Error> {
+        rb_self.insert_at(index, chunk)?;
+        Ok(rb_self)
+    }
+
+    /// Insert at character `index`: a negative index counts from the end (-1
+    /// appends). Clamped into range.
+    fn insert_at(&self, index: i64, text: String) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        let text = chunk.clone();
         guarded(move || {
             let mut txn = doc.transact_mut_with(ORIGIN);
             let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
             let at = end_or_units(&txn, &t, index);
             t.insert(&mut txn, at, &text);
             Ok(())
-        })?;
-        Ok(chunk)
+        })
     }
 
     /// The Yjs relative position of character `index` as the `{type, tname,
@@ -206,7 +204,7 @@ mod tests {
 
     fn text(initial: &str) -> RbText {
         let text = root_text(&doc(), "t".into()).unwrap();
-        text.push(initial.into()).unwrap();
+        text.insert_at(-1, initial.into()).unwrap();
         text
     }
 
@@ -219,9 +217,9 @@ mod tests {
     }
 
     #[ruby_test]
-    fn push_appends_and_length_counts_characters() {
+    fn appending_at_minus_one_and_length_counting_characters() {
         let t = text("hé");
-        assert_eq!(t.push("😀!".into()).unwrap(), "😀!");
+        t.insert_at(-1, "😀!".into()).unwrap();
         assert_eq!(t.to_s().unwrap(), "hé😀!");
         assert_eq!(t.length().unwrap(), 4);
     }
@@ -229,10 +227,10 @@ mod tests {
     #[ruby_test]
     fn insert_reads_a_negative_index_from_the_end_and_clamps() {
         let t = text("a😀c");
-        t.insert(2, "b".into()).unwrap();
-        t.insert(-1, "d".into()).unwrap();
-        t.insert(99, "e".into()).unwrap();
-        t.insert(-99, "_".into()).unwrap();
+        t.insert_at(2, "b".into()).unwrap();
+        t.insert_at(-1, "d".into()).unwrap();
+        t.insert_at(99, "e".into()).unwrap();
+        t.insert_at(-99, "_".into()).unwrap();
         assert_eq!(t.to_s().unwrap(), "_a😀bcde");
     }
 
@@ -259,7 +257,7 @@ mod tests {
         let t = text("a😀c");
         let position = t.native_relative_position(2, "after".into()).unwrap();
         assert_eq!(t.index_at(position).unwrap(), Some(2));
-        t.insert(0, "xy".into()).unwrap();
+        t.insert_at(0, "xy".into()).unwrap();
         assert_eq!(t.index_at(position).unwrap(), Some(4));
     }
 
@@ -268,8 +266,8 @@ mod tests {
         let doc = doc();
         let a = root_text(&doc, "a".into()).unwrap();
         let b = root_text(&doc, "b".into()).unwrap();
-        a.push("one".into()).unwrap();
-        b.push("two".into()).unwrap();
+        a.insert_at(-1, "one".into()).unwrap();
+        b.insert_at(-1, "two".into()).unwrap();
         let position = a.native_relative_position(1, "after".into()).unwrap();
         assert_eq!(b.index_at(position).unwrap(), None);
     }
@@ -290,7 +288,7 @@ mod tests {
         }
         assert_eq!(notes.to_s().unwrap(), "");
         assert!(notes.is_empty().unwrap());
-        let err = notes.push("more".into()).unwrap_err();
+        let err = notes.insert_at(-1, "more".into()).unwrap_err();
         assert!(err.to_string().contains("text no longer exists"), "{err}");
     }
 }
