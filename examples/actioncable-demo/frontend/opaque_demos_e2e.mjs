@@ -46,13 +46,23 @@ ab("kb-a", "eval", `(() => { const m=window.__yrb.cards.toArray().find(m=>m.get(
 check("b sees the card move", await waitEval("kb-b", `window.__yrb.cards.toArray().find(m=>m.get('text')==="C${TAG}")?.get('column')==='doing'`, "kb move"))
 ab("kb-a", "close"); ab("kb-b", "close")
 
-// --- Forms (Y.Map) ----------------------------------------------------------
+// --- Forms (Y.Map of nested Y.Text) -------------------------------------------
 console.log("\n# forms")
 ab("fm-a", "open", `${BASE}/docs/demo-${TAG}/forms`); ab("fm-b", "open", `${BASE}/docs/demo-${TAG}/forms`)
 check("a synced", await synced("fm-a")); check("b synced", await synced("fm-b"))
-ab("fm-a", "eval", `(() => { const e=document.querySelector('[data-key=name]'); e.value="Ada${TAG}"; e.dispatchEvent(new Event('input',{bubbles:true})); })()`)
-check("b sees a's field", await waitEval("fm-b", `window.__yrb.form.get('name')==="Ada${TAG}"`, "fm sync"))
-check("b's input reflects it", await waitEval("fm-b", `document.querySelector('[data-key=name]').value==="Ada${TAG}"`, "fm input"))
+const typeName = (s, value) => ab(s, "eval", `(() => { const e=document.querySelector('[data-key=name]'); e.value=${JSON.stringify(value)}; e.dispatchEvent(new Event('input',{bubbles:true})); })()`)
+const nameIs = (value) => `window.__yrb.form.get('name')?.toString()===${JSON.stringify(value)} && document.querySelector('[data-key=name]').value===${JSON.stringify(value)}`
+check("a's name field is enabled", await waitEval("fm-a", "!document.querySelector('[data-key=name]').disabled", "fm enabled"))
+check("b's name field is enabled", await waitEval("fm-b", "!document.querySelector('[data-key=name]').disabled", "fm enabled"))
+typeName("fm-a", `Ada${TAG}`)
+check("b sees a's field", await waitEval("fm-b", nameIs(`Ada${TAG}`), "fm sync"))
+// Both edit the same field before either sees the other's change.
+ab("fm-a", "eval", "window.__yrb.provider.disconnect()"); ab("fm-b", "eval", "window.__yrb.provider.disconnect()")
+typeName("fm-a", `Ada${TAG} Lovelace`)
+typeName("fm-b", `Dr. Ada${TAG}`)
+ab("fm-a", "eval", "window.__yrb.provider.connect()"); ab("fm-b", "eval", "window.__yrb.provider.connect()")
+check("a keeps both edits", await waitEval("fm-a", nameIs(`Dr. Ada${TAG} Lovelace`), "fm merge a"))
+check("b keeps both edits", await waitEval("fm-b", nameIs(`Dr. Ada${TAG} Lovelace`), "fm merge b"))
 ab("fm-a", "close"); ab("fm-b", "close")
 
 console.log(""); if (failures) { console.log(`FAILED: ${failures}`); process.exit(1) }

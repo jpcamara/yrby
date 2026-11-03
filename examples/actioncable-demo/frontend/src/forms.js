@@ -1,12 +1,13 @@
 // Opaque-state demo: a collaborative form.
-// Shared state is a Y.Map keyed by field name. Each input writes form.set(key,
-// value); a remote change updates the input (skipping the field you're focused
-// in, so your typing isn't clobbered). Field values are last-writer-wins per
-// field (Y.Map) — to character-merge WITHIN a field you'd use a Y.Text, exactly
-// like the CodeMirror demo. Same DocumentChannel either way.
+// The shared state is a Y.Map keyed by field name. Each text field holds a
+// nested Y.Text, so two people typing in the same field merge character by
+// character, like the CodeMirror demo. The role is a plain value: a choice
+// has no characters to merge, so the last pick wins. Same DocumentChannel
+// either way.
 import * as Y from "yjs"
 import { createConsumer } from "@rails/actioncable"
 import { ActionCableProvider } from "yrby-client"
+import { bindTextField } from "./text_field.js"
 
 const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia", "Alan"]
 const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8", "#e879f9", "#f472b6"]
@@ -19,6 +20,7 @@ const FIELDS = [
   { key: "role", label: "Role", type: "select", options: ["", "Engineer", "Designer", "PM", "Other"] },
   { key: "notes", label: "Notes", type: "textarea" },
 ]
+const isText = (f) => f.type !== "select"
 
 const root = document.getElementById("form")
 const statusEl = document.getElementById("status")
@@ -42,17 +44,46 @@ for (const f of FIELDS) {
   else if (f.type === "select") { el = document.createElement("select"); el.innerHTML = f.options.map((o) => `<option>${o}</option>`).join("") }
   else { el = document.createElement("input"); el.type = f.type }
   el.dataset.key = f.key
-  el.addEventListener("input", () => form.set(f.key, el.value))
+  // Text fields wait for their Y.Text, which exists once the form syncs.
+  if (isText(f)) el.disabled = true
+  else el.addEventListener("input", () => form.set(f.key, el.value))
   wrap.appendChild(el)
   root.appendChild(wrap)
   inputs[f.key] = el
 }
 
+// Each text field's binding, and the Y.Text it's bound to.
+const bound = {}
+
+function bindTextFields() {
+  for (const f of FIELDS.filter(isText)) {
+    const text = form.get(f.key)
+    if (!(text instanceof Y.Text) || bound[f.key]?.text === text) continue
+    bound[f.key]?.unbind()
+    bound[f.key] = { text, unbind: bindTextField(inputs[f.key], text) }
+    inputs[f.key].disabled = false
+  }
+}
+
+// A field's Y.Text is created once, after the form has synced, so a page
+// doesn't replace the one already in the document. Two pages that create
+// the same field at the same moment both end up on whichever the map
+// keeps, because bindTextFields rebinds when the map changes. An older
+// document stored plain strings, and those become the starting text.
+function createTextFields() {
+  ydoc.transact(() => {
+    for (const f of FIELDS.filter(isText)) {
+      const value = form.get(f.key)
+      if (!(value instanceof Y.Text)) form.set(f.key, new Y.Text(typeof value === "string" ? value : ""))
+    }
+  })
+}
+
 form.observe(() => {
-  for (const f of FIELDS) {
+  bindTextFields()
+  for (const f of FIELDS.filter((f) => !isText(f))) {
     const v = form.get(f.key) ?? ""
-    const el = inputs[f.key]
-    if (el.value !== v && document.activeElement !== el) el.value = v
+    if (inputs[f.key].value !== v) inputs[f.key].value = v
   }
 })
 
@@ -65,6 +96,10 @@ provider.awareness.on("update", renderPresence)
 statusEl.textContent = `connecting as ${user.name}…`
 provider.onStatusChange(({ status }) => {
   statusEl.textContent = status === "synced" ? `synced as ${user.name}` : `${status}…`
+  if (status === "synced") {
+    createTextFields()
+    bindTextFields()
+  }
 })
 renderPresence()
 provider.connect()

@@ -13,8 +13,9 @@
     <%= render "nav" %>
     <p>
       Opaque state is a <code>Y.Map</code> keyed by field. Fill it in two windows.
-      Field values are last-writer-wins per field; swap a field to <code>Y.Text</code>
-      for character-merge (see the CodeMirror page).
+      Each text field is a nested <code>Y.Text</code>, so two people typing in the
+      same field both keep what they typed. The role is a plain value, and the last
+      pick wins.
     </p>
     <div id="presence"></div>
     <p id="status" class="status">connecting…</p>
