@@ -169,9 +169,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     // Seed an independent probe with the doc's current state so we can measure the
     // update's effect without mutating the real doc.
     let probe = Doc::new();
-    let current = doc
-        .transact()
-        .encode_state_as_update_v1(&yrs::StateVector::default());
+    let current = crate::txn::read(doc).encode_state_as_update_v1(&yrs::StateVector::default());
     probe
         .transact_mut()
         .apply_update(yrs::Update::decode_v1(&current).map_err(|e| e.to_string())?)
