@@ -46,10 +46,10 @@ impl RbArray {
     fn child(&self, index: i64) -> Result<Option<Out>, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             let a = resolve::<ArrayRef, _>(&txn, id)?;
             a.get(&txn, element_index(index, a.len(&txn))?)
-        }))
+        })
     }
 
     // --- reads ---
@@ -63,7 +63,7 @@ impl RbArray {
             let a = resolve::<ArrayRef, _>(&txn, id)?;
             let i = element_index(index, a.len(&txn))?;
             a.get(&txn, i).map(|v| out_to_any(&txn, &v))
-        });
+        })?;
         let ruby = Ruby::get().unwrap();
         Ok(match got {
             Some(a) => any_to_ruby(&ruby, &a),
@@ -100,11 +100,11 @@ impl RbArray {
     fn size(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<ArrayRef, _>(&txn, id)
                 .map(|a| a.len(&txn) as usize)
                 .unwrap_or(0)
-        }))
+        })
     }
 
     fn is_empty(&self) -> Result<bool, Error> {
@@ -114,10 +114,10 @@ impl RbArray {
     fn snapshot(&self) -> Result<Vec<Any>, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || match resolve::<ArrayRef, _>(&txn, id) {
+        nogvl(move || match resolve::<ArrayRef, _>(&txn, id) {
             Some(a) => a.iter(&txn).map(|v| out_to_any(&txn, &v)).collect(),
             None => Vec::new(),
-        }))
+        })
     }
 
     fn to_a(&self) -> Result<Value, Error> {
@@ -227,7 +227,7 @@ pub fn root_array(doc: &Doc, name: String) -> Result<RbArray, Error> {
             &mut *txn,
             name.as_str(),
         ))
-    });
+    })?;
     Ok(RbArray::new(doc.clone(), id))
 }
 

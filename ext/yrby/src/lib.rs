@@ -72,7 +72,30 @@ fn assert_thread_safe() {
 ///
 /// Panics inside the closure are caught and re-raised (resumed) after the GVL
 /// is reacquired, where magnus converts them to Ruby exceptions.
-pub(crate) fn nogvl<F, R>(f: F) -> R
+///
+/// After the closure, this checks for interrupts, as
+/// `rb_thread_call_without_gvl` does: a pending Thread#raise, kill, or
+/// timeout comes back as the error. Checking also re-arms any interrupts still
+/// queued, so a thread that only calls into yrby still gets them.
+pub(crate) fn nogvl<F, R>(f: F) -> Result<R, Error>
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
+{
+    let result = without_gvl(f);
+    Ruby::get().unwrap().thread_check_ints()?;
+    Ok(result)
+}
+
+/// `nogvl` without the interrupt check, for code that can't return an error,
+/// such as a destructor. Pending interrupts wait for Ruby's next check.
+///
+/// The closure always runs. `rb_thread_call_without_gvl` raises a pending
+/// interrupt before its callback, and that jump skips Rust destructors: a
+/// transaction moved into a skipped closure would never drop, and its
+/// document would stay locked. With `RB_NOGVL_INTR_FAIL`, Ruby skips the
+/// callback instead of raising, and the closure runs here with the GVL held.
+pub(crate) fn without_gvl<F, R>(f: F) -> R
 where
     F: FnOnce() -> R + Send,
     R: Send,
@@ -100,12 +123,16 @@ where
         result: None,
     };
     unsafe {
-        rb_sys::rb_thread_call_without_gvl(
+        rb_sys::rb_nogvl(
             Some(callback::<F, R>),
             &mut ctx as *mut Ctx<F, R> as *mut c_void,
             None,
             std::ptr::null_mut(),
+            rb_sys::RB_NOGVL_INTR_FAIL as _,
         );
+    }
+    if let Some(func) = ctx.func.take() {
+        ctx.result = Some(catch_unwind(AssertUnwindSafe(func)));
     }
     match ctx.result.expect("nogvl callback did not run") {
         Ok(result) => result,
@@ -174,7 +201,7 @@ impl RbDoc {
     fn encode_state_vector(&self) -> Result<RString, Error> {
         let doc = &self.0;
         let txn = crate::txn::read(doc)?;
-        let sv = nogvl(move || txn.state_vector().encode_v1());
+        let sv = nogvl(move || txn.state_vector().encode_v1())?;
         Ok(binary_string(&sv))
     }
 
@@ -182,17 +209,13 @@ impl RbDoc {
     /// holding text without knowing it up front.
     fn root_names(&self) -> Result<Vec<String>, Error> {
         let txn = crate::txn::read(&self.0)?;
-        Ok(nogvl(move || {
-            txn.root_refs().map(|(name, _)| name.to_string()).collect()
-        }))
+        nogvl(move || txn.root_refs().map(|(name, _)| name.to_string()).collect())
     }
 
     fn read_text(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
-            txn.get_text(name.as_str()).map(|t| t.get_string(&txn))
-        }))
+        nogvl(move || txn.get_text(name.as_str()).map(|t| t.get_string(&txn)))
     }
 
     /// Text of an XML-shaped root, one top-level block per line. The walk +
@@ -201,10 +224,10 @@ impl RbDoc {
     fn read_xml(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             let fragment = txn.get_xml_fragment(name.as_str())?;
             Some(read::xml_blocks_text(&txn, &fragment))
-        }))
+        })
     }
 
     /// A `Y.Map` root serialized to a JSON object string (keys sorted; values
@@ -214,10 +237,10 @@ impl RbDoc {
     fn read_map(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             let map = txn.get_map(name.as_str())?;
             Some(read::map_json(&txn, &map))
-        }))
+        })
     }
 
     /// A `Y.Array` root serialized to a JSON array string (values recursive, in
@@ -228,10 +251,10 @@ impl RbDoc {
     fn read_array(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             let array = txn.get_array(name.as_str())?;
             Some(read::array_json(&txn, &array))
-        }))
+        })
     }
 
     /// True if the doc holds un-integrable pending structs or a pending delete
@@ -240,7 +263,7 @@ impl RbDoc {
     /// the missing dependency later arrives. A pure read.
     fn pending(&self) -> Result<bool, Error> {
         let txn = crate::txn::read(&self.0)?;
-        Ok(nogvl(move || has_pending(&txn)))
+        nogvl(move || has_pending(&txn))
     }
 
     /// Like `encode_state_as_update` (full state), but **gap-free**: it excludes
@@ -251,7 +274,7 @@ impl RbDoc {
     /// stays lossless for raw-update recovery.)
     fn compacted_state_update(&self) -> Result<RString, Error> {
         let txn = crate::txn::read(&self.0)?;
-        let update = nogvl(move || integrated_update(&txn, &yrs::StateVector::default()))
+        let update = nogvl(move || integrated_update(&txn, &yrs::StateVector::default()))?
             .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
@@ -331,7 +354,7 @@ impl RbDoc {
             out.sort_unstable();
             out.dedup();
             Ok(out)
-        })
+        })?
         .map_err(yrb_error)?;
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let array = ruby.ary_new();
@@ -350,14 +373,14 @@ impl RbDoc {
         let sticky = sticky_from_ruby(&ruby, position)?;
         let doc = &self.0;
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             let target = sticky.get_offset(&txn)?.branch;
             let root_ref = shared::root_xml_text(&txn, root.as_str())?;
             shared::embedded_xml_texts(&txn, &root_ref)
                 .iter()
                 .position(|block| contains_branch(&txn, block, target))
                 .map(|ordinal| ordinal as u32)
-        }))
+        })
     }
 
     /// The block an anchor's position names, as a live handle, or nil once
@@ -376,7 +399,7 @@ impl RbDoc {
                 == yrs::branch::BranchID::Root(name.into());
             (is_block && in_root && shared::resolve::<yrs::XmlTextRef, _>(&txn, &id).is_some())
                 .then_some(id)
-        });
+        })?;
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
 
@@ -402,16 +425,19 @@ impl RbDoc {
                 Some(bytes) => yrs::StateVector::decode_v1(bytes).map_err(|e| e.to_string())?,
             };
             Ok(txn.encode_state_as_update_v1(&sv))
-        })
+        })?
         .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
 
     fn apply_update(&self, update: RString) -> Result<(), Error> {
         let update_bytes = copy_bytes(update);
-        let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| yrb_error(e.to_string()))?;
         let mut txn = txn::apply(&self.0, None, "apply_update")?;
-        nogvl(move || txn.apply_update(update).map_err(|e| e.to_string())).map_err(yrb_error)
+        nogvl(move || {
+            let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
+            txn.apply_update(update).map_err(|e| e.to_string())
+        })?
+        .map_err(yrb_error)
     }
 
     /// True if applying `update` would integrate cleanly (its dependencies are
@@ -420,7 +446,7 @@ impl RbDoc {
     fn update_ready(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let txn = crate::txn::read(&self.0)?;
-        nogvl(move || update_is_ready(&txn, &update_bytes)).map_err(yrb_error)
+        nogvl(move || update_is_ready(&txn, &update_bytes))?.map_err(yrb_error)
     }
 
     /// True if applying `update` would change the document (it carries new
@@ -429,7 +455,7 @@ impl RbDoc {
     fn update_advances(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let txn = crate::txn::read(&self.0)?;
-        nogvl(move || update_advances_doc(&txn, &update_bytes)).map_err(yrb_error)
+        nogvl(move || update_advances_doc(&txn, &update_bytes))?.map_err(yrb_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
@@ -439,7 +465,7 @@ impl RbDoc {
         let encoded = nogvl(move || {
             let sv = txn.state_vector();
             Message::Sync(SyncMessage::SyncStep1(sv)).encode_v1()
-        });
+        })?;
         Ok(binary_string(&encoded))
     }
 
@@ -461,17 +487,17 @@ impl RbDoc {
                 let response = nogvl(move || {
                     let update = txn.encode_state_as_update_v1(&sv);
                     Message::Sync(SyncMessage::SyncStep2(update)).encode_v1()
-                });
+                })?;
                 (0, 0, response)
             }
             Message::Sync(SyncMessage::SyncStep2(update_bytes)) => {
                 let mut txn = txn::apply(doc, None, "handle_sync_message")?;
-                nogvl(move || apply_bytes(&mut txn, &update_bytes)).map_err(yrb_error)?;
+                nogvl(move || apply_bytes(&mut txn, &update_bytes))?.map_err(yrb_error)?;
                 (0, 1, Vec::new())
             }
             Message::Sync(SyncMessage::Update(update_bytes)) => {
                 let mut txn = txn::apply(doc, None, "handle_sync_message")?;
-                nogvl(move || apply_bytes(&mut txn, &update_bytes)).map_err(yrb_error)?;
+                nogvl(move || apply_bytes(&mut txn, &update_bytes))?.map_err(yrb_error)?;
                 (0, 2, Vec::new())
             }
             Message::Awareness(_) => (1, 0, Vec::new()),
@@ -536,7 +562,7 @@ impl RbLexical {
         let segments = nogvl(move || {
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::render_segments(&txn, &fragment, rules)
-        });
+        })?;
         segments_result(segments)
     }
 
@@ -550,7 +576,7 @@ impl RbLexical {
         let map = nogvl(move || {
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::collect_node_types(&txn, &fragment)
-        });
+        })?;
         let ruby = Ruby::get().unwrap();
         match map {
             None => Ok(ruby.qnil().as_value()),
@@ -616,7 +642,7 @@ impl RbProseMirror {
         let segments = nogvl(move || {
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::render_segments(&txn, &fragment, rules)
-        });
+        })?;
         segments_result(segments)
     }
 
@@ -630,7 +656,7 @@ impl RbProseMirror {
         let map = nogvl(move || {
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::collect_node_types(&txn, &fragment)
-        });
+        })?;
         let ruby = Ruby::get().unwrap();
         match map {
             None => Ok(ruby.qnil().as_value()),
@@ -738,7 +764,7 @@ fn wrap_update(update: RString) -> RString {
 ///   2 = sync step2/update (a document change: record/apply/relay)
 ///   3 = awareness        (presence: relay)
 ///   4 = awareness query  (a request: respond, do not relay)
-fn message_kind(data: RString) -> u8 {
+fn message_kind(data: RString) -> Result<u8, Error> {
     let data_bytes = copy_bytes(data);
     nogvl(move || classify_message(&data_bytes))
 }
@@ -749,7 +775,7 @@ fn message_kind(data: RString) -> u8 {
 /// awareness update). The store-backed path records this exact delta before relay.
 fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
     let data_bytes = copy_bytes(data);
-    let merged = nogvl(move || merged_doc_update(&data_bytes)).map_err(yrb_error)?;
+    let merged = nogvl(move || merged_doc_update(&data_bytes))?.map_err(yrb_error)?;
     Ok(merged.map(|b| binary_string(&b)))
 }
 

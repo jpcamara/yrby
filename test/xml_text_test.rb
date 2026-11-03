@@ -219,6 +219,14 @@ class XmlTextTest < Minitest::Test
                  Y::Lexxy.new(doc).to_html("root")
   end
 
+  def test_a_list_between_quote_lines_splits_the_quote
+    doc = Y::Doc.new
+    Y::Lexxy.append_markdown(doc, "> A\n- B\n> C")
+
+    assert_equal "<blockquote><p>A</p></blockquote><ul><li value=\"1\">B</li></ul><blockquote><p>C</p></blockquote>",
+                 Y::Lexxy.new(doc).to_html("root")
+  end
+
   # A peer's caret is a relative position; block_at says which block it is in.
   def test_block_at_resolves_a_position_to_its_top_level_block
     doc = Y::Doc.new

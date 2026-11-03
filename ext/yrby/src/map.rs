@@ -46,9 +46,7 @@ impl RbMap {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
-            resolve::<MapRef, _>(&txn, id)?.get(&txn, &key)
-        }))
+        nogvl(move || resolve::<MapRef, _>(&txn, id)?.get(&txn, &key))
     }
 
     // --- reads ---
@@ -62,7 +60,7 @@ impl RbMap {
         let got: Option<Any> = nogvl(move || {
             let m = resolve::<MapRef, _>(&txn, id)?;
             m.get(&txn, &key).map(|v| out_to_any(&txn, &v))
-        });
+        })?;
         let ruby = Ruby::get().unwrap();
         Ok(match got {
             Some(a) => any_to_ruby(&ruby, &a),
@@ -99,42 +97,42 @@ impl RbMap {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<MapRef, _>(&txn, id)
                 .map(|m| m.contains_key(&txn, &key))
                 .unwrap_or(false)
-        }))
+        })
     }
 
     fn size(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<MapRef, _>(&txn, id)
                 .map(|m| m.len(&txn) as usize)
                 .unwrap_or(0)
-        }))
+        })
     }
 
     fn keys(&self) -> Result<Vec<String>, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || match resolve::<MapRef, _>(&txn, id) {
+        nogvl(move || match resolve::<MapRef, _>(&txn, id) {
             Some(m) => m.keys(&txn).map(|k| k.to_string()).collect(),
             None => Vec::new(),
-        }))
+        })
     }
 
     fn snapshot(&self) -> Result<Vec<(String, Any)>, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || match resolve::<MapRef, _>(&txn, id) {
+        nogvl(move || match resolve::<MapRef, _>(&txn, id) {
             Some(m) => m
                 .iter(&txn)
                 .map(|(k, v)| (k.to_string(), out_to_any(&txn, &v)))
                 .collect(),
             None => Vec::new(),
-        }))
+        })
     }
 
     fn to_h(&self) -> Result<Value, Error> {
@@ -213,7 +211,7 @@ impl RbMap {
 /// `Y::Doc#get_map`.
 pub fn root_map(doc: &Doc, name: String) -> Result<RbMap, Error> {
     let mut txn = crate::txn::write(doc)?;
-    let id = nogvl(move || identity(&yrs::WriteTxn::get_or_insert_map(&mut *txn, name.as_str())));
+    let id = nogvl(move || identity(&yrs::WriteTxn::get_or_insert_map(&mut *txn, name.as_str())))?;
     Ok(RbMap::new(doc.clone(), id))
 }
 

@@ -97,6 +97,7 @@ module Y
 
         def item(payload, ordered:)
           close_para
+          close_quote
           close_list if @list && @list[:ordered] != ordered
           (@list ||= { ordered: ordered, items: [] })[:items] << payload
         end

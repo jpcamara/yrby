@@ -43,30 +43,28 @@ impl RbText {
     fn to_s(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<TextRef, _>(&txn, id)
                 .map(|t| t.get_string(&txn))
                 .unwrap_or_default()
-        }))
+        })
     }
 
     /// The length in characters, as `String#length` counts.
     fn length(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<TextRef, _>(&txn, id)
                 .map(|t| char_len(&txn, &t) as usize)
                 .unwrap_or(0)
-        }))
+        })
     }
 
     fn is_empty(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
-            resolve::<TextRef, _>(&txn, id).is_none_or(|t| t.len(&txn) == 0)
-        }))
+        nogvl(move || resolve::<TextRef, _>(&txn, id).is_none_or(|t| t.len(&txn) == 0))
     }
 
     // --- writes ---
@@ -133,12 +131,12 @@ impl RbText {
         let sticky = crate::sticky_from_ruby(&ruby, position)?;
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             let text = resolve::<TextRef, _>(&txn, id)?;
             let offset = sticky.get_offset(&txn)?;
             let branch: &Branch = text.as_ref();
             (BranchPtr::from(branch) == offset.branch).then(|| to_chars(&txn, &text, offset.index))
-        }))
+        })
     }
 
     /// Remove `length` characters from `index`, as `String#slice!` does: a
@@ -177,7 +175,7 @@ impl RbText {
 /// `Y::Doc#get_text`.
 pub fn root_text(doc: &Doc, name: String) -> Result<RbText, Error> {
     let mut txn = crate::txn::write(doc)?;
-    let id = nogvl(move || identity(&yrs::WriteTxn::get_or_insert_text(&mut *txn, name.as_str())));
+    let id = nogvl(move || identity(&yrs::WriteTxn::get_or_insert_text(&mut *txn, name.as_str())))?;
     Ok(RbText::new(doc.clone(), id))
 }
 
