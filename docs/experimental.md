@@ -211,27 +211,35 @@ counter["n"] = 0
 doc.transact { counter["n"] = counter["n"] + 1 } # nothing writes in between
 ```
 
-Inside the block, every handle call and read on the document from this
-thread uses the transaction and sees what the block wrote. Other threads
-wait for the commit, so they see all of the block's writes or none of them.
-A transaction already open on the thread is joined, so blocks nest, and a
-fiber the block resumes joins it too. Each handle has `transact` for its
-document. The Lexical helpers write each block in one transaction, so
-another thread never sees a block before its attributes or its text.
+Inside the block, every handle call and read on the document from the
+block's fiber uses the transaction and sees what the block wrote. A block
+inside it on the same document joins it, so blocks nest. Each handle has
+`transact` for its document. The Lexical helpers write each block in one
+transaction, so a reader never sees a block before its attributes or its
+text.
+
+Other threads and fibers wait for the commit, so they see all of the
+block's writes or none of them. A wait can be interrupted by `Timeout`,
+`Thread#kill`, or Ctrl-C. Under a fiber scheduler, such as Async, a waiting
+fiber yields, so other tasks run, the block's among them. Without a
+scheduler, a fiber the block resumes can't wait for the block it's inside,
+so touching the document there raises `Y::Error`.
 
 The writes commit when the block returns or raises. There's no rollback.
 
-Three things don't work inside a block:
+Four things don't work inside a block:
 
 - Applying a remote update (`apply_update`, `apply_update_changes`, or
   `handle_sync_message`) raises `Y::Error`. It needs a transaction of its
   own.
 - `edit` raises `Y::Error` inside another block on the same document, whose
   update would already hold its writes.
-- Waiting on another thread that uses the same document never returns,
-  because that thread is waiting for the commit.
+- Waiting on another thread or task that uses the same document never
+  returns, because it is waiting for the commit.
+- Leaving the block's fiber suspended, such as an Enumerator stopped
+  partway, keeps the document held until the fiber finishes.
 
-Keep blocks short. Other threads wait on them.
+Keep blocks short. Everything else that uses the document waits on them.
 
 ## Streaming into a document
 
@@ -239,9 +247,8 @@ A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
 as its own update. `Doc#edit` runs a block in one transaction, as
 `transact` does, and returns the update the transaction made, or nil when
-it changed nothing. Another thread's write waits for the block, so it stays
-out. In a reactor, a fiber the block resumes joins the transaction, so its
-writes are in the update too:
+it changed nothing. Another thread's or task's write waits for the block, so
+it stays out of the update:
 
 ```ruby
 doc = Y::Doc.new

@@ -1,10 +1,10 @@
 //! Live `Y::Map` handles over a yrs `Map`, exposing read + write of actual
 //! shared data (not just opaque CRDT sync).
 //!
-//! Thread safety mirrors `Y::Doc` exactly: every operation opens its own
-//! transaction inside `nogvl` (GVL released) and holds no lock across the GVL
-//! boundary. Ruby values are read/built only with the GVL held (before/after the
-//! `nogvl` block); the closure works purely on `Send` data.
+//! Thread safety mirrors `Y::Doc` exactly: every operation takes a transaction
+//! (see `txn`), then does its work and commits inside `nogvl` (GVL released).
+//! Ruby values are read/built only with the GVL held (before/after the `nogvl`
+//! block); the closure works purely on `Send` data.
 //!
 //! A handle keeps its map's identity and resolves it per operation (see
 //! `shared`). Once the map is deleted, reads return empty and writes raise.
@@ -29,12 +29,13 @@ pub struct RbMap {
     id: BranchID,
 }
 
-impl RbMap {
-    /// Runs the block in one write transaction on this handle's document.
-    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<magnus::Value, Error> {
-        crate::txn::transact(ruby, &rb_self.doc)
+impl crate::txn::OnDoc for RbMap {
+    fn doc(&self) -> &Doc {
+        &self.doc
     }
+}
 
+impl RbMap {
     pub fn new(doc: Doc, id: BranchID) -> Self {
         RbMap { doc, id }
     }
@@ -44,8 +45,8 @@ impl RbMap {
     fn child(&self, key: Value) -> Result<Option<Out>, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
+        let txn = crate::txn::read(doc)?;
         Ok(nogvl(move || {
-            let txn = crate::txn::read(doc);
             resolve::<MapRef, _>(&txn, id)?.get(&txn, &key)
         }))
     }
@@ -57,8 +58,8 @@ impl RbMap {
     fn get(&self, key: Value) -> Result<Value, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
+        let txn = crate::txn::read(doc)?;
         let got: Option<Any> = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let m = resolve::<MapRef, _>(&txn, id)?;
             m.get(&txn, &key).map(|v| out_to_any(&txn, &v))
         });
@@ -97,56 +98,52 @@ impl RbMap {
     fn has_key(&self, key: Value) -> Result<bool, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
+        let txn = crate::txn::read(doc)?;
         Ok(nogvl(move || {
-            let txn = crate::txn::read(doc);
             resolve::<MapRef, _>(&txn, id)
                 .map(|m| m.contains_key(&txn, &key))
                 .unwrap_or(false)
         }))
     }
 
-    fn size(&self) -> usize {
+    fn size(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<MapRef, _>(&txn, id)
                 .map(|m| m.len(&txn) as usize)
                 .unwrap_or(0)
-        })
+        }))
     }
 
-    fn keys(&self) -> Vec<String> {
+    fn keys(&self) -> Result<Vec<String>, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
-            match resolve::<MapRef, _>(&txn, id) {
-                Some(m) => m.keys(&txn).map(|k| k.to_string()).collect(),
-                None => Vec::new(),
-            }
-        })
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || match resolve::<MapRef, _>(&txn, id) {
+            Some(m) => m.keys(&txn).map(|k| k.to_string()).collect(),
+            None => Vec::new(),
+        }))
     }
 
-    fn snapshot(&self) -> Vec<(String, Any)> {
+    fn snapshot(&self) -> Result<Vec<(String, Any)>, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
-            match resolve::<MapRef, _>(&txn, id) {
-                Some(m) => m
-                    .iter(&txn)
-                    .map(|(k, v)| (k.to_string(), out_to_any(&txn, &v)))
-                    .collect(),
-                None => Vec::new(),
-            }
-        })
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || match resolve::<MapRef, _>(&txn, id) {
+            Some(m) => m
+                .iter(&txn)
+                .map(|(k, v)| (k.to_string(), out_to_any(&txn, &v)))
+                .collect(),
+            None => Vec::new(),
+        }))
     }
 
-    fn to_h(&self) -> Value {
+    fn to_h(&self) -> Result<Value, Error> {
         let ruby = Ruby::get().unwrap();
         let h = ruby.hash_new();
-        for (k, v) in &self.snapshot() {
+        for (k, v) in &self.snapshot()? {
             let _ = h.aset(k.as_str(), any_to_ruby(&ruby, v));
         }
-        h.as_value()
+        Ok(h.as_value())
     }
 
     /// `each { |key, value| }`: yields a snapshot of each entry (read under
@@ -154,7 +151,7 @@ impl RbMap {
     fn each(&self) -> Result<(), Error> {
         let ruby = Ruby::get().unwrap();
         let block = ruby.block_proc()?;
-        for (k, v) in &self.snapshot() {
+        for (k, v) in &self.snapshot()? {
             let _: Value = block.call((k.as_str(), any_to_ruby(&ruby, v)))?;
         }
         Ok(())
@@ -170,8 +167,8 @@ impl RbMap {
         let key = key_to_string(key)?;
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let m = resolve::<MapRef, _>(&txn, id).ok_or("map no longer exists")?;
             m.insert(&mut txn, key, to_in(iv));
             Ok(())
@@ -183,8 +180,8 @@ impl RbMap {
     fn delete(&self, key: Value) -> Result<Value, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         let prev: Option<Any> = guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let Some(m) = resolve::<MapRef, _>(&txn, id) else {
                 return Ok(None);
             };
@@ -202,8 +199,8 @@ impl RbMap {
 
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             if let Some(m) = resolve::<MapRef, _>(&txn, id) {
                 m.clear(&mut txn);
             }
@@ -214,20 +211,18 @@ impl RbMap {
 
 /// Ensure a root map exists and return a live handle to it. Called by
 /// `Y::Doc#get_map`.
-pub fn root_map(doc: &Doc, name: String) -> RbMap {
-    let d = doc.clone();
-    let id = nogvl(move || {
-        identity(&yrs::WriteTxn::get_or_insert_map(
-            &mut *crate::txn::write(&d),
-            name.as_str(),
-        ))
-    });
-    RbMap::new(doc.clone(), id)
+pub fn root_map(doc: &Doc, name: String) -> Result<RbMap, Error> {
+    let mut txn = crate::txn::write(doc)?;
+    let id = nogvl(move || identity(&yrs::WriteTxn::get_or_insert_map(&mut *txn, name.as_str())));
+    Ok(RbMap::new(doc.clone(), id))
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     let class = module.define_class("Map", ruby.class_object())?;
-    class.define_private_method("native_transact", magnus::method!(RbMap::transact, 0))?;
+    class.define_private_method(
+        "native_transact",
+        magnus::method!(crate::txn::transact::<RbMap>, 0),
+    )?;
     class.define_method("[]", magnus::method!(RbMap::get, 1))?;
     class.define_method("get", magnus::method!(RbMap::get, 1))?;
     class.define_method("get_map", magnus::method!(RbMap::get_map, 1))?;

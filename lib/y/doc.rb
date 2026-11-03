@@ -4,14 +4,17 @@ module Y
   # `transact` for a document and each of its handles: run the block in one
   # write transaction on the document, so its writes commit together.
   #
-  # Every handle call and read inside the block, on this thread, uses that
-  # transaction and sees the block's writes. Other threads wait for the
-  # commit and never see them half done. A transaction already open on this
-  # thread is joined, not nested, and a fiber the block resumes joins it too.
+  # Every handle call and read inside the block, from the block's fiber,
+  # uses that transaction and sees the block's writes. A block already open
+  # in this fiber is joined, not nested. Other threads and fibers wait for
+  # the commit and never see the writes half done. The wait can be
+  # interrupted, and under a fiber scheduler it yields. Without a scheduler,
+  # a fiber the block resumes raises Y::Error instead of waiting.
   #
   # The writes commit when the block returns or raises. There is no rollback.
   # Applying a remote update inside the block raises Y::Error, since it needs
-  # a transaction of its own. Keep the block short: other threads wait on it.
+  # a transaction of its own. Keep the block short: everything else waits on
+  # it.
   module Transact
     def transact
       raise ArgumentError, "transact needs a block" unless block_given?
@@ -29,9 +32,8 @@ module Y
     # edit either way. The update is what a process saves and broadcasts, one
     # call per chunk as it streams into a document.
     #
-    # The update is exactly the block's transaction. Another thread's write
-    # waits until the block returns, so it stays out. In a reactor, a fiber
-    # the block resumes joins the transaction, so its writes are in it too.
+    # The update is exactly the block's transaction. Another thread's or
+    # fiber's write waits until the block returns, so it stays out.
     # `edit` raises Y::Error inside another `edit` or `transact` on the same
     # document, where the outer block's update would hold its writes.
     def edit

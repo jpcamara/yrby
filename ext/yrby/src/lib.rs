@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{DeepObservable, Doc, GetString, ReadTxn, Text, Transact};
+use yrs::{DeepObservable, Doc, GetString, ReadTxn, Text};
 
 mod array;
 mod map;
@@ -60,11 +60,11 @@ fn assert_thread_safe() {
 ///   objects after returning.
 /// - It must be `Send` (it runs while other threads own the GVL). `&Doc` is
 ///   fine: it's `Sync` (asserted above).
-/// - Lock discipline: any native lock it takes (the doc's internal RwLock) must
-///   be acquired and released inside this closure, with the GVL already dropped.
-///   Never lock with the GVL held (e.g. before calling `nogvl`), or a thread
-///   waiting on the lock while holding the GVL can deadlock against the GVL
-///   reacquire. Same reason we never hold a lock across the GVL boundary.
+/// - Lock discipline: never wait on the doc's lock in here, and never wait on
+///   it with the GVL held. `txn::read` and `txn::write` take a transaction
+///   before `nogvl`, trying the lock and sleeping through Ruby between tries,
+///   so the wait can be interrupted. The closure takes the transaction and
+///   drops it, which releases the lock before the GVL comes back.
 ///
 /// The closure runs with no unblock function, so it is not interruptible: a
 /// Thread#kill, timeout, or signal can't preempt it mid-run. That's fine for the
@@ -143,6 +143,12 @@ pub(crate) fn yrb_error(msg: String) -> Error {
 // Doc Implementation
 // ============================================================================
 
+impl txn::OnDoc for RbDoc {
+    fn doc(&self) -> &Doc {
+        &self.0
+    }
+}
+
 impl RbDoc {
     /// Create a new Doc with an optional client_id
     ///
@@ -165,61 +171,53 @@ impl RbDoc {
         self.0.client_id().get()
     }
 
-    fn encode_state_vector(&self) -> RString {
+    fn encode_state_vector(&self) -> Result<RString, Error> {
         let doc = &self.0;
-        let sv = nogvl(move || {
-            let txn = crate::txn::read(doc);
-            txn.state_vector().encode_v1()
-        });
-        binary_string(&sv)
+        let txn = crate::txn::read(doc)?;
+        let sv = nogvl(move || txn.state_vector().encode_v1());
+        Ok(binary_string(&sv))
     }
 
     /// Names of the document's root types, so a content reader can find the one
     /// holding text without knowing it up front.
-    fn root_names(&self) -> Vec<String> {
-        let doc = &self.0;
-        nogvl(move || {
-            crate::txn::read(doc)
-                .root_refs()
-                .map(|(name, _)| name.to_string())
-                .collect()
-        })
+    fn root_names(&self) -> Result<Vec<String>, Error> {
+        let txn = crate::txn::read(&self.0)?;
+        Ok(nogvl(move || {
+            txn.root_refs().map(|(name, _)| name.to_string()).collect()
+        }))
     }
 
-    fn read_text(&self, name: String) -> Option<String> {
+    fn read_text(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
-        nogvl(move || {
-            // Exactly ONE transaction per call. Opening a second while the
-            // first is still held deadlocks against a waiting writer, and
-            // inside nogvl that hang can't be interrupted.
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             txn.get_text(name.as_str()).map(|t| t.get_string(&txn))
-        })
+        }))
     }
 
     /// Text of an XML-shaped root, one top-level block per line. The walk +
     /// block-join logic lives in `read::xml_blocks_text` (pure, Rust-tested);
     /// this just opens the transaction and resolves the root.
-    fn read_xml(&self, name: String) -> Option<String> {
+    fn read_xml(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             let fragment = txn.get_xml_fragment(name.as_str())?;
             Some(read::xml_blocks_text(&txn, &fragment))
-        })
+        }))
     }
 
     /// A `Y.Map` root serialized to a JSON object string (keys sorted; values
     /// recursive). Complements read_text/read_xml for structured shared state.
     /// Callers parse the JSON (e.g. `JSON.parse(doc.read_map("state"))`). The
     /// serialization lives in `read::map_json` (pure, Rust-tested).
-    fn read_map(&self, name: String) -> Option<String> {
+    fn read_map(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             let map = txn.get_map(name.as_str())?;
             Some(read::map_json(&txn, &map))
-        })
+        }))
     }
 
     /// A `Y.Array` root serialized to a JSON array string (values recursive, in
@@ -227,22 +225,22 @@ impl RbDoc {
     /// array: a board's cards, a sheet's rows. Callers parse the JSON (e.g.
     /// `JSON.parse(doc.read_array("cards"))`). The serialization lives in
     /// `read::array_json` (pure, Rust-tested).
-    fn read_array(&self, name: String) -> Option<String> {
+    fn read_array(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             let array = txn.get_array(name.as_str())?;
             Some(read::array_json(&txn, &array))
-        })
+        }))
     }
 
     /// True if the doc holds un-integrable pending structs or a pending delete
     /// set: content that couldn't integrate because a causally-prior update is
     /// missing. Such content is a recovery buffer, not document state; it heals if
     /// the missing dependency later arrives. A pure read.
-    fn pending(&self) -> bool {
-        let doc = &self.0;
-        nogvl(move || has_pending(doc))
+    fn pending(&self) -> Result<bool, Error> {
+        let txn = crate::txn::read(&self.0)?;
+        Ok(nogvl(move || has_pending(&txn)))
     }
 
     /// Like `encode_state_as_update` (full state), but **gap-free**: it excludes
@@ -252,35 +250,35 @@ impl RbDoc {
     /// a genuine gap still heals if its dependency arrives. (`encode_state_as_update`
     /// stays lossless for raw-update recovery.)
     fn compacted_state_update(&self) -> Result<RString, Error> {
-        let doc = &self.0;
-        let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))
+        let txn = crate::txn::read(&self.0)?;
+        let update = nogvl(move || integrated_update(&txn, &yrs::StateVector::default()))
             .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
 
     /// A live `Y::Array` handle to the root array named `name` (created if
     /// absent). Writes through it mutate the document and sync to every peer.
-    fn get_array(&self, name: String) -> array::RbArray {
+    fn get_array(&self, name: String) -> Result<array::RbArray, Error> {
         array::root_array(&self.0, name)
     }
 
     /// A live `Y::Text` handle to the root text named `name` (created if
     /// absent). This is what an agent appends into.
-    fn get_text(&self, name: String) -> text::RbText {
+    fn get_text(&self, name: String) -> Result<text::RbText, Error> {
         text::root_text(&self.0, name)
     }
 
     /// A live `Y::XmlText` handle to the root xml text named `name` (created
     /// if absent). Rich-text editors keep their document here; this is how a
     /// Ruby process writes a paragraph into one.
-    fn get_xml_text(&self, name: String) -> xml_text::RbXmlText {
+    fn get_xml_text(&self, name: String) -> Result<xml_text::RbXmlText, Error> {
         xml_text::root_xml_text(&self.0, name)
     }
 
     /// A live `Y::Map` handle to the root map named `name` (created if absent).
     /// Unlike `read_map` (a JSON snapshot), the returned handle reads and *writes*
     /// the actual shared map, with the same thread-safety guarantees as the Doc.
-    fn get_map(&self, name: String) -> map::RbMap {
+    fn get_map(&self, name: String) -> Result<map::RbMap, Error> {
         map::root_map(&self.0, name)
     }
 
@@ -292,14 +290,12 @@ impl RbDoc {
     /// following a document react to the part that changed.
     fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
         let bytes = copy_bytes(update);
-        let doc = &self.0;
-        txn::refuse_held(doc, "apply_update_changes")?;
+        // One transaction from the snapshot of the blocks to the commit,
+        // under an origin of its own: another write can't change the blocks
+        // in between, and its events don't count.
+        let key = shared::observer_key();
+        let mut txn = txn::apply(&self.0, Some(key.clone()), "apply_update_changes")?;
         let changed = nogvl(move || -> Result<Vec<u32>, String> {
-            // One transaction from the snapshot of the blocks to the commit,
-            // under an origin of its own: another thread's write can't change
-            // the blocks in between, and its events don't count.
-            let key = shared::observer_key();
-            let mut txn = doc.transact_mut_with(key.clone());
             let fragment = yrs::WriteTxn::get_or_insert_xml_fragment(&mut txn, root.as_str());
             let branch: &yrs::branch::Branch = fragment.as_ref();
             let target = yrs::XmlTextRef::from(yrs::branch::BranchPtr::from(branch));
@@ -353,8 +349,8 @@ impl RbDoc {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let sticky = sticky_from_ruby(&ruby, position)?;
         let doc = &self.0;
+        let txn = crate::txn::read(doc)?;
         Ok(nogvl(move || {
-            let txn = crate::txn::read(doc);
             let target = sticky.get_offset(&txn)?.branch;
             let root_ref = shared::root_xml_text(&txn, root.as_str())?;
             shared::embedded_xml_texts(&txn, &root_ref)
@@ -370,8 +366,8 @@ impl RbDoc {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let sticky = sticky_from_ruby(&ruby, position)?;
         let (doc, name) = (&self.0, root.as_str());
+        let txn = crate::txn::read(doc)?;
         let id = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let branch = sticky.get_offset(&txn)?.branch;
             let id = shared::identity(&yrs::XmlTextRef::from(branch));
             let is_block = matches!(id, yrs::branch::BranchID::Root(_))
@@ -382,11 +378,6 @@ impl RbDoc {
                 .then_some(id)
         });
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
-    }
-
-    /// Runs the block in one write transaction on this document. See txn.rs.
-    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
-        txn::transact(ruby, &rb_self.0)
     }
 
     /// Runs the block in a write transaction of its own and returns the
@@ -404,12 +395,12 @@ impl RbDoc {
             Some(copy_bytes(sv_string))
         };
         let doc = &self.0;
+        let txn = crate::txn::read(doc)?;
         let update = nogvl(move || -> Result<Vec<u8>, String> {
             let sv = match &sv_bytes {
                 None => yrs::StateVector::default(),
                 Some(bytes) => yrs::StateVector::decode_v1(bytes).map_err(|e| e.to_string())?,
             };
-            let txn = crate::txn::read(doc);
             Ok(txn.encode_state_as_update_v1(&sv))
         })
         .map_err(yrb_error)?;
@@ -418,14 +409,9 @@ impl RbDoc {
 
     fn apply_update(&self, update: RString) -> Result<(), Error> {
         let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        txn::refuse_held(doc, "apply_update")?;
-        nogvl(move || -> Result<(), String> {
-            let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-            let mut txn = doc.transact_mut();
-            txn.apply_update(update).map_err(|e| e.to_string())
-        })
-        .map_err(yrb_error)
+        let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| yrb_error(e.to_string()))?;
+        let mut txn = txn::apply(&self.0, None, "apply_update")?;
+        nogvl(move || txn.apply_update(update).map_err(|e| e.to_string())).map_err(yrb_error)
     }
 
     /// True if applying `update` would integrate cleanly (its dependencies are
@@ -433,8 +419,8 @@ impl RbDoc {
     /// update is missing. Pure read; does not mutate.
     fn update_ready(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        nogvl(move || update_is_ready(doc, &update_bytes)).map_err(yrb_error)
+        let txn = crate::txn::read(&self.0)?;
+        nogvl(move || update_is_ready(&txn, &update_bytes)).map_err(yrb_error)
     }
 
     /// True if applying `update` would change the document (it carries new
@@ -442,19 +428,19 @@ impl RbDoc {
     /// retry). See `update_advances_doc`. Pure read; does not mutate.
     fn update_advances(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        nogvl(move || update_advances_doc(doc, &update_bytes)).map_err(yrb_error)
+        let txn = crate::txn::read(&self.0)?;
+        nogvl(move || update_advances_doc(&txn, &update_bytes)).map_err(yrb_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
-    fn sync_step1(&self) -> RString {
+    fn sync_step1(&self) -> Result<RString, Error> {
         let doc = &self.0;
+        let txn = crate::txn::read(doc)?;
         let encoded = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let sv = txn.state_vector();
             Message::Sync(SyncMessage::SyncStep1(sv)).encode_v1()
         });
-        binary_string(&encoded)
+        Ok(binary_string(&encoded))
     }
 
     /// Handle a Sync or Awareness message, returning
@@ -463,52 +449,45 @@ impl RbDoc {
     fn handle_sync_message(&self, data: RString) -> Result<(u8, u8, RString), Error> {
         let data_bytes = copy_bytes(data);
         let doc = &self.0;
-        txn::refuse_held(doc, "handle_sync_message")?;
+        let msg = Message::decode_v1(&data_bytes).map_err(|e| yrb_error(e.to_string()))?;
 
-        let (msg_type, sync_type, response) =
-            nogvl(move || -> Result<(u8, u8, Vec<u8>), String> {
-                let msg = Message::decode_v1(&data_bytes).map_err(|e| e.to_string())?;
-
-                match msg {
-                    Message::Sync(sync_msg) => match sync_msg {
-                        SyncMessage::SyncStep1(sv) => {
-                            // Respond with SyncStep2 carrying the doc's full
-                            // state, pending included, matching Y.js's
-                            // encodeStateAsUpdate. A peer parks a pending
-                            // struct exactly as this doc does and heals it
-                            // when the missing dependency arrives.
-                            let txn = crate::txn::read(doc);
-                            let update = txn.encode_state_as_update_v1(&sv);
-                            let response = Message::Sync(SyncMessage::SyncStep2(update));
-                            Ok((0, 0, response.encode_v1()))
-                        }
-                        SyncMessage::SyncStep2(update_bytes) => {
-                            // Apply the update
-                            let update =
-                                yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-                            let mut txn = doc.transact_mut();
-                            txn.apply_update(update).map_err(|e| e.to_string())?;
-                            Ok((0, 1, Vec::new()))
-                        }
-                        SyncMessage::Update(update_bytes) => {
-                            // Apply the update
-                            let update =
-                                yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-                            let mut txn = doc.transact_mut();
-                            txn.apply_update(update).map_err(|e| e.to_string())?;
-                            Ok((0, 2, Vec::new()))
-                        }
-                    },
-                    Message::Awareness(_) => Ok((1, 0, Vec::new())),
-                    // Auth, awareness-query, and custom frames aren't part of this
-                    // protocol; reject rather than pretend to handle them.
-                    _ => Err("unsupported message type".to_string()),
-                }
-            })
-            .map_err(yrb_error)?;
+        let (msg_type, sync_type, response) = match msg {
+            Message::Sync(SyncMessage::SyncStep1(sv)) => {
+                // Respond with SyncStep2 carrying the doc's full state,
+                // pending included, matching Y.js's encodeStateAsUpdate. A
+                // peer parks a pending struct exactly as this doc does and
+                // heals it when the missing dependency arrives.
+                let txn = crate::txn::read(doc)?;
+                let response = nogvl(move || {
+                    let update = txn.encode_state_as_update_v1(&sv);
+                    Message::Sync(SyncMessage::SyncStep2(update)).encode_v1()
+                });
+                (0, 0, response)
+            }
+            Message::Sync(SyncMessage::SyncStep2(update_bytes)) => {
+                let mut txn = txn::apply(doc, None, "handle_sync_message")?;
+                nogvl(move || apply_bytes(&mut txn, &update_bytes)).map_err(yrb_error)?;
+                (0, 1, Vec::new())
+            }
+            Message::Sync(SyncMessage::Update(update_bytes)) => {
+                let mut txn = txn::apply(doc, None, "handle_sync_message")?;
+                nogvl(move || apply_bytes(&mut txn, &update_bytes)).map_err(yrb_error)?;
+                (0, 2, Vec::new())
+            }
+            Message::Awareness(_) => (1, 0, Vec::new()),
+            // Auth, awareness-query, and custom frames aren't part of this
+            // protocol; reject rather than pretend to handle them.
+            _ => return Err(yrb_error("unsupported message type".to_string())),
+        };
 
         Ok((msg_type, sync_type, binary_string(&response)))
     }
+}
+
+/// Decode `update_bytes` and apply them in `txn`.
+fn apply_bytes(txn: &mut yrs::TransactionMut, update_bytes: &[u8]) -> Result<(), String> {
+    let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
+    txn.apply_update(update).map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -521,8 +500,8 @@ impl RbDoc {
 /// the `Y::Lexxy` facade's rule set arrives that way). Holds a cheap clone of
 /// the doc (yrs `Doc` is an Arc handle), so it reads live state.
 ///
-/// Thread safety matches `Y::Doc`: every method opens its own transaction
-/// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
+/// Thread safety matches `Y::Doc`: every method takes a transaction (see
+/// `txn`), then reads inside `nogvl`. Callback rules
 /// keep that discipline: the render emits deferred segments, and the Ruby
 /// layer runs the app's blocks only after the transaction has closed.
 #[magnus::wrap(class = "Y::NativeLexical", free_immediately, size)]
@@ -553,8 +532,8 @@ impl RbLexical {
         let name = root_name_arg(args, "root")?;
         let doc = &self.doc;
         let rules = &self.rules;
+        let txn = crate::txn::read(doc)?;
         let segments = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::render_segments(&txn, &fragment, rules)
         });
@@ -567,8 +546,8 @@ impl RbLexical {
     fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
         let name = root_name_arg(args, "root")?;
         let doc = &self.doc;
+        let txn = crate::txn::read(doc)?;
         let map = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::collect_node_types(&txn, &fragment)
         });
@@ -600,8 +579,8 @@ impl RbLexical {
 /// Holds a cheap clone of the doc (yrs `Doc` is an Arc handle), so it reads
 /// live state.
 ///
-/// Thread safety matches `Y::Doc`: every method opens its own transaction
-/// inside `nogvl` and holds no lock across the GVL boundary. Callback rules
+/// Thread safety matches `Y::Doc`: every method takes a transaction (see
+/// `txn`), then reads inside `nogvl`. Callback rules
 /// keep that discipline: the render emits deferred segments, and the Ruby
 /// layer runs the app's blocks only after the transaction has closed.
 #[magnus::wrap(class = "Y::NativeProseMirror", free_immediately, size)]
@@ -633,8 +612,8 @@ impl RbProseMirror {
         let name = root_name_arg(args, "default")?;
         let doc = &self.doc;
         let rules = &self.rules;
+        let txn = crate::txn::read(doc)?;
         let segments = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::render_segments(&txn, &fragment, rules)
         });
@@ -647,8 +626,8 @@ impl RbProseMirror {
     fn node_types(&self, args: &[Value]) -> Result<Value, Error> {
         let name = root_name_arg(args, "default")?;
         let doc = &self.doc;
+        let txn = crate::txn::read(doc)?;
         let map = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::collect_node_types(&txn, &fragment)
         });
@@ -1134,7 +1113,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
-    doc_class.define_private_method("native_transact", method!(RbDoc::transact, 0))?;
+    doc_class.define_private_method("native_transact", method!(txn::transact::<RbDoc>, 0))?;
     doc_class.define_private_method("native_edit", method!(RbDoc::edit, 0))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;

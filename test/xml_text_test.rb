@@ -210,6 +210,15 @@ class XmlTextTest < Minitest::Test
     assert_equal expected, Y::Lexxy.new(doc).to_html("root")
   end
 
+  def test_consecutive_quote_lines_are_one_quote
+    doc = Y::Doc.new
+    Y::Lexxy.append_markdown(doc, "> One thought,\n> carried on.\n>\n> **Still** quoted.\nAfter.\n\n> Another.")
+
+    assert_equal "<blockquote><p>One thought, carried on. <strong>Still</strong> quoted.</p></blockquote>" \
+                 "<p>After.</p><blockquote><p>Another.</p></blockquote>",
+                 Y::Lexxy.new(doc).to_html("root")
+  end
+
   # A peer's caret is a relative position; block_at says which block it is in.
   def test_block_at_resolves_a_position_to_its_top_level_block
     doc = Y::Doc.new

@@ -1,8 +1,8 @@
 //! Live `Y::Array` handles over a yrs `Array`: read and write the elements of a
 //! shared list from Ruby.
 //!
-//! Same contract as `Y::Map`. Every operation opens its own transaction inside
-//! `nogvl`, nothing caches a branch pointer, and Ruby values are only touched
+//! Same contract as `Y::Map`. Every operation takes a transaction and works
+//! inside `nogvl`, nothing caches a branch pointer, and Ruby values are only touched
 //! with the GVL held.
 //!
 //! The method that earns this type its place is `get_map`, which hands back a
@@ -30,101 +30,101 @@ pub struct RbArray {
     id: BranchID,
 }
 
-impl RbArray {
-    /// Runs the block in one write transaction on this handle's document.
-    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<magnus::Value, Error> {
-        crate::txn::transact(ruby, &rb_self.doc)
+impl crate::txn::OnDoc for RbArray {
+    fn doc(&self) -> &Doc {
+        &self.doc
     }
+}
 
+impl RbArray {
     pub fn new(doc: Doc, id: BranchID) -> Self {
         RbArray { doc, id }
     }
 
     /// The shared value at `index`, resolved now: what `get_map`, `get_array`
     /// and `get_text` narrow to a handle.
-    fn child(&self, index: i64) -> Option<Out> {
+    fn child(&self, index: i64) -> Result<Option<Out>, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             let a = resolve::<ArrayRef, _>(&txn, id)?;
             a.get(&txn, element_index(index, a.len(&txn))?)
-        })
+        }))
     }
 
     // --- reads ---
 
     /// `array[i]`: a snapshot value. Nested maps and arrays come back as deep
     /// `Hash`/`Array`; use `get_map` for a live handle instead.
-    fn get(&self, index: i64) -> Value {
+    fn get(&self, index: i64) -> Result<Value, Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let txn = crate::txn::read(doc)?;
         let got: Option<Any> = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let a = resolve::<ArrayRef, _>(&txn, id)?;
             let i = element_index(index, a.len(&txn))?;
             a.get(&txn, i).map(|v| out_to_any(&txn, &v))
         });
         let ruby = Ruby::get().unwrap();
-        match got {
+        Ok(match got {
             Some(a) => any_to_ruby(&ruby, &a),
             None => ruby.qnil().as_value(),
-        }
+        })
     }
 
     /// A live `Y::Map` for the element at `index`, or `nil` if that element is
     /// absent or is not a map. Mutating it mutates the document.
-    fn get_map(&self, index: i64) -> Option<RbMap> {
-        match self.child(index)? {
-            Out::YMap(m) => Some(RbMap::new(self.doc.clone(), identity(&m))),
+    fn get_map(&self, index: i64) -> Result<Option<RbMap>, Error> {
+        Ok(match self.child(index)? {
+            Some(Out::YMap(m)) => Some(RbMap::new(self.doc.clone(), identity(&m))),
             _ => None,
-        }
+        })
     }
 
     /// A live `Y::Text` for text stored at `index`. An agent appending to one
     /// field of one record goes through here.
-    fn get_text(&self, index: i64) -> Option<RbText> {
-        match self.child(index)? {
-            Out::YText(t) => Some(RbText::new(self.doc.clone(), identity(&t))),
+    fn get_text(&self, index: i64) -> Result<Option<RbText>, Error> {
+        Ok(match self.child(index)? {
+            Some(Out::YText(t)) => Some(RbText::new(self.doc.clone(), identity(&t))),
             _ => None,
-        }
+        })
     }
 
     /// A live `Y::Array` for a nested array at `index`.
-    fn get_array(&self, index: i64) -> Option<Self> {
-        match self.child(index)? {
-            Out::YArray(a) => Some(RbArray::new(self.doc.clone(), identity(&a))),
+    fn get_array(&self, index: i64) -> Result<Option<Self>, Error> {
+        Ok(match self.child(index)? {
+            Some(Out::YArray(a)) => Some(RbArray::new(self.doc.clone(), identity(&a))),
             _ => None,
-        }
+        })
     }
 
-    fn size(&self) -> usize {
+    fn size(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<ArrayRef, _>(&txn, id)
                 .map(|a| a.len(&txn) as usize)
                 .unwrap_or(0)
-        })
+        }))
     }
 
-    fn is_empty(&self) -> bool {
-        self.size() == 0
+    fn is_empty(&self) -> Result<bool, Error> {
+        Ok(self.size()? == 0)
     }
 
-    fn snapshot(&self) -> Vec<Any> {
+    fn snapshot(&self) -> Result<Vec<Any>, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
-            match resolve::<ArrayRef, _>(&txn, id) {
-                Some(a) => a.iter(&txn).map(|v| out_to_any(&txn, &v)).collect(),
-                None => Vec::new(),
-            }
-        })
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || match resolve::<ArrayRef, _>(&txn, id) {
+            Some(a) => a.iter(&txn).map(|v| out_to_any(&txn, &v)).collect(),
+            None => Vec::new(),
+        }))
     }
 
-    fn to_a(&self) -> Value {
+    fn to_a(&self) -> Result<Value, Error> {
         let ruby = Ruby::get().unwrap();
-        ruby.ary_from_iter(self.snapshot().iter().map(|v| any_to_ruby(&ruby, v)))
-            .as_value()
+        Ok(ruby
+            .ary_from_iter(self.snapshot()?.iter().map(|v| any_to_ruby(&ruby, v)))
+            .as_value())
     }
 
     /// `each { |value| }`: yields a snapshot of each element (read under
@@ -132,7 +132,7 @@ impl RbArray {
     fn each(&self) -> Result<(), Error> {
         let ruby = Ruby::get().unwrap();
         let block = ruby.block_proc()?;
-        for v in &self.snapshot() {
+        for v in &self.snapshot()? {
             let _: Value = block.call((any_to_ruby(&ruby, v),))?;
         }
         Ok(())
@@ -152,8 +152,8 @@ impl RbArray {
         let ruby = Ruby::get().unwrap();
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
             let at = insert_index(index, a.len(&txn));
             a.insert(&mut txn, at, to_in(iv));
@@ -165,8 +165,8 @@ impl RbArray {
     /// Remove the element at `index`, returning its previous snapshot value.
     fn delete_at(&self, index: i64) -> Result<Value, Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         let prev: Option<Any> = guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let Some(a) = resolve::<ArrayRef, _>(&txn, id) else {
                 return Ok(None);
             };
@@ -187,8 +187,8 @@ impl RbArray {
 
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             if let Some(a) = resolve::<ArrayRef, _>(&txn, id) {
                 let len = a.len(&txn);
                 if len > 0 {
@@ -206,8 +206,8 @@ impl RbArray {
         let ruby = Ruby::get().unwrap();
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
             let i = element_index(index, a.len(&txn)).ok_or("index out of range")?;
             a.remove(&mut txn, i);
@@ -220,20 +220,23 @@ impl RbArray {
 
 /// Ensure a root array exists and return a live handle. Called by
 /// `Y::Doc#get_array`.
-pub fn root_array(doc: &Doc, name: String) -> RbArray {
-    let d = doc.clone();
+pub fn root_array(doc: &Doc, name: String) -> Result<RbArray, Error> {
+    let mut txn = crate::txn::write(doc)?;
     let id = nogvl(move || {
         identity(&yrs::WriteTxn::get_or_insert_array(
-            &mut *crate::txn::write(&d),
+            &mut *txn,
             name.as_str(),
         ))
     });
-    RbArray::new(doc.clone(), id)
+    Ok(RbArray::new(doc.clone(), id))
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     let class = module.define_class("Array", ruby.class_object())?;
-    class.define_private_method("native_transact", magnus::method!(RbArray::transact, 0))?;
+    class.define_private_method(
+        "native_transact",
+        magnus::method!(crate::txn::transact::<RbArray>, 0),
+    )?;
     class.define_method("[]", magnus::method!(RbArray::get, 1))?;
     class.define_method("get", magnus::method!(RbArray::get, 1))?;
     class.define_method("[]=", magnus::method!(RbArray::set, 2))?;

@@ -79,10 +79,10 @@ pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String>
 /// So the clock lower bound serves only as a cheap definitive REJECT; "ready"
 /// is decided by trial-integrating on a throwaway probe seeded with the doc's
 /// integrated state: ready iff nothing parks.
-pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
+pub(crate) fn update_is_ready<T: ReadTxn>(txn: &T, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     // Partial order: "not covered" includes incomparable: not ready either way.
-    let lower_covered = crate::txn::read(doc).state_vector() >= update.state_vector_lower();
+    let lower_covered = txn.state_vector() >= update.state_vector_lower();
     if !lower_covered {
         return Ok(false);
     }
@@ -93,7 +93,7 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
     // whose dependency exists only in that pending buffer is genuinely not
     // ready: recording it would put a gap in the durable log; a resync heals
     // both it and the pending it leans on as one complete delta.
-    let seed = integrated_update(doc, &StateVector::default())?;
+    let seed = integrated_update(txn, &StateVector::default())?;
     let probe = Doc::new();
     {
         let mut txn = probe.transact_mut();
@@ -101,7 +101,8 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
             .map_err(|e| e.to_string())?;
         txn.apply_update(update).map_err(|e| e.to_string())?;
     }
-    Ok(!has_pending(&probe))
+    let pending = has_pending(&probe.transact());
+    Ok(!pending)
 }
 
 /// True if applying `update_bytes` would actually change `doc`, i.e. it carries
@@ -131,7 +132,10 @@ pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, St
 /// server had already integrated. The exact comparison removes that duplication
 /// while still never dropping a real deletion. Assumes the update is already
 /// causally ready.
-pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
+pub(crate) fn update_advances_doc<T: ReadTxn>(
+    txn: &T,
+    update_bytes: &[u8],
+) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     let has_deletes = !update.delete_set().is_empty();
 
@@ -160,7 +164,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     // lacks: the update advances, no probe needed. The common case (a novel
     // edit) exits here; only retries and ambiguous diffs pay for the probe.
     if !has_deletes {
-        let covered = crate::txn::read(doc).state_vector() >= update.state_vector();
+        let covered = txn.state_vector() >= update.state_vector();
         if !covered {
             return Ok(true);
         }
@@ -169,7 +173,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     // Seed an independent probe with the doc's current state so we can measure the
     // update's effect without mutating the real doc.
     let probe = Doc::new();
-    let current = crate::txn::read(doc).encode_state_as_update_v1(&yrs::StateVector::default());
+    let current = txn.encode_state_as_update_v1(&yrs::StateVector::default());
     probe
         .transact_mut()
         .apply_update(yrs::Update::decode_v1(&current).map_err(|e| e.to_string())?)
@@ -220,8 +224,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
 /// True if the doc holds un-integrable pending structs or a pending delete set:
 /// blocks that couldn't integrate because a causally-prior update is missing. A
 /// pure read; does not mutate.
-pub(crate) fn has_pending(doc: &Doc) -> bool {
-    let txn = crate::txn::read(doc);
+pub(crate) fn has_pending<T: ReadTxn>(txn: &T) -> bool {
     txn.store().pending_update().is_some() || txn.store().pending_ds().is_some()
 }
 
@@ -237,12 +240,11 @@ pub(crate) fn has_pending(doc: &Doc) -> bool {
 ///
 /// Non-destructive: the prune happens only on the throwaway copy; `doc` keeps its
 /// pending, so a genuine gap still heals if its missing dependency later arrives.
-pub(crate) fn integrated_update(doc: &Doc, sv: &StateVector) -> Result<Vec<u8>, String> {
-    // Pending check and encode share ONE transaction. With two, a concurrent
-    // gappy apply_update could slip between them and the encode would serve
-    // the very pending this function exists to exclude.
+pub(crate) fn integrated_update<T: ReadTxn>(txn: &T, sv: &StateVector) -> Result<Vec<u8>, String> {
+    // Pending check and encode share ONE transaction, the caller's. With two,
+    // a concurrent gappy apply_update could slip between them and the encode
+    // would serve the very pending this function exists to exclude.
     let full = {
-        let txn = crate::txn::read(doc);
         let store = txn.store();
         // Nothing pending: the direct encode is already gap-free.
         if store.pending_update().is_none() && store.pending_ds().is_none() {
@@ -327,7 +329,7 @@ mod tests {
 
         // Against a doc that doesn't have it yet, the update advances.
         assert!(
-            update_advances_doc(&doc, &upd).unwrap(),
+            update_advances_doc(&doc.transact(), &upd).unwrap(),
             "new content advances"
         );
 
@@ -336,14 +338,14 @@ mod tests {
             .apply_update(yrs::Update::decode_v1(&upd).unwrap())
             .unwrap();
         assert!(
-            !update_advances_doc(&doc, &upd).unwrap(),
+            !update_advances_doc(&doc.transact(), &upd).unwrap(),
             "an already-applied retry does not advance"
         );
 
         // A genuinely new insert (from a different client) still advances.
         let more = text_update("world");
         assert!(
-            update_advances_doc(&doc, &more).unwrap(),
+            update_advances_doc(&doc.transact(), &more).unwrap(),
             "different new content advances"
         );
     }
@@ -371,7 +373,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            update_advances_doc(&server, &diff).unwrap(),
+            update_advances_doc(&server.transact(), &diff).unwrap(),
             "a dependent diff carrying new content advances"
         );
         server
@@ -379,7 +381,7 @@ mod tests {
             .apply_update(yrs::Update::decode_v1(&diff).unwrap())
             .unwrap();
         assert!(
-            !update_advances_doc(&server, &diff).unwrap(),
+            !update_advances_doc(&server.transact(), &diff).unwrap(),
             "the byte-identical retry of that diff does not advance"
         );
     }
@@ -415,7 +417,7 @@ mod tests {
 
         // The deletion is new: it advances (must be recorded).
         assert!(
-            update_advances_doc(&server, &delete).unwrap(),
+            update_advances_doc(&server.transact(), &delete).unwrap(),
             "a not-yet-applied deletion advances the doc"
         );
 
@@ -426,7 +428,7 @@ mod tests {
             .apply_update(yrs::Update::decode_v1(&delete).unwrap())
             .unwrap();
         assert!(
-            !update_advances_doc(&server, &delete).unwrap(),
+            !update_advances_doc(&server.transact(), &delete).unwrap(),
             "an already-applied pure-delete retry does not advance"
         );
     }
@@ -452,7 +454,7 @@ mod tests {
             .apply_update(yrs::Update::decode_v1(&content_state).unwrap())
             .unwrap();
         assert!(
-            update_advances_doc(&server, &mixed).unwrap(),
+            update_advances_doc(&server.transact(), &mixed).unwrap(),
             "an insert+delete update advances"
         );
         server
@@ -460,7 +462,7 @@ mod tests {
             .apply_update(yrs::Update::decode_v1(&mixed).unwrap())
             .unwrap();
         assert!(
-            !update_advances_doc(&server, &mixed).unwrap(),
+            !update_advances_doc(&server.transact(), &mixed).unwrap(),
             "its byte-identical retry does not advance"
         );
     }
@@ -522,24 +524,33 @@ mod tests {
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(u1).unwrap())
             .unwrap();
-        assert!(update_is_ready(&doc, u1).unwrap(), "u1 has no missing deps");
         assert!(
-            !update_is_ready(&doc, u3).unwrap(),
+            update_is_ready(&doc.transact(), u1).unwrap(),
+            "u1 has no missing deps"
+        );
+        assert!(
+            !update_is_ready(&doc.transact(), u3).unwrap(),
             "u3 depends on the missing u2"
         );
-        assert!(!has_pending(&doc), "nothing pending until u3 is applied");
+        assert!(
+            !has_pending(&doc.transact()),
+            "nothing pending until u3 is applied"
+        );
 
         // Applying u3 anyway parks it as a pending struct.
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(u3).unwrap())
             .unwrap();
-        assert!(has_pending(&doc), "u3 is pending: its parent u2 is missing");
+        assert!(
+            has_pending(&doc.transact()),
+            "u3 is pending: its parent u2 is missing"
+        );
 
         // Once u2 arrives (via resync), u3 integrates and pending clears.
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(u2).unwrap())
             .unwrap();
-        assert!(!has_pending(&doc), "u2 arrived; u3 integrated");
+        assert!(!has_pending(&doc.transact()), "u2 arrived; u3 integrated");
     }
 
     // Build a cross-client-origin gap: client C creates "abc"; client A applies
@@ -575,7 +586,7 @@ mod tests {
         // and the downstream advances? probe then acked-and-dropped it).
         let server = Doc::new();
         assert!(
-            !update_is_ready(&server, &a_delta).unwrap(),
+            !update_is_ready(&server.transact(), &a_delta).unwrap(),
             "a delta with unmet cross-client origins is not ready"
         );
 
@@ -584,8 +595,8 @@ mod tests {
             .transact_mut()
             .apply_update(yrs::Update::decode_v1(&c_update).unwrap())
             .unwrap();
-        assert!(update_is_ready(&server, &a_delta).unwrap());
-        assert!(update_advances_doc(&server, &a_delta).unwrap());
+        assert!(update_is_ready(&server.transact(), &a_delta).unwrap());
+        assert!(update_advances_doc(&server.transact(), &a_delta).unwrap());
     }
 
     #[test]
@@ -606,7 +617,7 @@ mod tests {
 
         let server = Doc::new();
         assert!(
-            !update_is_ready(&server, &merged).unwrap(),
+            !update_is_ready(&server.transact(), &merged).unwrap(),
             "the post-Skip blocks depend on the missing u2"
         );
     }
@@ -622,7 +633,10 @@ mod tests {
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(&dependent).unwrap())
             .unwrap();
-        assert!(has_pending(&doc), "the doc carries a legacy parked gap");
+        assert!(
+            has_pending(&doc.transact()),
+            "the doc carries a legacy parked gap"
+        );
 
         // A healthy, self-contained update from an unrelated client.
         let healthy = {
@@ -634,10 +648,10 @@ mod tests {
         };
 
         assert!(
-            update_is_ready(&doc, &healthy).unwrap(),
+            update_is_ready(&doc.transact(), &healthy).unwrap(),
             "legacy pending must not veto unrelated healthy updates"
         );
-        assert!(update_advances_doc(&doc, &healthy).unwrap());
+        assert!(update_advances_doc(&doc.transact(), &healthy).unwrap());
     }
 
     #[test]
@@ -661,10 +675,10 @@ mod tests {
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(&deltas[1]).unwrap())
             .unwrap();
-        assert!(has_pending(&doc), "u2 parked without u1");
+        assert!(has_pending(&doc.transact()), "u2 parked without u1");
 
         assert!(
-            !update_is_ready(&doc, &deltas[2]).unwrap(),
+            !update_is_ready(&doc.transact(), &deltas[2]).unwrap(),
             "a dependency satisfied only by pending content is not ready"
         );
     }
@@ -677,7 +691,7 @@ mod tests {
         let (_c_update, a_delta) = cross_client_origin_gap();
         let server = Doc::new();
         assert!(
-            update_advances_doc(&server, &a_delta).unwrap(),
+            update_advances_doc(&server.transact(), &a_delta).unwrap(),
             "a parked update is not a duplicate"
         );
     }
@@ -715,11 +729,11 @@ mod tests {
         let gappy = yrs::merge_updates_v1([&u1, &u3]).unwrap();
 
         assert!(
-            update_is_ready(&server, &gappy).unwrap(),
+            update_is_ready(&server.transact(), &gappy).unwrap(),
             "sanity: the sync flow would accept and apply this frame"
         );
         assert!(
-            update_advances_doc(&server, &gappy).unwrap(),
+            update_advances_doc(&server.transact(), &gappy).unwrap(),
             "novel content hiding behind a Skip must be recorded, not dropped"
         );
     }
@@ -746,13 +760,16 @@ mod tests {
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(&dependent).unwrap())
             .unwrap();
-        assert!(has_pending(&doc), "the gappy update parked as pending");
+        assert!(
+            has_pending(&doc.transact()),
+            "the gappy update parked as pending"
+        );
 
         // encode_state_as_update carries the pending; integrated_update does not.
         let full = doc
             .transact()
             .encode_state_as_update_v1(&yrs::StateVector::default());
-        let gap_free = integrated_update(&doc, &yrs::StateVector::default()).unwrap();
+        let gap_free = integrated_update(&doc.transact(), &yrs::StateVector::default()).unwrap();
         assert_ne!(full, gap_free, "integrated_update drops the pending bytes");
 
         // Applying the gap-free encode to a fresh peer must NOT poison it.
@@ -761,13 +778,13 @@ mod tests {
             .apply_update(yrs::Update::decode_v1(&gap_free).unwrap())
             .unwrap();
         assert!(
-            !has_pending(&peer),
+            !has_pending(&peer.transact()),
             "peer got no pending from the gap-free state"
         );
 
         // Non-destructive: the source doc keeps its pending (so it can still heal).
         assert!(
-            has_pending(&doc),
+            has_pending(&doc.transact()),
             "integrated_update did not mutate the source"
         );
     }
@@ -780,11 +797,11 @@ mod tests {
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(&first).unwrap())
             .unwrap();
-        assert!(!has_pending(&doc));
+        assert!(!has_pending(&doc.transact()));
         let direct = doc
             .transact()
             .encode_state_as_update_v1(&yrs::StateVector::default());
-        let via = integrated_update(&doc, &yrs::StateVector::default()).unwrap();
+        let via = integrated_update(&doc.transact(), &yrs::StateVector::default()).unwrap();
         assert_eq!(direct, via);
     }
 
@@ -800,8 +817,11 @@ mod tests {
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(&first).unwrap())
             .unwrap();
-        assert!(!has_pending(&doc), "gap healed once first arrived");
-        let gap_free = integrated_update(&doc, &yrs::StateVector::default()).unwrap();
+        assert!(
+            !has_pending(&doc.transact()),
+            "gap healed once first arrived"
+        );
+        let gap_free = integrated_update(&doc.transact(), &yrs::StateVector::default()).unwrap();
         let peer = Doc::new();
         peer.transact_mut()
             .apply_update(yrs::Update::decode_v1(&gap_free).unwrap())
@@ -837,9 +857,9 @@ mod tests {
         doc.transact_mut()
             .apply_update(yrs::Update::decode_v1(&independent_gappy_insert()).unwrap())
             .unwrap(); // + a pending struct from another client
-        assert!(has_pending(&doc));
+        assert!(has_pending(&doc.transact()));
 
-        let gap_free = integrated_update(&doc, &yrs::StateVector::default()).unwrap();
+        let gap_free = integrated_update(&doc.transact(), &yrs::StateVector::default()).unwrap();
         let peer = Doc::new();
         peer.transact_mut()
             .apply_update(yrs::Update::decode_v1(&gap_free).unwrap())
@@ -850,7 +870,7 @@ mod tests {
             "a",
             "kept the integrated content"
         );
-        assert!(!has_pending(&peer), "dropped the pending");
+        assert!(!has_pending(&peer.transact()), "dropped the pending");
     }
 
     #[test]
@@ -875,7 +895,7 @@ mod tests {
             .unwrap();
         let peer_sv = peer.transact().state_vector();
 
-        let diff = integrated_update(&server, &peer_sv).unwrap();
+        let diff = integrated_update(&server.transact(), &peer_sv).unwrap();
         peer.transact_mut()
             .apply_update(yrs::Update::decode_v1(&diff).unwrap())
             .unwrap();
@@ -884,7 +904,10 @@ mod tests {
                 .get_string(&peer.transact()),
             "a"
         );
-        assert!(!has_pending(&peer), "the diff carried no pending");
+        assert!(
+            !has_pending(&peer.transact()),
+            "the diff carried no pending"
+        );
     }
 
     #[test]
@@ -925,13 +948,13 @@ mod tests {
         };
 
         for _ in 0..500 {
-            let encoded = integrated_update(&doc, &yrs::StateVector::default()).unwrap();
+            let encoded = integrated_update(&doc.transact(), &yrs::StateVector::default()).unwrap();
             let peer = Doc::new();
             peer.transact_mut()
                 .apply_update(yrs::Update::decode_v1(&encoded).unwrap())
                 .unwrap();
             assert!(
-                !has_pending(&peer),
+                !has_pending(&peer.transact()),
                 "an integrated_update encode leaked pending to a peer"
             );
         }
@@ -955,18 +978,21 @@ mod tests {
             .apply_update(yrs::Update::decode_v1(&deletion).unwrap())
             .unwrap();
         assert!(
-            has_pending(&doc),
+            has_pending(&doc.transact()),
             "the orphan deletion parked as a pending delete set"
         );
 
-        let gap_free = integrated_update(&doc, &yrs::StateVector::default()).unwrap();
+        let gap_free = integrated_update(&doc.transact(), &yrs::StateVector::default()).unwrap();
         let peer = Doc::new();
         peer.transact_mut()
             .apply_update(yrs::Update::decode_v1(&gap_free).unwrap())
             .unwrap();
-        assert!(!has_pending(&peer), "the pending delete set was not served");
         assert!(
-            has_pending(&doc),
+            !has_pending(&peer.transact()),
+            "the pending delete set was not served"
+        );
+        assert!(
+            has_pending(&doc.transact()),
             "non-destructive: source keeps its pending"
         );
     }

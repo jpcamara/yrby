@@ -3,6 +3,7 @@
 require "test_helper"
 require "async"
 require "json"
+require "timeout"
 
 # Doc#transact holds one write transaction across a block: its writes commit
 # together, reads inside see them, and other threads wait for the commit.
@@ -390,24 +391,26 @@ class DocTransactTest < Minitest::Test
 
   # --- fibers ---
 
-  def test_a_fiber_the_block_resumes_joins_it
+  # A fiber the block resumes can't run while the block waits for it, so
+  # it raises instead of waiting forever.
+  def test_a_fiber_the_block_resumes_raises_instead_of_waiting
     doc = Y::Doc.new
-    update = finishes do
-      fiber = Fiber.new { doc.get_text("t") << "from a fiber " }
-      doc.edit do |d|
-        d.get_text("t") << "from the block "
-        fiber.resume
+    error = finishes do
+      doc.transact do |d|
+        d.get_text("t") << "block"
+        Fiber.new { d.get_text("t") << "fiber" }.resume
+      rescue Y::Error => e
+        e
       end
     end
-    fresh = Y::Doc.new
-    fresh.apply_update(update)
 
-    assert_equal "from the block from a fiber ", fresh.read_text("t")
+    assert_match(/another fiber/, error.message)
+    assert_equal "block", doc.read_text("t")
   end
 
-  # Under a scheduler, a task that runs while the block waits joins its
-  # transaction: the other task's write is in the block's update.
-  def test_fibers_under_a_scheduler_join_the_block
+  # Under a scheduler, another task waits for the block, and the wait yields
+  # to it. The block's update holds only its own writes.
+  def test_tasks_under_a_scheduler_wait_for_the_block
     doc = Y::Doc.new
     update = finishes do
       Async do |task|
@@ -418,14 +421,107 @@ class DocTransactTest < Minitest::Test
             d.get_text("t") << "c"
           end
         end
-        task.async { doc.get_text("t") << "b" }
+        writer = task.async { doc.get_text("t") << "b" }
+        writer.wait
         editor.wait
       end.wait
     end
     fresh = Y::Doc.new
     fresh.apply_update(update)
 
-    assert_equal "abc", fresh.read_text("t")
+    assert_equal "ac", fresh.read_text("t")
+    assert_equal "acb", doc.read_text("t")
+  end
+
+  def test_a_remote_update_from_another_task_waits_for_the_block
+    source = Y::Doc.new
+    source.get_text("t") << "remote"
+    remote = source.encode_state_as_update
+    doc = Y::Doc.new
+    finishes do
+      Async do |task|
+        task.async do
+          doc.transact do |d|
+            d.get_text("t") << "local"
+            task.yield
+          end
+        end
+        task.async { doc.apply_update(remote) }
+      end.wait
+    end
+
+    assert_includes doc.read_text("t"), "local"
+    assert_includes doc.read_text("t"), "remote"
+  end
+
+  # --- waiting ---
+
+  def hold(doc, seconds)
+    held = Queue.new
+    thread = Thread.new do
+      doc.transact do
+        held << true
+        sleep seconds
+      end
+    end
+    held.pop
+    thread
+  end
+
+  def test_a_wait_for_a_held_document_can_time_out
+    doc = Y::Doc.new
+    holder = hold(doc, 3)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    assert_raises(Timeout::Error) { Timeout.timeout(0.2) { doc.read_text("t") } }
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 1
+  ensure
+    holder&.kill&.join
+  end
+
+  def test_a_thread_waiting_for_a_held_document_can_be_killed
+    doc = Y::Doc.new
+    holder = hold(doc, 3)
+    waiter = Thread.new { doc.get_text("t") << "never" }
+    sleep 0.05
+    waiter.kill
+
+    assert waiter.join(1), "the waiting thread did not die"
+    holder.kill.join
+
+    assert_equal "", doc.read_text("t").to_s
+  end
+
+  # Two threads nesting blocks on two documents in opposite orders wait on
+  # each other. A timeout breaks the wait, and both documents are free after.
+  def test_opposite_order_nesting_can_be_broken_by_a_timeout
+    a = Y::Doc.new
+    b = Y::Doc.new
+    ready = Queue.new
+    go = Queue.new
+    threads = [[a, b], [b, a]].map do |first, second|
+      Thread.new do
+        Timeout.timeout(0.5) do
+          first.transact do
+            ready << true
+            go.pop
+            second.transact { :both }
+          end
+        end
+      rescue Timeout::Error => e
+        e
+      end
+    end
+    2.times { ready.pop }
+    2.times { go << true }
+    results = finishes(5) { threads.map(&:value) }
+
+    assert(results.any?(Timeout::Error), "neither wait was broken: #{results.inspect}")
+    a.get_text("t") << "free"
+    b.get_text("t") << "free"
+
+    assert_equal "free", a.read_text("t")
+    assert_equal "free", b.read_text("t")
   end
 
   # --- garbage collection ---
@@ -440,9 +536,11 @@ class DocTransactTest < Minitest::Test
           GC.start if (i % 50).zero?
         end
         GC.compact if GC.respond_to?(:compact)
+        d.get_map("state")["after"] = true
       end
     end
 
     assert_equal 200, paragraphs(doc).length
+    assert doc.get_map("state")["after"]
   end
 end

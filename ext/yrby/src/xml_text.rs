@@ -35,12 +35,13 @@ pub struct RbXmlText {
     root: String,
 }
 
-impl RbXmlText {
-    /// Runs the block in one write transaction on this handle's document.
-    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<magnus::Value, Error> {
-        crate::txn::transact(ruby, &rb_self.doc)
+impl crate::txn::OnDoc for RbXmlText {
+    fn doc(&self) -> &Doc {
+        &self.doc
     }
+}
 
+impl RbXmlText {
     pub fn new(doc: Doc, id: BranchID, root: String) -> Self {
         RbXmlText { doc, id, root }
     }
@@ -51,46 +52,46 @@ impl RbXmlText {
 
     // --- reads ---
 
-    fn to_s(&self) -> String {
+    fn to_s(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| x.get_string(&txn))
                 .unwrap_or_default()
-        })
+        }))
     }
 
     /// The text of this block: its strings, without the node markers, with
     /// nested blocks (a list's items) joined by newlines. What a process reads
     /// when it wants to know what a block says.
-    fn text(&self) -> String {
+    fn text(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| block_text(&txn, &x))
                 .unwrap_or_default()
-        })
+        }))
     }
 
     /// The length in characters, each embed counting as one.
-    fn length(&self) -> usize {
+    fn length(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| char_len(&txn, &x) as usize)
                 .unwrap_or(0)
-        })
+        }))
     }
 
-    fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id).is_none_or(|x| x.len(&txn) == 0)
-        })
+        }))
     }
 
     /// The name of the root this block lives under; an anchor carries it.
@@ -102,21 +103,19 @@ impl RbXmlText {
     /// process keeps to put a block back the way it was.
     fn attributes(&self) -> Result<RHash, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        let pairs: Vec<(String, Any)> = nogvl(move || {
-            let txn = crate::txn::read(doc);
-            match resolve::<XmlTextRef, _>(&txn, id) {
-                Some(x) => x
-                    .attributes(&txn)
-                    .map(|(key, value)| {
-                        let any = match value {
-                            Out::Any(a) => a,
-                            other => Any::from(other.to_string(&txn)),
-                        };
-                        (key.to_string(), any)
-                    })
-                    .collect(),
-                None => Vec::new(),
-            }
+        let txn = crate::txn::read(doc)?;
+        let pairs: Vec<(String, Any)> = nogvl(move || match resolve::<XmlTextRef, _>(&txn, id) {
+            Some(x) => x
+                .attributes(&txn)
+                .map(|(key, value)| {
+                    let any = match value {
+                        Out::Any(a) => a,
+                        other => Any::from(other.to_string(&txn)),
+                    };
+                    (key.to_string(), any)
+                })
+                .collect(),
+            None => Vec::new(),
         });
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let hash = ruby.hash_new();
@@ -127,40 +126,40 @@ impl RbXmlText {
     }
 
     /// How many `XmlText` blocks this one embeds.
-    fn xml_text_count(&self) -> usize {
+    fn xml_text_count(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| embedded_xml_texts(&txn, &x).len())
                 .unwrap_or(0)
-        })
+        }))
     }
 
     /// A live handle to the `n`-th embedded `XmlText` block, or nil when there
     /// is none. A negative `n` counts from the last. The handle stays on that
     /// block, wherever it moves.
-    fn xml_text(&self, n: i64) -> Option<Self> {
+    fn xml_text(&self, n: i64) -> Result<Option<Self>, Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let txn = crate::txn::read(doc)?;
         let block = nogvl(move || {
-            let txn = crate::txn::read(doc);
             let blocks = embedded_xml_texts(&txn, &resolve::<XmlTextRef, _>(&txn, id)?);
             let n = element_index(n, blocks.len() as u32)?;
             Some(identity(&blocks[n as usize]))
-        })?;
-        Some(RbXmlText::new(self.doc.clone(), block, self.root.clone()))
+        });
+        Ok(block.map(|block| RbXmlText::new(self.doc.clone(), block, self.root.clone())))
     }
 
     /// Whether the last thing in this block is an embedded block (a link).
     /// Text appended there needs a text node of its own.
-    fn ends_with_xml_text(&self) -> bool {
+    fn ends_with_xml_text(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        nogvl(move || {
-            let txn = crate::txn::read(doc);
+        let txn = crate::txn::read(doc)?;
+        Ok(nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| ends_with_xml_text(&txn, &x))
                 .unwrap_or(false)
-        })
+        }))
     }
 
     // --- writes ---
@@ -170,8 +169,8 @@ impl RbXmlText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             x.insert_attribute(&mut txn, key, to_in(iv));
             Ok(())
@@ -184,8 +183,8 @@ impl RbXmlText {
     fn insert(&self, index: i64, chunk: String) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let text = chunk.clone();
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             let at = end_or_units(&txn, &x, index);
             x.insert(&mut txn, at, &text);
@@ -202,8 +201,8 @@ impl RbXmlText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             let at = to_units(&txn, &x, insert_index(index, char_len(&txn, &x)));
             match iv {
@@ -231,8 +230,8 @@ impl RbXmlText {
             Assoc::After
         };
         let (doc, id) = (&self.doc, &self.id);
+        let txn = crate::txn::read(doc)?;
         let position = guarded(move || {
-            let txn = crate::txn::read(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             let at = to_units(&txn, &x, insert_index(index, char_len(&txn, &x)));
             // Past the last item there is nothing to name, so Yjs anchors the
@@ -251,8 +250,8 @@ impl RbXmlText {
     fn native_block_position(&self) -> Result<RHash, Error> {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let (doc, id) = (&self.doc, &self.id);
+        let txn = crate::txn::read(doc)?;
         let position = guarded(move || {
-            let txn = crate::txn::read(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             Ok(Position::new(StickyIndex::from_type(
                 &txn,
@@ -267,8 +266,8 @@ impl RbXmlText {
     /// negative index counts from the end, and the length stops at the end.
     fn delete(&self, index: i64, length: i64) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             if let Some((from, to)) = delete_span(index, length, char_len(&txn, &x)) {
                 let (from, to) = (to_units(&txn, &x, from), to_units(&txn, &x, to));
@@ -283,8 +282,8 @@ impl RbXmlText {
     /// Remove everything: markers, text, and embedded blocks.
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             let len = x.len(&txn);
             if len > 0 {
@@ -301,8 +300,8 @@ impl RbXmlText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let pairs = hash_pairs(&ruby, attributes)?;
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         let block = guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             let count = embedded_xml_texts(&txn, &x).len() as u32;
             let ordinal = insert_index(n, count);
@@ -320,8 +319,8 @@ impl RbXmlText {
     /// last). Returns whether there was one.
     fn delete_xml_text(&self, n: i64) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
+        let mut txn = crate::txn::write(doc)?;
         guarded(move || {
-            let mut txn = crate::txn::write(doc);
             let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
             let count = embedded_xml_texts(&txn, &x).len() as u32;
             let Some(at) =
@@ -343,13 +342,17 @@ impl RbXmlText {
 
 /// Ensure a root xml text exists and return a live handle. Called by
 /// `Y::Doc#get_xml_text`.
-pub fn root_xml_text(doc: &Doc, name: String) -> RbXmlText {
-    let d = doc.clone();
+pub fn root_xml_text(doc: &Doc, name: String) -> Result<RbXmlText, Error> {
+    let mut txn = crate::txn::write(doc)?;
     let root = name.clone();
     nogvl(move || {
-        yrs::WriteTxn::get_or_insert_xml_fragment(&mut *crate::txn::write(&d), root.as_str());
+        yrs::WriteTxn::get_or_insert_xml_fragment(&mut *txn, root.as_str());
     });
-    RbXmlText::new(doc.clone(), BranchID::Root(name.as_str().into()), name)
+    Ok(RbXmlText::new(
+        doc.clone(),
+        BranchID::Root(name.as_str().into()),
+        name,
+    ))
 }
 
 /// A handle to the block `id` names, under `root`. How `Doc#find` hands one
@@ -360,7 +363,10 @@ pub fn handle(doc: &Doc, id: BranchID, root: String) -> RbXmlText {
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     let class = module.define_class("XmlText", ruby.class_object())?;
-    class.define_private_method("native_transact", magnus::method!(RbXmlText::transact, 0))?;
+    class.define_private_method(
+        "native_transact",
+        magnus::method!(crate::txn::transact::<RbXmlText>, 0),
+    )?;
     class.define_method("to_s", magnus::method!(RbXmlText::to_s, 0))?;
     class.define_method("to_str", magnus::method!(RbXmlText::to_s, 0))?;
     class.define_method("text", magnus::method!(RbXmlText::text, 0))?;
