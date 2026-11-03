@@ -242,3 +242,134 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("each", magnus::method!(RbArray::each, 0))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Each method on a handle, called as Ruby calls it.
+    use super::*;
+    use crate::shared::test_support::{doc, hash, int, rb};
+    use rb_sys_test_helpers::ruby_test;
+    use yrs::{ArrayPrelim, TextPrelim, Transact};
+
+    fn list_of(values: &[i64]) -> RbArray {
+        let list = root_array(&doc(), "list".into());
+        for v in values {
+            list.push(rb(*v)).unwrap();
+        }
+        list
+    }
+
+    #[ruby_test]
+    fn a_fresh_array_is_empty() {
+        let list = list_of(&[]);
+        assert_eq!(list.size(), 0);
+        assert!(list.is_empty());
+        assert_eq!(list.to_a().inspect(), "[]");
+    }
+
+    #[ruby_test]
+    fn push_appends_and_returns_the_value() {
+        let list = list_of(&[1]);
+        assert_eq!(list.push(rb(2)).unwrap().inspect(), "2");
+        assert_eq!(list.snapshot(), vec![int(1), int(2)]);
+    }
+
+    #[ruby_test]
+    fn insert_reads_a_negative_index_from_the_end_and_clamps() {
+        let list = list_of(&[1, 3]);
+        list.insert(1, rb(2)).unwrap();
+        list.insert(-1, rb(4)).unwrap();
+        list.insert(99, rb(5)).unwrap();
+        list.insert(-99, rb(0)).unwrap();
+        assert_eq!(
+            list.snapshot(),
+            vec![int(0), int(1), int(2), int(3), int(4), int(5)]
+        );
+    }
+
+    #[ruby_test]
+    fn get_reads_a_negative_index_and_is_nil_outside() {
+        let list = list_of(&[1, 2, 3]);
+        assert_eq!(list.get(0).inspect(), "1");
+        assert_eq!(list.get(-1).inspect(), "3");
+        assert_eq!(list.get(3).inspect(), "nil");
+        assert_eq!(list.get(-4).inspect(), "nil");
+    }
+
+    #[ruby_test]
+    fn set_replaces_in_place_and_raises_outside() {
+        let list = list_of(&[1, 2]);
+        list.set(-1, rb(9)).unwrap();
+        assert_eq!(list.snapshot(), vec![int(1), int(9)]);
+        let err = list.set(2, rb(3)).unwrap_err();
+        assert!(err.to_string().contains("index out of range"), "{err}");
+    }
+
+    #[ruby_test]
+    fn delete_at_returns_the_removed_value_or_nil() {
+        let list = list_of(&[1, 2, 3]);
+        assert_eq!(list.delete_at(1).unwrap().inspect(), "2");
+        assert_eq!(list.delete_at(5).unwrap().inspect(), "nil");
+        assert_eq!(list.snapshot(), vec![int(1), int(3)]);
+    }
+
+    #[ruby_test]
+    fn clear_removes_every_element() {
+        let list = list_of(&[1, 2, 3]);
+        list.clear().unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[ruby_test]
+    fn child_is_the_shared_value_at_an_index() {
+        let list = list_of(&[1]);
+        list.push(hash(&[("name", rb("Ada"))]).as_value()).unwrap();
+        assert!(matches!(list.child(-1), Some(Out::YMap(_))));
+        assert!(matches!(list.child(0), Some(Out::Any(_))));
+        assert!(list.child(2).is_none());
+    }
+
+    #[ruby_test]
+    fn get_map_get_text_and_get_array_narrow_by_type() {
+        let list = list_of(&[]);
+        list.push(hash(&[("name", rb("Ada"))]).as_value()).unwrap();
+        {
+            let mut txn = list.doc.transact_mut();
+            let array = resolve::<ArrayRef, _>(&txn, &list.id).unwrap();
+            array.push_back(&mut txn, TextPrelim::new("hi"));
+            array.push_back(&mut txn, ArrayPrelim::default());
+        }
+        assert!(list.get_map(0).is_some());
+        assert_eq!(list.get(0).inspect(), r#"{"name" => "Ada"}"#);
+        assert!(list.get_text(0).is_none());
+        assert!(list.get_text(1).is_some());
+        assert!(list.get_map(1).is_none());
+        let nested = list.get_array(-1).expect("an array at the end");
+        nested.push(rb(7)).unwrap();
+        assert_eq!(list.get(2).inspect(), "[7]");
+    }
+
+    #[ruby_test]
+    fn a_handle_to_a_deleted_array_reads_empty_and_refuses_writes() {
+        let outer = list_of(&[]);
+        {
+            let mut txn = outer.doc.transact_mut();
+            let array = resolve::<ArrayRef, _>(&txn, &outer.id).unwrap();
+            array.push_back(&mut txn, ArrayPrelim::default());
+        }
+        let inner = outer.get_array(0).unwrap();
+        inner.push(rb(1)).unwrap();
+        outer.delete_at(0).unwrap();
+        assert_eq!(inner.size(), 0);
+        assert!(inner.snapshot().is_empty());
+        let err = inner.push(rb(2)).unwrap_err();
+        assert!(err.to_string().contains("array no longer exists"), "{err}");
+    }
+
+    #[ruby_test]
+    fn root_array_returns_the_same_array_for_a_name() {
+        let doc = doc();
+        root_array(&doc, "list".into()).push(rb(1)).unwrap();
+        assert_eq!(root_array(&doc, "list".into()).snapshot(), vec![int(1)]);
+    }
+}
