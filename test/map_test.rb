@@ -259,4 +259,24 @@ class MapTest < Minitest::Test
       assert_equal iterations - 1, @map["k#{i}"]
     end
   end
+
+  def test_a_hash_that_contains_itself_raises_instead_of_crashing
+    map = Y::Doc.new.get_map("m")
+    loop_hash = {}
+    loop_hash["self"] = loop_hash
+
+    assert_raises(ArgumentError) { map["x"] = loop_hash }
+    deep = 100.times.reduce(1) { |inner, _| { "a" => inner } }
+    map["deep"] = deep
+
+    assert_equal deep, map["deep"]
+  end
+
+  def test_each_returns_the_map_and_an_enumerator_without_a_block
+    map = Y::Doc.new.get_map("m")
+    map["a"] = 1
+
+    assert_same(map, map.each { |_key, _value| nil })
+    assert_equal [["a", 1]], map.each.to_a
+  end
 end

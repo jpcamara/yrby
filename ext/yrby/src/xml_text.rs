@@ -47,7 +47,7 @@ impl RbXmlText {
 
     // --- reads ---
 
-    fn to_s(&self) -> String {
+    fn to_s(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -60,7 +60,7 @@ impl RbXmlText {
     /// The text of this block: its strings, without the node markers, with
     /// nested blocks (a list's items) joined by newlines. What a process reads
     /// when it wants to know what a block says.
-    fn text(&self) -> String {
+    fn text(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -71,7 +71,7 @@ impl RbXmlText {
     }
 
     /// The length in characters, each embed counting as one.
-    fn length(&self) -> usize {
+    fn length(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -81,7 +81,7 @@ impl RbXmlText {
         })
     }
 
-    fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -113,7 +113,7 @@ impl RbXmlText {
                     .collect(),
                 None => Vec::new(),
             }
-        });
+        })?;
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let hash = ruby.hash_new();
         for (key, any) in pairs {
@@ -123,7 +123,7 @@ impl RbXmlText {
     }
 
     /// How many `XmlText` blocks this one embeds.
-    fn xml_text_count(&self) -> usize {
+    fn xml_text_count(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -136,7 +136,7 @@ impl RbXmlText {
     /// A live handle to the `n`-th embedded `XmlText` block, or nil when there
     /// is none. A negative `n` counts from the last. The handle stays on that
     /// block, wherever it moves.
-    fn xml_text(&self, n: i64) -> Option<Self> {
+    fn xml_text(&self, n: i64) -> Result<Option<Self>, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let block = nogvl(move || {
             let txn = doc.transact();
@@ -144,12 +144,12 @@ impl RbXmlText {
             let n = element_index(n, blocks.len() as u32)?;
             Some(identity(&blocks[n as usize]))
         })?;
-        Some(RbXmlText::new(self.doc.clone(), block, self.root.clone()))
+        Ok(block.map(|block| RbXmlText::new(self.doc.clone(), block, self.root.clone())))
     }
 
     /// Whether the last thing in this block is an embedded block (a link).
     /// Text appended there needs a text node of its own.
-    fn ends_with_xml_text(&self) -> bool {
+    fn ends_with_xml_text(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -340,13 +340,17 @@ impl RbXmlText {
 
 /// Ensure a root xml text exists and return a live handle. Called by
 /// `Y::Doc#get_xml_text`.
-pub fn root_xml_text(doc: &Doc, name: String) -> RbXmlText {
+pub fn root_xml_text(doc: &Doc, name: String) -> Result<RbXmlText, Error> {
     let d = doc.clone();
     let root = name.clone();
     nogvl(move || {
         d.get_or_insert_xml_fragment(root.as_str());
-    });
-    RbXmlText::new(doc.clone(), BranchID::Root(name.as_str().into()), name)
+    })?;
+    Ok(RbXmlText::new(
+        doc.clone(),
+        BranchID::Root(name.as_str().into()),
+        name,
+    ))
 }
 
 /// A handle to the block `id` names, under `root`. How `Doc#find` hands one
@@ -414,7 +418,7 @@ mod tests {
     use rb_sys_test_helpers::ruby_test;
 
     fn root() -> RbXmlText {
-        root_xml_text(&doc(), "root".into())
+        root_xml_text(&doc(), "root".into()).unwrap()
     }
 
     fn paragraph(root: &RbXmlText, words: &str) -> RbXmlText {
@@ -428,9 +432,9 @@ mod tests {
     #[ruby_test]
     fn a_fresh_root_is_empty_and_knows_its_name() {
         let root = root();
-        assert!(root.is_empty());
-        assert_eq!(root.length(), 0);
-        assert_eq!(root.xml_text_count(), 0);
+        assert!(root.is_empty().unwrap());
+        assert_eq!(root.length().unwrap(), 0);
+        assert_eq!(root.xml_text_count().unwrap(), 0);
         assert_eq!(root.root_name(), "root");
     }
 
@@ -439,13 +443,13 @@ mod tests {
         let root = root();
         let first = paragraph(&root, "one");
         paragraph(&root, "two");
-        assert_eq!(root.xml_text_count(), 2);
-        assert_eq!(first.text(), "one");
+        assert_eq!(root.xml_text_count().unwrap(), 2);
+        assert_eq!(first.text().unwrap(), "one");
         assert_eq!(
             first.attributes().unwrap().as_value().inspect(),
             r#"{"__type" => "paragraph"}"#
         );
-        assert_eq!(root.text(), "one\ntwo");
+        assert_eq!(root.text().unwrap(), "one\ntwo");
     }
 
     #[ruby_test]
@@ -453,9 +457,9 @@ mod tests {
         let root = root();
         paragraph(&root, "one");
         paragraph(&root, "two");
-        assert_eq!(root.xml_text(-1).unwrap().text(), "two");
-        assert!(root.xml_text(2).is_none());
-        assert!(root.xml_text(-3).is_none());
+        assert_eq!(root.xml_text(-1).unwrap().unwrap().text().unwrap(), "two");
+        assert!(root.xml_text(2).unwrap().is_none());
+        assert!(root.xml_text(-3).unwrap().is_none());
     }
 
     #[ruby_test]
@@ -467,7 +471,7 @@ mod tests {
             .insert_xml_text(1, hash(&[("__type", rb("paragraph"))]))
             .unwrap();
         two.insert(0, "two".into()).unwrap();
-        assert_eq!(root.text(), "one\ntwo\nthree");
+        assert_eq!(root.text().unwrap(), "one\ntwo\nthree");
     }
 
     #[ruby_test]
@@ -477,7 +481,7 @@ mod tests {
         paragraph(&root, "two");
         assert!(root.delete_xml_text(0).unwrap());
         assert!(!root.delete_xml_text(5).unwrap());
-        assert_eq!(root.text(), "two");
+        assert_eq!(root.text().unwrap(), "two");
     }
 
     #[ruby_test]
@@ -489,7 +493,7 @@ mod tests {
             .unwrap();
         root.delete_xml_text(1).unwrap();
         two.insert(-1, "!".into()).unwrap();
-        assert_eq!(root.xml_text(-1).unwrap().text(), "two!");
+        assert_eq!(root.xml_text(-1).unwrap().unwrap().text().unwrap(), "two!");
     }
 
     #[ruby_test]
@@ -499,11 +503,11 @@ mod tests {
         block
             .insert_embed(0, hash(&[("__type", rb("text"))]).as_value())
             .unwrap();
-        assert_eq!(block.length(), 3);
+        assert_eq!(block.length().unwrap(), 3);
         block.insert(2, "bc".into()).unwrap();
-        assert_eq!(block.text(), "abcd");
+        assert_eq!(block.text().unwrap(), "abcd");
         block.delete(-2, 1).unwrap();
-        assert_eq!(block.text(), "abd");
+        assert_eq!(block.text().unwrap(), "abd");
     }
 
     #[ruby_test]
@@ -519,9 +523,9 @@ mod tests {
     fn ends_with_xml_text_is_true_when_a_block_ends_a_block() {
         let root = root();
         let item = paragraph(&root, "see ");
-        assert!(!item.ends_with_xml_text());
+        assert!(!item.ends_with_xml_text().unwrap());
         item.push_xml_text(hash(&[("__type", rb("link"))])).unwrap();
-        assert!(item.ends_with_xml_text());
+        assert!(item.ends_with_xml_text().unwrap());
     }
 
     #[ruby_test]
@@ -529,8 +533,8 @@ mod tests {
         let root = root();
         paragraph(&root, "one");
         root.clear().unwrap();
-        assert!(root.is_empty());
-        assert_eq!(root.xml_text_count(), 0);
+        assert!(root.is_empty().unwrap());
+        assert_eq!(root.xml_text_count().unwrap(), 0);
     }
 
     #[ruby_test]
@@ -549,8 +553,8 @@ mod tests {
         let root = root();
         let block = paragraph(&root, "one");
         root.delete_xml_text(0).unwrap();
-        assert_eq!(block.text(), "");
-        assert!(block.xml_text(0).is_none());
+        assert_eq!(block.text().unwrap(), "");
+        assert!(block.xml_text(0).unwrap().is_none());
         let err = block.insert(0, "x".into()).unwrap_err();
         assert!(
             err.to_string().contains("the block no longer exists"),
@@ -563,7 +567,7 @@ mod tests {
         let root = root();
         let block = paragraph(&root, "one");
         let again = handle(&block.doc, block.id.clone(), "root".into());
-        assert_eq!(again.text(), "one");
+        assert_eq!(again.text().unwrap(), "one");
         assert_eq!(again.root_name(), "root");
     }
 }

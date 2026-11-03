@@ -71,7 +71,17 @@ fn assert_thread_safe() {
 ///
 /// Panics inside the closure are caught and re-raised (resumed) after the GVL
 /// is reacquired, where magnus converts them to Ruby exceptions.
-pub(crate) fn nogvl<F, R>(f: F) -> R
+///
+/// Interrupts (Thread#raise, Thread#kill, Timeout) come back as the error.
+/// `rb_thread_call_without_gvl` would raise one before or after the closure,
+/// and Ruby's raise jumps over Rust frames without running their
+/// destructors. With `RB_NOGVL_INTR_FAIL` Ruby never raises here: it skips
+/// the closure when an interrupt is already pending, and then the closure
+/// runs with the GVL held. After it, `thread_check_ints` makes the check
+/// `rb_thread_call_without_gvl` makes, as a `Result`. That check also
+/// re-arms interrupts still queued behind the first, so a thread that only
+/// calls into yrby still gets a kill queued behind a raise.
+pub(crate) fn nogvl<F, R>(f: F) -> Result<R, Error>
 where
     F: FnOnce() -> R + Send,
     R: Send,
@@ -99,17 +109,23 @@ where
         result: None,
     };
     unsafe {
-        rb_sys::rb_thread_call_without_gvl(
+        rb_sys::rb_nogvl(
             Some(callback::<F, R>),
             &mut ctx as *mut Ctx<F, R> as *mut c_void,
             None,
             std::ptr::null_mut(),
+            rb_sys::RB_NOGVL_INTR_FAIL as _,
         );
     }
-    match ctx.result.expect("nogvl callback did not run") {
+    if let Some(func) = ctx.func.take() {
+        ctx.result = Some(catch_unwind(AssertUnwindSafe(func)));
+    }
+    let result = match ctx.result.expect("nogvl callback did not run") {
         Ok(result) => result,
         Err(panic) => resume_unwind(panic),
-    }
+    };
+    Ruby::get().unwrap().thread_check_ints()?;
+    Ok(result)
 }
 
 /// Helper to create a binary Ruby string from bytes. Called only with the GVL
@@ -164,18 +180,18 @@ impl RbDoc {
         self.0.client_id().get()
     }
 
-    fn encode_state_vector(&self) -> RString {
+    fn encode_state_vector(&self) -> Result<RString, Error> {
         let doc = &self.0;
         let sv = nogvl(move || {
             let txn = doc.transact();
             txn.state_vector().encode_v1()
-        });
-        binary_string(&sv)
+        })?;
+        Ok(binary_string(&sv))
     }
 
     /// Names of the document's root types, so a content reader can find the one
     /// holding text without knowing it up front.
-    fn root_names(&self) -> Vec<String> {
+    fn root_names(&self) -> Result<Vec<String>, Error> {
         let doc = &self.0;
         nogvl(move || {
             doc.transact()
@@ -185,7 +201,7 @@ impl RbDoc {
         })
     }
 
-    fn read_text(&self, name: String) -> Option<String> {
+    fn read_text(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         nogvl(move || {
             // Exactly ONE transaction per call. Opening a second while the
@@ -199,7 +215,7 @@ impl RbDoc {
     /// Text of an XML-shaped root, one top-level block per line. The walk +
     /// block-join logic lives in `read::xml_blocks_text` (pure, Rust-tested);
     /// this just opens the transaction and resolves the root.
-    fn read_xml(&self, name: String) -> Option<String> {
+    fn read_xml(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         nogvl(move || {
             let txn = doc.transact();
@@ -212,7 +228,7 @@ impl RbDoc {
     /// recursive). Complements read_text/read_xml for structured shared state.
     /// Callers parse the JSON (e.g. `JSON.parse(doc.read_map("state"))`). The
     /// serialization lives in `read::map_json` (pure, Rust-tested).
-    fn read_map(&self, name: String) -> Option<String> {
+    fn read_map(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         nogvl(move || {
             let txn = doc.transact();
@@ -226,7 +242,7 @@ impl RbDoc {
     /// array: a board's cards, a sheet's rows. Callers parse the JSON (e.g.
     /// `JSON.parse(doc.read_array("cards"))`). The serialization lives in
     /// `read::array_json` (pure, Rust-tested).
-    fn read_array(&self, name: String) -> Option<String> {
+    fn read_array(&self, name: String) -> Result<Option<String>, Error> {
         let doc = &self.0;
         nogvl(move || {
             let txn = doc.transact();
@@ -239,7 +255,7 @@ impl RbDoc {
     /// set: content that couldn't integrate because a causally-prior update is
     /// missing. Such content is a recovery buffer, not document state; it heals if
     /// the missing dependency later arrives. A pure read.
-    fn pending(&self) -> bool {
+    fn pending(&self) -> Result<bool, Error> {
         let doc = &self.0;
         nogvl(move || has_pending(doc))
     }
@@ -252,34 +268,34 @@ impl RbDoc {
     /// stays lossless for raw-update recovery.)
     fn compacted_state_update(&self) -> Result<RString, Error> {
         let doc = &self.0;
-        let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))
+        let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))?
             .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
 
     /// A live `Y::Array` handle to the root array named `name` (created if
     /// absent). Writes through it mutate the document and sync to every peer.
-    fn get_array(&self, name: String) -> array::RbArray {
+    fn get_array(&self, name: String) -> Result<array::RbArray, Error> {
         array::root_array(&self.0, name)
     }
 
     /// A live `Y::Text` handle to the root text named `name` (created if
     /// absent). This is what an agent appends into.
-    fn get_text(&self, name: String) -> text::RbText {
+    fn get_text(&self, name: String) -> Result<text::RbText, Error> {
         text::root_text(&self.0, name)
     }
 
     /// A live `Y::XmlText` handle to the root xml text named `name` (created
     /// if absent). Rich-text editors keep their document here; this is how a
     /// Ruby process writes a paragraph into one.
-    fn get_xml_text(&self, name: String) -> xml_text::RbXmlText {
+    fn get_xml_text(&self, name: String) -> Result<xml_text::RbXmlText, Error> {
         xml_text::root_xml_text(&self.0, name)
     }
 
     /// A live `Y::Map` handle to the root map named `name` (created if absent).
     /// Unlike `read_map` (a JSON snapshot), the returned handle reads and *writes*
     /// the actual shared map, with the same thread-safety guarantees as the Doc.
-    fn get_map(&self, name: String) -> map::RbMap {
+    fn get_map(&self, name: String) -> Result<map::RbMap, Error> {
         map::root_map(&self.0, name)
     }
 
@@ -333,7 +349,7 @@ impl RbDoc {
             out.sort_unstable();
             out.dedup();
             Ok(out)
-        })
+        })?
         .map_err(yrb_error)?;
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let array = ruby.ary_new();
@@ -351,7 +367,7 @@ impl RbDoc {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let sticky = sticky_from_ruby(&ruby, position)?;
         let doc = &self.0;
-        Ok(nogvl(move || {
+        nogvl(move || {
             let txn = doc.transact();
             let target = sticky.get_offset(&txn)?.branch;
             let root_ref = shared::root_xml_text(&txn, root.as_str())?;
@@ -359,7 +375,7 @@ impl RbDoc {
                 .iter()
                 .position(|block| contains_branch(&txn, block, target))
                 .map(|ordinal| ordinal as u32)
-        }))
+        })
     }
 
     /// The block an anchor's position names, as a live handle, or nil once
@@ -378,16 +394,16 @@ impl RbDoc {
                 == yrs::branch::BranchID::Root(name.into());
             (is_block && in_root && shared::resolve::<yrs::XmlTextRef, _>(&txn, &id).is_some())
                 .then_some(id)
-        });
+        })?;
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
 
     /// The document's state vector and delete set, encoded: where `Doc#edit`
     /// starts.
-    fn snapshot(&self) -> RString {
+    fn snapshot(&self) -> Result<RString, Error> {
         let doc = &self.0;
-        let snapshot = nogvl(move || doc.transact().snapshot().encode_v1());
-        binary_string(&snapshot)
+        let snapshot = nogvl(move || doc.transact().snapshot().encode_v1())?;
+        Ok(binary_string(&snapshot))
     }
 
     /// The update holding what the document gained since `snapshot`, or nil
@@ -403,7 +419,7 @@ impl RbDoc {
                 return Ok(None);
             }
             Ok(Some(changes_since(&txn, &before, &now)))
-        })
+        })?
         .map_err(yrb_error)?;
         Ok(update.map(|update| binary_string(&update)))
     }
@@ -424,7 +440,7 @@ impl RbDoc {
             };
             let txn = doc.transact();
             Ok(txn.encode_state_as_update_v1(&sv))
-        })
+        })?
         .map_err(yrb_error)?;
         Ok(binary_string(&update))
     }
@@ -436,7 +452,7 @@ impl RbDoc {
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
             let mut txn = doc.transact_mut();
             txn.apply_update(update).map_err(|e| e.to_string())
-        })
+        })?
         .map_err(yrb_error)
     }
 
@@ -446,7 +462,7 @@ impl RbDoc {
     fn update_ready(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
-        nogvl(move || update_is_ready(doc, &update_bytes)).map_err(yrb_error)
+        nogvl(move || update_is_ready(doc, &update_bytes))?.map_err(yrb_error)
     }
 
     /// True if applying `update` would change the document (it carries new
@@ -455,18 +471,18 @@ impl RbDoc {
     fn update_advances(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
-        nogvl(move || update_advances_doc(doc, &update_bytes)).map_err(yrb_error)
+        nogvl(move || update_advances_doc(doc, &update_bytes))?.map_err(yrb_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
-    fn sync_step1(&self) -> RString {
+    fn sync_step1(&self) -> Result<RString, Error> {
         let doc = &self.0;
         let encoded = nogvl(move || {
             let txn = doc.transact();
             let sv = txn.state_vector();
             Message::Sync(SyncMessage::SyncStep1(sv)).encode_v1()
-        });
-        binary_string(&encoded)
+        })?;
+        Ok(binary_string(&encoded))
     }
 
     /// Handle a Sync or Awareness message, returning
@@ -515,7 +531,7 @@ impl RbDoc {
                     // protocol; reject rather than pretend to handle them.
                     _ => Err("unsupported message type".to_string()),
                 }
-            })
+            })?
             .map_err(yrb_error)?;
 
         Ok((msg_type, sync_type, binary_string(&response)))
@@ -568,7 +584,7 @@ impl RbLexical {
             let txn = doc.transact();
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::render_segments(&txn, &fragment, rules)
-        });
+        })?;
         segments_result(segments)
     }
 
@@ -582,7 +598,7 @@ impl RbLexical {
             let txn = doc.transact();
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::collect_node_types(&txn, &fragment)
-        });
+        })?;
         let ruby = Ruby::get().unwrap();
         match map {
             None => Ok(ruby.qnil().as_value()),
@@ -648,7 +664,7 @@ impl RbProseMirror {
             let txn = doc.transact();
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::render_segments(&txn, &fragment, rules)
-        });
+        })?;
         segments_result(segments)
     }
 
@@ -662,7 +678,7 @@ impl RbProseMirror {
             let txn = doc.transact();
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::collect_node_types(&txn, &fragment)
-        });
+        })?;
         let ruby = Ruby::get().unwrap();
         match map {
             None => Ok(ruby.qnil().as_value()),
@@ -770,7 +786,7 @@ fn wrap_update(update: RString) -> RString {
 ///   2 = sync step2/update (a document change: record/apply/relay)
 ///   3 = awareness        (presence: relay)
 ///   4 = awareness query  (a request: respond, do not relay)
-fn message_kind(data: RString) -> u8 {
+fn message_kind(data: RString) -> Result<u8, Error> {
     let data_bytes = copy_bytes(data);
     nogvl(move || classify_message(&data_bytes))
 }
@@ -781,7 +797,7 @@ fn message_kind(data: RString) -> u8 {
 /// awareness update). The store-backed path records this exact delta before relay.
 fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
     let data_bytes = copy_bytes(data);
-    let merged = nogvl(move || merged_doc_update(&data_bytes)).map_err(yrb_error)?;
+    let merged = nogvl(move || merged_doc_update(&data_bytes))?.map_err(yrb_error)?;
     Ok(merged.map(|b| binary_string(&b)))
 }
 
@@ -1313,10 +1329,13 @@ mod tests {
         push(&doc, "t", "hello");
         let peer = new_doc();
         peer.apply_update(update(&doc)).unwrap();
-        assert_eq!(peer.read_text("t".into()).as_deref(), Some("hello"));
         assert_eq!(
-            copy_bytes(peer.encode_state_vector()),
-            copy_bytes(doc.encode_state_vector())
+            peer.read_text("t".into()).unwrap().as_deref(),
+            Some("hello")
+        );
+        assert_eq!(
+            copy_bytes(peer.encode_state_vector().unwrap()),
+            copy_bytes(doc.encode_state_vector().unwrap())
         );
     }
 
@@ -1327,12 +1346,18 @@ mod tests {
         let peer = new_doc();
         peer.apply_update(update(&doc)).unwrap();
         push(&doc, "t", " two");
-        let diff = update_since(&doc, peer.encode_state_vector());
+        let diff = update_since(&doc, peer.encode_state_vector().unwrap());
         let fresh = new_doc();
         fresh.apply_update(diff).unwrap();
-        assert!(fresh.pending(), "the diff leaves out the first write");
+        assert!(
+            fresh.pending().unwrap(),
+            "the diff leaves out the first write"
+        );
         peer.apply_update(diff).unwrap();
-        assert_eq!(peer.read_text("t".into()).as_deref(), Some("one two"));
+        assert_eq!(
+            peer.read_text("t".into()).unwrap().as_deref(),
+            Some("one two")
+        );
     }
 
     #[ruby_test]
@@ -1347,13 +1372,16 @@ mod tests {
         let doc = lexical_doc(&["one", "two"]);
         push(&doc, "t", "hi");
         doc.0.get_or_insert_map("m");
-        let mut names = doc.root_names();
+        let mut names = doc.root_names().unwrap();
         names.sort();
         assert_eq!(names, vec!["m", "root", "t"]);
-        assert_eq!(doc.read_text("t".into()).as_deref(), Some("hi"));
-        assert_eq!(doc.read_map("m".into()).as_deref(), Some("{}"));
-        assert_eq!(doc.read_xml("root".into()).as_deref(), Some("one\ntwo"));
-        assert_eq!(doc.read_array("missing".into()), None);
+        assert_eq!(doc.read_text("t".into()).unwrap().as_deref(), Some("hi"));
+        assert_eq!(doc.read_map("m".into()).unwrap().as_deref(), Some("{}"));
+        assert_eq!(
+            doc.read_xml("root".into()).unwrap().as_deref(),
+            Some("one\ntwo")
+        );
+        assert_eq!(doc.read_array("missing".into()).unwrap(), None);
     }
 
     #[ruby_test]
@@ -1361,7 +1389,7 @@ mod tests {
         let source = new_doc();
         push(&source, "t", "a");
         let first = update(&source);
-        let after_first = source.encode_state_vector();
+        let after_first = source.encode_state_vector().unwrap();
         push(&source, "t", "b");
         let second = update_since(&source, after_first);
 
@@ -1369,14 +1397,14 @@ mod tests {
         assert!(!doc.update_ready(second).unwrap());
         assert!(doc.update_advances(second).unwrap());
         doc.apply_update(second).unwrap();
-        assert!(doc.pending());
-        assert_eq!(doc.read_text("t".into()), None);
+        assert!(doc.pending().unwrap());
+        assert_eq!(doc.read_text("t".into()).unwrap(), None);
         let compacted = copy_bytes(doc.compacted_state_update().unwrap());
         assert!(compacted.len() < copy_bytes(update(&doc)).len());
 
         doc.apply_update(first).unwrap();
-        assert!(!doc.pending());
-        assert_eq!(doc.read_text("t".into()).as_deref(), Some("ab"));
+        assert!(!doc.pending().unwrap());
+        assert_eq!(doc.read_text("t".into()).unwrap().as_deref(), Some("ab"));
         assert!(!doc.update_advances(second).unwrap());
     }
 
@@ -1385,12 +1413,15 @@ mod tests {
         let doc = new_doc();
         push(&doc, "t", "hello");
         let peer = new_doc();
-        let (kind, step, reply) = doc.handle_sync_message(peer.sync_step1()).unwrap();
+        let (kind, step, reply) = doc.handle_sync_message(peer.sync_step1().unwrap()).unwrap();
         assert_eq!((kind, step), (0, 0));
         let (kind, step, nothing) = peer.handle_sync_message(reply).unwrap();
         assert_eq!((kind, step), (0, 1));
         assert!(copy_bytes(nothing).is_empty());
-        assert_eq!(peer.read_text("t".into()).as_deref(), Some("hello"));
+        assert_eq!(
+            peer.read_text("t".into()).unwrap().as_deref(),
+            Some("hello")
+        );
     }
 
     #[ruby_test]
@@ -1404,7 +1435,7 @@ mod tests {
                 .1,
             2
         );
-        assert_eq!(peer.read_text("t".into()).as_deref(), Some("hi"));
+        assert_eq!(peer.read_text("t".into()).unwrap().as_deref(), Some("hi"));
         assert!(peer.handle_sync_message(binary_string(&[9, 9])).is_err());
     }
 
@@ -1412,15 +1443,21 @@ mod tests {
     fn an_update_since_a_snapshot_holds_what_changed_after_it() {
         let doc = new_doc();
         push(&doc, "t", "before");
-        let snapshot = doc.snapshot();
+        let snapshot = doc.snapshot().unwrap();
         assert!(doc.update_since(snapshot).unwrap().is_none());
         push(&doc, "t", " after");
         let peer = new_doc();
         peer.apply_update(doc.update_since(snapshot).unwrap().unwrap())
             .unwrap();
-        assert!(peer.pending(), "the update leaves out what came before");
+        assert!(
+            peer.pending().unwrap(),
+            "the update leaves out what came before"
+        );
         peer.apply_update(update(&doc)).unwrap();
-        assert_eq!(peer.read_text("t".into()).as_deref(), Some("before after"));
+        assert_eq!(
+            peer.read_text("t".into()).unwrap().as_deref(),
+            Some("before after")
+        );
     }
 
     #[ruby_test]
@@ -1433,7 +1470,7 @@ mod tests {
             let at = text.len(&txn) - 1;
             text.remove_range(&mut txn, at, 1);
         }
-        let snapshot = doc.snapshot();
+        let snapshot = doc.snapshot().unwrap();
         let peer = new_doc();
         peer.apply_update(update(&doc)).unwrap();
         text.remove_range(&mut doc.0.transact_mut(), 0, 1);
@@ -1444,7 +1481,10 @@ mod tests {
             copy_bytes(chunk).len()
         );
         peer.apply_update(chunk).unwrap();
-        assert_eq!(peer.read_text("t".into()), doc.read_text("t".into()));
+        assert_eq!(
+            peer.read_text("t".into()).unwrap(),
+            doc.read_text("t".into()).unwrap()
+        );
     }
 
     #[ruby_test]
@@ -1452,7 +1492,7 @@ mod tests {
         let doc = lexical_doc(&["one", "two", "three"]);
         let peer = new_doc();
         peer.apply_update(update(&doc)).unwrap();
-        let before = peer.encode_state_vector();
+        let before = peer.encode_state_vector().unwrap();
         paragraph(&peer, 1, "new");
         remove_child(&peer, 3);
         let changed = doc
@@ -1460,7 +1500,7 @@ mod tests {
             .unwrap();
         assert_eq!(changed.as_value().inspect(), "[1, 2]");
         assert_eq!(
-            doc.read_xml("root".into()).as_deref(),
+            doc.read_xml("root".into()).unwrap().as_deref(),
             Some("one\nnew\ntwo")
         );
     }
@@ -1521,7 +1561,9 @@ mod tests {
     fn awareness_refuses_a_state_that_is_not_json_and_ignores_other_frames() {
         let awareness = RbAwareness::new(&[]).unwrap();
         assert!(awareness.set_local_state("{nope".into()).is_err());
-        assert!(!awareness.apply_update(new_doc().sync_step1()).unwrap());
+        assert!(!awareness
+            .apply_update(new_doc().sync_step1().unwrap())
+            .unwrap());
     }
 
     #[ruby_test]

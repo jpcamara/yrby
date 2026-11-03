@@ -34,7 +34,7 @@ impl RbText {
 
     // --- reads ---
 
-    fn to_s(&self) -> String {
+    fn to_s(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -45,7 +45,7 @@ impl RbText {
     }
 
     /// The length in characters, as `String#length` counts.
-    fn length(&self) -> usize {
+    fn length(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -55,7 +55,7 @@ impl RbText {
         })
     }
 
-    fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -126,13 +126,13 @@ impl RbText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let sticky = crate::sticky_from_ruby(&ruby, position)?;
         let (doc, id) = (&self.doc, &self.id);
-        Ok(nogvl(move || {
+        nogvl(move || {
             let txn = doc.transact();
             let text = resolve::<TextRef, _>(&txn, id)?;
             let offset = sticky.get_offset(&txn)?;
             let branch: &Branch = text.as_ref();
             (BranchPtr::from(branch) == offset.branch).then(|| to_chars(&txn, &text, offset.index))
-        }))
+        })
     }
 
     /// Remove `length` characters from `index`, as `String#slice!` does: a
@@ -169,10 +169,10 @@ impl RbText {
 
 /// Ensure a root text exists and return a live handle. Called by
 /// `Y::Doc#get_text`.
-pub fn root_text(doc: &Doc, name: String) -> RbText {
+pub fn root_text(doc: &Doc, name: String) -> Result<RbText, Error> {
     let d = doc.clone();
-    let id = nogvl(move || identity(&d.get_or_insert_text(name.as_str())));
-    RbText::new(doc.clone(), id)
+    let id = nogvl(move || identity(&d.get_or_insert_text(name.as_str())))?;
+    Ok(RbText::new(doc.clone(), id))
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
@@ -205,7 +205,7 @@ mod tests {
     use yrs::{Map, MapRef, TextPrelim, Transact};
 
     fn text(initial: &str) -> RbText {
-        let text = root_text(&doc(), "t".into());
+        let text = root_text(&doc(), "t".into()).unwrap();
         text.push(initial.into()).unwrap();
         text
     }
@@ -213,17 +213,17 @@ mod tests {
     #[ruby_test]
     fn a_fresh_text_is_empty() {
         let t = text("");
-        assert_eq!(t.to_s(), "");
-        assert_eq!(t.length(), 0);
-        assert!(t.is_empty());
+        assert_eq!(t.to_s().unwrap(), "");
+        assert_eq!(t.length().unwrap(), 0);
+        assert!(t.is_empty().unwrap());
     }
 
     #[ruby_test]
     fn push_appends_and_length_counts_characters() {
         let t = text("hé");
         assert_eq!(t.push("😀!".into()).unwrap(), "😀!");
-        assert_eq!(t.to_s(), "hé😀!");
-        assert_eq!(t.length(), 4);
+        assert_eq!(t.to_s().unwrap(), "hé😀!");
+        assert_eq!(t.length().unwrap(), 4);
     }
 
     #[ruby_test]
@@ -233,25 +233,25 @@ mod tests {
         t.insert(-1, "d".into()).unwrap();
         t.insert(99, "e".into()).unwrap();
         t.insert(-99, "_".into()).unwrap();
-        assert_eq!(t.to_s(), "_a😀bcde");
+        assert_eq!(t.to_s().unwrap(), "_a😀bcde");
     }
 
     #[ruby_test]
     fn delete_removes_characters_as_slice_bang_does() {
         let t = text("a😀bcd");
         t.delete(1, 2).unwrap();
-        assert_eq!(t.to_s(), "acd");
+        assert_eq!(t.to_s().unwrap(), "acd");
         t.delete(-1, 5).unwrap();
-        assert_eq!(t.to_s(), "ac");
+        assert_eq!(t.to_s().unwrap(), "ac");
         t.delete(9, 1).unwrap();
-        assert_eq!(t.to_s(), "ac");
+        assert_eq!(t.to_s().unwrap(), "ac");
     }
 
     #[ruby_test]
     fn clear_removes_everything() {
         let t = text("hello");
         t.clear().unwrap();
-        assert!(t.is_empty());
+        assert!(t.is_empty().unwrap());
     }
 
     #[ruby_test]
@@ -266,8 +266,8 @@ mod tests {
     #[ruby_test]
     fn a_position_in_another_text_is_nil() {
         let doc = doc();
-        let a = root_text(&doc, "a".into());
-        let b = root_text(&doc, "b".into());
+        let a = root_text(&doc, "a".into()).unwrap();
+        let b = root_text(&doc, "b".into()).unwrap();
         a.push("one".into()).unwrap();
         b.push("two".into()).unwrap();
         let position = a.native_relative_position(1, "after".into()).unwrap();
@@ -283,13 +283,13 @@ mod tests {
             identity(&map.insert(&mut txn, "notes", TextPrelim::new("hi")))
         };
         let notes = RbText::new(doc.clone(), id);
-        assert_eq!(notes.to_s(), "hi");
+        assert_eq!(notes.to_s().unwrap(), "hi");
         {
             let map: MapRef = doc.get_or_insert_map("state");
             map.remove(&mut doc.transact_mut(), "notes");
         }
-        assert_eq!(notes.to_s(), "");
-        assert!(notes.is_empty());
+        assert_eq!(notes.to_s().unwrap(), "");
+        assert!(notes.is_empty().unwrap());
         let err = notes.push("more".into()).unwrap_err();
         assert!(err.to_string().contains("text no longer exists"), "{err}");
     }

@@ -9,7 +9,7 @@
 //! A handle keeps its map's identity and resolves it per operation (see
 //! `shared`). Once the map is deleted, reads return empty and writes raise.
 
-use magnus::{prelude::*, Error, Ruby, Value};
+use magnus::{prelude::*, typed_data::Obj, Error, Ruby, Value};
 use yrs::branch::BranchID;
 use yrs::{Any, Doc, Map, MapRef, Transact};
 
@@ -39,10 +39,10 @@ impl RbMap {
     fn child(&self, key: Value) -> Result<Child, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
-        Ok(nogvl(move || {
+        nogvl(move || {
             let txn = doc.transact();
             Child::of(resolve::<MapRef, _>(&txn, id).and_then(|m| m.get(&txn, &key)))
-        }))
+        })
     }
 
     // --- reads ---
@@ -56,7 +56,7 @@ impl RbMap {
             let txn = doc.transact();
             let m = resolve::<MapRef, _>(&txn, id)?;
             m.get(&txn, &key).map(|v| out_to_any(&txn, &v))
-        });
+        })?;
         let ruby = Ruby::get().unwrap();
         Ok(match got {
             Some(a) => any_to_ruby(&ruby, &a),
@@ -92,15 +92,15 @@ impl RbMap {
     fn has_key(&self, key: Value) -> Result<bool, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
-        Ok(nogvl(move || {
+        nogvl(move || {
             let txn = doc.transact();
             resolve::<MapRef, _>(&txn, id)
                 .map(|m| m.contains_key(&txn, &key))
                 .unwrap_or(false)
-        }))
+        })
     }
 
-    fn size(&self) -> usize {
+    fn size(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -110,7 +110,7 @@ impl RbMap {
         })
     }
 
-    fn keys(&self) -> Vec<String> {
+    fn keys(&self) -> Result<Vec<String>, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -121,7 +121,7 @@ impl RbMap {
         })
     }
 
-    fn snapshot(&self) -> Vec<(String, Any)> {
+    fn snapshot(&self) -> Result<Vec<(String, Any)>, Error> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
@@ -135,24 +135,27 @@ impl RbMap {
         })
     }
 
-    fn to_h(&self) -> Value {
+    fn to_h(&self) -> Result<Value, Error> {
         let ruby = Ruby::get().unwrap();
         let h = ruby.hash_new();
-        for (k, v) in &self.snapshot() {
-            let _ = h.aset(k.as_str(), any_to_ruby(&ruby, v));
+        for (k, v) in &self.snapshot()? {
+            h.aset(k.as_str(), any_to_ruby(&ruby, v))?;
         }
-        h.as_value()
+        Ok(h.as_value())
     }
 
     /// `each { |key, value| }`: yields a snapshot of each entry (read under
-    /// `nogvl`, yielded with the GVL held so the block can call back into Ruby).
-    fn each(&self) -> Result<(), Error> {
-        let ruby = Ruby::get().unwrap();
-        let block = ruby.block_proc()?;
-        for (k, v) in &self.snapshot() {
-            let _: Value = block.call((k.as_str(), any_to_ruby(&ruby, v)))?;
+    /// `nogvl`, yielded with the GVL held so the block can call back into
+    /// Ruby), and returns the map. Without a block, an Enumerator.
+    fn each(ruby: &Ruby, rb_self: Obj<Self>) -> Result<Value, Error> {
+        if !ruby.block_given() {
+            return Ok(rb_self.enumeratorize("each", ()).as_value());
         }
-        Ok(())
+        let block = ruby.block_proc()?;
+        for (k, v) in &rb_self.snapshot()? {
+            let _: Value = block.call((k.as_str(), any_to_ruby(ruby, v)))?;
+        }
+        Ok(rb_self.as_value())
     }
 
     // --- writes ---
@@ -209,10 +212,10 @@ impl RbMap {
 
 /// Ensure a root map exists and return a live handle to it. Called by
 /// `Y::Doc#get_map`.
-pub fn root_map(doc: &Doc, name: String) -> RbMap {
+pub fn root_map(doc: &Doc, name: String) -> Result<RbMap, Error> {
     let d = doc.clone();
-    let id = nogvl(move || identity(&d.get_or_insert_map(name.as_str())));
-    RbMap::new(doc.clone(), id)
+    let id = nogvl(move || identity(&d.get_or_insert_map(name.as_str())))?;
+    Ok(RbMap::new(doc.clone(), id))
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
@@ -267,7 +270,7 @@ mod tests {
     }
 
     fn state() -> RbMap {
-        root_map(&doc(), "state".into())
+        root_map(&doc(), "state".into()).unwrap()
     }
 
     #[ruby_test]
@@ -284,7 +287,7 @@ mod tests {
         let ruby = Ruby::get().unwrap();
         map.set(ruby.to_symbol("n").as_value(), rb(1)).unwrap();
         assert!(map.has_key(rb("n")).unwrap());
-        assert_eq!(map.keys(), vec!["n".to_string()]);
+        assert_eq!(map.keys().unwrap(), vec!["n".to_string()]);
     }
 
     #[ruby_test]
@@ -292,11 +295,11 @@ mod tests {
         let map = state();
         map.set(rb("a"), rb(1)).unwrap();
         map.set(rb("b"), rb("two")).unwrap();
-        assert_eq!(map.size(), 2);
-        let mut keys = map.keys();
+        assert_eq!(map.size().unwrap(), 2);
+        let mut keys = map.keys().unwrap();
         keys.sort();
         assert_eq!(keys, vec!["a", "b"]);
-        let mut entries = map.snapshot();
+        let mut entries = map.snapshot().unwrap();
         entries.sort_by(|x, y| x.0.cmp(&y.0));
         assert_eq!(
             entries,
@@ -319,7 +322,7 @@ mod tests {
         map.set(rb("a"), rb(1)).unwrap();
         map.set(rb("b"), rb(2)).unwrap();
         map.clear().unwrap();
-        assert_eq!(map.size(), 0);
+        assert_eq!(map.size().unwrap(), 0);
     }
 
     #[ruby_test]
@@ -330,7 +333,7 @@ mod tests {
         assert!(matches!(map.child(rb("user")).unwrap(), Child::Map(_)));
         let user = map.get_map(rb("user")).unwrap().expect("a map at user");
         user.set(rb("age"), rb(36)).unwrap();
-        let mut entries = user.snapshot();
+        let mut entries = user.snapshot().unwrap();
         entries.sort_by(|x, y| x.0.cmp(&y.0));
         assert_eq!(
             entries,
@@ -363,7 +366,7 @@ mod tests {
             .unwrap();
         let user = map.get_map(rb("user")).unwrap().unwrap();
         map.delete(rb("user")).unwrap();
-        assert_eq!(user.size(), 0);
+        assert_eq!(user.size().unwrap(), 0);
         assert_eq!(user.get(rb("name")).unwrap().inspect(), "nil");
         let err = user.set(rb("name"), rb("Grace")).unwrap_err();
         assert!(err.to_string().contains("map no longer exists"), "{err}");
