@@ -112,6 +112,23 @@ Every handle can reach any nested shared type: `get_map`, `get_array`, and
 `get_text` exist on both `Y::Map` and `Y::Array`, so a text field inside a
 record inside a list is directly addressable.
 
+To make a nested text, use `set_text` on a map, or `push_text` or
+`insert_text` on an array. Each one stores a new `Y.Text` and returns its
+handle. A field held this way merges typing: two people who type in it at
+once both keep their edit. `map["name"] = "Ada"` stores a plain string,
+and the last write to it wins.
+
+```ruby
+form = doc.get_map("form")
+name = form.set_text("name", "Ada")   # => Y::Text
+name.push(" Lovelace")
+form.get_text("name").to_s            # => "Ada Lovelace"
+
+plan = doc.get_array("plan")
+plan.push_text("Draft an outline")    # => Y::Text
+plan.insert_text(0, "Find the posts") # same index rules as insert
+```
+
 > **Naming note.** Inside `module Y`, `Array` means `Y::Array`. Code in that
 > namespace that means the core class says `::Array`, and `Kernel.Array(...)`
 > for the conversion method, the same way channels in `module Y` say

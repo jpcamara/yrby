@@ -11,7 +11,7 @@
 
 use magnus::{prelude::*, typed_data::Obj, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Doc, Map, MapRef, Transact};
+use yrs::{Any, Doc, Map, MapRef, TextPrelim, Transact};
 
 use crate::array::RbArray;
 use crate::nogvl;
@@ -177,6 +177,20 @@ impl RbMap {
         Ok(value)
     }
 
+    /// Store a new `Y.Text` holding `content` at `key`, replacing what was
+    /// there, and return a live handle to it. A text in a map is what lets
+    /// two people type in the same field and both keep their edit.
+    fn set_text(&self, key: Value, content: String) -> Result<RbText, Error> {
+        let key = key_to_string(key)?;
+        let (doc, id) = (&self.doc, &self.id);
+        let text = guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let m = resolve::<MapRef, _>(&txn, id).ok_or("map no longer exists")?;
+            Ok(identity(&m.insert(&mut txn, key, TextPrelim::new(content))))
+        })?;
+        Ok(RbText::new(self.doc.clone(), text))
+    }
+
     /// Remove `key`, returning its previous snapshot value (or `nil`).
     fn delete(&self, key: Value) -> Result<Value, Error> {
         let key = key_to_string(key)?;
@@ -227,6 +241,7 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("get_text", magnus::method!(RbMap::get_text, 1))?;
     class.define_method("[]=", magnus::method!(RbMap::set, 2))?;
     class.define_method("set", magnus::method!(RbMap::set, 2))?;
+    class.define_method("native_set_text", magnus::method!(RbMap::set_text, 2))?;
     class.define_method("delete", magnus::method!(RbMap::delete, 1))?;
     class.define_method("clear", magnus::method!(RbMap::clear, 0))?;
     class.define_method("key?", magnus::method!(RbMap::has_key, 1))?;

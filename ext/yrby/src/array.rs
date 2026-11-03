@@ -14,7 +14,7 @@
 
 use magnus::{prelude::*, typed_data::Obj, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Array, ArrayRef, Doc, Transact};
+use yrs::{Any, Array, ArrayRef, Doc, TextPrelim, Transact};
 
 use crate::map::RbMap;
 use crate::nogvl;
@@ -171,6 +171,19 @@ impl RbArray {
         })
     }
 
+    /// Insert a new `Y.Text` holding `content` at `index` (the same index
+    /// rules as `insert`) and return a live handle to it.
+    fn insert_text(&self, index: i64, content: String) -> Result<RbText, Error> {
+        let (doc, id) = (&self.doc, &self.id);
+        let text = guarded(move || {
+            let mut txn = doc.transact_mut_with(ORIGIN);
+            let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
+            let at = insert_index(index, a.len(&txn));
+            Ok(identity(&a.insert(&mut txn, at, TextPrelim::new(content))))
+        })?;
+        Ok(RbText::new(self.doc.clone(), text))
+    }
+
     /// Remove the element at `index`, returning its previous snapshot value.
     fn delete_at(&self, index: i64) -> Result<Value, Error> {
         let (doc, id) = (&self.doc, &self.id);
@@ -246,6 +259,10 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("push", magnus::method!(RbArray::push, 1))?;
     class.define_method("<<", magnus::method!(RbArray::push, 1))?;
     class.define_method("insert", magnus::method!(RbArray::insert, 2))?;
+    class.define_method(
+        "native_insert_text",
+        magnus::method!(RbArray::insert_text, 2),
+    )?;
     class.define_method("delete_at", magnus::method!(RbArray::delete_at, 1))?;
     class.define_method("clear", magnus::method!(RbArray::clear, 0))?;
     class.define_method("size", magnus::method!(RbArray::size, 0))?;
