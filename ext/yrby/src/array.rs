@@ -14,14 +14,14 @@
 
 use magnus::{prelude::*, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Array, ArrayRef, Doc, Out, Transact};
+use yrs::{Any, Array, ArrayRef, Doc, Transact};
 
 use crate::map::RbMap;
 use crate::nogvl;
 use crate::read::out_to_any;
 use crate::shared::{
     any_to_ruby, element_index, guarded, identity, insert_index, resolve, ruby_to_invalue, to_in,
-    ORIGIN,
+    Child, ORIGIN,
 };
 use crate::text::RbText;
 
@@ -38,12 +38,14 @@ impl RbArray {
 
     /// The shared value at `index`, resolved now: what `get_map`, `get_array`
     /// and `get_text` narrow to a handle.
-    fn child(&self, index: i64) -> Option<Out> {
+    fn child(&self, index: i64) -> Child {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
             let txn = doc.transact();
-            let a = resolve::<ArrayRef, _>(&txn, id)?;
-            a.get(&txn, element_index(index, a.len(&txn))?)
+            Child::of(
+                resolve::<ArrayRef, _>(&txn, id)
+                    .and_then(|a| a.get(&txn, element_index(index, a.len(&txn))?)),
+            )
         })
     }
 
@@ -69,8 +71,8 @@ impl RbArray {
     /// A live `Y::Map` for the element at `index`, or `nil` if that element is
     /// absent or is not a map. Mutating it mutates the document.
     fn get_map(&self, index: i64) -> Option<RbMap> {
-        match self.child(index)? {
-            Out::YMap(m) => Some(RbMap::new(self.doc.clone(), identity(&m))),
+        match self.child(index) {
+            Child::Map(id) => Some(RbMap::new(self.doc.clone(), id)),
             _ => None,
         }
     }
@@ -78,16 +80,16 @@ impl RbArray {
     /// A live `Y::Text` for text stored at `index`. An agent appending to one
     /// field of one record goes through here.
     fn get_text(&self, index: i64) -> Option<RbText> {
-        match self.child(index)? {
-            Out::YText(t) => Some(RbText::new(self.doc.clone(), identity(&t))),
+        match self.child(index) {
+            Child::Text(id) => Some(RbText::new(self.doc.clone(), id)),
             _ => None,
         }
     }
 
     /// A live `Y::Array` for a nested array at `index`.
     fn get_array(&self, index: i64) -> Option<Self> {
-        match self.child(index)? {
-            Out::YArray(a) => Some(RbArray::new(self.doc.clone(), identity(&a))),
+        match self.child(index) {
+            Child::Array(id) => Some(RbArray::new(self.doc.clone(), id)),
             _ => None,
         }
     }
@@ -324,9 +326,9 @@ mod tests {
     fn child_is_the_shared_value_at_an_index() {
         let list = list_of(&[1]);
         list.push(hash(&[("name", rb("Ada"))]).as_value()).unwrap();
-        assert!(matches!(list.child(-1), Some(Out::YMap(_))));
-        assert!(matches!(list.child(0), Some(Out::Any(_))));
-        assert!(list.child(2).is_none());
+        assert!(matches!(list.child(-1), Child::Map(_)));
+        assert!(matches!(list.child(0), Child::Other));
+        assert!(matches!(list.child(2), Child::Other));
     }
 
     #[ruby_test]

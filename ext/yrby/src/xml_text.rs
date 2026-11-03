@@ -41,8 +41,8 @@ impl RbXmlText {
         RbXmlText { doc, id, root }
     }
 
-    fn child(&self, block: &XmlTextRef) -> Self {
-        RbXmlText::new(self.doc.clone(), identity(block), self.root.clone())
+    fn child(&self, block: BranchID) -> Self {
+        RbXmlText::new(self.doc.clone(), block, self.root.clone())
     }
 
     // --- reads ---
@@ -307,9 +307,10 @@ impl RbXmlText {
             for (k, v) in pairs {
                 child.insert_attribute(&mut txn, k, to_in(v));
             }
-            Ok(child)
+            // The block's identity, not the block: see `Child`.
+            Ok(identity(&child))
         })?;
-        Ok(self.child(&block))
+        Ok(self.child(block))
     }
 
     /// Remove the `n`-th embedded block (a negative `n` counts from the

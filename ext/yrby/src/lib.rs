@@ -3,7 +3,6 @@ use magnus::{
     TryConvert, Value,
 };
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
 
 use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
@@ -383,33 +382,30 @@ impl RbDoc {
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
 
-    /// Start recording the updates this thread's handle writes make: what
-    /// `Doc#edit` returns. Updates applied from elsewhere stay out.
-    fn record_updates(&self) -> Recording {
+    /// The document's state vector and delete set, encoded: where `Doc#edit`
+    /// starts.
+    fn snapshot(&self) -> RString {
         let doc = &self.0;
-        let updates = Arc::new(Mutex::new(Vec::new()));
-        let sink = updates.clone();
-        let thread = std::thread::current().id();
-        let origin = yrs::Origin::from(shared::ORIGIN);
-        let key = shared::observer_key();
-        // Subscribing needs the document to itself for a moment, so it waits
-        // out a transaction another thread has open.
-        nogvl(|| loop {
-            let (sink, origin) = (sink.clone(), origin.clone());
-            let subscribed = doc.observe_update_v1(key.clone(), move |txn, event| {
-                if txn.origin() == Some(&origin) && std::thread::current().id() == thread {
-                    sink.lock().unwrap().push(event.update.clone());
-                }
-            });
-            match subscribed {
-                Ok(()) => break,
-                Err(_) => std::thread::yield_now(),
+        let snapshot = nogvl(move || doc.transact().snapshot().encode_v1());
+        binary_string(&snapshot)
+    }
+
+    /// The update holding what the document gained since `snapshot`, or nil
+    /// when it is unchanged: what `Doc#edit` returns.
+    fn update_since(&self, snapshot: RString) -> Result<Option<RString>, Error> {
+        let bytes = copy_bytes(snapshot);
+        let doc = &self.0;
+        let update = nogvl(move || -> Result<Option<Vec<u8>>, String> {
+            let before = yrs::Snapshot::decode_v1(&bytes).map_err(|e| e.to_string())?;
+            let txn = doc.transact();
+            let now = txn.snapshot();
+            if now == before {
+                return Ok(None);
             }
-        });
-        Recording {
-            updates,
-            observer: Mutex::new(Some((doc.clone(), key))),
-        }
+            Ok(Some(changes_since(&txn, &before, &now)))
+        })
+        .map_err(yrb_error)?;
+        Ok(update.map(|update| binary_string(&update)))
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -793,34 +789,24 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // Module Initialization
 // ============================================================================
 
-/// The updates a `Doc#edit` block makes, collected as they commit. `finish`
-/// stops recording and returns them merged into one, or nil for none; it is
-/// safe to call twice.
-#[magnus::wrap(class = "Y::Doc::Recording", free_immediately, size)]
-struct Recording {
-    updates: Arc<Mutex<Vec<Vec<u8>>>>,
-    /// The document and key of the update observer, until `finish` removes it.
-    observer: Mutex<Option<(Doc, yrs::Origin)>>,
-}
-
-impl Recording {
-    fn finish(&self) -> Result<Option<RString>, Error> {
-        if let Some((doc, key)) = self.observer.lock().unwrap().take() {
-            // Unsubscribing also needs the document to itself.
-            nogvl(move || {
-                while doc.unobserve_update_v1(key.clone()).is_err() {
-                    std::thread::yield_now()
-                }
-            });
+/// The blocks added since `before`, and the deletions made since it.
+///
+/// An update since a state vector carries the whole delete set, every
+/// deletion the document has ever had, so a chunk streamed into a long-lived
+/// document would grow with its history. A v1 update is its blocks followed
+/// by its delete set, so this swaps that delete set for only the new
+/// deletions. If the bytes ever don't end with the delete set as expected, it
+/// keeps the whole update, which is bigger but still right.
+fn changes_since<T: ReadTxn>(txn: &T, before: &yrs::Snapshot, now: &yrs::Snapshot) -> Vec<u8> {
+    let full = txn.encode_state_as_update_v1(&before.state_map);
+    let all = now.delete_set.encode_v1();
+    match full.strip_suffix(all.as_slice()) {
+        Some(blocks) => {
+            let mut update = blocks.to_vec();
+            update.extend(now.delete_set.diff(&before.delete_set).encode_v1());
+            update
         }
-        let updates = std::mem::take(&mut *self.updates.lock().unwrap());
-        match updates.len() {
-            0 => Ok(None),
-            1 => Ok(Some(binary_string(&updates[0]))),
-            _ => yrs::merge_updates_v1(&updates)
-                .map(|merged| Some(binary_string(&merged)))
-                .map_err(|e| yrb_error(e.to_string())),
-        }
+        None => full,
     }
 }
 
@@ -1180,9 +1166,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
-    doc_class.define_private_method("record_updates", method!(RbDoc::record_updates, 0))?;
-    let recording = doc_class.define_class("Recording", ruby.class_object())?;
-    recording.define_method("finish", method!(Recording::finish, 0))?;
+    doc_class.define_private_method("native_snapshot", method!(RbDoc::snapshot, 0))?;
+    doc_class.define_private_method("native_update_since", method!(RbDoc::update_since, 1))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
@@ -1424,33 +1409,42 @@ mod tests {
     }
 
     #[ruby_test]
-    fn a_recording_holds_this_threads_handle_writes_only() {
+    fn an_update_since_a_snapshot_holds_what_changed_after_it() {
         let doc = new_doc();
+        push(&doc, "t", "before");
+        let snapshot = doc.snapshot();
+        assert!(doc.update_since(snapshot).unwrap().is_none());
+        push(&doc, "t", " after");
         let peer = new_doc();
-        push(&peer, "theirs", "remote");
-        let recording = doc.record_updates();
-        doc.apply_update(update(&peer)).unwrap();
-        push(&doc, "mine", "a");
-        push(&doc, "mine", "b");
-        std::thread::scope(|s| {
-            s.spawn(|| push(&doc, "other", "another thread"));
-        });
-        let recorded = recording.finish().unwrap().expect("an update");
-        assert!(
-            recording.finish().unwrap().is_none(),
-            "finish twice is safe"
-        );
-
-        let fresh = new_doc();
-        fresh.apply_update(recorded).unwrap();
-        assert_eq!(fresh.read_text("mine".into()).as_deref(), Some("ab"));
-        assert_eq!(fresh.read_text("theirs".into()), None);
-        assert_eq!(fresh.read_text("other".into()), None);
+        peer.apply_update(doc.update_since(snapshot).unwrap().unwrap())
+            .unwrap();
+        assert!(peer.pending(), "the update leaves out what came before");
+        peer.apply_update(update(&doc)).unwrap();
+        assert_eq!(peer.read_text("t".into()).as_deref(), Some("before after"));
     }
 
     #[ruby_test]
-    fn a_recording_with_no_writes_is_nil() {
-        assert!(new_doc().record_updates().finish().unwrap().is_none());
+    fn an_update_since_a_snapshot_carries_only_new_deletions() {
+        let doc = new_doc();
+        let text = doc.0.get_or_insert_text("t");
+        for _ in 0..200 {
+            push(&doc, "t", "xy");
+            let mut txn = doc.0.transact_mut();
+            let at = text.len(&txn) - 1;
+            text.remove_range(&mut txn, at, 1);
+        }
+        let snapshot = doc.snapshot();
+        let peer = new_doc();
+        peer.apply_update(update(&doc)).unwrap();
+        text.remove_range(&mut doc.0.transact_mut(), 0, 1);
+        let chunk = doc.update_since(snapshot).unwrap().unwrap();
+        assert!(
+            copy_bytes(chunk).len() < 40,
+            "{} bytes",
+            copy_bytes(chunk).len()
+        );
+        peer.apply_update(chunk).unwrap();
+        assert_eq!(peer.read_text("t".into()), doc.read_text("t".into()));
     }
 
     #[ruby_test]

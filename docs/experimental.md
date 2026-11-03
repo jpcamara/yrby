@@ -46,11 +46,11 @@ map.clear
 ```
 
 A handle holds the identity of the shared type it points at, not a path to
-it, and looks the type up again on every operation, so it never caches a raw
-CRDT pointer that could dangle when the tree is mutated (possibly on another
-thread). A nested handle stays on its map as keys and elements change around
-it. Once that map is deleted, reads return nothing and writes raise
-`Y::Error`.
+it, and looks the type up again on every operation. A raw CRDT pointer never
+leaves the transaction that found it, since another thread can delete the
+type and free it as soon as that transaction ends. A nested handle stays on
+its map as keys and elements change around it. Once that map is deleted,
+reads return nothing and writes raise `Y::Error`.
 
 ## Y::Array (live shared lists)
 
@@ -203,10 +203,10 @@ rest), what a process keeps to put a block back the way it was.
 A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
 as its own update. `Doc#edit` runs a block that writes to the document and
-returns the update its writes produced, or nil when it wrote nothing. It
-holds only what was written through handles on this thread, so an update
-applied from elsewhere meanwhile stays out. In a reactor, another fiber's
-handle writes to the same document during the block are included too:
+returns the update its writes produced, or nil when the document didn't
+change. The update holds everything the document gained while the block
+ran, so a write another thread or peer made meanwhile is in it too. Applying
+an update twice changes nothing, so that only adds bytes:
 
 ```ruby
 doc = Y::Doc.new
