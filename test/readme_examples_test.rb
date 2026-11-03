@@ -12,12 +12,19 @@ require "y/collaborative"
 require "action_cable"
 require_relative "../app/channels/y/document_channel"
 
-# Runs the ```ruby blocks from README.md against the real gem, so an
-# example that drifts from the API fails the suite. Each block evaluates
-# in its own anonymous module with a prelude supplying the names examples
-# use without declaring (doc, key, a store, channel scaffolding).
+# Examples that edit a document broadcast the change.
+ActionCable.server.config.cable = { "adapter" => "test" }
+ActionCable.server.config.logger = Logger.new(File::NULL)
+
+# Runs the ```ruby blocks from README.md and docs/experimental.md against
+# the real gem, so an example that drifts from the API fails the suite. Each
+# block evaluates in its own anonymous module with a prelude supplying the
+# names examples use without declaring (doc, key, a store, channel
+# scaffolding). A block
+# fenced ```rb is shown but not run, for code that needs a live server;
+# test/client_app_test.rb covers the client example.
 class ReadmeExamplesTest < Minitest::Test
-  README = File.expand_path("../README.md", __dir__)
+  DOCS = %w[README.md docs/experimental.md].freeze
 
   # Gemfile fragments: every non-blank line is a comment or a gem call.
   def gemfile_fragment?(block)
@@ -83,14 +90,17 @@ class ReadmeExamplesTest < Minitest::Test
 
   def test_readme_ruby_examples
     executed = 0
-    File.read(README).scan(/^```ruby\n(.*?)^```/m).map(&:first).each_with_index do |block, i|
-      next if gemfile_fragment?(block)
+    DOCS.each do |name|
+      blocks = File.read(File.expand_path("../#{name}", __dir__)).scan(/^```ruby\n(.*?)^```/m).map(&:first)
+      blocks.each_with_index do |block, i|
+        next if gemfile_fragment?(block)
 
-      executed += 1
-      container = Module.new
-      container.module_eval(PRELUDE + block, "README.md:example_#{i + 1}")
-    rescue Exception => e # rubocop:disable Lint/RescueException -- report which example broke
-      flunk "README example #{i + 1} raised #{e.class}: #{e.message}\n#{block}"
+        executed += 1
+        container = Module.new
+        container.module_eval(PRELUDE + block, "#{name}:example_#{i + 1}")
+      rescue Exception => e # rubocop:disable Lint/RescueException -- report which example broke
+        flunk "#{name} example #{i + 1} raised #{e.class}: #{e.message}\n#{block}"
+      end
     end
 
     assert_operator executed, :>=, 10, "extraction found too few runnable examples"

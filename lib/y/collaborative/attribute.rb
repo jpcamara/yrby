@@ -40,6 +40,24 @@ module Y
       # with both.
       def channel = "Y::DocumentChannel"
 
+      # Edits the document from Ruby the way a browser does: yields the
+      # current document, records what the block changed, and broadcasts it so
+      # open editors apply it. Returns the update, or nil when the block
+      # changed nothing.
+      #
+      #   post.collaborative_document(:body).edit do |doc|
+      #     Y::Lexxy.append_paragraph(doc, "Reviewed by ops.")
+      #   end
+      def edit
+        doc = y_doc
+        update = doc.edit { yield doc }
+        return unless update
+
+        append(update)
+        Y::ActionCable.broadcast(key, update)
+        update
+      end
+
       # Builds a new Y::Doc from storage on every call.
       def y_doc
         Y::Doc.new.tap do |doc|

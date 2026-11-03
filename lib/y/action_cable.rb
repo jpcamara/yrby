@@ -17,6 +17,17 @@ module Y
     def self.included(base)
       base.include(Sync)
     end
+
+    # The stream a document's subscribers listen on.
+    def self.stream_name(key) = "yrby:#{key}"
+
+    # Sends an update to everyone subscribed to a document, from outside a
+    # channel: a job, a console, or Y::Collaborative::Attribute#edit. Record
+    # the update first. This only distributes it.
+    def self.broadcast(key, update)
+      encoded = Base64.strict_encode64(Y.wrap_update(update))
+      ::ActionCable.server.broadcast(stream_name(key), { "update" => encoded })
+    end
   end
 end
 

@@ -20,3 +20,5 @@ prosemirror-yjs-html = { path = "crates/prosemirror-html" }
 
 [dev-dependencies]
 rb-sys-env = "0.1"
+magnus = { version = "0.8", features = ["embed"] }
+rb-sys-test-helpers = "0.3"
