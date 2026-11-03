@@ -182,6 +182,18 @@ class DemosTest < ActionDispatch::IntegrationTest
     )
   end
 
+  test "the stored endpoint reads a form field held in a Y.Text as a string" do
+    Y::Document.append("form/room1", Updates::FORM_MAP)
+
+    get "/demos/form/room1/stored"
+
+    assert_response :success
+    assert_equal(
+      { "name" => "Ada Lovelace", "role" => "Engineer" },
+      JSON.parse(response.parsed_body["body"])
+    )
+  end
+
   test "the stored endpoint reads a Y.Array demo back as JSON" do
     Y::Document.append("kanban/room1", Updates::CARDS_ARRAY)
 

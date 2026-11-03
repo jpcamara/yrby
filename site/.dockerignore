@@ -13,6 +13,7 @@ public/whiteboard.js
 public/kanban.js
 public/chat.js
 public/codemirror.js
+public/form.js
 public/assets
 
 .DS_Store

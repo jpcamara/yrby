@@ -331,6 +331,10 @@ jobs:
         working-directory: site/frontend
         run: bun install --frozen-lockfile && bunx eslint .
 
+      - name: Text field binding
+        working-directory: site/frontend
+        run: node --test text_field_test.mjs
+
       - name: Build the demo bundles
         working-directory: site/frontend
         run: bun run build

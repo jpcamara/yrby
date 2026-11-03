@@ -328,7 +328,39 @@ await clickAt(B, '.chat-pick[data-emoji="👍"]')
 check("choosing a reaction again removes it",
   !!(await converge("reaction removed", badges, (v) => v === JSON.stringify(["❤️"]))))
 
+// --- 6) Form: two people typing in the same field --------------------------
+await openBoth(`/demos/form/${ROOM}`)
+
+const NAME = "#form [data-key=name]"
+const nameText = (s) => js(s, `JSON.stringify([window.__yrby.form.get("name")?.toString() ?? null, document.querySelector("${NAME}").value])`)
+const nameIs = (value) => (v) => v === JSON.stringify([value, value])
+for (const s of SESSIONS) {
+  await waitFor(`${s} name field enabled`, async () => (await js(s, `document.querySelector("${NAME}").disabled`)) === false)
+}
+
+await clickAt(A, NAME)
+await ab(A, "keyboard", "type", "Ada")
+check("B sees A's typing in the name field", !!(await converge("name typed", nameText, nameIs("Ada"))))
+
+// Both type in the field while offline, so neither sees the other's edit
+// first. A adds to the end and B to the start. A Y.Text keeps both.
+for (const s of SESSIONS) await js(s, `window.__yrby.provider.disconnect()`)
+await clickAt(A, NAME)
+await ab(A, "press", "End")
+await ab(A, "keyboard", "type", " Lovelace")
+await clickAt(B, NAME)
+await ab(B, "press", "Home")
+await ab(B, "keyboard", "type", "Dr. ")
+for (const s of SESSIONS) await js(s, `window.__yrby.provider.connect()`)
+check("two people typing in one field both keep their edit",
+  !!(await converge("name merged", nameText, nameIs("Dr. Ada Lovelace"))))
+
+// The role is a plain value, so a pick replaces the last one.
+await ab(B, "select", "#form [data-key=role]", "Designer")
+check("A sees B's pick",
+  !!(await converge("role picked", (s) => js(s, `document.querySelector("#form [data-key=role]").value`), (v) => v === "Designer")))
+
 await ab(A, "close", "--all")
 console.log("")
 if (failures > 0) { console.log(`FAILED: ${failures} check(s) failed`); process.exit(1) }
-console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban, chat")
+console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban, chat, form")
