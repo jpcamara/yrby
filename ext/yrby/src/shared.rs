@@ -93,7 +93,7 @@ where
             .cloned()
             .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
             .unwrap_or_else(|| "the document operation failed".to_string())),
-    })
+    })?
     .map_err(yrb_error)
 }
 
@@ -383,9 +383,18 @@ pub fn key_to_string(v: Value) -> Result<String, Error> {
 
 /// Read a Ruby Hash into `Send` pairs with the GVL held.
 pub fn hash_pairs(ruby: &Ruby, hash: RHash) -> Result<Vec<(String, InValue)>, Error> {
+    pairs_at(ruby, hash, 0)
+}
+
+/// How deep a Hash or Array written to a document may nest, as many levels as
+/// JSON's default `max_nesting`. Converting one that contains itself would
+/// otherwise recurse until the stack overflows.
+const MAX_NESTING: usize = 100;
+
+fn pairs_at(ruby: &Ruby, hash: RHash, depth: usize) -> Result<Vec<(String, InValue)>, Error> {
     let mut pairs = Vec::new();
     hash.foreach(|k: Value, v: Value| {
-        pairs.push((key_to_string(k)?, ruby_to_invalue(ruby, v)?));
+        pairs.push((key_to_string(k)?, invalue_at(ruby, v, depth)?));
         Ok(ForEach::Continue)
     })?;
     Ok(pairs)
@@ -394,6 +403,16 @@ pub fn hash_pairs(ruby: &Ruby, hash: RHash) -> Result<Vec<(String, InValue)>, Er
 /// Read a Ruby value into an `InValue`. GVL held. Ruby `Hash` becomes a live
 /// nested map; `Array` an embedded array of primitives; primitives their `Any`.
 pub fn ruby_to_invalue(ruby: &Ruby, v: Value) -> Result<InValue, Error> {
+    invalue_at(ruby, v, 0)
+}
+
+fn invalue_at(ruby: &Ruby, v: Value, depth: usize) -> Result<InValue, Error> {
+    if depth > MAX_NESTING {
+        return Err(Error::new(
+            ruby.exception_arg_error(),
+            format!("nesting of {depth} is too deep (at most {MAX_NESTING})"),
+        ));
+    }
     if v.is_nil() {
         return Ok(InValue::Any(Any::Null));
     }
@@ -404,12 +423,12 @@ pub fn ruby_to_invalue(ruby: &Ruby, v: Value) -> Result<InValue, Error> {
         return Ok(InValue::Any(Any::Bool(false)));
     }
     if let Some(h) = RHash::from_value(v) {
-        return Ok(InValue::Map(hash_pairs(ruby, h)?));
+        return Ok(InValue::Map(pairs_at(ruby, h, depth + 1)?));
     }
     if let Some(a) = RArray::from_value(v) {
         let mut items: Vec<Any> = Vec::with_capacity(a.len());
         for item in a.into_iter() {
-            items.push(invalue_to_any(ruby_to_invalue(ruby, item)?));
+            items.push(invalue_to_any(invalue_at(ruby, item, depth + 1)?));
         }
         return Ok(InValue::Any(Any::Array(items.into())));
     }

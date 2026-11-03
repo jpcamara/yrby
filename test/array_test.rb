@@ -171,4 +171,13 @@ class ArrayTest < Minitest::Test
 
     assert_equal [1, 2, 3], list.to_a
   end
+
+  def test_each_returns_the_array_and_an_enumerator_without_a_block
+    list = Y::Doc.new.get_array("a")
+    list << 1
+    list << 2
+
+    assert_same(list, list.each { |_value| nil })
+    assert_equal([2, 4], list.each.map { |v| v * 2 })
+  end
 end
