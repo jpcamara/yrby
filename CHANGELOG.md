@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Experimental
+
+- `Y::Map#set_text(key, content = "")` stores a new `Y.Text` at a key and
+  returns its live `Y::Text`. `Y::Array#push_text(content = "")` and
+  `#insert_text(index, content = "")` do the same in a list. Before this,
+  Ruby could edit a nested `Y.Text` a browser made but couldn't make one,
+  so a server couldn't set up a form whose fields merge typing.
+
 ## yrby-client 0.7.1 - 2026-11-03
 
 ### Fixed
