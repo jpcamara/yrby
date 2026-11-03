@@ -55,6 +55,10 @@ These are new, and they may change in a minor release. See
 
 ### Fixed
 
+- Ruby now counts the memory a document holds. Before, the GC saw only a
+  small object, so dropped documents piled up until something else caused a
+  collection. A loop that loads and drops a 1.5 MB update peaked at 690 to
+  890 MB; it now stays under 190 MB.
 - yrby-client: `connect()` restores the presence that `disconnect()` removed,
   unless the app set or cleared presence in between. Before this, a `renew()`
   (which document sessions call with a renewed grant) or a manual reconnect
