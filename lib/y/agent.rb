@@ -69,15 +69,21 @@ module Y
       @leaving = false
     end
 
+    # Runs as a task of the caller's reactor when there is one. Otherwise it
+    # starts one on the calling thread, such as a job's, and holds that
+    # thread until the agent leaves.
     def run
       return :busy unless !@lock || @lock.take
 
-      join
-      safely("setup") { yield self } if block_given?
-      follow
-      :left
+      Sync do
+        join
+        safely("setup") { yield self } if block_given?
+        follow
+        :left
+      ensure
+        @client&.unsubscribe
+      end
     ensure
-      @client&.unsubscribe
       @lock&.release
     end
 
