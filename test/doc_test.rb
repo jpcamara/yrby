@@ -185,4 +185,23 @@ class DocTest < Minitest::Test
     assert_equal YjsFixtures::TextHelloWorld::STATE_VECTOR, doc2.encode_state_vector
     assert_equal doc1.encode_state_vector, doc2.encode_state_vector
   end
+
+  # Ruby frees a dropped document only when its GC runs, and the GC runs
+  # sooner the more memory it knows about, so the document reports what it
+  # holds.
+  def test_loading_a_document_counts_toward_gc
+    source = Y::Doc.new
+    map = source.get_map("m")
+    20_000.times { |i| map["k#{i}"] = "value #{i}" }
+    update = source.encode_state_as_update
+
+    GC.disable
+    before = GC.stat(:malloc_increase_bytes)
+    Y::Doc.new.apply_update(update)
+    grew = GC.stat(:malloc_increase_bytes) - before
+
+    assert_operator grew, :>, update.bytesize
+  ensure
+    GC.enable
+  end
 end
