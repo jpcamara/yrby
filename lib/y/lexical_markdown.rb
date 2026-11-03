@@ -18,13 +18,15 @@ module Y
 
       # Append `markdown` to `doc` through `flavor` (Y::Lexical or Y::Lexxy).
       def append(flavor, doc, markdown, root: "root")
-        blocks(markdown.to_s).each do |kind, payload, extra|
-          case kind
-          when :heading then flavor.append_heading(doc, runs(payload), tag: "h#{extra}", root: root)
-          when :paragraph then flavor.append_paragraph(doc, runs(payload), root: root)
-          when :quote then flavor.append_quote(doc, runs(payload), root: root)
-          when :code then flavor.append_code(doc, payload, language: extra, root: root)
-          when :list then flavor.append_list(doc, payload.map { |line| runs(line) }, ordered: extra, root: root)
+        doc.transact do
+          blocks(markdown.to_s).each do |kind, payload, extra|
+            case kind
+            when :heading then flavor.append_heading(doc, runs(payload), tag: "h#{extra}", root: root)
+            when :paragraph then flavor.append_paragraph(doc, runs(payload), root: root)
+            when :quote then flavor.append_quote(doc, runs(payload), root: root)
+            when :code then flavor.append_code(doc, payload, language: extra, root: root)
+            when :list then flavor.append_list(doc, payload.map { |line| runs(line) }, ordered: extra, root: root)
+            end
           end
         end
       end

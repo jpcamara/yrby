@@ -29,9 +29,11 @@ module Y
 
     # Lexxy puts a quote's text inside a paragraph within the quote block.
     def self.append_quote(doc, runs, root: "root")
-      quote = doc.get_xml_text(root).push_xml_text(quote_attributes)
-      write_runs(quote.push_xml_text(PARAGRAPH_ATTRIBUTES), runs)
-      quote
+      doc.transact do
+        quote = doc.get_xml_text(root).push_xml_text(quote_attributes)
+        write_runs(quote.push_xml_text(PARAGRAPH_ATTRIBUTES), runs)
+        quote
+      end
     end
 
     # A cursor-placement placeholder; empty ones export to nothing.

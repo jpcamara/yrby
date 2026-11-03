@@ -11,13 +11,13 @@
 
 use magnus::{prelude::*, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Doc, Map, MapRef, Out, Transact};
+use yrs::{Any, Doc, Map, MapRef, Out};
 
 use crate::array::RbArray;
 use crate::nogvl;
 use crate::read::out_to_any;
 use crate::shared::{
-    any_to_ruby, guarded, identity, key_to_string, resolve, ruby_to_invalue, to_in, ORIGIN,
+    any_to_ruby, guarded, identity, key_to_string, resolve, ruby_to_invalue, to_in,
 };
 use crate::text::RbText;
 
@@ -30,6 +30,11 @@ pub struct RbMap {
 }
 
 impl RbMap {
+    /// Runs the block in one write transaction on this handle's document.
+    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<magnus::Value, Error> {
+        crate::txn::transact(ruby, &rb_self.doc)
+    }
+
     pub fn new(doc: Doc, id: BranchID) -> Self {
         RbMap { doc, id }
     }
@@ -40,7 +45,7 @@ impl RbMap {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
         Ok(nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             resolve::<MapRef, _>(&txn, id)?.get(&txn, &key)
         }))
     }
@@ -53,7 +58,7 @@ impl RbMap {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
         let got: Option<Any> = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let m = resolve::<MapRef, _>(&txn, id)?;
             m.get(&txn, &key).map(|v| out_to_any(&txn, &v))
         });
@@ -93,7 +98,7 @@ impl RbMap {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
         Ok(nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             resolve::<MapRef, _>(&txn, id)
                 .map(|m| m.contains_key(&txn, &key))
                 .unwrap_or(false)
@@ -103,7 +108,7 @@ impl RbMap {
     fn size(&self) -> usize {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             resolve::<MapRef, _>(&txn, id)
                 .map(|m| m.len(&txn) as usize)
                 .unwrap_or(0)
@@ -113,7 +118,7 @@ impl RbMap {
     fn keys(&self) -> Vec<String> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             match resolve::<MapRef, _>(&txn, id) {
                 Some(m) => m.keys(&txn).map(|k| k.to_string()).collect(),
                 None => Vec::new(),
@@ -124,7 +129,7 @@ impl RbMap {
     fn snapshot(&self) -> Vec<(String, Any)> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             match resolve::<MapRef, _>(&txn, id) {
                 Some(m) => m
                     .iter(&txn)
@@ -166,7 +171,7 @@ impl RbMap {
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let m = resolve::<MapRef, _>(&txn, id).ok_or("map no longer exists")?;
             m.insert(&mut txn, key, to_in(iv));
             Ok(())
@@ -179,7 +184,7 @@ impl RbMap {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
         let prev: Option<Any> = guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let Some(m) = resolve::<MapRef, _>(&txn, id) else {
                 return Ok(None);
             };
@@ -198,7 +203,7 @@ impl RbMap {
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             if let Some(m) = resolve::<MapRef, _>(&txn, id) {
                 m.clear(&mut txn);
             }
@@ -211,12 +216,18 @@ impl RbMap {
 /// `Y::Doc#get_map`.
 pub fn root_map(doc: &Doc, name: String) -> RbMap {
     let d = doc.clone();
-    let id = nogvl(move || identity(&d.get_or_insert_map(name.as_str())));
+    let id = nogvl(move || {
+        identity(&yrs::WriteTxn::get_or_insert_map(
+            &mut *crate::txn::write(&d),
+            name.as_str(),
+        ))
+    });
     RbMap::new(doc.clone(), id)
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     let class = module.define_class("Map", ruby.class_object())?;
+    class.define_private_method("native_transact", magnus::method!(RbMap::transact, 0))?;
     class.define_method("[]", magnus::method!(RbMap::get, 1))?;
     class.define_method("get", magnus::method!(RbMap::get, 1))?;
     class.define_method("get_map", magnus::method!(RbMap::get_map, 1))?;
@@ -241,7 +252,7 @@ mod tests {
     //! What a handle's identity resolves to: a root map, a nested map, and
     //! nothing once the nested map has been deleted.
     use super::*;
-    use yrs::MapPrelim;
+    use yrs::{MapPrelim, Transact};
 
     #[test]
     fn a_root_map_resolves() {

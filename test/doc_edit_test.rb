@@ -58,31 +58,38 @@ class DocEditTest < Minitest::Test
     assert_operator doc.edit { text << "y" }.bytesize, :<, 40
   end
 
-  def test_an_update_applied_during_the_block_is_left_out
+  def test_applying_an_update_inside_the_block_raises
     doc = Y::Doc.new
     remote = Y::Doc.new
     remote.get_text("theirs") << "from a peer"
-    update = doc.edit do |d|
-      d.apply_update(remote.encode_state_as_update)
-      d.get_text("mine") << "from ruby"
-    end
-    fresh = Y::Doc.new
-    fresh.apply_update(update)
 
-    assert_equal "", fresh.read_text("theirs").to_s
-    assert_equal "from ruby", fresh.read_text("mine")
+    error = assert_raises(Y::Error) do
+      doc.edit { |d| d.apply_update(remote.encode_state_as_update) }
+    end
+    assert_match(/apply_update can.t run inside transact or edit/, error.message)
+    doc.apply_update(remote.encode_state_as_update)
+
+    assert_equal "from a peer", doc.read_text("theirs"), "the document is usable after"
   end
 
-  def test_another_threads_writes_are_left_out
+  # Another thread waits for the block to commit, so its write lands after
+  # the edit and stays out of the update.
+  def test_another_threads_write_waits_and_is_left_out
     doc = Y::Doc.new
+    other = nil
     update = doc.edit do |d|
-      Thread.new { d.get_text("theirs") << "other thread" }.join
+      other = Thread.new { d.get_text("theirs") << "other thread" }
+      sleep 0.1
+
+      assert_predicate other, :alive?, "the other thread waits for the commit"
       d.get_text("mine") << "this thread"
     end
+    other.join(5) or flunk "the other thread never got the document"
     fresh = Y::Doc.new
     fresh.apply_update(update)
 
     assert_equal "", fresh.read_text("theirs").to_s
     assert_equal "this thread", fresh.read_text("mine")
+    assert_equal "other thread", doc.read_text("theirs")
   end
 end

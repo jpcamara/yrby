@@ -18,9 +18,13 @@ These are new, and they may change in a minor release. See
   made for while others edit around it, and releases the GVL like `Doc`.
   Indexes are Ruby characters, and negative indexes count from the end as in
   Ruby.
-- `Doc#edit { }` runs a block that writes to the document and returns the
-  update its writes produced, or nil when it wrote nothing. It is the unit a
-  process saves and sends as it writes.
+- `Doc#transact { }` runs a block in one write transaction. Its writes commit
+  together, reads inside see them, and other threads see all of them or none.
+  Each handle has `transact` for its document. The Lexical helpers write
+  each block in one transaction.
+- `Doc#edit { }` runs a block in one transaction and returns the update it
+  made, or nil when it changed nothing. It is the unit a process saves and
+  sends as it writes.
 - `Y::Lexical` and `Y::Lexxy` write Lexical's node shape: `append_paragraph`,
   `append_heading`, `append_list`, `append_quote`, `append_code`,
   `append_markdown`, `insert_paragraph`, `append_text`, `replace_runs`, and
@@ -32,7 +36,9 @@ These are new, and they may change in a minor release. See
   `relative_position(index)` builds the Yjs caret shape editors put in
   awareness, and `Text#index_at(position)` resolves one.
 - `Doc#apply_update_changes(update, root)` applies an update and returns the
-  ordinals of the top-level blocks it touched.
+  ordinals of the top-level blocks it touched. It reads the blocks and
+  applies the update in one transaction, so another thread's write doesn't
+  show up in the result.
 - `Y::Awareness` builds and reads presence frames, and `Doc#client_id` returns
   the id a document writes under.
 
