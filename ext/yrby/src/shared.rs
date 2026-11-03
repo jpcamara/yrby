@@ -484,3 +484,36 @@ mod tests {
         assert_eq!(text.get_string(&txn), "aé日");
     }
 }
+
+/// What the handle tests share: a document set up as `Y::Doc.new` sets one
+/// up, and Ruby values to call handle methods with. Tests that use these run
+/// inside Ruby (`#[ruby_test]`), since the handles call into it.
+#[cfg(test)]
+pub mod test_support {
+    use magnus::{IntoValue, RHash, Ruby, Value};
+    use yrs::{Any, Doc, Number, OffsetKind, Options};
+
+    /// A document that counts text as `Y::Doc.new` does, in UTF-16 units.
+    pub fn doc() -> Doc {
+        Doc::with_options(Options {
+            offset_kind: OffsetKind::Utf16,
+            ..Options::default()
+        })
+    }
+
+    pub fn rb<T: IntoValue>(value: T) -> Value {
+        Ruby::get().unwrap().into_value(value)
+    }
+
+    pub fn hash(pairs: &[(&str, Value)]) -> RHash {
+        let hash = Ruby::get().unwrap().hash_new();
+        for (key, value) in pairs {
+            hash.aset(*key, *value).unwrap();
+        }
+        hash
+    }
+
+    pub fn int(value: i64) -> Any {
+        Any::Number(Number::Int(value))
+    }
+}

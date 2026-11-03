@@ -238,10 +238,12 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    //! What a handle's identity resolves to: a root map, a nested map, and
-    //! nothing once the nested map has been deleted.
+    //! What a handle's identity resolves to, then each method on a handle,
+    //! called as Ruby calls it.
     use super::*;
-    use yrs::MapPrelim;
+    use crate::shared::test_support::{doc, hash, int, rb};
+    use rb_sys_test_helpers::ruby_test;
+    use yrs::{ArrayPrelim, MapPrelim, TextPrelim, Transact};
 
     #[test]
     fn a_root_map_resolves() {
@@ -262,5 +264,108 @@ mod tests {
         assert!(resolve::<MapRef, _>(&txn, &id).is_some());
         root.remove(&mut txn, "user");
         assert!(resolve::<MapRef, _>(&txn, &id).is_none());
+    }
+
+    fn state() -> RbMap {
+        root_map(&doc(), "state".into())
+    }
+
+    #[ruby_test]
+    fn set_returns_the_value_and_get_reads_it_back() {
+        let map = state();
+        assert_eq!(map.set(rb("n"), rb(1)).unwrap().inspect(), "1");
+        assert_eq!(map.get(rb("n")).unwrap().inspect(), "1");
+        assert_eq!(map.get(rb("missing")).unwrap().inspect(), "nil");
+    }
+
+    #[ruby_test]
+    fn a_symbol_key_is_its_string() {
+        let map = state();
+        let ruby = Ruby::get().unwrap();
+        map.set(ruby.to_symbol("n").as_value(), rb(1)).unwrap();
+        assert!(map.has_key(rb("n")).unwrap());
+        assert_eq!(map.keys(), vec!["n".to_string()]);
+    }
+
+    #[ruby_test]
+    fn size_keys_and_to_h_read_every_entry() {
+        let map = state();
+        map.set(rb("a"), rb(1)).unwrap();
+        map.set(rb("b"), rb("two")).unwrap();
+        assert_eq!(map.size(), 2);
+        let mut keys = map.keys();
+        keys.sort();
+        assert_eq!(keys, vec!["a", "b"]);
+        let mut entries = map.snapshot();
+        entries.sort_by(|x, y| x.0.cmp(&y.0));
+        assert_eq!(
+            entries,
+            vec![("a".into(), int(1)), ("b".into(), Any::from("two"))]
+        );
+    }
+
+    #[ruby_test]
+    fn delete_returns_the_previous_value_or_nil() {
+        let map = state();
+        map.set(rb("n"), rb(1)).unwrap();
+        assert_eq!(map.delete(rb("n")).unwrap().inspect(), "1");
+        assert_eq!(map.delete(rb("n")).unwrap().inspect(), "nil");
+        assert!(!map.has_key(rb("n")).unwrap());
+    }
+
+    #[ruby_test]
+    fn clear_removes_every_entry() {
+        let map = state();
+        map.set(rb("a"), rb(1)).unwrap();
+        map.set(rb("b"), rb(2)).unwrap();
+        map.clear().unwrap();
+        assert_eq!(map.size(), 0);
+    }
+
+    #[ruby_test]
+    fn a_hash_value_becomes_a_live_nested_map() {
+        let map = state();
+        map.set(rb("user"), hash(&[("name", rb("Ada"))]).as_value())
+            .unwrap();
+        assert!(matches!(map.child(rb("user")).unwrap(), Some(Out::YMap(_))));
+        let user = map.get_map(rb("user")).unwrap().expect("a map at user");
+        user.set(rb("age"), rb(36)).unwrap();
+        let mut entries = user.snapshot();
+        entries.sort_by(|x, y| x.0.cmp(&y.0));
+        assert_eq!(
+            entries,
+            vec![("age".into(), int(36)), ("name".into(), Any::from("Ada"))]
+        );
+    }
+
+    #[ruby_test]
+    fn get_map_get_text_and_get_array_narrow_by_type() {
+        let map = state();
+        map.set(rb("n"), rb(1)).unwrap();
+        {
+            let mut txn = map.doc.transact_mut();
+            let m = resolve::<MapRef, _>(&txn, &map.id).unwrap();
+            m.insert(&mut txn, "notes", TextPrelim::new("hi"));
+            m.insert(&mut txn, "list", ArrayPrelim::default());
+        }
+        assert!(map.child(rb("missing")).unwrap().is_none());
+        assert!(map.get_map(rb("n")).unwrap().is_none());
+        assert!(map.get_text(rb("notes")).unwrap().is_some());
+        assert!(map.get_text(rb("list")).unwrap().is_none());
+        assert!(map.get_array(rb("list")).unwrap().is_some());
+        assert!(map.get_array(rb("notes")).unwrap().is_none());
+    }
+
+    #[ruby_test]
+    fn a_handle_to_a_deleted_map_reads_empty_and_refuses_writes() {
+        let map = state();
+        map.set(rb("user"), hash(&[("name", rb("Ada"))]).as_value())
+            .unwrap();
+        let user = map.get_map(rb("user")).unwrap().unwrap();
+        map.delete(rb("user")).unwrap();
+        assert_eq!(user.size(), 0);
+        assert_eq!(user.get(rb("name")).unwrap().inspect(), "nil");
+        let err = user.set(rb("name"), rb("Grace")).unwrap_err();
+        assert!(err.to_string().contains("map no longer exists"), "{err}");
     }
 }

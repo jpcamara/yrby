@@ -194,3 +194,103 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Each method on a handle, called as Ruby calls it. Indexes count
+    //! characters, as Ruby's do, though the document counts UTF-16 units.
+    use super::*;
+    use crate::shared::test_support::doc;
+    use rb_sys_test_helpers::ruby_test;
+    use yrs::{Map, MapRef, TextPrelim, Transact};
+
+    fn text(initial: &str) -> RbText {
+        let text = root_text(&doc(), "t".into());
+        text.push(initial.into()).unwrap();
+        text
+    }
+
+    #[ruby_test]
+    fn a_fresh_text_is_empty() {
+        let t = text("");
+        assert_eq!(t.to_s(), "");
+        assert_eq!(t.length(), 0);
+        assert!(t.is_empty());
+    }
+
+    #[ruby_test]
+    fn push_appends_and_length_counts_characters() {
+        let t = text("hé");
+        assert_eq!(t.push("😀!".into()).unwrap(), "😀!");
+        assert_eq!(t.to_s(), "hé😀!");
+        assert_eq!(t.length(), 4);
+    }
+
+    #[ruby_test]
+    fn insert_reads_a_negative_index_from_the_end_and_clamps() {
+        let t = text("a😀c");
+        t.insert(2, "b".into()).unwrap();
+        t.insert(-1, "d".into()).unwrap();
+        t.insert(99, "e".into()).unwrap();
+        t.insert(-99, "_".into()).unwrap();
+        assert_eq!(t.to_s(), "_a😀bcde");
+    }
+
+    #[ruby_test]
+    fn delete_removes_characters_as_slice_bang_does() {
+        let t = text("a😀bcd");
+        t.delete(1, 2).unwrap();
+        assert_eq!(t.to_s(), "acd");
+        t.delete(-1, 5).unwrap();
+        assert_eq!(t.to_s(), "ac");
+        t.delete(9, 1).unwrap();
+        assert_eq!(t.to_s(), "ac");
+    }
+
+    #[ruby_test]
+    fn clear_removes_everything() {
+        let t = text("hello");
+        t.clear().unwrap();
+        assert!(t.is_empty());
+    }
+
+    #[ruby_test]
+    fn a_relative_position_follows_its_character() {
+        let t = text("a😀c");
+        let position = t.native_relative_position(2, "after".into()).unwrap();
+        assert_eq!(t.index_at(position).unwrap(), Some(2));
+        t.insert(0, "xy".into()).unwrap();
+        assert_eq!(t.index_at(position).unwrap(), Some(4));
+    }
+
+    #[ruby_test]
+    fn a_position_in_another_text_is_nil() {
+        let doc = doc();
+        let a = root_text(&doc, "a".into());
+        let b = root_text(&doc, "b".into());
+        a.push("one".into()).unwrap();
+        b.push("two".into()).unwrap();
+        let position = a.native_relative_position(1, "after".into()).unwrap();
+        assert_eq!(b.index_at(position).unwrap(), None);
+    }
+
+    #[ruby_test]
+    fn a_handle_to_a_deleted_text_reads_empty_and_refuses_writes() {
+        let doc = doc();
+        let id = {
+            let map: MapRef = doc.get_or_insert_map("state");
+            let mut txn = doc.transact_mut();
+            identity(&map.insert(&mut txn, "notes", TextPrelim::new("hi")))
+        };
+        let notes = RbText::new(doc.clone(), id);
+        assert_eq!(notes.to_s(), "hi");
+        {
+            let map: MapRef = doc.get_or_insert_map("state");
+            map.remove(&mut doc.transact_mut(), "notes");
+        }
+        assert_eq!(notes.to_s(), "");
+        assert!(notes.is_empty());
+        let err = notes.push("more".into()).unwrap_err();
+        assert!(err.to_string().contains("text no longer exists"), "{err}");
+    }
+}

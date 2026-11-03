@@ -1248,3 +1248,308 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Each method on `Y::Doc`, `Y::Doc::Recording`, `Y::Awareness`, and the
+    //! two renderers, called as Ruby calls it. The handles' methods belong to
+    //! their own modules, so these tests write through yrs, under the
+    //! handles' origin where that matters.
+    use super::*;
+    use crate::shared::test_support::rb;
+    use rb_sys_test_helpers::ruby_test;
+    use yrs::{Any, MapPrelim, Text, Xml, XmlTextPrelim, XmlTextRef};
+
+    fn new_doc() -> RbDoc {
+        RbDoc::new(&[]).unwrap()
+    }
+
+    /// Append to the root text `name` as a handle does: under its origin.
+    fn push(doc: &RbDoc, name: &str, chunk: &str) {
+        let text = doc.0.get_or_insert_text(name);
+        let mut txn = doc.0.transact_mut_with(shared::ORIGIN);
+        let at = text.len(&txn);
+        text.insert(&mut txn, at, chunk);
+    }
+
+    fn update(doc: &RbDoc) -> RString {
+        doc.encode_state_as_update(&[]).unwrap()
+    }
+
+    fn update_since(doc: &RbDoc, state_vector: RString) -> RString {
+        doc.encode_state_as_update(&[state_vector.as_value()])
+            .unwrap()
+    }
+
+    fn root(doc: &RbDoc) -> XmlTextRef {
+        doc.0.get_or_insert_xml_fragment("root");
+        shared::root_xml_text(&doc.0.transact(), "root").unwrap()
+    }
+
+    /// Add a Lexical paragraph to `root` before its `at`-th child.
+    fn paragraph(doc: &RbDoc, at: u32, words: &str) {
+        let root = root(doc);
+        let mut txn = doc.0.transact_mut();
+        let block = root.insert_embed(&mut txn, at, XmlTextPrelim::new(""));
+        block.insert_attribute(&mut txn, "__type", "paragraph");
+        let node = MapPrelim::from_iter([
+            ("__type", Any::from("text")),
+            ("__format", Any::from(0)),
+            ("__style", Any::from("")),
+            ("__mode", Any::from(0)),
+            ("__detail", Any::from(0)),
+        ]);
+        block.insert_embed(&mut txn, 0, node);
+        block.insert(&mut txn, 1, words);
+    }
+
+    fn lexical_doc(paragraphs: &[&str]) -> RbDoc {
+        let doc = new_doc();
+        for (n, words) in paragraphs.iter().enumerate() {
+            paragraph(&doc, n as u32, words);
+        }
+        doc
+    }
+
+    fn remove_child(doc: &RbDoc, at: u32) {
+        root(doc).remove_range(&mut doc.0.transact_mut(), at, 1);
+    }
+
+    #[ruby_test]
+    fn a_doc_writes_under_the_client_id_it_was_given() {
+        let doc = RbDoc::new(&[rb(42_u64)]).unwrap();
+        assert_eq!(doc.client_id(), 42);
+        assert_ne!(new_doc().client_id(), new_doc().client_id());
+    }
+
+    #[ruby_test]
+    fn an_update_carries_state_from_one_doc_to_another() {
+        let doc = new_doc();
+        push(&doc, "t", "hello");
+        let peer = new_doc();
+        peer.apply_update(update(&doc)).unwrap();
+        assert_eq!(peer.read_text("t".into()).as_deref(), Some("hello"));
+        assert_eq!(
+            copy_bytes(peer.encode_state_vector()),
+            copy_bytes(doc.encode_state_vector())
+        );
+    }
+
+    #[ruby_test]
+    fn an_update_since_a_state_vector_holds_only_what_is_new() {
+        let doc = new_doc();
+        push(&doc, "t", "one");
+        let peer = new_doc();
+        peer.apply_update(update(&doc)).unwrap();
+        push(&doc, "t", " two");
+        let diff = update_since(&doc, peer.encode_state_vector());
+        let fresh = new_doc();
+        fresh.apply_update(diff).unwrap();
+        assert!(fresh.pending(), "the diff leaves out the first write");
+        peer.apply_update(diff).unwrap();
+        assert_eq!(peer.read_text("t".into()).as_deref(), Some("one two"));
+    }
+
+    #[ruby_test]
+    fn a_malformed_update_raises() {
+        assert!(new_doc()
+            .apply_update(binary_string(&[0xff, 0xff]))
+            .is_err());
+    }
+
+    #[ruby_test]
+    fn reads_return_each_kind_of_root_and_nil_for_a_missing_one() {
+        let doc = lexical_doc(&["one", "two"]);
+        push(&doc, "t", "hi");
+        doc.0.get_or_insert_map("m");
+        let mut names = doc.root_names();
+        names.sort();
+        assert_eq!(names, vec!["m", "root", "t"]);
+        assert_eq!(doc.read_text("t".into()).as_deref(), Some("hi"));
+        assert_eq!(doc.read_map("m".into()).as_deref(), Some("{}"));
+        assert_eq!(doc.read_xml("root".into()).as_deref(), Some("one\ntwo"));
+        assert_eq!(doc.read_array("missing".into()), None);
+    }
+
+    #[ruby_test]
+    fn an_update_missing_its_dependency_is_pending_until_it_arrives() {
+        let source = new_doc();
+        push(&source, "t", "a");
+        let first = update(&source);
+        let after_first = source.encode_state_vector();
+        push(&source, "t", "b");
+        let second = update_since(&source, after_first);
+
+        let doc = new_doc();
+        assert!(!doc.update_ready(second).unwrap());
+        assert!(doc.update_advances(second).unwrap());
+        doc.apply_update(second).unwrap();
+        assert!(doc.pending());
+        assert_eq!(doc.read_text("t".into()), None);
+        let compacted = copy_bytes(doc.compacted_state_update().unwrap());
+        assert!(compacted.len() < copy_bytes(update(&doc)).len());
+
+        doc.apply_update(first).unwrap();
+        assert!(!doc.pending());
+        assert_eq!(doc.read_text("t".into()).as_deref(), Some("ab"));
+        assert!(!doc.update_advances(second).unwrap());
+    }
+
+    #[ruby_test]
+    fn a_sync_step1_answered_by_a_peer_brings_the_doc_up_to_date() {
+        let doc = new_doc();
+        push(&doc, "t", "hello");
+        let peer = new_doc();
+        let (kind, step, reply) = doc.handle_sync_message(peer.sync_step1()).unwrap();
+        assert_eq!((kind, step), (0, 0));
+        let (kind, step, nothing) = peer.handle_sync_message(reply).unwrap();
+        assert_eq!((kind, step), (0, 1));
+        assert!(copy_bytes(nothing).is_empty());
+        assert_eq!(peer.read_text("t".into()).as_deref(), Some("hello"));
+    }
+
+    #[ruby_test]
+    fn handle_sync_message_applies_an_update_and_rejects_garbage() {
+        let doc = new_doc();
+        push(&doc, "t", "hi");
+        let peer = new_doc();
+        assert_eq!(
+            peer.handle_sync_message(wrap_update(update(&doc)))
+                .unwrap()
+                .1,
+            2
+        );
+        assert_eq!(peer.read_text("t".into()).as_deref(), Some("hi"));
+        assert!(peer.handle_sync_message(binary_string(&[9, 9])).is_err());
+    }
+
+    #[ruby_test]
+    fn a_recording_holds_this_threads_handle_writes_only() {
+        let doc = new_doc();
+        let peer = new_doc();
+        push(&peer, "theirs", "remote");
+        let recording = doc.record_updates();
+        doc.apply_update(update(&peer)).unwrap();
+        push(&doc, "mine", "a");
+        push(&doc, "mine", "b");
+        std::thread::scope(|s| {
+            s.spawn(|| push(&doc, "other", "another thread"));
+        });
+        let recorded = recording.finish().unwrap().expect("an update");
+        assert!(
+            recording.finish().unwrap().is_none(),
+            "finish twice is safe"
+        );
+
+        let fresh = new_doc();
+        fresh.apply_update(recorded).unwrap();
+        assert_eq!(fresh.read_text("mine".into()).as_deref(), Some("ab"));
+        assert_eq!(fresh.read_text("theirs".into()), None);
+        assert_eq!(fresh.read_text("other".into()), None);
+    }
+
+    #[ruby_test]
+    fn a_recording_with_no_writes_is_nil() {
+        assert!(new_doc().record_updates().finish().unwrap().is_none());
+    }
+
+    #[ruby_test]
+    fn apply_update_changes_reports_the_blocks_an_update_touched() {
+        let doc = lexical_doc(&["one", "two", "three"]);
+        let peer = new_doc();
+        peer.apply_update(update(&doc)).unwrap();
+        let before = peer.encode_state_vector();
+        paragraph(&peer, 1, "new");
+        remove_child(&peer, 3);
+        let changed = doc
+            .apply_update_changes(update_since(&peer, before), "root".into())
+            .unwrap();
+        assert_eq!(changed.as_value().inspect(), "[1, 2]");
+        assert_eq!(
+            doc.read_xml("root".into()).as_deref(),
+            Some("one\nnew\ntwo")
+        );
+    }
+
+    #[ruby_test]
+    fn a_block_position_finds_its_block_as_others_come_and_go() {
+        let doc = lexical_doc(&["one", "two"]);
+        let ruby = Ruby::get().unwrap();
+        let root = root(&doc);
+        let position = {
+            let txn = doc.0.transact();
+            let blocks = shared::embedded_xml_texts(&txn, &root);
+            let sticky = yrs::StickyIndex::from_type(&txn, &blocks[1], yrs::Assoc::After);
+            shared::Position::new(sticky).to_ruby(&ruby).unwrap()
+        };
+        paragraph(&doc, 0, "zero");
+        assert_eq!(doc.block_at(position, "root".into()).unwrap(), Some(2));
+        let found = doc.find(position, "root".into()).unwrap();
+        assert!(found.is_some());
+        assert!(doc.find(position, "elsewhere".into()).unwrap().is_none());
+        remove_child(&doc, 2);
+        assert!(doc.find(position, "root".into()).unwrap().is_none());
+    }
+
+    #[ruby_test]
+    fn children_count_blocks_but_not_other_embeds() {
+        let doc = lexical_doc(&["one"]);
+        root(&doc).insert_embed(&mut doc.0.transact_mut(), 0, Any::from(true));
+        paragraph(&doc, 2, "two");
+        let root = root(&doc);
+        let txn = doc.0.transact();
+        let children = Children::of(&txn, &root);
+        assert!(!children.is_block(0));
+        assert!(children.is_block(1));
+        assert_eq!(children.ordinal(2), 1);
+        assert_eq!(children.blocks_in(0, 3), 2);
+    }
+
+    #[ruby_test]
+    fn awareness_frames_carry_presence_between_clients() {
+        let agent = RbAwareness::new(&[rb(7_u64)]).unwrap();
+        let browser = RbAwareness::new(&[]).unwrap();
+        assert_eq!(agent.client_id(), 7);
+        let frame = agent.set_local_state(r#"{"name":"Agent"}"#.into()).unwrap();
+        assert!(browser.apply_update(frame).unwrap());
+        let states = browser.states().unwrap().as_value().inspect();
+        assert!(states.contains(r#"7 => {"name" => "Agent"}"#), "{states}");
+        assert!(!browser.clocks().unwrap().is_empty());
+
+        assert!(browser
+            .apply_update(agent.clear_local_state().unwrap())
+            .unwrap());
+        let states = browser.states().unwrap().as_value().inspect();
+        assert!(!states.contains("Agent"), "{states}");
+    }
+
+    #[ruby_test]
+    fn awareness_refuses_a_state_that_is_not_json_and_ignores_other_frames() {
+        let awareness = RbAwareness::new(&[]).unwrap();
+        assert!(awareness.set_local_state("{nope".into()).is_err());
+        assert!(!awareness.apply_update(new_doc().sync_step1()).unwrap());
+    }
+
+    #[ruby_test]
+    fn the_lexical_renderer_renders_a_lexical_doc_and_skips_a_missing_root() {
+        let doc = lexical_doc(&["hello"]);
+        let lexical = RbLexical::native_new(&doc, "{}".into()).unwrap();
+        assert_eq!(
+            lexical.native_to_html(&[]).unwrap().inspect(),
+            r#""<p>hello</p>""#
+        );
+        let types = lexical.node_types(&[]).unwrap().inspect();
+        assert!(types.contains("paragraph"), "{types}");
+        assert!(lexical.native_to_html(&[rb("missing")]).unwrap().is_nil());
+        assert!(lexical.native_to_html(&[rb("a"), rb("b")]).is_err());
+    }
+
+    #[ruby_test]
+    fn the_prosemirror_renderer_skips_a_missing_root_and_refuses_bad_rules() {
+        let doc = new_doc();
+        let prosemirror = RbProseMirror::native_new(&doc, "{}".into()).unwrap();
+        assert!(prosemirror.native_to_html(&[]).unwrap().is_nil());
+        assert!(prosemirror.node_types(&[]).unwrap().is_nil());
+        assert!(RbProseMirror::native_new(&doc, "not json".into()).is_err());
+    }
+}

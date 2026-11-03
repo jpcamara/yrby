@@ -403,3 +403,166 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Each method on a handle, called as Ruby calls it: a root, the blocks
+    //! embedded in it, and the strings and embeds inside a block.
+    use super::*;
+    use crate::shared::test_support::{doc, hash, rb};
+    use rb_sys_test_helpers::ruby_test;
+
+    fn root() -> RbXmlText {
+        root_xml_text(&doc(), "root".into())
+    }
+
+    fn paragraph(root: &RbXmlText, words: &str) -> RbXmlText {
+        let block = root
+            .push_xml_text(hash(&[("__type", rb("paragraph"))]))
+            .unwrap();
+        block.insert(-1, words.into()).unwrap();
+        block
+    }
+
+    #[ruby_test]
+    fn a_fresh_root_is_empty_and_knows_its_name() {
+        let root = root();
+        assert!(root.is_empty());
+        assert_eq!(root.length(), 0);
+        assert_eq!(root.xml_text_count(), 0);
+        assert_eq!(root.root_name(), "root");
+    }
+
+    #[ruby_test]
+    fn push_xml_text_appends_a_block_with_its_attributes() {
+        let root = root();
+        let first = paragraph(&root, "one");
+        paragraph(&root, "two");
+        assert_eq!(root.xml_text_count(), 2);
+        assert_eq!(first.text(), "one");
+        assert_eq!(
+            first.attributes().unwrap().as_value().inspect(),
+            r#"{"__type" => "paragraph"}"#
+        );
+        assert_eq!(root.text(), "one\ntwo");
+    }
+
+    #[ruby_test]
+    fn xml_text_reads_a_negative_index_and_is_nil_outside() {
+        let root = root();
+        paragraph(&root, "one");
+        paragraph(&root, "two");
+        assert_eq!(root.xml_text(-1).unwrap().text(), "two");
+        assert!(root.xml_text(2).is_none());
+        assert!(root.xml_text(-3).is_none());
+    }
+
+    #[ruby_test]
+    fn insert_xml_text_places_a_block_before_the_nth() {
+        let root = root();
+        paragraph(&root, "one");
+        paragraph(&root, "three");
+        let two = root
+            .insert_xml_text(1, hash(&[("__type", rb("paragraph"))]))
+            .unwrap();
+        two.insert(0, "two".into()).unwrap();
+        assert_eq!(root.text(), "one\ntwo\nthree");
+    }
+
+    #[ruby_test]
+    fn delete_xml_text_removes_the_nth_block_and_says_whether_there_was_one() {
+        let root = root();
+        paragraph(&root, "one");
+        paragraph(&root, "two");
+        assert!(root.delete_xml_text(0).unwrap());
+        assert!(!root.delete_xml_text(5).unwrap());
+        assert_eq!(root.text(), "two");
+    }
+
+    #[ruby_test]
+    fn a_block_handle_stays_on_its_block_as_others_come_and_go() {
+        let root = root();
+        paragraph(&root, "one");
+        let two = paragraph(&root, "two");
+        root.insert_xml_text(0, hash(&[("__type", rb("paragraph"))]))
+            .unwrap();
+        root.delete_xml_text(1).unwrap();
+        two.insert(-1, "!".into()).unwrap();
+        assert_eq!(root.xml_text(-1).unwrap().text(), "two!");
+    }
+
+    #[ruby_test]
+    fn insert_and_delete_count_characters_with_an_embed_as_one() {
+        let root = root();
+        let block = paragraph(&root, "ad");
+        block
+            .insert_embed(0, hash(&[("__type", rb("text"))]).as_value())
+            .unwrap();
+        assert_eq!(block.length(), 3);
+        block.insert(2, "bc".into()).unwrap();
+        assert_eq!(block.text(), "abcd");
+        block.delete(-2, 1).unwrap();
+        assert_eq!(block.text(), "abd");
+    }
+
+    #[ruby_test]
+    fn set_attribute_writes_one_attribute() {
+        let block = paragraph(&root(), "one");
+        block.set_attribute("__format".into(), rb(1)).unwrap();
+        let attributes = block.attributes().unwrap();
+        assert_eq!(attributes.len(), 2);
+        assert_eq!(attributes.aref::<_, i64>("__format").unwrap(), 1);
+    }
+
+    #[ruby_test]
+    fn ends_with_xml_text_is_true_when_a_block_ends_a_block() {
+        let root = root();
+        let item = paragraph(&root, "see ");
+        assert!(!item.ends_with_xml_text());
+        item.push_xml_text(hash(&[("__type", rb("link"))])).unwrap();
+        assert!(item.ends_with_xml_text());
+    }
+
+    #[ruby_test]
+    fn clear_removes_text_markers_and_blocks() {
+        let root = root();
+        paragraph(&root, "one");
+        root.clear().unwrap();
+        assert!(root.is_empty());
+        assert_eq!(root.xml_text_count(), 0);
+    }
+
+    #[ruby_test]
+    fn a_block_position_names_the_block() {
+        let root = root();
+        paragraph(&root, "one");
+        let two = paragraph(&root, "two");
+        let position = two.native_block_position().unwrap();
+        let inspect = position.as_value().inspect();
+        assert!(inspect.contains("\"item\""), "{inspect}");
+        assert!(two.native_relative_position(1, "before".into()).is_ok());
+    }
+
+    #[ruby_test]
+    fn a_handle_to_a_deleted_block_reads_empty_and_refuses_writes() {
+        let root = root();
+        let block = paragraph(&root, "one");
+        root.delete_xml_text(0).unwrap();
+        assert_eq!(block.text(), "");
+        assert!(block.xml_text(0).is_none());
+        let err = block.insert(0, "x".into()).unwrap_err();
+        assert!(
+            err.to_string().contains("the block no longer exists"),
+            "{err}"
+        );
+    }
+
+    #[ruby_test]
+    fn handle_names_a_block_by_its_identity() {
+        let root = root();
+        let block = paragraph(&root, "one");
+        let again = handle(&block.doc, block.id.clone(), "root".into());
+        assert_eq!(again.text(), "one");
+        assert_eq!(again.root_name(), "root");
+    }
+}
