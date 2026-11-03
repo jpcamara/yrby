@@ -38,13 +38,14 @@ module Y
         parser.finish
       end
 
-      # A line-by-line parser. Prose lines gather into a paragraph and list
-      # lines into a list until something else ends them; a fence gathers
-      # lines verbatim until it closes.
+      # A line-by-line parser. Prose lines gather into a paragraph, quote
+      # lines into a quote, and list lines into a list until something else
+      # ends them; a fence gathers lines verbatim until it closes.
       class Blocks
         def initialize
           @out = []
           @para = []
+          @quote = nil
           @list = nil
           @fence = nil
         end
@@ -56,10 +57,11 @@ module Y
           elsif (m = HEADING.match(line)) then block(:heading, m[2], m[1].length)
           elsif (m = BULLET.match(line)) then item(m[1], ordered: false)
           elsif (m = NUMBERED.match(line)) then item(m[1], ordered: true)
-          elsif (m = QUOTE.match(line)) then block(:quote, m[1])
+          elsif (m = QUOTE.match(line)) then quote(m[1])
           elsif line.strip.empty? then close_all
           else
             close_list
+            close_quote
             @para << line.strip
           end
         end
@@ -99,6 +101,18 @@ module Y
           (@list ||= { ordered: ordered, items: [] })[:items] << payload
         end
 
+        def quote(line)
+          close_para
+          close_list
+          @quote ||= []
+          @quote << line.strip unless line.strip.empty?
+        end
+
+        def close_quote
+          @out << [:quote, @quote.join(" ")] if @quote&.any?
+          @quote = nil
+        end
+
         def close_para
           @out << [:paragraph, @para.join(" ")] unless @para.empty?
           @para = []
@@ -111,6 +125,7 @@ module Y
 
         def close_all
           close_para
+          close_quote
           close_list
         end
       end
