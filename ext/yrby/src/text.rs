@@ -12,12 +12,12 @@
 
 use magnus::{prelude::*, Error, RHash, Ruby};
 use yrs::branch::{Branch, BranchID, BranchPtr};
-use yrs::{Assoc, Doc, GetString, IndexedSequence, StickyIndex, Text, TextRef, Transact};
+use yrs::{Assoc, Doc, GetString, IndexedSequence, StickyIndex, Text, TextRef};
 
 use crate::nogvl;
 use crate::shared::{
     char_len, delete_span, end_or_units, guarded, identity, insert_index, resolve, to_chars,
-    to_units, Position, ORIGIN,
+    to_units, Position,
 };
 use crate::yrb_error;
 
@@ -28,6 +28,11 @@ pub struct RbText {
 }
 
 impl RbText {
+    /// Runs the block in one write transaction on this handle's document.
+    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<magnus::Value, Error> {
+        crate::txn::transact(ruby, &rb_self.doc)
+    }
+
     pub fn new(doc: Doc, id: BranchID) -> Self {
         RbText { doc, id }
     }
@@ -37,7 +42,7 @@ impl RbText {
     fn to_s(&self) -> String {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             resolve::<TextRef, _>(&txn, id)
                 .map(|t| t.get_string(&txn))
                 .unwrap_or_default()
@@ -48,7 +53,7 @@ impl RbText {
     fn length(&self) -> usize {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             resolve::<TextRef, _>(&txn, id)
                 .map(|t| char_len(&txn, &t) as usize)
                 .unwrap_or(0)
@@ -58,7 +63,7 @@ impl RbText {
     fn is_empty(&self) -> bool {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             resolve::<TextRef, _>(&txn, id).is_none_or(|t| t.len(&txn) == 0)
         })
     }
@@ -71,7 +76,7 @@ impl RbText {
         let (doc, id) = (&self.doc, &self.id);
         let text = chunk.clone();
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
             let at = t.len(&txn);
             t.insert(&mut txn, at, &text);
@@ -86,7 +91,7 @@ impl RbText {
         let (doc, id) = (&self.doc, &self.id);
         let text = chunk.clone();
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
             let at = end_or_units(&txn, &t, index);
             t.insert(&mut txn, at, &text);
@@ -108,7 +113,7 @@ impl RbText {
         };
         let (doc, id) = (&self.doc, &self.id);
         let position = guarded(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let text = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
             let at = to_units(&txn, &text, insert_index(index, char_len(&txn, &text)));
             let sticky = text
@@ -127,7 +132,7 @@ impl RbText {
         let sticky = crate::sticky_from_ruby(&ruby, position)?;
         let (doc, id) = (&self.doc, &self.id);
         Ok(nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let text = resolve::<TextRef, _>(&txn, id)?;
             let offset = sticky.get_offset(&txn)?;
             let branch: &Branch = text.as_ref();
@@ -140,7 +145,7 @@ impl RbText {
     fn delete(&self, index: i64, length: i64) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
             if let Some((from, to)) = delete_span(index, length, char_len(&txn, &t)) {
                 let (from, to) = (to_units(&txn, &t, from), to_units(&txn, &t, to));
@@ -155,7 +160,7 @@ impl RbText {
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             if let Some(t) = resolve::<TextRef, _>(&txn, id) {
                 let len = t.len(&txn);
                 if len > 0 {
@@ -171,12 +176,18 @@ impl RbText {
 /// `Y::Doc#get_text`.
 pub fn root_text(doc: &Doc, name: String) -> RbText {
     let d = doc.clone();
-    let id = nogvl(move || identity(&d.get_or_insert_text(name.as_str())));
+    let id = nogvl(move || {
+        identity(&yrs::WriteTxn::get_or_insert_text(
+            &mut *crate::txn::write(&d),
+            name.as_str(),
+        ))
+    });
     RbText::new(doc.clone(), id)
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     let class = module.define_class("Text", ruby.class_object())?;
+    class.define_private_method("native_transact", magnus::method!(RbText::transact, 0))?;
     class.define_method("to_s", magnus::method!(RbText::to_s, 0))?;
     class.define_method("to_str", magnus::method!(RbText::to_s, 0))?;
     class.define_method("push", magnus::method!(RbText::push, 1))?;

@@ -82,7 +82,7 @@ pub(crate) fn merged_doc_update(bytes: &[u8]) -> Result<Option<Vec<u8>>, String>
 pub(crate) fn update_is_ready(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
     let update = yrs::Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
     // Partial order: "not covered" includes incomparable: not ready either way.
-    let lower_covered = doc.transact().state_vector() >= update.state_vector_lower();
+    let lower_covered = crate::txn::read(doc).state_vector() >= update.state_vector_lower();
     if !lower_covered {
         return Ok(false);
     }
@@ -160,7 +160,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     // lacks: the update advances, no probe needed. The common case (a novel
     // edit) exits here; only retries and ambiguous diffs pay for the probe.
     if !has_deletes {
-        let covered = doc.transact().state_vector() >= update.state_vector();
+        let covered = crate::txn::read(doc).state_vector() >= update.state_vector();
         if !covered {
             return Ok(true);
         }
@@ -223,7 +223,7 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
 /// blocks that couldn't integrate because a causally-prior update is missing. A
 /// pure read; does not mutate.
 pub(crate) fn has_pending(doc: &Doc) -> bool {
-    let txn = doc.transact();
+    let txn = crate::txn::read(doc);
     txn.store().pending_update().is_some() || txn.store().pending_ds().is_some()
 }
 
@@ -244,7 +244,7 @@ pub(crate) fn integrated_update(doc: &Doc, sv: &StateVector) -> Result<Vec<u8>, 
     // gappy apply_update could slip between them and the encode would serve
     // the very pending this function exists to exclude.
     let full = {
-        let txn = doc.transact();
+        let txn = crate::txn::read(doc);
         let store = txn.store();
         // Nothing pending: the direct encode is already gap-free.
         if store.pending_update().is_none() && store.pending_ds().is_none() {

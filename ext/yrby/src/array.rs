@@ -14,14 +14,13 @@
 
 use magnus::{prelude::*, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Array, ArrayRef, Doc, Out, Transact};
+use yrs::{Any, Array, ArrayRef, Doc, Out};
 
 use crate::map::RbMap;
 use crate::nogvl;
 use crate::read::out_to_any;
 use crate::shared::{
     any_to_ruby, element_index, guarded, identity, insert_index, resolve, ruby_to_invalue, to_in,
-    ORIGIN,
 };
 use crate::text::RbText;
 
@@ -32,6 +31,11 @@ pub struct RbArray {
 }
 
 impl RbArray {
+    /// Runs the block in one write transaction on this handle's document.
+    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<magnus::Value, Error> {
+        crate::txn::transact(ruby, &rb_self.doc)
+    }
+
     pub fn new(doc: Doc, id: BranchID) -> Self {
         RbArray { doc, id }
     }
@@ -41,7 +45,7 @@ impl RbArray {
     fn child(&self, index: i64) -> Option<Out> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let a = resolve::<ArrayRef, _>(&txn, id)?;
             a.get(&txn, element_index(index, a.len(&txn))?)
         })
@@ -54,7 +58,7 @@ impl RbArray {
     fn get(&self, index: i64) -> Value {
         let (doc, id) = (&self.doc, &self.id);
         let got: Option<Any> = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let a = resolve::<ArrayRef, _>(&txn, id)?;
             let i = element_index(index, a.len(&txn))?;
             a.get(&txn, i).map(|v| out_to_any(&txn, &v))
@@ -95,7 +99,7 @@ impl RbArray {
     fn size(&self) -> usize {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             resolve::<ArrayRef, _>(&txn, id)
                 .map(|a| a.len(&txn) as usize)
                 .unwrap_or(0)
@@ -109,7 +113,7 @@ impl RbArray {
     fn snapshot(&self) -> Vec<Any> {
         let (doc, id) = (&self.doc, &self.id);
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             match resolve::<ArrayRef, _>(&txn, id) {
                 Some(a) => a.iter(&txn).map(|v| out_to_any(&txn, &v)).collect(),
                 None => Vec::new(),
@@ -149,7 +153,7 @@ impl RbArray {
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
             let at = insert_index(index, a.len(&txn));
             a.insert(&mut txn, at, to_in(iv));
@@ -162,7 +166,7 @@ impl RbArray {
     fn delete_at(&self, index: i64) -> Result<Value, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let prev: Option<Any> = guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let Some(a) = resolve::<ArrayRef, _>(&txn, id) else {
                 return Ok(None);
             };
@@ -184,7 +188,7 @@ impl RbArray {
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             if let Some(a) = resolve::<ArrayRef, _>(&txn, id) {
                 let len = a.len(&txn);
                 if len > 0 {
@@ -203,7 +207,7 @@ impl RbArray {
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
         guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
+            let mut txn = crate::txn::write(doc);
             let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
             let i = element_index(index, a.len(&txn)).ok_or("index out of range")?;
             a.remove(&mut txn, i);
@@ -218,12 +222,18 @@ impl RbArray {
 /// `Y::Doc#get_array`.
 pub fn root_array(doc: &Doc, name: String) -> RbArray {
     let d = doc.clone();
-    let id = nogvl(move || identity(&d.get_or_insert_array(name.as_str())));
+    let id = nogvl(move || {
+        identity(&yrs::WriteTxn::get_or_insert_array(
+            &mut *crate::txn::write(&d),
+            name.as_str(),
+        ))
+    });
     RbArray::new(doc.clone(), id)
 }
 
 pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     let class = module.define_class("Array", ruby.class_object())?;
+    class.define_private_method("native_transact", magnus::method!(RbArray::transact, 0))?;
     class.define_method("[]", magnus::method!(RbArray::get, 1))?;
     class.define_method("get", magnus::method!(RbArray::get, 1))?;
     class.define_method("[]=", magnus::method!(RbArray::set, 2))?;

@@ -3,7 +3,6 @@ use magnus::{
     TryConvert, Value,
 };
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
 
 use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
@@ -16,6 +15,7 @@ mod protocol;
 mod read;
 mod shared;
 mod text;
+mod txn;
 mod xml_text;
 use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
@@ -168,7 +168,7 @@ impl RbDoc {
     fn encode_state_vector(&self) -> RString {
         let doc = &self.0;
         let sv = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             txn.state_vector().encode_v1()
         });
         binary_string(&sv)
@@ -179,7 +179,7 @@ impl RbDoc {
     fn root_names(&self) -> Vec<String> {
         let doc = &self.0;
         nogvl(move || {
-            doc.transact()
+            crate::txn::read(doc)
                 .root_refs()
                 .map(|(name, _)| name.to_string())
                 .collect()
@@ -192,7 +192,7 @@ impl RbDoc {
             // Exactly ONE transaction per call. Opening a second while the
             // first is still held deadlocks against a waiting writer, and
             // inside nogvl that hang can't be interrupted.
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             txn.get_text(name.as_str()).map(|t| t.get_string(&txn))
         })
     }
@@ -203,7 +203,7 @@ impl RbDoc {
     fn read_xml(&self, name: String) -> Option<String> {
         let doc = &self.0;
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             Some(read::xml_blocks_text(&txn, &fragment))
         })
@@ -216,7 +216,7 @@ impl RbDoc {
     fn read_map(&self, name: String) -> Option<String> {
         let doc = &self.0;
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let map = txn.get_map(name.as_str())?;
             Some(read::map_json(&txn, &map))
         })
@@ -230,7 +230,7 @@ impl RbDoc {
     fn read_array(&self, name: String) -> Option<String> {
         let doc = &self.0;
         nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let array = txn.get_array(name.as_str())?;
             Some(read::array_json(&txn, &array))
         })
@@ -293,16 +293,25 @@ impl RbDoc {
     fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
         let bytes = copy_bytes(update);
         let doc = &self.0;
+        txn::refuse_held(doc, "apply_update_changes")?;
         let changed = nogvl(move || -> Result<Vec<u32>, String> {
-            let fragment = doc.get_or_insert_xml_fragment(root.as_str());
+            // One transaction from the snapshot of the blocks to the commit,
+            // under an origin of its own: another thread's write can't change
+            // the blocks in between, and its events don't count.
+            let key = shared::observer_key();
+            let mut txn = doc.transact_mut_with(key.clone());
+            let fragment = yrs::WriteTxn::get_or_insert_xml_fragment(&mut txn, root.as_str());
             let branch: &yrs::branch::Branch = fragment.as_ref();
             let target = yrs::XmlTextRef::from(yrs::branch::BranchPtr::from(branch));
             let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
             let sink = hits.clone();
             let root_ref = target.clone();
-            let before = Children::of(&doc.transact(), &target);
-            let key = shared::observer_key();
+            let before = Children::of(&txn, &target);
+            let ours = key.clone();
             target.observe_deep(key.clone(), move |txn, events| {
+                if txn.origin() != Some(&ours) {
+                    return;
+                }
                 let children = Children::of(txn, &root_ref);
                 let mut hits = sink.lock().unwrap();
                 for event in events.iter() {
@@ -317,10 +326,9 @@ impl RbDoc {
             });
             let applied = yrs::Update::decode_v1(&bytes)
                 .map_err(|e| e.to_string())
-                .and_then(|parsed| {
-                    let mut txn = doc.transact_mut();
-                    txn.apply_update(parsed).map_err(|e| e.to_string())
-                });
+                .and_then(|parsed| txn.apply_update(parsed).map_err(|e| e.to_string()));
+            // Committing runs the observer.
+            drop(txn);
             target.unobserve_deep(key);
             applied?;
             let mut out = hits.lock().unwrap().clone();
@@ -346,7 +354,7 @@ impl RbDoc {
         let sticky = sticky_from_ruby(&ruby, position)?;
         let doc = &self.0;
         Ok(nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let target = sticky.get_offset(&txn)?.branch;
             let root_ref = shared::root_xml_text(&txn, root.as_str())?;
             shared::embedded_xml_texts(&txn, &root_ref)
@@ -363,7 +371,7 @@ impl RbDoc {
         let sticky = sticky_from_ruby(&ruby, position)?;
         let (doc, name) = (&self.0, root.as_str());
         let id = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let branch = sticky.get_offset(&txn)?.branch;
             let id = shared::identity(&yrs::XmlTextRef::from(branch));
             let is_block = matches!(id, yrs::branch::BranchID::Root(_))
@@ -376,33 +384,15 @@ impl RbDoc {
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
 
-    /// Start recording the updates this thread's handle writes make: what
-    /// `Doc#edit` returns. Updates applied from elsewhere stay out.
-    fn record_updates(&self) -> Recording {
-        let doc = &self.0;
-        let updates = Arc::new(Mutex::new(Vec::new()));
-        let sink = updates.clone();
-        let thread = std::thread::current().id();
-        let origin = yrs::Origin::from(shared::ORIGIN);
-        let key = shared::observer_key();
-        // Subscribing needs the document to itself for a moment, so it waits
-        // out a transaction another thread has open.
-        nogvl(|| loop {
-            let (sink, origin) = (sink.clone(), origin.clone());
-            let subscribed = doc.observe_update_v1(key.clone(), move |txn, event| {
-                if txn.origin() == Some(&origin) && std::thread::current().id() == thread {
-                    sink.lock().unwrap().push(event.update.clone());
-                }
-            });
-            match subscribed {
-                Ok(()) => break,
-                Err(_) => std::thread::yield_now(),
-            }
-        });
-        Recording {
-            updates,
-            observer: Mutex::new(Some((doc.clone(), key))),
-        }
+    /// Runs the block in one write transaction on this document. See txn.rs.
+    fn transact(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
+        txn::transact(ruby, &rb_self.0)
+    }
+
+    /// Runs the block in a write transaction of its own and returns the
+    /// update it made, or nil for none.
+    fn edit(ruby: &Ruby, rb_self: &Self) -> Result<Option<RString>, Error> {
+        Ok(txn::edit(ruby, &rb_self.0)?.map(|update| binary_string(&update)))
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -419,7 +409,7 @@ impl RbDoc {
                 None => yrs::StateVector::default(),
                 Some(bytes) => yrs::StateVector::decode_v1(bytes).map_err(|e| e.to_string())?,
             };
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             Ok(txn.encode_state_as_update_v1(&sv))
         })
         .map_err(yrb_error)?;
@@ -429,6 +419,7 @@ impl RbDoc {
     fn apply_update(&self, update: RString) -> Result<(), Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
+        txn::refuse_held(doc, "apply_update")?;
         nogvl(move || -> Result<(), String> {
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
             let mut txn = doc.transact_mut();
@@ -459,7 +450,7 @@ impl RbDoc {
     fn sync_step1(&self) -> RString {
         let doc = &self.0;
         let encoded = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let sv = txn.state_vector();
             Message::Sync(SyncMessage::SyncStep1(sv)).encode_v1()
         });
@@ -472,6 +463,7 @@ impl RbDoc {
     fn handle_sync_message(&self, data: RString) -> Result<(u8, u8, RString), Error> {
         let data_bytes = copy_bytes(data);
         let doc = &self.0;
+        txn::refuse_held(doc, "handle_sync_message")?;
 
         let (msg_type, sync_type, response) =
             nogvl(move || -> Result<(u8, u8, Vec<u8>), String> {
@@ -485,7 +477,7 @@ impl RbDoc {
                             // encodeStateAsUpdate. A peer parks a pending
                             // struct exactly as this doc does and heals it
                             // when the missing dependency arrives.
-                            let txn = doc.transact();
+                            let txn = crate::txn::read(doc);
                             let update = txn.encode_state_as_update_v1(&sv);
                             let response = Message::Sync(SyncMessage::SyncStep2(update));
                             Ok((0, 0, response.encode_v1()))
@@ -562,7 +554,7 @@ impl RbLexical {
         let doc = &self.doc;
         let rules = &self.rules;
         let segments = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::render_segments(&txn, &fragment, rules)
         });
@@ -576,7 +568,7 @@ impl RbLexical {
         let name = root_name_arg(args, "root")?;
         let doc = &self.doc;
         let map = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             lexical_html::collect_node_types(&txn, &fragment)
         });
@@ -642,7 +634,7 @@ impl RbProseMirror {
         let doc = &self.doc;
         let rules = &self.rules;
         let segments = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::render_segments(&txn, &fragment, rules)
         });
@@ -656,7 +648,7 @@ impl RbProseMirror {
         let name = root_name_arg(args, "default")?;
         let doc = &self.doc;
         let map = nogvl(move || {
-            let txn = doc.transact();
+            let txn = crate::txn::read(doc);
             let fragment = txn.get_xml_fragment(name.as_str())?;
             prosemirror_html::collect_node_types(&txn, &fragment)
         });
@@ -785,37 +777,6 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // ============================================================================
 // Module Initialization
 // ============================================================================
-
-/// The updates a `Doc#edit` block makes, collected as they commit. `finish`
-/// stops recording and returns them merged into one, or nil for none; it is
-/// safe to call twice.
-#[magnus::wrap(class = "Y::Doc::Recording", free_immediately, size)]
-struct Recording {
-    updates: Arc<Mutex<Vec<Vec<u8>>>>,
-    /// The document and key of the update observer, until `finish` removes it.
-    observer: Mutex<Option<(Doc, yrs::Origin)>>,
-}
-
-impl Recording {
-    fn finish(&self) -> Result<Option<RString>, Error> {
-        if let Some((doc, key)) = self.observer.lock().unwrap().take() {
-            // Unsubscribing also needs the document to itself.
-            nogvl(move || {
-                while doc.unobserve_update_v1(key.clone()).is_err() {
-                    std::thread::yield_now()
-                }
-            });
-        }
-        let updates = std::mem::take(&mut *self.updates.lock().unwrap());
-        match updates.len() {
-            0 => Ok(None),
-            1 => Ok(Some(binary_string(&updates[0]))),
-            _ => yrs::merge_updates_v1(&updates)
-                .map(|merged| Some(binary_string(&merged)))
-                .map_err(|e| yrb_error(e.to_string())),
-        }
-    }
-}
 
 /// A root's children in order: the document index each starts at and
 /// whether it is an `XmlText` block. Ordinals count only those, as
@@ -1173,9 +1134,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
-    doc_class.define_private_method("record_updates", method!(RbDoc::record_updates, 0))?;
-    let recording = doc_class.define_class("Recording", ruby.class_object())?;
-    recording.define_method("finish", method!(Recording::finish, 0))?;
+    doc_class.define_private_method("native_transact", method!(RbDoc::transact, 0))?;
+    doc_class.define_private_method("native_edit", method!(RbDoc::edit, 0))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;

@@ -9,6 +9,7 @@ covered by yrby's usual compatibility promise. Everything else is in the
 - [Y::Text (live shared text)](#ytext-live-shared-text)
 - [Writing rich text from Ruby](#writing-rich-text-from-ruby)
 - [Anchors: a block's identity as a value](#anchors-a-blocks-identity-as-a-value)
+- [Writing in one transaction](#writing-in-one-transaction)
 - [Streaming into a document](#streaming-into-a-document)
 - [Editing a document from Ruby](#editing-a-document-from-ruby)
 
@@ -198,15 +199,49 @@ Y::Anchor.from_json(anchor.to_json) == anchor # => true
 `XmlText#attributes` returns a block's attributes (`__type`, `__tag`, and the
 rest), what a process keeps to put a block back the way it was.
 
+## Writing in one transaction
+
+Each handle call is a transaction of its own. `transact` runs a block in one
+write transaction, so its writes commit together:
+
+```ruby
+doc = Y::Doc.new
+counter = doc.get_map("counter")
+counter["n"] = 0
+doc.transact { counter["n"] = counter["n"] + 1 } # nothing writes in between
+```
+
+Inside the block, every handle call and read on the document from this
+thread uses the transaction and sees what the block wrote. Other threads
+wait for the commit, so they see all of the block's writes or none of them.
+A transaction already open on the thread is joined, so blocks nest, and a
+fiber the block resumes joins it too. Each handle has `transact` for its
+document. The Lexical helpers write each block in one transaction, so
+another thread never sees a block before its attributes or its text.
+
+The writes commit when the block returns or raises. There's no rollback.
+
+Three things don't work inside a block:
+
+- Applying a remote update (`apply_update`, `apply_update_changes`, or
+  `handle_sync_message`) raises `Y::Error`. It needs a transaction of its
+  own.
+- `edit` raises `Y::Error` inside another block on the same document, whose
+  update would already hold its writes.
+- Waiting on another thread that uses the same document never returns,
+  because that thread is waiting for the commit.
+
+Keep blocks short. Other threads wait on them.
+
 ## Streaming into a document
 
 A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
-as its own update. `Doc#edit` runs a block that writes to the document and
-returns the update its writes produced, or nil when it wrote nothing. It
-holds only what was written through handles on this thread, so an update
-applied from elsewhere meanwhile stays out. In a reactor, another fiber's
-handle writes to the same document during the block are included too:
+as its own update. `Doc#edit` runs a block in one transaction, as
+`transact` does, and returns the update the transaction made, or nil when
+it changed nothing. Another thread's write waits for the block, so it stays
+out. In a reactor, a fiber the block resumes joins the transaction, so its
+writes are in the update too:
 
 ```ruby
 doc = Y::Doc.new

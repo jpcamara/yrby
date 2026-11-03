@@ -1,24 +1,43 @@
 # frozen_string_literal: true
 
 module Y
+  # `transact` for a document and each of its handles: run the block in one
+  # write transaction on the document, so its writes commit together.
+  #
+  # Every handle call and read inside the block, on this thread, uses that
+  # transaction and sees the block's writes. Other threads wait for the
+  # commit and never see them half done. A transaction already open on this
+  # thread is joined, not nested, and a fiber the block resumes joins it too.
+  #
+  # The writes commit when the block returns or raises. There is no rollback.
+  # Applying a remote update inside the block raises Y::Error, since it needs
+  # a transaction of its own. Keep the block short: other threads wait on it.
+  module Transact
+    def transact
+      raise ArgumentError, "transact needs a block" unless block_given?
+
+      native_transact { yield self }
+    end
+  end
+
   # Ruby-side conveniences over the native document.
   class Doc
-    # Runs the block, which edits this document through handles, and returns
-    # the update its writes produced, or nil when it wrote nothing. The
-    # document has the edit either way. The update is what a process saves
-    # and broadcasts, one call per chunk as it streams into a document.
+    include Transact
+
+    # Runs the block in a transaction, like `transact`, and returns the update
+    # its writes made, or nil when they changed nothing. The document has the
+    # edit either way. The update is what a process saves and broadcasts, one
+    # call per chunk as it streams into a document.
     #
-    # The update holds the handle writes made on this thread while the block
-    # runs, so an update applied from elsewhere stays out. In a reactor,
-    # another fiber's handle writes to this document during the block are in
-    # it too. Applying an update twice changes nothing, so that only adds
-    # bytes.
+    # The update is exactly the block's transaction. Another thread's write
+    # waits until the block returns, so it stays out. In a reactor, a fiber
+    # the block resumes joins the transaction, so its writes are in it too.
+    # `edit` raises Y::Error inside another `edit` or `transact` on the same
+    # document, where the outer block's update would hold its writes.
     def edit
-      recording = record_updates
-      yield self
-      recording.finish
-    ensure
-      recording&.finish
+      raise ArgumentError, "edit needs a block" unless block_given?
+
+      native_edit { yield self }
     end
 
     # The ordinal of the top-level block a position falls in, or nil at the
@@ -37,4 +56,6 @@ module Y
       native_find(anchor.position, anchor.root)
     end
   end
+
+  [Map, Array, Text, XmlText].each { |handle| handle.include(Transact) }
 end
