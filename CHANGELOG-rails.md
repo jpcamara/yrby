@@ -7,6 +7,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-03
+
+Requires yrby 0.9.0 or later.
+
 ### Experimental
 
 These are new, and they may change in a minor release. See

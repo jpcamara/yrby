@@ -6,6 +6,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## yrby-client 0.7.1 - 2026-11-03
+
+### Fixed
+
+- yrby-client: `connect()` restores the presence that `disconnect()` removed,
+  unless the app set or cleared presence in between. Before this, a `renew()`
+  (which document sessions call with a renewed grant) or a manual reconnect
+  left the local awareness state `null`, and y-protocols ignores
+  `setLocalStateField` while it is `null`, so the user stayed invisible to
+  peers until reload.
+
+## [0.9.0] - 2026-11-03
+
 ### Experimental
 
 These are new, and they may change in a minor release. See
@@ -31,9 +44,7 @@ These are new, and they may change in a minor release. See
   writes its block in one transaction. `XmlText#push_xml_text` and
   `insert_xml_text` take the new block's content, and `append` and
   `replace` write content into a block.
-- The Lexical and ProseMirror renderers refuse a link to a script: Lexical
-  sends it to `about:blank` and ProseMirror empties its `href`, as each
-  editor does. `append_markdown` writes such a link as plain text.
+- `append_markdown` writes a link to a script as plain text.
 - `Y::Anchor`, from `XmlText#anchor`, is a block's identity as a value to
   store or send. `Doc#block_at` and `Doc#find` resolve it.
   `relative_position(index)` builds the Yjs caret shape editors put in
@@ -55,12 +66,13 @@ These are new, and they may change in a minor release. See
 
 ### Fixed
 
-- yrby-client: `connect()` restores the presence that `disconnect()` removed,
-  unless the app set or cleared presence in between. Before this, a `renew()`
-  (which document sessions call with a renewed grant) or a manual reconnect
-  left the local awareness state `null`, and y-protocols ignores
-  `setLocalStateField` while it is `null`, so the user stayed invisible to
-  peers until reload.
+- The Lexical and ProseMirror renderers (and the `lexical-yjs-html` and
+  `prosemirror-yjs-html` 0.2.1 crates) refuse a link to a script: Lexical
+  sends it to `about:blank` and ProseMirror empties its `href`, as each
+  editor does.
+- A `Timeout`, `Thread#raise`, or `Thread#kill` that arrives during a
+  native call raises once the call returns. Before, Ruby could jump over
+  the extension's Rust frames without running their cleanup.
 
 ## yrby-client 0.7.0 - 2026-10-08
 
