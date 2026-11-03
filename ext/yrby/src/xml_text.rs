@@ -55,11 +55,11 @@ impl RbXmlText {
     fn to_s(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| x.get_string(&txn))
                 .unwrap_or_default()
-        }))
+        })
     }
 
     /// The text of this block: its strings, without the node markers, with
@@ -68,30 +68,28 @@ impl RbXmlText {
     fn text(&self) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| block_text(&txn, &x))
                 .unwrap_or_default()
-        }))
+        })
     }
 
     /// The length in characters, each embed counting as one.
     fn length(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| char_len(&txn, &x) as usize)
                 .unwrap_or(0)
-        }))
+        })
     }
 
     fn is_empty(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
-            resolve::<XmlTextRef, _>(&txn, id).is_none_or(|x| x.len(&txn) == 0)
-        }))
+        nogvl(move || resolve::<XmlTextRef, _>(&txn, id).is_none_or(|x| x.len(&txn) == 0))
     }
 
     /// The name of the root this block lives under; an anchor carries it.
@@ -116,7 +114,7 @@ impl RbXmlText {
                 })
                 .collect(),
             None => Vec::new(),
-        });
+        })?;
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let hash = ruby.hash_new();
         for (key, any) in pairs {
@@ -129,11 +127,11 @@ impl RbXmlText {
     fn xml_text_count(&self) -> Result<usize, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| embedded_xml_texts(&txn, &x).len())
                 .unwrap_or(0)
-        }))
+        })
     }
 
     /// A live handle to the `n`-th embedded `XmlText` block, or nil when there
@@ -146,7 +144,7 @@ impl RbXmlText {
             let blocks = embedded_xml_texts(&txn, &resolve::<XmlTextRef, _>(&txn, id)?);
             let n = element_index(n, blocks.len() as u32)?;
             Some(identity(&blocks[n as usize]))
-        });
+        })?;
         Ok(block.map(|block| RbXmlText::new(self.doc.clone(), block, self.root.clone())))
     }
 
@@ -155,11 +153,11 @@ impl RbXmlText {
     fn ends_with_xml_text(&self) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let txn = crate::txn::read(doc)?;
-        Ok(nogvl(move || {
+        nogvl(move || {
             resolve::<XmlTextRef, _>(&txn, id)
                 .map(|x| ends_with_xml_text(&txn, &x))
                 .unwrap_or(false)
-        }))
+        })
     }
 
     // --- writes ---
@@ -347,7 +345,7 @@ pub fn root_xml_text(doc: &Doc, name: String) -> Result<RbXmlText, Error> {
     let root = name.clone();
     nogvl(move || {
         yrs::WriteTxn::get_or_insert_xml_fragment(&mut *txn, root.as_str());
-    });
+    })?;
     Ok(RbXmlText::new(
         doc.clone(),
         BranchID::Root(name.as_str().into()),

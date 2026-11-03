@@ -27,7 +27,7 @@ use yrs::{
 };
 
 use crate::shared::ORIGIN;
-use crate::{nogvl, yrb_error};
+use crate::{without_gvl, yrb_error};
 
 /// How long a wait sleeps between tries, in seconds.
 const RETRY: f64 = 0.001;
@@ -280,7 +280,7 @@ impl Drop for Hold {
         HELD.with(|held| held.borrow_mut().retain(|h| !std::ptr::eq(h.txn, ptr)));
         // Committing runs observers and merges blocks, without the GVL.
         let txn = OnThisThread(self.txn.take());
-        nogvl(move || drop(txn));
+        without_gvl(move || drop(txn));
     }
 }
 

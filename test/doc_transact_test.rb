@@ -492,6 +492,51 @@ class DocTransactTest < Minitest::Test
     assert_equal "", doc.read_text("t").to_s
   end
 
+  class Interrupted < StandardError
+  end
+
+  # An interrupt raises after the native call, never in the middle of it,
+  # so the call finishes and releases the document.
+  def test_an_interrupt_raises_after_the_call_finishes
+    doc = Y::Doc.new
+    map = doc.get_map("m")
+
+    assert_raises(Interrupted) do
+      Thread.handle_interrupt(Interrupted => :on_blocking) do
+        Thread.current.raise(Interrupted)
+        map["n"] = 1
+      end
+    end
+
+    assert_equal({ "n" => 1 }, map.to_h)
+    Timeout.timeout(1) { map["n"] = 2 }
+
+    assert_equal({ "n" => 2 }, map.to_h)
+  end
+
+  # Ruby delivers one interrupt per check. A thread that only calls into yrby
+  # still gets the ones queued behind it, here a kill after many raises.
+  def test_queued_interrupts_reach_a_thread_that_only_calls_yrby
+    map = Y::Doc.new.get_map("m")
+    looping = Queue.new
+    worker = Thread.new do
+      loop do
+        map["n"] = 1
+        looping << true if looping.empty?
+      end
+    rescue Interrupted
+      retry
+    end
+    looping.pop
+    2_000.times do
+      worker.raise(Interrupted)
+      Thread.pass
+    end
+    worker.kill
+
+    assert worker.join(5), "the kill never reached the worker"
+  end
+
   # Two threads nesting blocks on two documents in opposite orders wait on
   # each other. A timeout breaks the wait, and both documents are free after.
   def test_opposite_order_nesting_can_be_broken_by_a_timeout

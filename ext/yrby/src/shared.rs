@@ -70,7 +70,7 @@ where
             .cloned()
             .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
             .unwrap_or_else(|| "the document operation failed".to_string())),
-    })
+    })?
     .map_err(yrb_error)
 }
 
