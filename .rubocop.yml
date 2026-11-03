@@ -60,6 +60,8 @@ Metrics/ClassLength:
     # session holds the protocol it drives.
     - "lib/y/action_cable/client.rb"
     - "lib/y/action_cable/client/session.rb"
+    # The agent keeps its whole stay, from joining to leaving, in one place.
+    - "lib/y/agent.rb"
 Minitest/MultipleAssertions:
   Enabled: false
 

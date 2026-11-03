@@ -358,7 +358,10 @@ above. Enqueue the job from code that has already checked the person may
 edit the post, since the agent gets the same access.
 
 The block sets the agent up and can write right away. `run` then follows the
-document. `on_change` gets the blocks people changed once their typing has
+document and returns when the agent leaves. In a job it holds the job's
+thread for that long, with the agent's connection on a reactor in that
+thread. Inside a reactor (Falcon, an `Async` block) it runs as a task of
+that one. `on_change` gets the blocks people changed once their typing has
 paused for a moment, and never the agent's own edits. `agent.people` lists
 who else is present.
 
