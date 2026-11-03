@@ -708,6 +708,30 @@
   }
 
   /* -------------------------------------------------------------------------
+   * Form (#form; the JS builds the fields). 16px text on phones, so iOS
+   * doesn't zoom in when a field gets focus.
+   * ---------------------------------------------------------------------- */
+  #form {
+    @apply grid max-w-xl gap-4 rounded-xl border border-zinc-800 bg-panel p-5;
+  }
+
+  #form .field {
+    @apply grid gap-1.5 text-sm font-medium text-zinc-400;
+  }
+
+  #form input,
+  #form select,
+  #form textarea {
+    @apply w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2
+           text-base font-normal text-zinc-200 outline-none
+           focus:border-rose-500/60 disabled:opacity-50 sm:text-sm;
+  }
+
+  #form textarea {
+    @apply min-h-24 resize-y;
+  }
+
+  /* -------------------------------------------------------------------------
    * Demo and docs list cards (server-rendered, used on the home page and the
    * demo index).
    * ---------------------------------------------------------------------- */

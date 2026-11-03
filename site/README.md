@@ -618,7 +618,7 @@ the site, so they stay in sync:
 
 ## Demos
 
-There are seven demo pages, picked to cover different Yjs shapes:
+There are eight demo pages, picked to cover different Yjs shapes:
 
 | Page | Shape | What it shows |
 |---|---|---|
@@ -629,6 +629,7 @@ There are seven demo pages, picked to cover different Yjs shapes:
 | Kanban | `Y.Array` | A move is one `map.set`, so concurrent moves never conflict |
 | Chat | `Y.Array` of `Y.Map`s | Typing shown through awareness without the text, and reactions keyed by person so they merge |
 | Code | `Y.Text` | CodeMirror 6 with remote cursors and selections |
+| Form | `Y.Map` of `Y.Text`s | Typing in the same field merges; a choice is last-pick-wins |
 
 ### The Lexxy demo
 

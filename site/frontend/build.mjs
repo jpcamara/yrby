@@ -62,6 +62,7 @@ const ENTRIES = [
   "src/whiteboard.js",   // Y.Map of shape records
   "src/kanban.js",       // Y.Array of card Y.Maps
   "src/chat.js",         // Y.Array of message Y.Maps, drafts in awareness
+  "src/form.js",         // Y.Map of field Y.Texts and a plain choice
   { entry: "src/document.js", external: ["@rails/actioncable"] },
   "src/codemirror.js",   // Y.Text
   "src/hero.js",         // the home page replay; no Yjs, no cable

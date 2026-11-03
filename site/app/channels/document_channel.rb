@@ -1,5 +1,5 @@
 # The collaborative document channel for the shape demos (spreadsheet,
-# whiteboard, kanban, chat, code, Tiptap).
+# whiteboard, kanban, chat, code, form, Tiptap).
 #
 # The yrby part matches the docs: `include Y::ActionCable` (through
 # RoomGuarded) and two hooks that use the gem's storage models on SQLite.

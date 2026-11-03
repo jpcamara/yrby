@@ -62,6 +62,14 @@ module Demos
       shape: "Y.Text",
       blurb: "CodeMirror 6 with y-codemirror.next, including other people's cursors and selections.",
       read: Reader.new(root: "code", kind: :text)
+    ),
+    Demo.new(
+      slug: "form",
+      title: "Form",
+      shape: "Y.Map of Y.Texts",
+      blurb: "Each text field is a Y.Text, so two people typing in the same field both keep their edit. " \
+             "A choice is a plain value, and the last pick wins.",
+      read: Reader.new(root: "form", kind: :map)
     )
   ].freeze
 
