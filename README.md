@@ -101,7 +101,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
-- [Experimental: writing from Ruby](#experimental-writing-from-ruby)
+- [Experimental: writing from Ruby, and agents](#experimental-writing-from-ruby-and-agents)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
 - [Message Type Constants](#message-type-constants)
@@ -1077,7 +1077,7 @@ The browser clients manage presence (cursors, selections). The server doesn't
 set or hold presence state, and it relays awareness frames without reading
 them. See `yrby-client` for the client-side awareness API.
 
-## Experimental: writing from Ruby
+## Experimental: writing from Ruby, and agents
 
 These APIs are new. They may change in any minor release, and they aren't
 covered by yrby's usual compatibility promise.
@@ -1088,6 +1088,11 @@ covered by yrby's usual compatibility promise.
 - Anchors: a block's identity as a value
 - Streaming into a document with `Doc#edit`
 - Editing a record's document from Ruby
+- Joining a document from a Ruby process, with `Y::ActionCable::Client`
+- Agents, with `Y::Agent`
+
+`require "y/action_cable/client"` and `require "y/agent"` print a warning in
+Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 
 ## Thread Safety
 

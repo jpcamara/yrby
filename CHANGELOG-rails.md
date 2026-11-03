@@ -7,6 +7,25 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
+
+- `Y::ActionCable::Client` joins a document over the cable's websocket with a
+  grant, as a browser does. `edit` sends a change, every update is resent
+  until acked, and a dropped socket reconnects. `presence=` shows the client
+  to others and renews itself. It sends the URL's origin, and `headers:`
+  add anything else the connection checks. It needs the async-websocket gem.
+- `Y::Agent.run(post.collaborative_document(:body), url:, headers:,
+  presence:) { |agent| ... }` runs a Ruby process as a participant in a
+  document, from a job or anywhere else. It joins with a grant, calls
+  `on_change` with the blocks people changed once their typing settles, and
+  leaves when nobody else has been present for `idle` seconds or after
+  `max_stay`. One agent works on a document at a time, through a lock in
+  `Rails.cache`, or one per person with `as: person`. Errors in handlers
+  go to `on_error` and the agent keeps going. `require "y/agent"` to use it.
+
 ## [0.8.0] - 2026-11-03
 
 Requires yrby 0.9.0 or later.
