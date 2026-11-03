@@ -20,6 +20,36 @@ class ThreadSafetyTest < Minitest::Test
   THREADS = 8
   ITERATIONS = 50
 
+  # A handle to a nested value is taken inside the transaction that finds the
+  # value. Another thread can delete the value and free it the moment that
+  # transaction ends.
+  def test_getting_a_handle_while_another_thread_deletes_the_value
+    map = Y::Doc.new.get_map("m")
+    list = Y::Doc.new.get_array("a")
+    stop = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
+    alive = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) < stop }
+    threads = [
+      Thread.new do
+        while alive.call
+          map["child"] = { "n" => 1 }
+          map.delete("child")
+        end
+      end,
+      Thread.new { map.get_map("child") while alive.call },
+      Thread.new do
+        while alive.call
+          list.push({ "n" => 1 })
+          list.delete_at(0)
+        end
+      end,
+      Thread.new { list.get_map(0) while alive.call }
+    ]
+    threads.each(&:join)
+
+    assert_nil map.get_map("child")
+    assert_equal 0, list.size
+  end
+
   def test_concurrent_writes_and_reads_on_shared_doc
     doc = Y::Doc.new
     updates = [

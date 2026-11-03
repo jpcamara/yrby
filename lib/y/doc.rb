@@ -4,21 +4,17 @@ module Y
   # Ruby-side conveniences over the native document.
   class Doc
     # Runs the block, which edits this document through handles, and returns
-    # the update its writes produced, or nil when it wrote nothing. The
-    # document has the edit either way. The update is what a process saves
-    # and broadcasts, one call per chunk as it streams into a document.
+    # the update its writes produced, or nil when the document didn't change.
+    # The document has the edit either way. The update is what a process
+    # saves and broadcasts, one call per chunk as it streams into a document.
     #
-    # The update holds the handle writes made on this thread while the block
-    # runs, so an update applied from elsewhere stays out. In a reactor,
-    # another fiber's handle writes to this document during the block are in
-    # it too. Applying an update twice changes nothing, so that only adds
-    # bytes.
+    # The update holds everything the document gained while the block ran,
+    # so a write another thread or peer made meanwhile is in it too. Applying
+    # an update twice changes nothing, so that only adds bytes.
     def edit
-      recording = record_updates
+      before = native_snapshot
       yield self
-      recording.finish
-    ensure
-      recording&.finish
+      native_update_since(before)
     end
 
     # The ordinal of the top-level block a position falls in, or nil at the

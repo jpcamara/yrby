@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "timeout"
 
 # Doc#edit is the unit a long-lived process saves and broadcasts as it
 # streams into a document: the update the block produced, or nil for none.
@@ -58,31 +59,52 @@ class DocEditTest < Minitest::Test
     assert_operator doc.edit { text << "y" }.bytesize, :<, 40
   end
 
-  def test_an_update_applied_during_the_block_is_left_out
+  # The update holds everything the document gained during the block, so a
+  # peer's update or another thread's write made meanwhile is in it too.
+  def test_writes_made_elsewhere_during_the_block_are_in_the_update
     doc = Y::Doc.new
     remote = Y::Doc.new
     remote.get_text("theirs") << "from a peer"
     update = doc.edit do |d|
       d.apply_update(remote.encode_state_as_update)
+      Thread.new { d.get_text("other") << "other thread" }.join
       d.get_text("mine") << "from ruby"
     end
     fresh = Y::Doc.new
     fresh.apply_update(update)
 
-    assert_equal "", fresh.read_text("theirs").to_s
+    assert_equal "from a peer", fresh.read_text("theirs")
+    assert_equal "other thread", fresh.read_text("other")
     assert_equal "from ruby", fresh.read_text("mine")
   end
 
-  def test_another_threads_writes_are_left_out
+  def test_a_block_that_only_deletes_yields_its_deletion
     doc = Y::Doc.new
-    update = doc.edit do |d|
-      Thread.new { d.get_text("theirs") << "other thread" }.join
-      d.get_text("mine") << "this thread"
-    end
-    fresh = Y::Doc.new
-    fresh.apply_update(update)
+    text = doc.get_text("t")
+    text << "abc"
+    peer = Y::Doc.new
+    peer.apply_update(doc.encode_state_as_update)
 
-    assert_equal "", fresh.read_text("theirs").to_s
-    assert_equal "this thread", fresh.read_text("mine")
+    peer.apply_update(doc.edit { text.delete(0, 1) })
+
+    assert_equal "bc", peer.read_text("t")
+  end
+
+  # Timeouts that land anywhere in an edit leave the document usable.
+  def test_timeouts_during_edits_leave_the_document_usable
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    200.times do
+      Timeout.timeout(0.0005) { loop { doc.edit { text << "a" } } }
+    rescue Timeout::Error
+      nil
+    end
+
+    update = doc.edit { text << "b" }
+    peer = Y::Doc.new
+    peer.apply_update(doc.encode_state_as_update)
+
+    refute_nil update
+    assert_equal text.to_s, peer.read_text("t")
   end
 end

@@ -56,6 +56,29 @@ pub fn identity<S: SharedRef>(shared: &S) -> BranchID {
     shared.hook().into()
 }
 
+/// A value stored in a map or an array, as the handle it takes: its kind
+/// and identity. Read it inside the transaction. The value's branch pointer
+/// can't leave it, since another thread can delete the branch, and its
+/// commit frees it.
+pub enum Child {
+    Map(BranchID),
+    Array(BranchID),
+    Text(BranchID),
+    /// A plain value, or nothing at all.
+    Other,
+}
+
+impl Child {
+    pub fn of(value: Option<Out>) -> Child {
+        match value {
+            Some(Out::YMap(m)) => Child::Map(identity(&m)),
+            Some(Out::YArray(a)) => Child::Array(identity(&a)),
+            Some(Out::YText(t)) => Child::Text(identity(&t)),
+            _ => Child::Other,
+        }
+    }
+}
+
 /// Run `f` without the GVL. Its error, or a panic inside yrs, becomes a
 /// `Y::Error` instead of taking the process down.
 pub fn guarded<F, R>(f: F) -> Result<R, Error>

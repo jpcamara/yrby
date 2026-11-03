@@ -11,13 +11,13 @@
 
 use magnus::{prelude::*, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Doc, Map, MapRef, Out, Transact};
+use yrs::{Any, Doc, Map, MapRef, Transact};
 
 use crate::array::RbArray;
 use crate::nogvl;
 use crate::read::out_to_any;
 use crate::shared::{
-    any_to_ruby, guarded, identity, key_to_string, resolve, ruby_to_invalue, to_in, ORIGIN,
+    any_to_ruby, guarded, identity, key_to_string, resolve, ruby_to_invalue, to_in, Child, ORIGIN,
 };
 use crate::text::RbText;
 
@@ -36,12 +36,12 @@ impl RbMap {
 
     /// The shared value at `key`, resolved now: what `get_map`, `get_array`
     /// and `get_text` narrow to a handle.
-    fn child(&self, key: Value) -> Result<Option<Out>, Error> {
+    fn child(&self, key: Value) -> Result<Child, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
         Ok(nogvl(move || {
             let txn = doc.transact();
-            resolve::<MapRef, _>(&txn, id)?.get(&txn, &key)
+            Child::of(resolve::<MapRef, _>(&txn, id).and_then(|m| m.get(&txn, &key)))
         }))
     }
 
@@ -68,7 +68,7 @@ impl RbMap {
     /// not a map. Mutating it mutates the document.
     fn get_map(&self, key: Value) -> Result<Option<Self>, Error> {
         Ok(match self.child(key)? {
-            Some(Out::YMap(m)) => Some(RbMap::new(self.doc.clone(), identity(&m))),
+            Child::Map(id) => Some(RbMap::new(self.doc.clone(), id)),
             _ => None,
         })
     }
@@ -76,7 +76,7 @@ impl RbMap {
     /// A live `Y::Array` for an array stored at `key`.
     fn get_array(&self, key: Value) -> Result<Option<RbArray>, Error> {
         Ok(match self.child(key)? {
-            Some(Out::YArray(a)) => Some(RbArray::new(self.doc.clone(), identity(&a))),
+            Child::Array(id) => Some(RbArray::new(self.doc.clone(), id)),
             _ => None,
         })
     }
@@ -84,7 +84,7 @@ impl RbMap {
     /// A live `Y::Text` for text stored at `key`.
     fn get_text(&self, key: Value) -> Result<Option<RbText>, Error> {
         Ok(match self.child(key)? {
-            Some(Out::YText(t)) => Some(RbText::new(self.doc.clone(), identity(&t))),
+            Child::Text(id) => Some(RbText::new(self.doc.clone(), id)),
             _ => None,
         })
     }
@@ -327,7 +327,7 @@ mod tests {
         let map = state();
         map.set(rb("user"), hash(&[("name", rb("Ada"))]).as_value())
             .unwrap();
-        assert!(matches!(map.child(rb("user")).unwrap(), Some(Out::YMap(_))));
+        assert!(matches!(map.child(rb("user")).unwrap(), Child::Map(_)));
         let user = map.get_map(rb("user")).unwrap().expect("a map at user");
         user.set(rb("age"), rb(36)).unwrap();
         let mut entries = user.snapshot();
@@ -348,7 +348,7 @@ mod tests {
             m.insert(&mut txn, "notes", TextPrelim::new("hi"));
             m.insert(&mut txn, "list", ArrayPrelim::default());
         }
-        assert!(map.child(rb("missing")).unwrap().is_none());
+        assert!(matches!(map.child(rb("missing")).unwrap(), Child::Other));
         assert!(map.get_map(rb("n")).unwrap().is_none());
         assert!(map.get_text(rb("notes")).unwrap().is_some());
         assert!(map.get_text(rb("list")).unwrap().is_none());
