@@ -30,8 +30,8 @@ use yrs::{
 
 use crate::{nogvl, yrb_error};
 
-/// The origin of every write transaction a handle or a `transact` block
-/// opens, which tells it apart from an update applied from elsewhere.
+/// The origin of every transaction a handle opens. `Doc#edit` returns only
+/// these, so an update applied from elsewhere while it runs stays out.
 pub const ORIGIN: &str = "yrby";
 
 /// The largest integer a double represents exactly (2^53).
@@ -70,7 +70,7 @@ where
             .cloned()
             .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
             .unwrap_or_else(|| "the document operation failed".to_string())),
-    })?
+    })
     .map_err(yrb_error)
 }
 

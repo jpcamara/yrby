@@ -1086,7 +1086,6 @@ covered by yrby's usual compatibility promise.
 - Live `Y::Map`, `Y::Array`, and `Y::Text` handles that write to a document
 - Writing Lexical rich text from Ruby, with `Y::Lexical` and `Y::Lexxy`
 - Anchors: a block's identity as a value
-- Writing in one transaction with `Doc#transact`
 - Streaming into a document with `Doc#edit`
 - Editing a record's document from Ruby
 
