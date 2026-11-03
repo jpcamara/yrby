@@ -90,4 +90,23 @@ class DocChangesTest < Minitest::Test
     assert_empty doc.apply_update_changes(DIVIDER_REMOVED.unpack1("m"), "root")
     assert_equal "first\nsecond", doc.read_xml("root")
   end
+
+  # apply_update_changes reports the blocks its own update touched, even
+  # while another thread writes to the document.
+  def test_apply_update_changes_reports_only_its_own_update
+    doc = Y::Doc.new
+    Y::Lexical.append_paragraph(doc, "first")
+    peer = Y::Doc.new
+    peer.apply_update(doc.encode_state_as_update)
+    done = false
+    writer = Thread.new { Y::Lexical.append_paragraph(doc, "local") until done }
+    reports = 300.times.map do |i|
+      update = peer.edit { |pd| pd.get_xml_text("root").xml_text(0).insert(-1, " #{i}") }
+      doc.apply_update_changes(update, "root")
+    end
+    done = true
+    writer.join(10) or flunk "the writer never finished"
+
+    assert_equal [[0]], reports.uniq
+  end
 end

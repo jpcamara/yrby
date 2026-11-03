@@ -18,16 +18,9 @@ These are new, and they may change in a minor release. See
   made for while others edit around it, and releases the GVL like `Doc`.
   Indexes are Ruby characters, and negative indexes count from the end as in
   Ruby.
-- `Doc#transact { }` runs a block in one write transaction. Its writes commit
-  together, reads inside see them, and other threads and fibers see all of
-  them or none. Each handle has `transact` for its document. The Lexical
-  helpers write each block in one transaction.
-- A call that waits for a document another thread or fiber is using can be
-  interrupted by `Timeout`, `Thread#kill`, or Ctrl-C, and under a fiber
-  scheduler it yields while it waits.
-- `Doc#edit { }` runs a block in one transaction and returns the update it
-  made, or nil when it changed nothing. It is the unit a process saves and
-  sends as it writes.
+- `Doc#edit { }` runs a block that writes to the document and returns the
+  update its writes produced, or nil when it wrote nothing. It is the unit a
+  process saves and sends as it writes.
 - `Y::Lexical` and `Y::Lexxy` write Lexical's node shape: `append_paragraph`,
   `append_heading`, `append_list`, `append_quote`, `append_code`,
   `append_markdown`, `insert_paragraph`, `append_text`, `replace_runs`, and
