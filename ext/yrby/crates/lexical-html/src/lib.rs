@@ -794,13 +794,24 @@ fn lexxy_style(style: &str) -> Option<String> {
     if css.is_empty() { None } else { Some(css) }
 }
 
+/// The schemes a link may use, and what an editor shows for any other, as
+/// Lexical's `LinkNode` does: a `javascript:` link would run in the page.
+const LINK_SCHEMES: [&str; 5] = ["http", "https", "mailto", "sms", "tel"];
+
+fn safe_href(url: String) -> String {
+    match url_scheme(&url) {
+        Some(scheme) if !LINK_SCHEMES.contains(&scheme.as_str()) => "about:blank".to_string(),
+        _ => url,
+    }
+}
+
 /// `link` / `autolink`: Lexxy's sanitize keeps only `href` and `title`
 /// (`target`/`rel` are stored in the doc but stripped from exported HTML).
 fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize, em: &mut Emitter, rules: &Rules) {
     em.push_str("<a");
     if let Some(url) = str_attr(txn, t, "__url") {
         em.push_str(" href=\"");
-        em.push_str(&escape_attr(&url));
+        em.push_str(&escape_attr(&safe_href(url)));
         em.push('"');
     }
     if let Some(title) = str_attr(txn, t, "__title").filter(|s| !s.is_empty()) {
@@ -979,6 +990,21 @@ pub fn escape_attr(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_to_an_unsafe_scheme_goes_nowhere() {
+        assert_eq!(
+            safe_href("https://example.com".into()),
+            "https://example.com"
+        );
+        assert_eq!(safe_href("/docs".into()), "/docs");
+        assert_eq!(
+            safe_href("mailto:a@example.com".into()),
+            "mailto:a@example.com"
+        );
+        assert_eq!(safe_href("javascript:alert(1)".into()), "about:blank");
+        assert_eq!(safe_href(" JAVA\tSCRIPT:alert(1)".into()), "about:blank");
+    }
     use yrs::updates::decoder::Decode;
     use yrs::{Doc, Transact, Update};
 

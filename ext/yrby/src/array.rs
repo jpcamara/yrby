@@ -142,15 +142,23 @@ impl RbArray {
 
     // --- writes ---
 
-    /// Append a value. A Ruby `Hash` becomes a real nested `Y.Map`, so the
-    /// element can be handed back later as a live handle by `get_map`.
-    fn push(&self, value: Value) -> Result<Value, Error> {
-        self.insert(-1, value)
+    /// Append a value and return the array, as `Array#push` does. A Ruby
+    /// `Hash` becomes a real nested `Y.Map`, so the element can be handed back
+    /// later as a live handle by `get_map`.
+    fn push(rb_self: Obj<Self>, value: Value) -> Result<Obj<Self>, Error> {
+        rb_self.insert_at(-1, value)?;
+        Ok(rb_self)
     }
 
-    /// Insert at `index`, as `Array#insert` does: a negative index counts from
-    /// the end (-1 appends). An index past the end appends.
-    fn insert(&self, index: i64, value: Value) -> Result<Value, Error> {
+    /// Insert at `index` and return the array, as `Array#insert` does.
+    fn insert(rb_self: Obj<Self>, index: i64, value: Value) -> Result<Obj<Self>, Error> {
+        rb_self.insert_at(index, value)?;
+        Ok(rb_self)
+    }
+
+    /// Insert at `index`: a negative index counts from the end (-1 appends),
+    /// and an index past the end appends.
+    fn insert_at(&self, index: i64, value: Value) -> Result<(), Error> {
         let ruby = Ruby::get().unwrap();
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
@@ -160,8 +168,7 @@ impl RbArray {
             let at = insert_index(index, a.len(&txn));
             a.insert(&mut txn, at, to_in(iv));
             Ok(())
-        })?;
-        Ok(value)
+        })
     }
 
     /// Remove the element at `index`, returning its previous snapshot value.
@@ -260,7 +267,7 @@ mod tests {
     fn list_of(values: &[i64]) -> RbArray {
         let list = root_array(&doc(), "list".into()).unwrap();
         for v in values {
-            list.push(rb(*v)).unwrap();
+            list.insert_at(-1, rb(*v)).unwrap();
         }
         list
     }
@@ -274,19 +281,19 @@ mod tests {
     }
 
     #[ruby_test]
-    fn push_appends_and_returns_the_value() {
+    fn insert_at_minus_one_appends() {
         let list = list_of(&[1]);
-        assert_eq!(list.push(rb(2)).unwrap().inspect(), "2");
+        list.insert_at(-1, rb(2)).unwrap();
         assert_eq!(list.snapshot().unwrap(), vec![int(1), int(2)]);
     }
 
     #[ruby_test]
     fn insert_reads_a_negative_index_from_the_end_and_clamps() {
         let list = list_of(&[1, 3]);
-        list.insert(1, rb(2)).unwrap();
-        list.insert(-1, rb(4)).unwrap();
-        list.insert(99, rb(5)).unwrap();
-        list.insert(-99, rb(0)).unwrap();
+        list.insert_at(1, rb(2)).unwrap();
+        list.insert_at(-1, rb(4)).unwrap();
+        list.insert_at(99, rb(5)).unwrap();
+        list.insert_at(-99, rb(0)).unwrap();
         assert_eq!(
             list.snapshot().unwrap(),
             vec![int(0), int(1), int(2), int(3), int(4), int(5)]
@@ -329,7 +336,8 @@ mod tests {
     #[ruby_test]
     fn child_is_the_shared_value_at_an_index() {
         let list = list_of(&[1]);
-        list.push(hash(&[("name", rb("Ada"))]).as_value()).unwrap();
+        list.insert_at(-1, hash(&[("name", rb("Ada"))]).as_value())
+            .unwrap();
         assert!(matches!(list.child(-1).unwrap(), Child::Map(_)));
         assert!(matches!(list.child(0).unwrap(), Child::Other));
         assert!(matches!(list.child(2).unwrap(), Child::Other));
@@ -338,7 +346,8 @@ mod tests {
     #[ruby_test]
     fn get_map_get_text_and_get_array_narrow_by_type() {
         let list = list_of(&[]);
-        list.push(hash(&[("name", rb("Ada"))]).as_value()).unwrap();
+        list.insert_at(-1, hash(&[("name", rb("Ada"))]).as_value())
+            .unwrap();
         {
             let mut txn = list.doc.transact_mut();
             let array = resolve::<ArrayRef, _>(&txn, &list.id).unwrap();
@@ -351,7 +360,7 @@ mod tests {
         assert!(list.get_text(1).unwrap().is_some());
         assert!(list.get_map(1).unwrap().is_none());
         let nested = list.get_array(-1).unwrap().expect("an array at the end");
-        nested.push(rb(7)).unwrap();
+        nested.insert_at(-1, rb(7)).unwrap();
         assert_eq!(list.get(2).unwrap().inspect(), "[7]");
     }
 
@@ -364,11 +373,11 @@ mod tests {
             array.push_back(&mut txn, ArrayPrelim::default());
         }
         let inner = outer.get_array(0).unwrap().unwrap();
-        inner.push(rb(1)).unwrap();
+        inner.insert_at(-1, rb(1)).unwrap();
         outer.delete_at(0).unwrap();
         assert_eq!(inner.size().unwrap(), 0);
         assert!(inner.snapshot().unwrap().is_empty());
-        let err = inner.push(rb(2)).unwrap_err();
+        let err = inner.insert_at(-1, rb(2)).unwrap_err();
         assert!(err.to_string().contains("array no longer exists"), "{err}");
     }
 
@@ -377,7 +386,7 @@ mod tests {
         let doc = doc();
         root_array(&doc, "list".into())
             .unwrap()
-            .push(rb(1))
+            .insert_at(-1, rb(1))
             .unwrap();
         assert_eq!(
             root_array(&doc, "list".into()).unwrap().snapshot().unwrap(),

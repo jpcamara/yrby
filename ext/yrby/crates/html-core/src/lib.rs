@@ -458,9 +458,40 @@ fn parse_parts(name: &str, parts: &[serde_json::Value]) -> Result<Vec<AttrPart>,
         .collect()
 }
 
+/// The scheme a URL names, lowercased, or `None` for a URL without one (a
+/// path). Browsers ignore whitespace and control characters in a scheme, so
+/// they don't count here either: `java\tscript:` is `javascript`.
+pub fn url_scheme(url: &str) -> Option<String> {
+    let url: String = url
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    let (scheme, _) = url.split_once(':')?;
+    let mut chars = scheme.chars();
+    let starts_with_letter = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
+    let valid = chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'));
+    (starts_with_letter && valid).then(|| scheme.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn url_scheme_reads_a_scheme_as_a_browser_does() {
+        assert_eq!(url_scheme("https://example.com").as_deref(), Some("https"));
+        assert_eq!(
+            url_scheme("JavaScript:alert(1)").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(
+            url_scheme(" java\tscript:alert(1)").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(url_scheme("/docs/a:b"), None);
+        assert_eq!(url_scheme("#top"), None);
+        assert_eq!(url_scheme("example.com"), None);
+    }
 
     #[test]
     fn parses_the_compiled_rule_shape() {

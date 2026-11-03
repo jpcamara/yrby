@@ -12,7 +12,14 @@ module Y
       NUMBERED = /\A\d+[.)]\s+(.*)\z/
       QUOTE = /\A>\s?(.*)\z/
       FENCE = /\A```\s*([^\s`]*)[^`]*\z/ # the language, then any other info
-      INLINE = /(\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|(?<![*\w])\*([^*]+)\*(?!\w)|(?<!\w)_([^_]+)_(?!\w))/
+      INLINE = /
+        ( \*\*(.+?)\*\*                                # bold
+        | `([^`]+)`                                    # code
+        | \[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)  # link: its URL may hold balanced parentheses
+        | (?<![*\w])\*([^*]+)\*(?!\w)                  # italic
+        | (?<!\w)_([^_]+)_(?!\w)                       # italic
+        )
+      /x
 
       module_function
 
@@ -137,13 +144,25 @@ module Y
           out << m.pre_match unless m.pre_match.empty?
           out << if m[2] then { text: m[2], bold: true }
                  elsif m[3] then { text: m[3], code: true }
-                 elsif m[4] then { text: m[4], link: m[5] }
+                 elsif m[4] then safe_url?(m[5]) ? { text: m[4], link: m[5] } : m[4]
                  else { text: m[6] || m[7], italic: true }
                  end
           rest = m.post_match
         end
         out << rest unless rest.empty?
         out
+      end
+
+      # The URL schemes a Markdown link may use, as Lexical's own link node
+      # allows them. A URL without a scheme is a path and stays.
+      SAFE_SCHEMES = %w[http https mailto sms tel].freeze
+
+      # Whether a model's link is safe to write: a `javascript:` URL becomes
+      # plain text. Browsers ignore whitespace and control characters inside
+      # a scheme, so those don't hide one.
+      def safe_url?(url)
+        scheme = url.gsub(/[\x00-\x20\x7f]/, "")[/\A([a-z][a-z0-9+.-]*):/i, 1]
+        scheme.nil? || SAFE_SCHEMES.include?(scheme.downcase)
       end
     end
 

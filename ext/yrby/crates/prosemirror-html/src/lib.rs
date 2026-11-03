@@ -807,16 +807,25 @@ fn hex_to_rgb(value: &str) -> Option<String> {
     Some(format!("rgb({r}, {g}, {b})"))
 }
 
+/// The schemes a link may use, as Tiptap's link mark allows them. It
+/// renders a link with any other scheme with an empty `href`, since a
+/// `javascript:` link would run in the page.
+const LINK_SCHEMES: [&str; 10] = [
+    "http", "https", "ftp", "ftps", "mailto", "tel", "callto", "sms", "cid", "xmpp",
+];
+
 /// `<a>` with Tiptap's attribute order (target, rel, class, href, title),
 /// skipping any that are absent or null.
 fn link_open(link: &std::collections::HashMap<String, Any>) -> String {
     let mut out = String::from("<a");
     for key in ["target", "rel", "class", "href", "title"] {
         if let Some(Any::String(v)) = link.get(key) {
+            let unsafe_href = key == "href"
+                && url_scheme(v).is_some_and(|scheme| !LINK_SCHEMES.contains(&scheme.as_str()));
             out.push(' ');
             out.push_str(key);
             out.push_str("=\"");
-            out.push_str(&escape_attr(v));
+            out.push_str(&escape_attr(if unsafe_href { "" } else { v }));
             out.push('"');
         }
     }
@@ -899,6 +908,22 @@ pub fn escape_attr(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_to_an_unsafe_scheme_has_an_empty_href() {
+        let link = |href: &str| {
+            link_open(&std::collections::HashMap::from([(
+                "href".to_string(),
+                Any::from(href),
+            )]))
+        };
+        assert_eq!(
+            link("https://example.com"),
+            r#"<a href="https://example.com">"#
+        );
+        assert_eq!(link("ftp://example.com"), r#"<a href="ftp://example.com">"#);
+        assert_eq!(link("javascript:alert(1)"), r#"<a href="">"#);
+    }
     use std::collections::HashMap;
     use std::sync::Arc;
     use yrs::updates::decoder::Decode;
