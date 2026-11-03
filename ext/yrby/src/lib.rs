@@ -11,6 +11,7 @@ use yrs::{DeepObservable, Doc, GetString, ReadTxn, Text, Transact};
 
 mod array;
 mod map;
+mod memory;
 mod protocol;
 mod read;
 mod shared;
