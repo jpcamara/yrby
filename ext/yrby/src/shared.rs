@@ -33,16 +33,26 @@ use crate::{nogvl, yrb_error};
 /// The origin of every transaction a handle opens, all through `write`.
 pub const ORIGIN: &str = "yrby";
 
+/// What the origin of every transaction that applies a peer's update starts
+/// with. The document keeps every other transaction's update for `Doc#edit`.
+pub const REMOTE: &str = "yrby-remote";
+
+/// True when `origin` marks a transaction that applied a peer's update.
+pub fn is_remote(origin: Option<&yrs::Origin>) -> bool {
+    origin.is_some_and(|origin| origin.as_ref().starts_with(REMOTE.as_bytes()))
+}
+
 /// The largest integer a double represents exactly (2^53).
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
 /// A key no other observer uses. yrs registers an observer under a key and
 /// removes it by that key, so two observers on one document need different
-/// ones.
+/// ones. It's also the origin of the transaction that applies a peer's
+/// update, so it starts with `REMOTE`.
 pub fn observer_key() -> yrs::Origin {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        .into()
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{REMOTE}:{n}").as_str().into()
 }
 
 /// The branch `id` names, if it exists and has not been deleted.
@@ -97,40 +107,14 @@ where
 }
 
 /// Run `f` in a write transaction under `ORIGIN`, as `guarded` runs its
-/// closure. When a `Doc#edit` is running in this fiber, the update the
-/// transaction made goes to it, so an edit returns its own writes and none
-/// another fiber, thread, or peer made meanwhile.
+/// closure. The document keeps the transaction's update for `Doc#edit` when
+/// it commits (see `RbDoc::new`).
 pub fn write<F, R>(doc: &Doc, f: F) -> Result<R, Error>
 where
     F: FnOnce(&mut TransactionMut) -> Result<R, String> + Send,
     R: Send,
 {
-    let edit = current_edit(doc)?;
-    let recording = edit.is_some();
-    let (result, update) = guarded(move || {
-        let mut txn = doc.transact_mut_with(ORIGIN);
-        let result = f(&mut txn);
-        Ok((result, recording.then(|| txn.encode_update_v1())))
-    })?;
-    if let (Some(edit), Some(update)) = (edit, update) {
-        edit.push(crate::binary_string(&update))?;
-    }
-    result.map_err(yrb_error)
-}
-
-/// The updates collected by the innermost `Doc#edit` of `doc` running in
-/// this fiber, or None outside one. `Doc#edit` keeps them in
-/// `Thread.current[:yrby_edits]`, which is fiber-local, under the doc's guid.
-fn current_edit(doc: &Doc) -> Result<Option<RArray>, Error> {
-    let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
-    let edits: Option<RHash> = ruby
-        .thread_current()
-        .funcall("[]", (ruby.to_symbol("yrby_edits"),))?;
-    let Some(edits) = edits else { return Ok(None) };
-    match edits.aref::<_, Option<RArray>>(doc.guid().to_string())? {
-        Some(stack) if !stack.is_empty() => Ok(Some(stack.entry(-1)?)),
-        _ => Ok(None),
-    }
+    guarded(move || f(&mut doc.transact_mut_with(ORIGIN)))
 }
 
 // --- indexes ---
@@ -514,11 +498,7 @@ pub fn any_to_ruby(ruby: &Ruby, a: &Any) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rb_sys_test_helpers::ruby_test;
-    use yrs::updates::decoder::Decode;
-    use yrs::{
-        Doc, GetString, OffsetKind, Options, ReadTxn, StateVector, Transact, Update, WriteTxn,
-    };
+    use yrs::{Doc, GetString, OffsetKind, Options, Transact};
 
     fn utf16_doc() -> Doc {
         Doc::with_options(Options {
@@ -564,82 +544,6 @@ mod tests {
         let from = to_units(&txn, &text, 1);
         text.remove_range(&mut txn, from, 2);
         assert_eq!(text.get_string(&txn), "aé日");
-    }
-
-    /// Start an edit of `doc` in this fiber as `Doc#edit` does, and return
-    /// the array its writes go to. `None` ends it.
-    fn edit(doc: Option<&Doc>) -> RArray {
-        let ruby = Ruby::get().unwrap();
-        let updates = ruby.ary_new();
-        let edits = doc.map(|doc| {
-            let stack = ruby.ary_new();
-            stack.push(updates).unwrap();
-            let edits = ruby.hash_new();
-            edits.aset(doc.guid().to_string(), stack).unwrap();
-            edits
-        });
-        let _: Value = ruby
-            .thread_current()
-            .funcall("[]=", (ruby.to_symbol("yrby_edits"), edits))
-            .unwrap();
-        updates
-    }
-
-    fn append(doc: &Doc, chunk: &'static str) -> Result<(), Error> {
-        write(doc, move |txn| {
-            let text = txn.get_or_insert_text("t");
-            let at = text.len(txn);
-            text.insert(txn, at, chunk);
-            Ok(())
-        })
-    }
-
-    fn apply(doc: &Doc, update: &[u8]) {
-        let update = Update::decode_v1(update).unwrap();
-        doc.transact_mut().apply_update(update).unwrap();
-    }
-
-    fn read(doc: &Doc) -> String {
-        let text = doc.get_or_insert_text("t");
-        let txn = doc.transact();
-        text.get_string(&txn)
-    }
-
-    #[ruby_test]
-    fn a_write_hands_its_update_only_to_its_own_docs_edit() {
-        let doc = test_support::doc();
-        let other = test_support::doc();
-        append(&doc, "before").unwrap();
-        let peer = test_support::doc();
-        apply(
-            &peer,
-            &doc.transact()
-                .encode_state_as_update_v1(&StateVector::default()),
-        );
-        let updates = edit(Some(&doc));
-        append(&doc, " mine").unwrap();
-        append(&other, "theirs").unwrap();
-        edit(None);
-        append(&doc, " after").unwrap();
-
-        assert_eq!(updates.len(), 1, "one write to this doc in the edit");
-        apply(&peer, &crate::copy_bytes(updates.entry(0).unwrap()));
-        assert_eq!(read(&peer), "before mine");
-    }
-
-    #[ruby_test]
-    fn a_write_that_fails_partway_still_hands_over_what_it_wrote() {
-        let doc = test_support::doc();
-        let updates = edit(Some(&doc));
-        let result = write(&doc, |txn| {
-            let text = txn.get_or_insert_text("t");
-            text.insert(txn, 0, "half");
-            Err::<(), _>("then it failed".to_string())
-        });
-        edit(None);
-
-        assert!(result.is_err());
-        assert_eq!(updates.len(), 1);
     }
 }
 

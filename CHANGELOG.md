@@ -13,13 +13,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   costs about the same at any length: 80k one-character appends took 2.5 s
   and now take 48 ms.
 
-- `Y::Doc#edit` returns only the writes its block made. Each handle write
-  hands its transaction's update to the edit running in its fiber, and the
-  edit merges them. Before this, the edit returned everything the document
-  gained while the block ran, so an update applied from a peer meanwhile was
-  sent again as the edit's own, and a caller had to lock the document to keep
-  them apart. Edits on one document now run one at a time, so each update's
-  clocks are consecutive. A peer's update doesn't wait for an edit.
+- `Y::Doc#edit` returns the document's own writes and never a peer's. The
+  document keeps the update of every local transaction until an edit returns
+  it, merged into one, so a write made outside an edit, from another thread
+  or fiber, or in a block that raised comes with the next edit. Before this,
+  the edit returned everything the document gained while the block ran, so
+  an update applied from a peer meanwhile was sent again as the edit's own,
+  and a caller had to lock the document to keep them apart. Edits on one
+  document now run one at a time, so each update's clocks are consecutive. A
+  peer's update doesn't wait for an edit.
 
 ### Experimental
 

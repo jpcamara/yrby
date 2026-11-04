@@ -33,7 +33,17 @@ pub(crate) use yjs_html_core as render_rules;
 /// interior-mutability wrapper (RefCell and friends): every method opens and
 /// closes its transaction within a single call.
 #[magnus::wrap(class = "Y::Doc", free_immediately, size)]
-struct RbDoc(Doc);
+struct RbDoc(Doc, Unsent);
+
+/// The updates of this document's own transactions that no `Doc#edit` has
+/// returned yet. Every transaction but a peer's lands here when it commits,
+/// after yrs is done changing the document, whichever thread or fiber made
+/// it and whether or not an edit was running. So no local write is left out.
+type Unsent = std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
+
+/// Past this many unsent updates, they merge into one, so a document that is
+/// never edited doesn't keep every write apart.
+const UNSENT_MERGE_AT: usize = 64;
 
 /// Compile-time proof that the wrapped Doc is thread-safe. If a future yrs
 /// upgrade makes Doc lose Send/Sync, this fails the build instead of silently
@@ -171,7 +181,23 @@ impl RbDoc {
             yrs::Options::with_client_id(yrs::block::ClientID::new(client_id))
         };
         options.offset_kind = yrs::OffsetKind::Utf16;
-        Ok(RbDoc(Doc::with_options(options)))
+        let doc = Doc::with_options(options);
+        let unsent = Unsent::default();
+        let sink = unsent.clone();
+        doc.observe_update_v1("yrby-unsent", move |txn, event| {
+            if shared::is_remote(txn.origin()) {
+                return;
+            }
+            let mut unsent = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            unsent.push(event.update.clone());
+            if unsent.len() >= UNSENT_MERGE_AT {
+                if let Ok(merged) = yrs::merge_updates_v1(&*unsent) {
+                    *unsent = vec![merged];
+                }
+            }
+        })
+        .map_err(|e| yrb_error(e.to_string()))?;
+        Ok(RbDoc(doc, unsent))
     }
 
     /// The id this document writes its own edits under. Presence for the same
@@ -398,20 +424,34 @@ impl RbDoc {
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
 
-    /// What `Doc#edit` keeps this document's updates under: its guid.
-    fn guid(&self) -> String {
-        self.0.guid().to_string()
+    /// Every update in `Unsent`, merged into one, or nil for none. Taking them
+    /// empties it. If the merge fails they stay.
+    fn take_unsent(&self) -> Result<Option<RString>, Error> {
+        let unsent = &self.1;
+        let merged = nogvl(move || -> Result<Option<Vec<u8>>, String> {
+            let mut unsent = unsent
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let merged = match unsent.len() {
+                0 => return Ok(None),
+                1 => unsent[0].clone(),
+                _ => yrs::merge_updates_v1(&*unsent).map_err(|e| e.to_string())?,
+            };
+            unsent.clear();
+            Ok(Some(merged))
+        })?
+        .map_err(yrb_error)?;
+        Ok(merged.map(|update| binary_string(&update)))
     }
 
-    /// The updates in `updates` merged into one: what `Doc#edit` returns.
-    fn merge(&self, updates: RArray) -> Result<RString, Error> {
-        let updates: Vec<Vec<u8>> = updates
-            .into_iter()
-            .map(|update| RString::try_convert(update).map(copy_bytes))
-            .collect::<Result<_, _>>()?;
-        let merged = nogvl(move || yrs::merge_updates_v1(&updates).map_err(|e| e.to_string()))?
-            .map_err(yrb_error)?;
-        Ok(binary_string(&merged))
+    /// Put a taken update back, for an outer edit to return as well.
+    fn keep_unsent(&self, update: RString) {
+        let update = copy_bytes(update);
+        let mut unsent = self
+            .1
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsent.push(update);
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -440,7 +480,7 @@ impl RbDoc {
         let doc = &self.0;
         nogvl(move || -> Result<(), String> {
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-            let mut txn = doc.transact_mut();
+            let mut txn = doc.transact_mut_with(shared::REMOTE);
             txn.apply_update(update).map_err(|e| e.to_string())
         })?
         .map_err(yrb_error)
@@ -503,7 +543,7 @@ impl RbDoc {
                             // Apply the update
                             let update =
                                 yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-                            let mut txn = doc.transact_mut();
+                            let mut txn = doc.transact_mut_with(shared::REMOTE);
                             txn.apply_update(update).map_err(|e| e.to_string())?;
                             Ok((0, 1, Vec::new()))
                         }
@@ -511,7 +551,7 @@ impl RbDoc {
                             // Apply the update
                             let update =
                                 yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-                            let mut txn = doc.transact_mut();
+                            let mut txn = doc.transact_mut_with(shared::REMOTE);
                             txn.apply_update(update).map_err(|e| e.to_string())?;
                             Ok((0, 2, Vec::new()))
                         }
@@ -1151,8 +1191,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
-    doc_class.define_private_method("native_merge", method!(RbDoc::merge, 1))?;
-    doc_class.define_private_method("native_guid", method!(RbDoc::guid, 0))?;
+    doc_class.define_private_method("native_take_unsent", method!(RbDoc::take_unsent, 0))?;
+    doc_class.define_private_method("native_keep_unsent", method!(RbDoc::keep_unsent, 1))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
@@ -1251,14 +1291,6 @@ mod tests {
             .unwrap()
     }
 
-    fn list(updates: &[RString]) -> RArray {
-        let list = Ruby::get().unwrap().ary_new();
-        for update in updates {
-            list.push(*update).unwrap();
-        }
-        list
-    }
-
     fn root(doc: &RbDoc) -> XmlTextRef {
         doc.0.get_or_insert_xml_fragment("root");
         shared::root_xml_text(&doc.0.transact(), "root").unwrap()
@@ -1337,36 +1369,52 @@ mod tests {
         );
     }
 
+    fn take(doc: &RbDoc) -> Option<RString> {
+        doc.take_unsent().unwrap()
+    }
+
     #[ruby_test]
-    fn merge_joins_updates_into_one_that_carries_them_all() {
+    fn local_writes_wait_to_be_taken_and_a_peers_never_do() {
         let doc = new_doc();
-        push(&doc, "t", "one");
-        let first = update(&doc);
-        let seen = doc.encode_state_vector().unwrap();
-        push(&doc, "t", " two");
-        let second = update_since(&doc, seen);
-        let merged = doc.merge(list(&[first, second])).unwrap();
+        push(&doc, "t", "mine");
+        let mine = take(&doc).expect("a local write waits");
+        assert!(take(&doc).is_none(), "taking empties it");
+
         let peer = new_doc();
-        peer.apply_update(merged).unwrap();
+        peer.apply_update(mine).unwrap();
+        peer.handle_sync_message(wrap_update(mine)).unwrap();
+        peer.apply_update_changes(mine, "root".into()).unwrap();
+        assert!(take(&peer).is_none(), "applied updates are a peer's");
+        assert_eq!(peer.read_text("t".into()).unwrap().as_deref(), Some("mine"));
+    }
+
+    #[ruby_test]
+    fn unsent_updates_merge_into_one_that_carries_them_all() {
+        let doc = new_doc();
+        for n in 0..(UNSENT_MERGE_AT * 2) {
+            push(&doc, "t", &n.to_string());
+        }
+        let fresh = new_doc();
+        fresh.apply_update(take(&doc).unwrap()).unwrap();
         assert_eq!(
-            peer.read_text("t".into()).unwrap().as_deref(),
-            Some("one two")
+            fresh.read_text("t".into()).unwrap(),
+            doc.read_text("t".into()).unwrap()
         );
-        assert!(!peer.pending().unwrap());
+        assert!(!fresh.pending().unwrap());
     }
 
     #[ruby_test]
-    fn merge_refuses_bytes_that_are_not_an_update() {
-        let garbage = binary_string(&[0xff, 0xff]);
-        assert!(new_doc().merge(list(&[garbage])).is_err());
-    }
-
-    #[ruby_test]
-    fn docs_sharing_a_client_id_still_have_their_own_guid() {
-        let a = RbDoc::new(&[rb(42_u64)]).unwrap();
-        let b = RbDoc::new(&[rb(42_u64)]).unwrap();
-        assert_eq!(a.guid(), a.guid());
-        assert_ne!(a.guid(), b.guid());
+    fn a_kept_update_is_taken_again_with_what_came_after() {
+        let doc = new_doc();
+        push(&doc, "t", "inner");
+        doc.keep_unsent(take(&doc).unwrap());
+        push(&doc, "t", " outer");
+        let fresh = new_doc();
+        fresh.apply_update(take(&doc).unwrap()).unwrap();
+        assert_eq!(
+            fresh.read_text("t".into()).unwrap().as_deref(),
+            Some("inner outer")
+        );
     }
 
     #[ruby_test]
