@@ -18,7 +18,11 @@ class AgentTest < Minitest::Test
   end
 
   PERSON = { "user" => { "name" => "Ada", "color" => "#0ea5e9" } }.freeze
-  AGENT = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }.freeze
+
+  # The agent the tests subclass, shown to people as Reviewer.
+  class Reviewer < Y::Agent
+    def presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
+  end
 
   def setup
     ClientApp.port
@@ -42,10 +46,12 @@ class AgentTest < Minitest::Test
     client
   end
 
-  def agent(**, &)
+  # Runs an agent in a thread of its own, as a job would.
+  def agent(agent = Reviewer, **)
     Thread.new do
-      Y::Agent.run(@document, url: ClientApp.url, headers: ClientApp.headers, presence: AGENT, lock: @lock,
-                              logger: Logger.new(File::NULL), **, &)
+      Thread.current.report_on_exception = false
+      agent.run(@document, url: ClientApp.url, headers: ClientApp.headers, lock: @lock,
+                           logger: Logger.new(File::NULL), **)
     end
   end
 
@@ -68,12 +74,11 @@ class AgentTest < Minitest::Test
   def test_the_agent_answers_an_edit_and_leaves_when_the_person_does
     ada = person
     names = roster(ada)
-    run = agent(idle: 1) do |a|
-      a.edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewer here.") }
-      a.on_change do |blocks|
-        a.edit { |doc| Y::Lexxy.append_paragraph(doc, "Saw block #{blocks.join(", ")}.") }
-      end
+    answers = Class.new(Reviewer) do
+      def joined = edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewer here.") }
+      def changed(blocks) = edit { |doc| Y::Lexxy.append_paragraph(doc, "Saw block #{blocks.join(", ")}.") }
     end
+    run = agent(answers, idle: 1)
 
     wait_until { ada.doc.read_xml("root").to_s.include?("Reviewer here.") }
     wait_until { names.call.include?("Reviewer") }
@@ -91,15 +96,26 @@ class AgentTest < Minitest::Test
   # Outside a reactor, run starts one on the calling thread and holds it
   # until the agent leaves, so a job's thread is the agent's.
   def test_the_agent_runs_on_the_calling_thread
-    thread = task = nil
-    run = agent(max_stay: 1) do
-      thread = Thread.current
-      task = Async::Task.current?
+    seen = Queue.new
+    looks = Class.new(Reviewer) do
+      define_method(:joined) do
+        seen << [Thread.current, Async::Task.current?]
+        leave
+      end
     end
+    run = agent(looks)
 
     assert_equal :left, run.join(10)&.value
+    thread, task = seen.pop
+
     assert_equal run, thread
     assert task, "the agent runs in a reactor"
+  end
+
+  def test_leave_ends_the_agent_without_waiting_to_be_alone
+    run = agent(Class.new(Reviewer) { def joined = leave })
+
+    assert_equal :left, run.join(5)&.value
   end
 
   def test_a_second_agent_on_the_same_document_is_turned_away
@@ -117,29 +133,20 @@ class AgentTest < Minitest::Test
     assert_equal :left, agent(as: "linus", max_stay: 1).join(10)&.value
   end
 
-  def test_an_error_in_a_handler_is_reported_and_the_agent_carries_on
+  # An error in changed ends the agent the way it would end a job: the agent
+  # clears its presence, gives up the lock, and the error raises out of run.
+  def test_an_error_in_changed_ends_the_agent_and_raises_out_of_run
     ada = person
     names = roster(ada)
-    errors = Queue.new
-    attempts = 0
-    run = agent(idle: 1) do |a|
-      a.on_error { |e| errors << e.message }
-      a.on_change do
-        attempts += 1
-        raise "the model timed out" if attempts == 1
-
-        a.edit { |doc| Y::Lexxy.append_paragraph(doc, "Second try worked.") }
-      end
-    end
+    run = agent(Class.new(Reviewer) { def changed(_blocks) = raise("the model timed out") })
 
     wait_until { names.call.include?("Reviewer") }
-    ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "first") }
+    ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "Please review.") }
 
-    assert_equal "the model timed out", errors.pop(timeout: 10)
+    error = assert_raises(RuntimeError) { run.join(10) }
 
-    ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "second") }
-
-    assert(wait_until { ada.doc.read_xml("root").to_s.include?("Second try worked.") })
-    run.kill
+    assert_equal "the model timed out", error.message
+    assert(wait_until { !names.call.include?("Reviewer") })
+    assert_nil @lock.read("yrby:agent:#{@document.key}")
   end
 end
