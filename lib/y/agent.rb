@@ -39,6 +39,7 @@ module Y
   # when another agent holds it.
   class Agent
     SETTLE = 1.5          # seconds of quiet before changed sees a burst of edits
+    SETTLE_AT_MOST = 5    # seconds of steady typing before changed sees it anyway
     IDLE = 120            # seconds with nobody else present before the agent leaves
     MAX_STAY = 2 * 60 * 60
     GONE = 30             # a person whose presence hasn't renewed in this long has left
@@ -90,15 +91,22 @@ module Y
 
     # How the agent appears to the people in the document: the hash editors
     # render, such as { "user" => { "name" => "Reviewer" } }. nil, the
-    # default, keeps it out of their roster.
-    def presence = nil
+    # default, keeps it out of their roster. Override it for how the agent
+    # joins, and set it to change it while the agent stays.
+    attr_reader :presence
+
+    def presence=(state)
+      @presence = state
+      @client&.presence = state
+    end
 
     # Called once the agent has joined and the document has loaded.
     def joined; end
 
     # Called with the ordinals of the top-level blocks people changed, once
-    # their typing has paused for SETTLE seconds. The agent's own edits never
-    # show up here.
+    # their typing has paused for SETTLE seconds, or after SETTLE_AT_MOST
+    # seconds of steady typing. The list is empty for a change outside the
+    # root, such as to a map. The agent's own edits never show up here.
     def changed(blocks); end
 
     def doc = @client.doc
@@ -162,9 +170,11 @@ module Y
     # renewal window has passed since it joined.
     def alone?(started) = now - started > Y::ActionCable::Client::RENEW && people.empty?
 
-    # Waits for a burst of edits to pause and returns every block it touched.
+    # Waits for a burst of edits to pause, or for SETTLE_AT_MOST seconds of
+    # steady typing, and returns every block it touched.
     def settle(blocks)
-      while (more = @changes.pop(timeout: SETTLE))
+      deadline = now + SETTLE_AT_MOST
+      while (wait = [SETTLE, deadline - now].min).positive? && (more = @changes.pop(timeout: wait))
         blocks |= more
       end
       blocks.sort
