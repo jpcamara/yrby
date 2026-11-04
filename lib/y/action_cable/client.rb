@@ -66,10 +66,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       @identifier = JSON.generate({ "channel" => channel }.merge(params.transform_keys(&:to_s)))
       @headers = headers.map { |name, value| [name.to_s.downcase, value.to_s] }
       @doc = doc
-      @doc_lock = Mutex.new # a local edit and a remote update never interleave
       @awareness = Y::Awareness.new(doc.client_id)
       @presence = nil
-      @session = Session.new(doc, @identifier, root: root, lock: @doc_lock) do |message|
+      @session = Session.new(doc, @identifier, root: root) do |message|
         @outgoing << JSON.generate(message)
       end
       @logger = logger || Logger.new($stderr)
@@ -131,10 +130,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     # Edit the document and send what the block changed. Returns the update,
-    # or nil when the block changed nothing. A remote update waits until the
-    # block returns, so the update holds only this edit.
+    # or nil when the block changed nothing. A remote update applied while
+    # the block runs stays out of it (see Y::Doc#edit).
     def edit
-      update = @doc_lock.synchronize { @doc.edit { yield @doc } }
+      update = @doc.edit { yield @doc }
       send_update(update)
       update
     end

@@ -12,9 +12,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # It is what the JS provider's session is, in Ruby, so it can be driven
     # in a test with nothing listening. The client feeds it every message
     # the socket delivers and every command the caller makes, all on one
-    # reactor, so its own state needs no lock. `lock:` is the client's doc
-    # lock, held while a remote update is applied so it never lands inside
-    # a local edit.
+    # reactor, so its own state needs no lock.
     #
     # Messages are the JSON hashes the cable carries. A command goes out as
     # { command:, identifier:, data: } and a channel message comes in as
@@ -26,9 +24,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       # `root:` names the root XmlText whose top-level blocks on_update
       # reports as changed; nil turns block tracking off.
-      def initialize(doc, identifier, root: "root", lock: Mutex.new, &transmit)
+      def initialize(doc, identifier, root: "root", &transmit)
         @doc = doc
-        @lock = lock
         @identifier = identifier
         @root = root
         @transmit = transmit
@@ -166,9 +163,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
 
       def apply(update)
-        changed = @lock.synchronize do
-          @root ? @doc.apply_update_changes(update, @root) : (@doc.apply_update(update) && nil)
-        end
+        changed = @root ? @doc.apply_update_changes(update, @root) : (@doc.apply_update(update) && nil)
         @on_update&.call(update, @doc, changed) if @loaded
       end
 

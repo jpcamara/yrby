@@ -312,8 +312,8 @@ Pass `headers:` when the connection needs more:
 A connection the server refuses, or a subscription it rejects, raises
 `Y::Error` from `subscribe`.
 
-`edit` sends what its block changed. A remote update waits until the block
-returns, so the update holds only this client's edit. Every update carries an
+`edit` sends what its block changed, and only that: a remote update applied
+while the block runs stays out of it. Every update carries an
 id and is resent until the server acks it, and a dropped socket reconnects
 with backoff. `presence=` shows the client in the editor's roster and is
 renewed every 15 seconds, since peers drop presence they haven't heard from in
