@@ -6,7 +6,7 @@ module Y
   # Ruby-side conveniences over the native document.
   class Doc
     # Runs the block, which edits this document through handles, and returns
-    # the update its writes produced, or nil when they changed nothing. The
+    # the update its writes produced, or nil when it wrote nothing. The
     # document has the edit either way. The update is what a process saves
     # and broadcasts, one call per chunk as it streams into a document.
     #

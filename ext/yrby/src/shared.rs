@@ -110,11 +110,7 @@ where
     let (result, update) = guarded(move || {
         let mut txn = doc.transact_mut_with(ORIGIN);
         let result = f(&mut txn);
-        let changed = !txn.insert_set().is_empty() || !txn.delete_set().is_empty();
-        Ok((
-            result,
-            (recording && changed).then(|| txn.encode_update_v1()),
-        ))
+        Ok((result, recording.then(|| txn.encode_update_v1())))
     })?;
     if let (Some(edit), Some(update)) = (edit, update) {
         edit.push(crate::binary_string(&update))?;
@@ -518,7 +514,11 @@ pub fn any_to_ruby(ruby: &Ruby, a: &Any) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yrs::{Doc, GetString, OffsetKind, Options, Transact};
+    use rb_sys_test_helpers::ruby_test;
+    use yrs::updates::decoder::Decode;
+    use yrs::{
+        Doc, GetString, OffsetKind, Options, ReadTxn, StateVector, Transact, Update, WriteTxn,
+    };
 
     fn utf16_doc() -> Doc {
         Doc::with_options(Options {
@@ -564,6 +564,82 @@ mod tests {
         let from = to_units(&txn, &text, 1);
         text.remove_range(&mut txn, from, 2);
         assert_eq!(text.get_string(&txn), "aé日");
+    }
+
+    /// Start an edit of `doc` in this fiber as `Doc#edit` does, and return
+    /// the array its writes go to. `None` ends it.
+    fn edit(doc: Option<&Doc>) -> RArray {
+        let ruby = Ruby::get().unwrap();
+        let updates = ruby.ary_new();
+        let edits = doc.map(|doc| {
+            let stack = ruby.ary_new();
+            stack.push(updates).unwrap();
+            let edits = ruby.hash_new();
+            edits.aset(doc.guid().to_string(), stack).unwrap();
+            edits
+        });
+        let _: Value = ruby
+            .thread_current()
+            .funcall("[]=", (ruby.to_symbol("yrby_edits"), edits))
+            .unwrap();
+        updates
+    }
+
+    fn append(doc: &Doc, chunk: &'static str) -> Result<(), Error> {
+        write(doc, move |txn| {
+            let text = txn.get_or_insert_text("t");
+            let at = text.len(txn);
+            text.insert(txn, at, chunk);
+            Ok(())
+        })
+    }
+
+    fn apply(doc: &Doc, update: &[u8]) {
+        let update = Update::decode_v1(update).unwrap();
+        doc.transact_mut().apply_update(update).unwrap();
+    }
+
+    fn read(doc: &Doc) -> String {
+        let text = doc.get_or_insert_text("t");
+        let txn = doc.transact();
+        text.get_string(&txn)
+    }
+
+    #[ruby_test]
+    fn a_write_hands_its_update_only_to_its_own_docs_edit() {
+        let doc = test_support::doc();
+        let other = test_support::doc();
+        append(&doc, "before").unwrap();
+        let peer = test_support::doc();
+        apply(
+            &peer,
+            &doc.transact()
+                .encode_state_as_update_v1(&StateVector::default()),
+        );
+        let updates = edit(Some(&doc));
+        append(&doc, " mine").unwrap();
+        append(&other, "theirs").unwrap();
+        edit(None);
+        append(&doc, " after").unwrap();
+
+        assert_eq!(updates.len(), 1, "one write to this doc in the edit");
+        apply(&peer, &crate::copy_bytes(updates.entry(0).unwrap()));
+        assert_eq!(read(&peer), "before mine");
+    }
+
+    #[ruby_test]
+    fn a_write_that_fails_partway_still_hands_over_what_it_wrote() {
+        let doc = test_support::doc();
+        let updates = edit(Some(&doc));
+        let result = write(&doc, |txn| {
+            let text = txn.get_or_insert_text("t");
+            text.insert(txn, 0, "half");
+            Err::<(), _>("then it failed".to_string())
+        });
+        edit(None);
+
+        assert!(result.is_err());
+        assert_eq!(updates.len(), 1);
     }
 }
 
