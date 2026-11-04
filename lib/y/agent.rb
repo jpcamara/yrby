@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/duration"
 require "logger"
 require "y/action_cable/client"
 require "y/agent/lock"
@@ -139,7 +140,8 @@ module Y
     private
 
     def join
-      params = { grant: @document.grant(expires_in: @max_stay + LOCK_TTL), name: @document.name }
+      grant = @document.grant(expires_in: ActiveSupport::Duration.build(@max_stay + LOCK_TTL))
+      params = { grant:, name: @document.name }
       @client = Y::ActionCable::Client.new(@connect[:url], params:, logger: @logger, **@connect.except(:url))
       @client.on_update { |_update, _doc, touched| @changes << (touched || []) }
       @client.on_awareness { |frame| see(frame) }

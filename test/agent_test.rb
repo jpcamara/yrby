@@ -4,6 +4,7 @@ require "test_helper"
 require "y/agent"
 require "active_support"
 require "active_support/cache"
+require "active_support/time" # a Duration counts from Time.current, as under Rails
 require_relative "support/client_app"
 
 # Y::Agent against a Rails app running the shipped Y::DocumentChannel: it
@@ -13,7 +14,8 @@ class AgentTest < Minitest::Test
   # What Y::Agent needs from a record's collaborative document. The grant
   # comes from the app, which owns the record.
   Document = Data.define(:key, :name) do
-    def grant(**) = ClientApp.grant(name)
+    # GlobalID calls from_now on expires_in, so it has to be a Duration.
+    def grant(expires_in:) = expires_in.from_now && ClientApp.grant(name)
     def channel = "Y::DocumentChannel"
   end
 
