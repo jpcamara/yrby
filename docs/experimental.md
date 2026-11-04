@@ -333,44 +333,65 @@ so editors tie a caret to its author.
 
 `Y::Agent` runs a Ruby process as a participant in a document: it joins with
 a grant, shows up among the people editing, hears what they write, and
-leaves when they do. Run one from a job.
+leaves when they do. Subclass it, and run it from a job.
 
 ```rb
 require "y/agent"
 
+class Reviewer < Y::Agent
+  def presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
+
+  def joined
+    edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewing.") }
+  end
+
+  def changed(blocks) # ordinals of the top-level blocks people changed
+    reply = ReviewModel.call(doc.read_xml("root").to_s)
+    edit { |doc| Y::Lexxy.append_paragraph(doc, reply) }
+    leave if reply.include?("Looks good")
+  end
+end
+
 class ReviewJob < ApplicationJob
   def perform(post)
-    Y::Agent.run(post.collaborative_document(:body),
-                 url: "wss://example.com/cable",
-                 presence: { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }) do |agent|
-      agent.edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewing.") }
-      agent.on_change do |blocks|
-        # blocks: ordinals of the top-level blocks people changed
-      end
-    end
+    Reviewer.run(post.collaborative_document(:body), url: "wss://example.com/cable")
   end
 end
 ```
+
+An agent overrides three methods, and each has a default that does nothing:
+
+- `presence` is how it shows up in the editor's roster, such as
+  `{ "user" => { "name" => "Reviewer" } }`. Without one, it doesn't.
+- `joined` runs once the document has loaded, and can write right away.
+- `changed(blocks)` gets the blocks people changed once their typing has
+  paused for a moment, and never the agent's own edits.
+
+Inside them, `doc` is the agent's copy of the document, `edit` changes it and
+sends the change, `people` lists who else is present, `document` is what
+`run` was given, and `leave` ends the agent once the method returns.
 
 The agent signs its own grant for the document, good for `max_stay:` plus a
 minute. `url:` and `headers:` work as they do for `Y::ActionCable::Client`
 above. Enqueue the job from code that has already checked the person may
 edit the post, since the agent gets the same access.
 
-The block sets the agent up and can write right away. `run` then follows the
-document and returns when the agent leaves. In a job it holds the job's
-thread for that long, with the agent's connection on a reactor in that
-thread. Inside a reactor (Falcon, an `Async` block) it runs as a task of
-that one. `on_change` gets the blocks people changed once their typing has
-paused for a moment, and never the agent's own edits. `agent.people` lists
-who else is present.
+`run` returns when the agent leaves. In a job it holds the job's thread for
+that long, with the agent's connection on a reactor in that thread. Inside a
+reactor (Falcon, an `Async` block) it runs as a task of that one. A job that
+runs an agent holds a worker for as long as the agent stays, so give agents
+their own queue.
 
 The agent leaves when nobody else has been present for `idle:` seconds (120
-by default), after `max_stay:` (two hours), or when a handler calls
-`agent.leave`. People already in the document show up only when their
-editor next renews its presence, so the agent waits one renewal window, 15
-seconds, before it decides it is alone. It always clears its presence and
-unsubscribes on the way out.
+by default), after `max_stay:` (two hours), or when it calls `leave`. People
+already in the document show up only when their editor next renews its
+presence, so the agent waits one renewal window, 15 seconds, before it
+decides it is alone. It always clears its presence and unsubscribes on the
+way out.
+
+An error in `joined` or `changed` ends the agent. It leaves, and the error
+raises out of `run`, so a job retries it as it would any other error.
+Rescue in the method to carry on instead.
 
 One agent works on a document at a time. Pass `as:` to allow one per person
 instead, such as `as: person` when each person can bring their own agent. A
@@ -381,13 +402,9 @@ the agent stays, so a slow model call doesn't let it lapse. `run` returns
 `:busy` without joining when another agent holds the document, and `:left`
 otherwise. Cache stores can't compare and set in one step, so a process that
 stalls for over a minute can lose the lock and briefly overlap the agent that
-took over. Its writes raise `Y::Error` from then on, and it leaves.
+took over. Its writes raise `Y::Error` from then on.
 
 The first argument is usually `record.collaborative_document(:name)`, which
 names its own grant and channel. Any object that responds to `key`, `name`,
 `grant(expires_in:)`, and `channel` works. Pass `channel:` for an app's own
 `Y::DocumentChannel` subclass.
-
-An error in the setup block or a handler is logged and passed to
-`agent.on_error`, and the agent keeps going. A job that runs an agent holds
-a worker for as long as the agent stays, so give agents their own queue.
