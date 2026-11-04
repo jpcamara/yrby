@@ -95,6 +95,17 @@ class AgentTest < Minitest::Test
 
   # Outside a reactor, run starts one on the calling thread and holds it
   # until the agent leaves, so a job's thread is the agent's.
+  def test_presence_can_change_while_the_agent_stays
+    ada = person
+    names = roster(ada)
+    run = agent(Class.new(Reviewer) { def changed(_blocks) = self.presence = { "user" => { "name" => "Busy" } } })
+    wait_until { names.call.include?("Reviewer") }
+    ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "Please review.") }
+
+    assert(wait_until { names.call.include?("Busy") })
+    run.kill
+  end
+
   def test_the_agent_runs_on_the_calling_thread
     seen = Queue.new
     looks = Class.new(Reviewer) do
@@ -110,6 +121,26 @@ class AgentTest < Minitest::Test
 
     assert_equal run, thread
     assert task, "the agent runs in a reactor"
+  end
+
+  # Someone who never pauses still gets an answer: changed runs after
+  # SETTLE_AT_MOST seconds of steady typing.
+  def test_steady_typing_reaches_changed_before_it_stops
+    ada = person
+    names = roster(ada)
+    seen = Queue.new
+    run = agent(Class.new(Reviewer) { define_method(:changed) { |blocks| seen << blocks } })
+    wait_until { names.call.include?("Reviewer") }
+
+    typing = Y::Agent::SETTLE_AT_MOST + 4
+    stop = Process.clock_gettime(Process::CLOCK_MONOTONIC) + typing
+    while Process.clock_gettime(Process::CLOCK_MONOTONIC) < stop && seen.empty?
+      ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "typing") }
+      sleep 0.3
+    end
+
+    refute_empty seen, "changed ran while Ada was still typing"
+    run.kill
   end
 
   def test_leave_ends_the_agent_without_waiting_to_be_alone
