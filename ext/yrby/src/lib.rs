@@ -1251,6 +1251,14 @@ mod tests {
             .unwrap()
     }
 
+    fn list(updates: &[RString]) -> RArray {
+        let list = Ruby::get().unwrap().ary_new();
+        for update in updates {
+            list.push(*update).unwrap();
+        }
+        list
+    }
+
     fn root(doc: &RbDoc) -> XmlTextRef {
         doc.0.get_or_insert_xml_fragment("root");
         shared::root_xml_text(&doc.0.transact(), "root").unwrap()
@@ -1327,6 +1335,38 @@ mod tests {
             peer.read_text("t".into()).unwrap().as_deref(),
             Some("one two")
         );
+    }
+
+    #[ruby_test]
+    fn merge_joins_updates_into_one_that_carries_them_all() {
+        let doc = new_doc();
+        push(&doc, "t", "one");
+        let first = update(&doc);
+        let seen = doc.encode_state_vector().unwrap();
+        push(&doc, "t", " two");
+        let second = update_since(&doc, seen);
+        let merged = doc.merge(list(&[first, second])).unwrap();
+        let peer = new_doc();
+        peer.apply_update(merged).unwrap();
+        assert_eq!(
+            peer.read_text("t".into()).unwrap().as_deref(),
+            Some("one two")
+        );
+        assert!(!peer.pending().unwrap());
+    }
+
+    #[ruby_test]
+    fn merge_refuses_bytes_that_are_not_an_update() {
+        let garbage = binary_string(&[0xff, 0xff]);
+        assert!(new_doc().merge(list(&[garbage])).is_err());
+    }
+
+    #[ruby_test]
+    fn docs_sharing_a_client_id_still_have_their_own_guid() {
+        let a = RbDoc::new(&[rb(42_u64)]).unwrap();
+        let b = RbDoc::new(&[rb(42_u64)]).unwrap();
+        assert_eq!(a.guid(), a.guid());
+        assert_ne!(a.guid(), b.guid());
     }
 
     #[ruby_test]

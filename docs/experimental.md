@@ -229,7 +229,7 @@ rest), what a process keeps to put a block back the way it was.
 A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
 as its own update. `Doc#edit` runs a block that writes to the document and
-returns the update its writes produced, or nil when they changed nothing.
+returns the update its writes produced, or nil when it wrote nothing.
 The update holds only this block's writes: an update applied from a peer
 meanwhile stays out of it, and doesn't wait for the block. Edits on one
 document run one at a time:
@@ -252,7 +252,7 @@ caret follows what it writes.
 A job, a console, or a controller edits a record's document with `edit`. It
 loads the current document, yields it, records what the block changed in the
 document's rows, and broadcasts the update so open editors apply it. It
-returns the update, or nil when the block changed nothing.
+returns the update, or nil when the block wrote nothing.
 
 ```ruby
 post.collaborative_document(:body).edit do |doc|
