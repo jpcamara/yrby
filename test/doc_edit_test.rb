@@ -39,13 +39,33 @@ class DocEditTest < Minitest::Test
                     "a diff is about its chunk, not the document"
   end
 
-  def test_a_block_that_writes_nothing_is_nil_even_after_deletions
+  # Writes made outside an edit wait for the next one, so none is left out.
+  def test_writes_made_before_an_edit_come_with_it
     doc = Y::Doc.new
     text = doc.get_text("t")
     text << "abc"
     text.delete(0, 1)
+    peer = Y::Doc.new
+    peer.apply_update(doc.edit { text << "d" })
 
+    assert_equal "bcd", peer.read_text("t")
     assert_nil(doc.edit { text.to_s })
+  end
+
+  # A block that raises leaves its writes for the next edit.
+  def test_writes_from_a_block_that_raised_come_with_the_next_edit
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    assert_raises(RuntimeError) do
+      doc.edit do
+        text << "kept"
+        raise "stop"
+      end
+    end
+    fresh = Y::Doc.new
+    fresh.apply_update(doc.edit { text << " then" })
+
+    assert_equal "kept then", fresh.read_text("t")
   end
 
   def test_a_chunk_stays_small_however_much_was_deleted_before
@@ -55,13 +75,14 @@ class DocEditTest < Minitest::Test
       text << "x#{i} "
       text.delete(text.length - 2, 1)
     end
+    doc.edit { nil } # takes the writes above
 
     assert_operator doc.edit { text << "y" }.bytesize, :<, 40
   end
 
-  # The update holds only the block's own writes. A peer's update, or a
-  # write from another thread or fiber, made meanwhile stays out.
-  def test_writes_made_elsewhere_during_the_block_stay_out_of_the_update
+  # A peer's update applied during the block stays out. A write another
+  # thread or fiber makes meanwhile comes with it, so none is left out.
+  def test_a_peers_update_stays_out_and_every_local_write_comes_with_it
     doc = Y::Doc.new
     remote = Y::Doc.new
     remote.get_text("theirs") << "from a peer"
@@ -76,7 +97,7 @@ class DocEditTest < Minitest::Test
 
     assert_equal "from ruby", fresh.read_text("mine")
     assert_equal "", fresh.read_text("theirs").to_s
-    assert_equal "", fresh.read_text("other").to_s
+    assert_equal "other thread, other fiber", fresh.read_text("other")
   end
 
   # Two threads editing the same document take turns, so neither edit's
@@ -153,8 +174,7 @@ class DocEditTest < Minitest::Test
     assert_equal "b", other.read_text("u")
   end
 
-  # A write that raises partway is still reported to an outer edit, so the
-  # outer update holds everything the document gained from it.
+  # An inner edit that raises leaves its writes for the outer one.
   def test_an_inner_edit_that_raises_still_reaches_the_outer_one
     doc = Y::Doc.new
     text = doc.get_text("t")

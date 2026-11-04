@@ -6,25 +6,30 @@ module Y
   # Ruby-side conveniences over the native document.
   class Doc
     # Runs the block, which edits this document through handles, and returns
-    # the update its writes produced, or nil when it wrote nothing. The
-    # document has the edit either way. The update is what a process saves
-    # and broadcasts, one call per chunk as it streams into a document.
+    # the update its writes produced, or nil when there's nothing to send.
+    # The document has the edit either way. The update is what a process
+    # saves and broadcasts, one call per chunk as it streams into a document.
     #
-    # The update holds only the writes this block made, in this fiber. An
-    # update applied from a peer meanwhile stays out of it and doesn't wait
-    # for the block. Edits on one document run one at a time, so each edit's
-    # writes take consecutive clocks and its update has no gaps for a peer
-    # to wait on. An edit inside another adds its writes to the outer one.
+    # The document keeps every local write until an edit returns it, so none
+    # is left out: a write made outside an edit, from another thread or
+    # fiber, or in a block that raised comes with the next edit's update. An
+    # update applied from a peer is never in it, and doesn't wait for the
+    # block. Edits on one document run one at a time, so an edit's writes
+    # take consecutive clocks. An edit inside another returns what it took,
+    # and the outer edit returns it again.
     def edit
       edit_lock.synchronize do
-        edits = (Thread.current[:yrby_edits] ||= {})[native_guid] ||= [] # this doc's, in this fiber
-        edits.push(updates = [])
+        @edit_depth = (@edit_depth || 0) + 1
         begin
           yield self
-          native_merge(updates) unless updates.empty?
+          # An interrupt between taking the update and returning it would lose it.
+          Thread.handle_interrupt(Object => :never) do
+            update = native_take_unsent
+            native_keep_unsent(update) if update && @edit_depth > 1
+            update
+          end
         ensure
-          edits.pop
-          edits.last&.concat(updates)
+          @edit_depth -= 1
         end
       end
     end

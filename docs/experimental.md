@@ -229,10 +229,11 @@ rest), what a process keeps to put a block back the way it was.
 A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
 as its own update. `Doc#edit` runs a block that writes to the document and
-returns the update its writes produced, or nil when it wrote nothing.
-The update holds only this block's writes: an update applied from a peer
-meanwhile stays out of it, and doesn't wait for the block. Edits on one
-document run one at a time:
+returns the update its writes produced, or nil when there's nothing to
+send. The document keeps every local write until an edit returns it, so a
+write made outside the block, or in a block that raised, comes with the next
+update. An update applied from a peer is never in it, and doesn't wait for
+the block. Edits on one document run one at a time:
 
 ```ruby
 doc = Y::Doc.new
