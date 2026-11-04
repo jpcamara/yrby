@@ -12,14 +12,13 @@ module Y
   # from a job:
   #
   #   class Reviewer < Y::Agent
-  #     def presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
-  #
   #     def joined
+  #       self.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
   #       edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewing.") }
   #     end
   #
-  #     def changed(blocks) # ordinals of the top-level blocks people changed
-  #       edit { |doc| Y::Lexxy.append_paragraph(doc, "Saw #{blocks.join(", ")}.") }
+  #     def changed(blocks) # live handles to the top-level blocks people changed
+  #       edit { |doc| Y::Lexxy.append_paragraph(doc, "Saw #{blocks.map(&:text).join(" / ")}.") }
   #     end
   #   end
   #
@@ -92,8 +91,8 @@ module Y
 
     # How the agent appears to the people in the document: the hash editors
     # render, such as { "user" => { "name" => "Reviewer" } }. nil, the
-    # default, keeps it out of their roster. Override it for how the agent
-    # joins, and set it to change it while the agent stays.
+    # default, keeps it out of their roster. Set it in `joined`, or in
+    # `initialize` to show up as the agent joins, and again to change it.
     attr_reader :presence
 
     def presence=(state)
@@ -104,11 +103,13 @@ module Y
     # Called once the agent has joined and the document has loaded.
     def joined; end
 
-    # Called with the ordinals of the top-level blocks people changed, once
-    # their typing has paused for SETTLE seconds, or after SETTLE_AT_MOST
-    # seconds of steady typing. A change outside the root, such as to a map,
-    # comes right away with an empty list: it's a click, not typing. The
-    # agent's own edits never show up here.
+    # Called with live handles (Y::XmlText) to the top-level blocks people
+    # changed, in document order, once their typing has paused for SETTLE
+    # seconds, or after SETTLE_AT_MOST seconds of steady typing. A handle
+    # stays on its block while people edit around it, and writing to one
+    # whose block was deleted raises Y::Error. A change outside the root,
+    # such as to a map, comes right away with an empty list: it's a click,
+    # not typing. The agent's own edits never show up here.
     def changed(blocks); end
 
     def doc = @client.doc
@@ -144,11 +145,10 @@ module Y
       grant = @document.grant(expires_in: ActiveSupport::Duration.build(@max_stay + LOCK_TTL))
       params = { grant:, name: @document.name }
       @client = Y::ActionCable::Client.new(@connect[:url], params:, logger: @logger, **@connect.except(:url))
-      @client.on_update { |_update, _doc, touched| @changes << (touched || []) }
+      @client.on_update { |_update, doc, touched| @changes << anchors(doc, touched || []) }
       @client.on_awareness { |frame| see(frame) }
       @client.subscribe
-      state = presence
-      @client.presence = state if state
+      @client.presence = @presence if @presence
     end
 
     def follow
@@ -161,8 +161,8 @@ module Y
         touched = @changes.pop(timeout: 1)
         next unless touched
 
-        blocks = touched.empty? ? touched : settle(touched)
-        changed(blocks) if holding?
+        touched = settle(touched) unless touched.empty?
+        changed(blocks(touched)) if holding?
       end
     end
 
@@ -173,14 +173,28 @@ module Y
     # renewal window has passed since it joined.
     def alone?(started) = now - started > Y::ActionCable::Client::RENEW && people.empty?
 
+    # Anchors to the blocks an update touched, taken as it arrives: a later
+    # update that adds or removes a block moves an ordinal, not an anchor.
+    def anchors(doc, ordinals)
+      root = doc.get_xml_text(@connect[:root]) unless ordinals.empty?
+      ordinals.filter_map { |ordinal| root.xml_text(ordinal)&.anchor }
+    end
+
     # Waits for a burst of edits to pause, or for SETTLE_AT_MOST seconds of
-    # steady typing, and returns every block it touched.
-    def settle(blocks)
+    # steady typing, and returns the anchors of every block it touched.
+    def settle(anchors)
       deadline = now + SETTLE_AT_MOST
       while (wait = [SETTLE, deadline - now].min).positive? && (more = @changes.pop(timeout: wait))
-        blocks |= more
+        anchors |= more
       end
-      blocks.sort
+      anchors
+    end
+
+    # Live handles to the blocks, in document order, leaving out any that
+    # were deleted while the edits settled.
+    def blocks(anchors)
+      anchors.filter_map { |anchor| (ordinal = doc.block_at(anchor)) && [ordinal, doc.find(anchor)] }
+             .sort_by(&:first).map(&:last)
     end
 
     # Presence frames from everyone, this agent's own included. A person's
