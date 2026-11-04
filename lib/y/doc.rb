@@ -1,20 +1,32 @@
 # frozen_string_literal: true
 
+require "monitor"
+
 module Y
   # Ruby-side conveniences over the native document.
   class Doc
     # Runs the block, which edits this document through handles, and returns
-    # the update its writes produced, or nil when the document didn't change.
-    # The document has the edit either way. The update is what a process
-    # saves and broadcasts, one call per chunk as it streams into a document.
+    # the update its writes produced, or nil when they changed nothing. The
+    # document has the edit either way. The update is what a process saves
+    # and broadcasts, one call per chunk as it streams into a document.
     #
-    # The update holds everything the document gained while the block ran,
-    # so a write another thread or peer made meanwhile is in it too. Applying
-    # an update twice changes nothing, so that only adds bytes.
+    # The update holds only the writes this block made, in this fiber. An
+    # update applied from a peer meanwhile stays out of it and doesn't wait
+    # for the block. Edits on one document run one at a time, so each edit's
+    # writes take consecutive clocks and its update has no gaps for a peer
+    # to wait on. An edit inside another adds its writes to the outer one.
     def edit
-      before = native_snapshot
-      yield self
-      native_update_since(before)
+      edit_lock.synchronize do
+        edits = Thread.current[:yrby_edits] ||= [] # fiber-local, as Thread#[] is
+        edits.push(updates = [])
+        begin
+          yield self
+          native_merge(updates) unless updates.empty?
+        ensure
+          edits.pop
+          edits.last&.concat(updates)
+        end
+      end
     end
 
     # The ordinal of the top-level block a position falls in, or nil at the
@@ -32,5 +44,12 @@ module Y
     def find(anchor)
       native_find(anchor.position, anchor.root)
     end
+
+    EDIT_LOCKS = Mutex.new
+    private_constant :EDIT_LOCKS
+
+    private
+
+    def edit_lock = @edit_lock || EDIT_LOCKS.synchronize { @edit_lock ||= Monitor.new }
   end
 end
