@@ -145,6 +145,23 @@ class AgentTest < Minitest::Test
     run.kill
   end
 
+  # A change outside the root is a click, not typing, so it doesn't wait for
+  # a pause.
+  def test_a_change_outside_the_root_arrives_without_waiting
+    ada = person
+    names = roster(ada)
+    seen = Queue.new
+    run = agent(Class.new(Reviewer) { define_method(:changed) { |blocks| seen << blocks } })
+    wait_until { names.call.include?("Reviewer") }
+
+    asked = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    ada.edit { |doc| doc.get_map("asks")["a1"] = "Make it shorter" }
+
+    assert_equal [], seen.pop(timeout: 5)
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - asked, :<, Y::Agent::SETTLE
+    run.kill
+  end
+
   def test_leave_ends_the_agent_without_waiting_to_be_alone
     run = agent(Class.new(Reviewer) { def joined = leave })
 
