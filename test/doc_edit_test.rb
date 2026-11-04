@@ -131,6 +131,28 @@ class DocEditTest < Minitest::Test
     refute_nil inner
   end
 
+  # A write to another document, or another document's edit, inside an edit
+  # belongs to that document, not to this edit's update.
+  def test_writes_to_another_document_stay_out_of_the_edit
+    a = Y::Doc.new
+    b = Y::Doc.new
+    inner = nil
+    outer = a.edit do
+      a.get_text("t") << "a"
+      b.get_text("loose") << "b"
+      inner = b.edit { b.get_text("u") << "b" }
+    end
+    fresh = Y::Doc.new
+    fresh.apply_update(outer)
+    other = Y::Doc.new
+    other.apply_update(inner)
+
+    assert_equal "a", fresh.read_text("t")
+    assert_nil fresh.read_text("u")
+    assert_nil fresh.read_text("loose")
+    assert_equal "b", other.read_text("u")
+  end
+
   # A write that raises partway is still reported to an outer edit, so the
   # outer update holds everything the document gained from it.
   def test_an_inner_edit_that_raises_still_reaches_the_outer_one

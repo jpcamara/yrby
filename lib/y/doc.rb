@@ -17,7 +17,7 @@ module Y
     # to wait on. An edit inside another adds its writes to the outer one.
     def edit
       edit_lock.synchronize do
-        edits = Thread.current[:yrby_edits] ||= [] # fiber-local, as Thread#[] is
+        edits = (Thread.current[:yrby_edits] ||= {})[native_guid] ||= [] # this doc's, in this fiber
         edits.push(updates = [])
         begin
           yield self

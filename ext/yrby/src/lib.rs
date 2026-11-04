@@ -398,6 +398,11 @@ impl RbDoc {
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
 
+    /// What `Doc#edit` keeps this document's updates under: its guid.
+    fn guid(&self) -> String {
+        self.0.guid().to_string()
+    }
+
     /// The updates in `updates` merged into one: what `Doc#edit` returns.
     fn merge(&self, updates: RArray) -> Result<RString, Error> {
         let updates: Vec<Vec<u8>> = updates
@@ -1147,6 +1152,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
     doc_class.define_private_method("native_merge", method!(RbDoc::merge, 1))?;
+    doc_class.define_private_method("native_guid", method!(RbDoc::guid, 0))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
