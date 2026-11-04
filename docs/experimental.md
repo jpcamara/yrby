@@ -363,9 +363,13 @@ An agent overrides three methods, and each has a default that does nothing:
 
 - `presence` is how it shows up in the editor's roster, such as
   `{ "user" => { "name" => "Reviewer" } }`. Without one, it doesn't.
+  `self.presence =` changes it while the agent stays, to show what it's
+  working on or put its caret somewhere.
 - `joined` runs once the document has loaded, and can write right away.
 - `changed(blocks)` gets the blocks people changed once their typing has
-  paused for a moment, and never the agent's own edits.
+  paused for a moment, or after five seconds of steady typing, and never
+  the agent's own edits. The list is empty when the change was outside the
+  root, such as to a map.
 
 Inside them, `doc` is the agent's copy of the document, `edit` changes it and
 sends the change, `people` lists who else is present, `document` is what
