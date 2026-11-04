@@ -12,7 +12,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # It is what the JS provider's session is, in Ruby, so it can be driven
     # in a test with nothing listening. The client feeds it every message
     # the socket delivers and every command the caller makes, all on one
-    # reactor, so it keeps no locks.
+    # reactor, so its own state needs no lock. `lock:` is the client's doc
+    # lock, held while a remote update is applied so it never lands inside
+    # a local edit.
     #
     # Messages are the JSON hashes the cable carries. A command goes out as
     # { command:, identifier:, data: } and a channel message comes in as
@@ -21,8 +23,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # The second byte of a sync frame is y-protocols' sync type; 1 is
       # SyncStep2, the server's answer to our SyncStep1.
       SYNC_STEP2 = 1
-
-      attr_reader :doc, :identifier
 
       # `root:` names the root XmlText whose top-level blocks on_update
       # reports as changed; nil turns block tracking off.
@@ -47,10 +47,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       def synced? = @synced
       def pending? = @outbox.pending?
 
-      # One message from the server. Returns what it was, for the connection
-      # to act on: :welcome, :ping, :confirmed, :rejected, :disconnect,
-      # :synced for the message that completed a handshake, :message for any
-      # other message of this subscription, and nil for anything else.
+      # One message from the server. Returns what it was: :welcome, :ping,
+      # :confirmed, :rejected, :disconnect, :synced for the message that
+      # completed a handshake, :ack, :update, or :awareness for a message of
+      # this subscription, :message for one it ignored, and nil for anything
+      # else. The connection acts on :synced, :rejected, and :disconnect.
       def receive(message)
         case message["type"]
         when "welcome" then welcome
@@ -124,10 +125,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         # AnyCable whispers presence under its own key; the server relays
         # document frames under "update".
         encoded = payload["awareness"] || payload["update"]
-        return unless encoded.is_a?(String)
+        frame = decode(encoded) if encoded.is_a?(String)
+        receive_frame(frame) if frame
+      end
 
-        frame = Base64.strict_decode64(encoded)
-        receive_frame(frame)
+      def decode(encoded)
+        Base64.strict_decode64(encoded)
       rescue ArgumentError
         nil
       end

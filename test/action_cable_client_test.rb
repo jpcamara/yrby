@@ -78,6 +78,17 @@ class ActionCableClientSessionTest < Minitest::Test
     assert_equal [[update, "typed in a browser", [0]]], updates
   end
 
+  # Only a frame that isn't base64 is dropped as garbage. An error from the
+  # caller's callback reaches the client.
+  def test_an_error_in_on_update_is_not_taken_for_garbage
+    join
+    @session.on_update { raise ArgumentError, "the caller's bug" }
+    update = @server.edit { |d| Y::Lexical.append_paragraph(d, "typed") }
+
+    error = assert_raises(ArgumentError) { @session.receive(from_server(Y.wrap_update(update))) }
+    assert_equal "the caller's bug", error.message
+  end
+
   def test_our_own_update_echoed_back_is_not_reported
     join
     updates = []
