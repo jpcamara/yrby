@@ -98,6 +98,14 @@ class ActionCableClientServerTest < Minitest::Test
     assert_equal "sent over the socket", reader.doc.read_xml("root")
   end
 
+  def test_editing_after_unsubscribe_raises_and_leaves_the_doc_alone
+    writer = client.subscribe
+    writer.unsubscribe
+
+    assert_raises(Y::Error) { writer.edit { |d| Y::Lexical.append_paragraph(d, "too late") } }
+    assert_equal "", writer.doc.read_xml("root").to_s
+  end
+
   def test_a_document_already_in_the_store_arrives_with_the_handshake
     STORE_LOCK.synchronize { STORE[@key] << Y::Doc.new.edit { |d| Y::Lexical.append_paragraph(d, "before") } }
     joined = client.subscribe
