@@ -7,6 +7,14 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `has_collaborative_document :body, channel: "PostDocumentChannel"` names
+  an app's own `Y::DocumentChannel` subclass for an attribute.
+  `collaborative_document(:body).channel` returns it, so
+  `collaborative_document_tag` and Ruby clients subscribe there without
+  passing `channel:` each time.
+
 ### Experimental
 
 These are new, and they may change in a minor release. See

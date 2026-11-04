@@ -414,5 +414,4 @@ took over. Its writes raise `Y::Error` from then on.
 
 The first argument is usually `record.collaborative_document(:name)`, which
 names its own grant and channel. Any object that responds to `key`, `name`,
-`grant(expires_in:)`, and `channel` works. Pass `channel:` for an app's own
-`Y::DocumentChannel` subclass.
+`grant(expires_in:)`, and `channel` works.

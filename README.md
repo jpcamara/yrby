@@ -664,6 +664,16 @@ the `authorize_document` block with the record and the attribute name, or to
 accept any valid grant when there's no block. A subclass can override
 `authorized?` directly and read the located record from `record`.
 
+A page subscribes to the channel its document names, `Y::DocumentChannel`
+unless the model says otherwise. Name a subclass where you declare the
+attribute, and the tag, a Ruby client, and an agent all use it:
+
+```ruby
+class Post < ApplicationRecord
+  has_collaborative_document :body, channel: "PostDocumentChannel"
+end
+```
+
 ### Grant lifetime and refresh
 
 A grant lasts as long as GlobalID's signed-id default, which is one month under
