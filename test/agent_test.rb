@@ -56,8 +56,7 @@ class AgentTest < Minitest::Test
   def agent(agent = Reviewer, **)
     Thread.new do
       Thread.current.report_on_exception = false
-      agent.run(@document, url: ClientApp.url, headers: ClientApp.headers, lock: @lock,
-                           logger: Logger.new(File::NULL), **)
+      agent.run(@document, url: ClientApp.url, headers: ClientApp.headers, lock: @lock, **)
     end
   end
 

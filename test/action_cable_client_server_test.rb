@@ -89,8 +89,7 @@ class ActionCableClientServerTest < Minitest::Test
     reader = client.on_update { |update, doc, changed| seen << [update, doc.read_xml("root"), changed] }.subscribe
 
     assert_predicate writer, :synced?
-    update = writer.doc.edit { |d| Y::Lexical.append_paragraph(d, "sent over the socket") }
-    writer.send_update(update)
+    update = writer.edit { |d| Y::Lexical.append_paragraph(d, "sent over the socket") }
 
     wait_until { !writer.pending? }
 
@@ -108,12 +107,13 @@ class ActionCableClientServerTest < Minitest::Test
 
   def test_presence_reaches_the_other_client
     first = client.subscribe
-    seen = Queue.new
-    client.on_awareness { |frame| seen << frame }.subscribe
-    frame = Y::Awareness.new.set_local_state(JSON.generate(name: "Agent"))
-    first.send_awareness(frame)
+    seen = Y::Awareness.new
+    client.on_awareness { |frame| seen.apply_update(frame) }.subscribe
+    first.presence = { "name" => "Agent" }
 
-    assert_equal frame, seen.pop(timeout: 5)
+    wait_until { seen.states[first.doc.client_id] }
+
+    assert_equal({ "name" => "Agent" }, seen.states[first.doc.client_id])
   end
 
   # Each reconnect is a new handshake with a new key. The caller's headers
@@ -121,8 +121,7 @@ class ActionCableClientServerTest < Minitest::Test
   def test_a_client_that_sets_its_origin_reconnects_after_a_drop
     origin = client(headers: { "Origin" => "http://127.0.0.1:#{self.class.port}" }).subscribe
     ActionCable.server.connections.each(&:close)
-    update = origin.doc.edit { |d| Y::Lexical.append_paragraph(d, "after the drop") }
-    origin.send_update(update)
+    update = origin.edit { |d| Y::Lexical.append_paragraph(d, "after the drop") }
 
     wait_until(timeout: 10) { !origin.pending? }
 
@@ -141,7 +140,7 @@ class ActionCableClientServerTest < Minitest::Test
     text = nil
     Sync do
       inside = client.subscribe
-      inside.send_update(inside.doc.edit { |d| Y::Lexical.append_paragraph(d, "from a fiber") })
+      inside.edit { |d| Y::Lexical.append_paragraph(d, "from a fiber") }
       wait_until { !inside.pending? }
       text = Y::Doc.new.tap { |d| STORE[@key].each { |u| d.apply_update(u) } }.read_xml("root")
       inside.unsubscribe

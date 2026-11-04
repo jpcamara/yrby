@@ -42,8 +42,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # The client runs as a task of the reactor `subscribe` is called from
   # when there is one (Falcon, or an Async block), and in a thread of its
   # own otherwise (Puma, a script). Callbacks run on that reactor; keep
-  # them short. send_update and send_awareness may be called from any
-  # thread or fiber.
+  # them short. edit and presence= may be called from any thread or fiber.
   #
   # Delivery is at least once, as in the JS provider: every update carries
   # an id and is kept until the server acks it, resent on a timer and after
@@ -150,9 +149,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       send_awareness(@awareness.set_local_state(@presence))
     end
 
-    # Send a document update; the raw bytes Y::Doc#edit returns. Kept until
-    # the server acks it. Prefer `edit`, which keeps a remote update from
-    # landing inside the diff.
+    private
+
+    # Hand a document update to the reactor, which keeps it until the server
+    # acks it.
     def send_update(update)
       return unless update && !@closed
 
@@ -160,12 +160,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       @commands << [:update, update]
     end
 
-    # Send a presence frame, such as one from Y::Awareness#set_local_state.
     def send_awareness(frame)
       @commands << [:awareness, frame] if frame && !@closed
     end
-
-    private
 
     # Runs a caller's callback, marked so `unsubscribe` knows it is inside one.
     def callback(block, args)

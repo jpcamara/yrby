@@ -44,6 +44,7 @@ module Y
     MAX_STAY = 2 * 60 * 60
     GONE = 30             # a person whose presence hasn't renewed in this long has left
     LOCK_TTL = 60         # the lock lapses this long after the agent's last renewal
+    ROOT = "root"         # the root XmlText Lexical and Lexxy edit, whose blocks changed reports
 
     # Runs an agent until it leaves. Returns :left, or :busy when another
     # agent holds the document.
@@ -53,17 +54,14 @@ module Y
 
     # `document` is a record's collaborative document, such as
     # post.collaborative_document(:body), which names its own grant and
-    # channel. `channel:` overrides the channel, for an app's own
-    # Y::DocumentChannel subclass, and `root:` names the root XmlText that
-    # changed reports blocks of.
-    def initialize(document, url:, headers: {}, channel: nil, root: "root", idle: IDLE, max_stay: MAX_STAY, # rubocop:disable Metrics/ParameterLists -- the document, the connection, and how long to stay
-                   as: nil, lock: Agent.default_lock, logger: Agent.default_logger)
+    # channel.
+    def initialize(document, url:, headers: {}, idle: IDLE, max_stay: MAX_STAY, as: nil, lock: Agent.default_lock) # rubocop:disable Metrics/ParameterLists -- the document, the connection, and how long to stay
       @document = document
-      @connect = { url: url, headers: headers, channel: channel || document.channel, root: root }
+      @url = url
+      @headers = headers
       @idle = idle
       @max_stay = max_stay
       @lock = lock && Lock.new(lock, Lock.key(document, as))
-      @logger = logger
       @changes = Thread::Queue.new
       @people = Y::Awareness.new
       @renewals = {} # client id => [clock, when it last moved]
@@ -144,7 +142,8 @@ module Y
     def join
       grant = @document.grant(expires_in: ActiveSupport::Duration.build(@max_stay + LOCK_TTL))
       params = { grant:, name: @document.name }
-      @client = Y::ActionCable::Client.new(@connect[:url], params:, logger: @logger, **@connect.except(:url))
+      @client = Y::ActionCable::Client.new(@url, params:, headers: @headers, channel: @document.channel, root: ROOT,
+                                                 logger: Agent.default_logger)
       @client.on_update { |_update, doc, touched| @changes << anchors(doc, touched || []) }
       @client.on_awareness { |frame| see(frame) }
       @client.subscribe
@@ -176,7 +175,7 @@ module Y
     # Anchors to the blocks an update touched, taken as it arrives: a later
     # update that adds or removes a block moves an ordinal, not an anchor.
     def anchors(doc, ordinals)
-      root = doc.get_xml_text(@connect[:root]) unless ordinals.empty?
+      root = doc.get_xml_text(ROOT) unless ordinals.empty?
       ordinals.filter_map { |ordinal| root.xml_text(ordinal)&.anchor }
     end
 
