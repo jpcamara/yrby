@@ -24,14 +24,13 @@ use magnus::{
 use yrs::branch::{Branch, BranchID, BranchPtr};
 use yrs::types::text::YChange;
 use yrs::{
-    Any, Hook, In, IndexScope, MapPrelim, Number, Out, ReadTxn, SharedRef, StickyIndex, Text, Xml,
-    XmlOut, XmlTextRef,
+    Any, Doc, Hook, In, IndexScope, MapPrelim, Number, Out, ReadTxn, SharedRef, StickyIndex, Text,
+    Transact, TransactionMut, Xml, XmlOut, XmlTextRef,
 };
 
 use crate::{nogvl, yrb_error};
 
-/// The origin of every transaction a handle opens. `Doc#edit` returns only
-/// these, so an update applied from elsewhere while it runs stays out.
+/// The origin of every transaction a handle opens, all through `write`.
 pub const ORIGIN: &str = "yrby";
 
 /// The largest integer a double represents exactly (2^53).
@@ -95,6 +94,45 @@ where
             .unwrap_or_else(|| "the document operation failed".to_string())),
     })?
     .map_err(yrb_error)
+}
+
+/// Run `f` in a write transaction under `ORIGIN`, as `guarded` runs its
+/// closure. When a `Doc#edit` is running in this fiber, the update the
+/// transaction made goes to it, so an edit returns its own writes and none
+/// another fiber, thread, or peer made meanwhile.
+pub fn write<F, R>(doc: &Doc, f: F) -> Result<R, Error>
+where
+    F: FnOnce(&mut TransactionMut) -> Result<R, String> + Send,
+    R: Send,
+{
+    let edit = current_edit()?;
+    let recording = edit.is_some();
+    let (result, update) = guarded(move || {
+        let mut txn = doc.transact_mut_with(ORIGIN);
+        let result = f(&mut txn);
+        let changed = !txn.insert_set().is_empty() || !txn.delete_set().is_empty();
+        Ok((
+            result,
+            (recording && changed).then(|| txn.encode_update_v1()),
+        ))
+    })?;
+    if let (Some(edit), Some(update)) = (edit, update) {
+        edit.push(crate::binary_string(&update))?;
+    }
+    result.map_err(yrb_error)
+}
+
+/// The updates collected by the innermost `Doc#edit` running in this fiber,
+/// or None outside one. `Thread#[]` is fiber-local.
+fn current_edit() -> Result<Option<RArray>, Error> {
+    let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+    let edits: Option<RArray> = ruby
+        .thread_current()
+        .funcall("[]", (ruby.to_symbol("yrby_edits"),))?;
+    match edits {
+        Some(edits) if !edits.is_empty() => Ok(Some(edits.entry(-1)?)),
+        _ => Ok(None),
+    }
 }
 
 // --- indexes ---

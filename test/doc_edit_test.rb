@@ -59,23 +59,95 @@ class DocEditTest < Minitest::Test
     assert_operator doc.edit { text << "y" }.bytesize, :<, 40
   end
 
-  # The update holds everything the document gained during the block, so a
-  # peer's update or another thread's write made meanwhile is in it too.
-  def test_writes_made_elsewhere_during_the_block_are_in_the_update
+  # The update holds only the block's own writes. A peer's update, or a
+  # write from another thread or fiber, made meanwhile stays out.
+  def test_writes_made_elsewhere_during_the_block_stay_out_of_the_update
     doc = Y::Doc.new
     remote = Y::Doc.new
     remote.get_text("theirs") << "from a peer"
     update = doc.edit do |d|
       d.apply_update(remote.encode_state_as_update)
       Thread.new { d.get_text("other") << "other thread" }.join
+      Fiber.new { d.get_text("other") << ", other fiber" }.resume
       d.get_text("mine") << "from ruby"
     end
     fresh = Y::Doc.new
     fresh.apply_update(update)
 
-    assert_equal "from a peer", fresh.read_text("theirs")
-    assert_equal "other thread", fresh.read_text("other")
     assert_equal "from ruby", fresh.read_text("mine")
+    assert_equal "", fresh.read_text("theirs").to_s
+    assert_equal "", fresh.read_text("other").to_s
+  end
+
+  # Two threads editing the same document take turns, so neither edit's
+  # writes land between the other's and each update holds its own.
+  def test_edits_on_two_threads_take_turns
+    doc = Y::Doc.new
+    a = doc.get_text("a")
+    b = doc.get_text("b")
+    order = Queue.new
+    started = Queue.new
+    other = Thread.new do
+      doc.edit do
+        b << "b1"
+        order << :b1
+        started << true
+        sleep 0.05
+        b << "b2"
+        order << :b2
+      end
+    end
+    started.pop
+    mine = doc.edit do
+      a << "a1"
+      order << :a1
+    end
+    theirs = other.value
+
+    assert_equal %i[b1 b2 a1], Array.new(3) { order.pop }
+    fresh = Y::Doc.new
+    fresh.apply_update(theirs)
+    fresh.apply_update(mine)
+
+    assert_equal %w[a1 b1b2], [fresh.read_text("a"), fresh.read_text("b")]
+    refute_predicate fresh, :pending?
+  end
+
+  # An edit inside another returns its own writes, and the outer edit holds
+  # them too.
+  def test_a_nested_edit_adds_its_writes_to_the_outer_one
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    inner = nil
+    outer = doc.edit do
+      text << "outer "
+      inner = doc.edit { text << "inner" }
+    end
+
+    alone = Y::Doc.new
+    alone.apply_update(outer)
+
+    assert_equal "outer inner", alone.read_text("t")
+    refute_nil inner
+  end
+
+  # A write that raises partway is still reported to an outer edit, so the
+  # outer update holds everything the document gained from it.
+  def test_an_inner_edit_that_raises_still_reaches_the_outer_one
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    outer = doc.edit do
+      doc.edit do
+        text << "kept"
+        raise "stop"
+      end
+    rescue RuntimeError
+      nil
+    end
+    fresh = Y::Doc.new
+    fresh.apply_update(outer)
+
+    assert_equal "kept", fresh.read_text("t")
   end
 
   def test_a_block_that_only_deletes_yields_its_deletion

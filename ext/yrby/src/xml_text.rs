@@ -23,8 +23,8 @@ use crate::nogvl;
 use crate::shared::{
     any_to_ruby, block_text, char_len, delete_span, element_index, embedded_xml_text_index,
     embedded_xml_texts, end_or_units, ends_with_xml_text, guarded, hash_pairs, identity,
-    insert_index, resolve, ruby_to_invalue, to_in, to_map_prelim, to_units, InValue, Position,
-    MAX_NESTING, ORIGIN,
+    insert_index, resolve, ruby_to_invalue, to_in, to_map_prelim, to_units, write, InValue,
+    Position, MAX_NESTING,
 };
 use crate::yrb_error;
 
@@ -166,10 +166,9 @@ impl RbXmlText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            x.insert_attribute(&mut txn, key, to_in(iv));
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            x.insert_attribute(txn, key, to_in(iv));
             Ok(())
         })?;
         Ok(value)
@@ -180,11 +179,10 @@ impl RbXmlText {
     fn insert(&self, index: i64, chunk: String) -> Result<String, Error> {
         let (doc, id) = (&self.doc, &self.id);
         let text = chunk.clone();
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            let at = end_or_units(&txn, &x, index);
-            x.insert(&mut txn, at, &text);
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            let at = end_or_units(txn, &x, index);
+            x.insert(txn, at, &text);
             Ok(())
         })?;
         Ok(chunk)
@@ -198,16 +196,15 @@ impl RbXmlText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            let at = to_units(&txn, &x, insert_index(index, char_len(&txn, &x)));
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            let at = to_units(txn, &x, insert_index(index, char_len(txn, &x)));
             match iv {
                 InValue::Map(entries) => {
-                    x.insert_embed(&mut txn, at, to_map_prelim(entries));
+                    x.insert_embed(txn, at, to_map_prelim(entries));
                 }
                 InValue::Any(a) => {
-                    x.insert_embed(&mut txn, at, a);
+                    x.insert_embed(txn, at, a);
                 }
             }
             Ok(())
@@ -263,13 +260,12 @@ impl RbXmlText {
     /// negative index counts from the end, and the length stops at the end.
     fn delete(&self, index: i64, length: i64) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            if let Some((from, to)) = delete_span(index, length, char_len(&txn, &x)) {
-                let (from, to) = (to_units(&txn, &x, from), to_units(&txn, &x, to));
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            if let Some((from, to)) = delete_span(index, length, char_len(txn, &x)) {
+                let (from, to) = (to_units(txn, &x, from), to_units(txn, &x, to));
                 if to > from {
-                    x.remove_range(&mut txn, from, to - from);
+                    x.remove_range(txn, from, to - from);
                 }
             }
             Ok(())
@@ -279,12 +275,11 @@ impl RbXmlText {
     /// Remove everything: markers, text, and embedded blocks.
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            let len = x.len(&txn);
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            let len = x.len(txn);
             if len > 0 {
-                x.remove_range(&mut txn, 0, len);
+                x.remove_range(txn, 0, len);
             }
             Ok(())
         })
@@ -300,13 +295,12 @@ impl RbXmlText {
         let attributes = hash_pairs(&ruby, attributes)?;
         let content = Piece::read_all(&ruby, content, 0)?;
         let (doc, id) = (&self.doc, &self.id);
-        let block = guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            let count = embedded_xml_texts(&txn, &x).len() as u32;
+        let block = write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            let count = embedded_xml_texts(txn, &x).len() as u32;
             let ordinal = insert_index(n, count);
-            let at = embedded_xml_text_index(&txn, &x, ordinal).unwrap_or_else(|| x.len(&txn));
-            let child = Piece::Block(attributes, content).write(&mut txn, &x, at);
+            let at = embedded_xml_text_index(txn, &x, ordinal).unwrap_or_else(|| x.len(txn));
+            let child = Piece::Block(attributes, content).write(txn, &x, at);
             // The block's identity, not the block: see `Child`.
             Ok(identity(&child.expect("a block piece writes a block")))
         })?;
@@ -331,19 +325,18 @@ impl RbXmlText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let content = Piece::read_all(&ruby, content, 0)?;
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
             if clear {
-                let len = x.len(&txn);
+                let len = x.len(txn);
                 if len > 0 {
-                    x.remove_range(&mut txn, 0, len);
+                    x.remove_range(txn, 0, len);
                 }
             }
-            let mut at = x.len(&txn);
+            let mut at = x.len(txn);
             for piece in content {
-                piece.write(&mut txn, &x, at);
-                at = x.len(&txn);
+                piece.write(txn, &x, at);
+                at = x.len(txn);
             }
             Ok(())
         })
@@ -358,15 +351,14 @@ impl RbXmlText {
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
         let marker = hash_pairs(&ruby, marker)?;
         let (doc, id) = (&rb_self.doc, &rb_self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            let mut at = x.len(&txn);
-            if at == 0 || ends_with_xml_text(&txn, &x) {
-                x.insert_embed(&mut txn, at, to_map_prelim(marker));
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            let mut at = x.len(txn);
+            if at == 0 || ends_with_xml_text(txn, &x) {
+                x.insert_embed(txn, at, to_map_prelim(marker));
                 at += 1;
             }
-            x.insert(&mut txn, at, &text);
+            x.insert(txn, at, &text);
             Ok(())
         })?;
         Ok(rb_self)
@@ -376,16 +368,15 @@ impl RbXmlText {
     /// last). Returns whether there was one.
     fn delete_xml_text(&self, n: i64) -> Result<bool, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let x = resolve::<XmlTextRef, _>(&txn, id).ok_or("the block no longer exists")?;
-            let count = embedded_xml_texts(&txn, &x).len() as u32;
+        write(doc, move |txn| {
+            let x = resolve::<XmlTextRef, _>(txn, id).ok_or("the block no longer exists")?;
+            let count = embedded_xml_texts(txn, &x).len() as u32;
             let Some(at) =
-                element_index(n, count).and_then(|n| embedded_xml_text_index(&txn, &x, n))
+                element_index(n, count).and_then(|n| embedded_xml_text_index(txn, &x, n))
             else {
                 return Ok(false);
             };
-            x.remove_range(&mut txn, at, 1);
+            x.remove_range(txn, at, 1);
             Ok(true)
         })
     }
