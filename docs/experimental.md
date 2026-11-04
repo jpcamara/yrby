@@ -339,14 +339,15 @@ leaves when they do. Subclass it, and run it from a job.
 require "y/agent"
 
 class Reviewer < Y::Agent
-  def presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
-
   def joined
+    self.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
     edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewing.") }
   end
 
-  def changed(blocks) # ordinals of the top-level blocks people changed
-    reply = ReviewModel.call(doc.read_xml("root").to_s)
+  def changed(blocks) # live handles to the top-level blocks people changed
+    return if blocks.empty?
+
+    reply = ReviewModel.call(blocks.map(&:text).join("\n"))
     edit { |doc| Y::Lexxy.append_paragraph(doc, reply) }
     leave if reply.include?("Looks good")
   end
@@ -359,21 +360,24 @@ class ReviewJob < ApplicationJob
 end
 ```
 
-An agent overrides three methods, and each has a default that does nothing:
+An agent overrides two methods, and each has a default that does nothing:
 
-- `presence` is how it shows up in the editor's roster, such as
-  `{ "user" => { "name" => "Reviewer" } }`. Without one, it doesn't.
-  `self.presence =` changes it while the agent stays, to show what it's
-  working on or put its caret somewhere.
 - `joined` runs once the document has loaded, and can write right away.
-- `changed(blocks)` gets the blocks people changed once their typing has
-  paused for a moment, or after five seconds of steady typing, and never
-  the agent's own edits. A change outside the root, such as to a map, comes
-  right away with an empty list.
+- `changed(blocks)` gets live handles (`Y::XmlText`) to the blocks people
+  changed, in document order, once their typing has paused for a moment or
+  after five seconds of steady typing, and never the agent's own edits. A
+  handle stays on its block while people keep editing around it, so a slow
+  model call still writes where it meant to. Writing to one whose block was
+  deleted raises `Y::Error`. A change outside the root, such as to a map,
+  comes right away with an empty list.
 
 Inside them, `doc` is the agent's copy of the document, `edit` changes it and
 sends the change, `people` lists who else is present, `document` is what
 `run` was given, and `leave` ends the agent once the method returns.
+`self.presence =` is how the agent shows up in the editor's roster, such as
+`{ "user" => { "name" => "Reviewer" } }`. Without it, it doesn't. Set it in
+`joined`, or in `initialize` to show up as it joins, and set it again to
+show what it's working on or put its caret somewhere.
 
 The agent signs its own grant for the document, good for `max_stay:` plus a
 minute. `url:` and `headers:` work as they do for `Y::ActionCable::Client`

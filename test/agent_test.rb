@@ -21,9 +21,13 @@ class AgentTest < Minitest::Test
 
   PERSON = { "user" => { "name" => "Ada", "color" => "#0ea5e9" } }.freeze
 
-  # The agent the tests subclass, shown to people as Reviewer.
+  # The agent the tests subclass, shown to people as Reviewer from the moment
+  # it joins.
   class Reviewer < Y::Agent
-    def presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
+    def initialize(...)
+      super
+      self.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
+    end
   end
 
   def setup
@@ -78,7 +82,7 @@ class AgentTest < Minitest::Test
     names = roster(ada)
     answers = Class.new(Reviewer) do
       def joined = edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewer here.") }
-      def changed(blocks) = edit { |doc| Y::Lexxy.append_paragraph(doc, "Saw block #{blocks.join(", ")}.") }
+      def changed(blocks) = edit { |doc| Y::Lexxy.append_paragraph(doc, "Saw: #{blocks.map(&:text).join(" / ")}") }
     end
     run = agent(answers, idle: 1)
 
@@ -86,7 +90,7 @@ class AgentTest < Minitest::Test
     wait_until { names.call.include?("Reviewer") }
     ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "Please review.") }
 
-    assert(wait_until { ada.doc.read_xml("root").to_s.include?("Saw block 1.") })
+    assert(wait_until { ada.doc.read_xml("root").to_s.include?("Saw: Please review.") })
 
     ada.unsubscribe
 
@@ -123,6 +127,22 @@ class AgentTest < Minitest::Test
 
     assert_equal run, thread
     assert task, "the agent runs in a reactor"
+  end
+
+  # changed gets the blocks themselves, so a block added above one while the
+  # edits settle doesn't shift which block it sees.
+  def test_a_block_added_above_during_the_pause_does_not_shift_what_changed_sees
+    ada = person
+    names = roster(ada)
+    seen = Queue.new
+    run = agent(Class.new(Reviewer) { define_method(:changed) { |blocks| seen << blocks.map(&:text) } })
+    wait_until { names.call.include?("Reviewer") }
+
+    ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "target") }
+    ada.edit { |doc| doc.get_xml_text("root").insert_xml_text(0, Y::Lexical::PARAGRAPH_ATTRIBUTES) }
+
+    assert_equal ["", "target"], seen.pop(timeout: 10)
+    run.kill
   end
 
   # Someone who never pauses still gets an answer: changed runs after
