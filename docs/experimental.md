@@ -368,8 +368,8 @@ An agent overrides three methods, and each has a default that does nothing:
 - `joined` runs once the document has loaded, and can write right away.
 - `changed(blocks)` gets the blocks people changed once their typing has
   paused for a moment, or after five seconds of steady typing, and never
-  the agent's own edits. The list is empty when the change was outside the
-  root, such as to a map.
+  the agent's own edits. A change outside the root, such as to a map, comes
+  right away with an empty list.
 
 Inside them, `doc` is the agent's copy of the document, `edit` changes it and
 sends the change, `people` lists who else is present, `document` is what

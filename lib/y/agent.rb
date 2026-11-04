@@ -106,8 +106,9 @@ module Y
 
     # Called with the ordinals of the top-level blocks people changed, once
     # their typing has paused for SETTLE seconds, or after SETTLE_AT_MOST
-    # seconds of steady typing. The list is empty for a change outside the
-    # root, such as to a map. The agent's own edits never show up here.
+    # seconds of steady typing. A change outside the root, such as to a map,
+    # comes right away with an empty list: it's a click, not typing. The
+    # agent's own edits never show up here.
     def changed(blocks); end
 
     def doc = @client.doc
@@ -160,7 +161,7 @@ module Y
         touched = @changes.pop(timeout: 1)
         next unless touched
 
-        blocks = settle(touched)
+        blocks = touched.empty? ? touched : settle(touched)
         changed(blocks) if holding?
       end
     end
