@@ -105,7 +105,7 @@ where
     F: FnOnce(&mut TransactionMut) -> Result<R, String> + Send,
     R: Send,
 {
-    let edit = current_edit()?;
+    let edit = current_edit(doc)?;
     let recording = edit.is_some();
     let (result, update) = guarded(move || {
         let mut txn = doc.transact_mut_with(ORIGIN);
@@ -122,15 +122,17 @@ where
     result.map_err(yrb_error)
 }
 
-/// The updates collected by the innermost `Doc#edit` running in this fiber,
-/// or None outside one. `Thread#[]` is fiber-local.
-fn current_edit() -> Result<Option<RArray>, Error> {
+/// The updates collected by the innermost `Doc#edit` of `doc` running in
+/// this fiber, or None outside one. `Doc#edit` keeps them in
+/// `Thread.current[:yrby_edits]`, which is fiber-local, under the doc's guid.
+fn current_edit(doc: &Doc) -> Result<Option<RArray>, Error> {
     let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
-    let edits: Option<RArray> = ruby
+    let edits: Option<RHash> = ruby
         .thread_current()
         .funcall("[]", (ruby.to_symbol("yrby_edits"),))?;
-    match edits {
-        Some(edits) if !edits.is_empty() => Ok(Some(edits.entry(-1)?)),
+    let Some(edits) = edits else { return Ok(None) };
+    match edits.aref::<_, Option<RArray>>(doc.guid().to_string())? {
+        Some(stack) if !stack.is_empty() => Ok(Some(stack.entry(-1)?)),
         _ => Ok(None),
     }
 }
