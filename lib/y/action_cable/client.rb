@@ -130,12 +130,19 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     # Edit the document and send what the block changed. Returns the update,
-    # or nil when the block changed nothing. A remote update applied while
-    # the block runs stays out of it (see Y::Doc#edit).
+    # or nil when there's nothing to send. A remote update applied while the
+    # block runs stays out of it (see Y::Doc#edit). Raises Y::Error once the
+    # client is closed, since nothing it edits then would reach anyone.
     def edit
-      update = @doc.edit { yield @doc }
-      send_update(update)
-      update
+      raise Y::Error, "the client was closed" if @closed
+
+      # Only the block can be interrupted, so an update is never taken from
+      # the document and then dropped before it's handed over.
+      Thread.handle_interrupt(Object => :never) do
+        update = @doc.edit { Thread.handle_interrupt(Object => :immediate) { yield @doc } }
+        send_update(update)
+        update
+      end
     end
 
     # Show this client to the document's other participants, the way a
@@ -153,7 +160,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # Hand a document update to the reactor, which keeps it until the server
     # acks it.
     def send_update(update)
-      return unless update && !@closed
+      return unless update
+      raise Y::Error, "the client closed before this update was sent" if @closed
 
       @lock.synchronize { @queued += 1 }
       @commands << [:update, update]
