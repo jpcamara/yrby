@@ -4,7 +4,8 @@ require "test_helper"
 require "timeout"
 
 # Doc#edit is the unit a long-lived process saves and broadcasts as it
-# streams into a document: the update the block produced, or nil for none.
+# streams into a document: every local write no edit has returned yet, or
+# nil for none.
 class DocEditTest < Minitest::Test
   def test_the_update_the_block_produced_applies_on_a_peer
     doc = Y::Doc.new
@@ -100,42 +101,79 @@ class DocEditTest < Minitest::Test
     assert_equal "other thread, other fiber", fresh.read_text("other")
   end
 
-  # Two threads editing the same document take turns, so neither edit's
-  # writes land between the other's and each update holds its own.
-  def test_edits_on_two_threads_take_turns
+  # Edits on several threads at once each take what's unsent, and together
+  # their updates hold every write with nothing left pending.
+  def test_edits_on_several_threads_at_once_lose_nothing
     doc = Y::Doc.new
-    a = doc.get_text("a")
-    b = doc.get_text("b")
-    order = Queue.new
-    started = Queue.new
-    other = Thread.new do
-      doc.edit do
-        b << "b1"
-        order << :b1
-        started << true
-        sleep 0.05
-        b << "b2"
-        order << :b2
+    text = doc.get_text("t")
+    updates = Queue.new
+    threads = Array.new(4) do
+      Thread.new do
+        200.times do
+          update = doc.edit { text << "x" }
+          updates << update if update
+        end
       end
     end
-    started.pop
-    mine = doc.edit do
-      a << "a1"
-      order << :a1
-    end
-    theirs = other.value
-
-    assert_equal %i[b1 b2 a1], Array.new(3) { order.pop }
+    threads.each(&:join)
     fresh = Y::Doc.new
-    fresh.apply_update(theirs)
-    fresh.apply_update(mine)
+    fresh.apply_update(updates.pop) until updates.empty?
 
-    assert_equal %w[a1 b1b2], [fresh.read_text("a"), fresh.read_text("b")]
+    assert_equal 800, fresh.read_text("t").length
     refute_predicate fresh, :pending?
   end
 
-  # An edit inside another returns its own writes, and the outer edit holds
-  # them too.
+  # An interrupt landing anywhere in an edit leaves its update in the
+  # document for the next edit, so the updates edits return hold every write.
+  def test_an_interrupt_anywhere_in_an_edit_loses_no_update
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    sent = []
+    2000.times do
+      Thread.handle_interrupt(Object => :never) do
+        update = Thread.handle_interrupt(Object => :immediate) do
+          Timeout.timeout(0.00002) { doc.edit { text << "a" } }
+        end
+        sent << update if update
+      rescue Timeout::Error
+        nil
+      end
+    end
+    sent << doc.edit { nil }
+    fresh = Y::Doc.new
+    sent.compact.each { |update| fresh.apply_update(update) }
+
+    assert_equal text.to_s, fresh.read_text("t")
+    refute_predicate fresh, :pending?
+  end
+
+  # An edit in a fiber or thread the block starts counts as nested, so the
+  # outer edit returns its writes too.
+  def test_an_edit_in_a_fiber_or_thread_the_block_starts_is_nested
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    outer = doc.edit do
+      Enumerator.new { |y| y << doc.edit { text << "fiber " } }.next
+      Thread.new { doc.edit { text << "thread" } }.join
+    end
+    fresh = Y::Doc.new
+    fresh.apply_update(outer)
+
+    assert_equal "fiber thread", fresh.read_text("t")
+  end
+
+  def test_a_frozen_document_can_still_be_edited
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    doc.freeze
+    fresh = Y::Doc.new
+    fresh.apply_update(doc.edit { text << "x" })
+
+    assert_equal "x", fresh.read_text("t")
+  end
+
+  # An edit inside another returns what's unsent so far, and the outer edit
+  # returns it again.
   def test_a_nested_edit_adds_its_writes_to_the_outer_one
     doc = Y::Doc.new
     text = doc.get_text("t")
