@@ -232,8 +232,10 @@ as its own update. `Doc#edit` runs a block that writes to the document and
 returns an update with every local write no edit has returned yet, or nil
 when there's nothing to send. The document keeps every local write until an
 edit returns it, so a write made outside the block, or in a block that
-raised, comes with the next update. An update applied from a peer is never
-in it, and doesn't wait for the block:
+raised, comes with the next update. Send every update an edit returns: an
+edit in a thread the block didn't start, such as a pool thread, takes the
+block's earlier writes too. An update applied from a peer is never in it,
+and doesn't wait for the block:
 
 ```ruby
 doc = Y::Doc.new
