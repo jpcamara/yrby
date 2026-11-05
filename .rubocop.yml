@@ -75,6 +75,7 @@ Naming/FileName:
   Exclude:
     - "lib/yrby.rb"
     - "lib/yrby-rails.rb"
+    - "lib/yrby-agent.rb"
     - "lib/yrby-decoder.rb"
 
 Style/ClassAndModuleChildren:
