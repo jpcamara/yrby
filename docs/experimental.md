@@ -295,7 +295,7 @@ client.on_update { |update, doc, changed| } # changed: ordinals of the blocks it
 client.subscribe                               # returns once the document has loaded
 client.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
 client.edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewed.") }
-client.unsubscribe                             # waits for acks, clears presence, closes
+client.unsubscribe                             # waits for acks, clears presence, closes; raises if one never came
 ```
 
 The grant gets the client into the document. Before that,

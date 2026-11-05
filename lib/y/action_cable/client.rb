@@ -55,8 +55,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     RENEW = 15     # seconds between presence renewals; peers drop a client they haven't heard from in 30
     LEAVE_GRACE = 0.25 # seconds between clearing presence and unsubscribing
     BACKOFF = [1, 2, 4, 8].freeze # seconds before each reconnect, then the last for good
-
-    attr_reader :doc
+    UNACKED = "unsubscribed before the server acked every update"
 
     # `channel:` and `params:` make the subscription identifier, the way
     # yrby-client's provider does. `root:` is the root XmlText on_update
@@ -113,17 +112,22 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     # Leave: wait up to `timeout` seconds for acks of what is still in
     # flight, tell the channel, and close the socket. Nothing is delivered
-    # after this.
+    # after this. Raises Y::Error when an update was still unacked, since
+    # it may never have reached the server.
     def unsubscribe(timeout: 5)
       return self if @closed
 
       @closed = true
-      @commands << [:close, timeout]
       # From inside a callback the runner is the caller, so it can't be
-      # waited on. It finishes leaving once the callback returns.
-      return self if Thread.current[:yrby_client_callback].equal?(self)
+      # waited on. It finishes leaving once the callback returns, and logs
+      # an update still unacked instead.
+      inside = Thread.current[:yrby_client_callback].equal?(self)
+      @commands << [:close, [timeout, inside]]
+      return self if inside
 
       @runner.is_a?(Thread) ? @runner.join(timeout + 5) : @runner&.wait
+      raise Y::Error, UNACKED if pending?
+
       self
     rescue Async::Stop
       self
@@ -156,6 +160,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     private
+
+    attr_reader :doc
 
     # Hand a document update to the reactor, which keeps it until the server
     # acks it.
@@ -277,7 +283,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
           @session.send_update(argument)
           @lock.synchronize { @queued -= 1 }
         when :awareness then @session.send_awareness(argument)
-        when :close then return leave(argument)
+        when :close then return leave(*argument)
         end
       end
     end
@@ -290,9 +296,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # and the server then drops the removal. The client lets the removal go
     # out and waits LEAVE_GRACE before unsubscribing. If it is lost anyway,
     # peers drop the presence after 30 seconds.
-    def leave(timeout)
+    def leave(timeout, inside_callback)
       deadline = now + timeout
       sleep 0.05 while @session.pending? && now < deadline
+      @logger.error(UNACKED) if inside_callback && @session.pending?
       if @presence
         @session.send_awareness(@awareness.clear_local_state)
         flush
