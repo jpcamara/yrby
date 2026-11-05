@@ -19,6 +19,10 @@ module Y
     # leaves it for the outer edit to return again. Once the outer edit
     # returns, a thread it started edits on its own.
     #
+    # So send every update an edit returns. An edit in a thread the block
+    # didn't start, such as a pool thread, isn't nested: it takes the outer
+    # block's writes too, and they're sent only if its update is.
+    #
     # An exception raised as `edit` returns, such as a Thread#raise or a
     # signal trap, loses the update the edit took. A caller that must send
     # every update masks interrupts around `edit` and doesn't raise from a
