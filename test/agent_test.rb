@@ -132,12 +132,14 @@ class AgentTest < Minitest::Test
   end
 
   # changed gets the blocks themselves, so a block added above one while the
-  # edits settle doesn't shift which block it sees.
+  # edits settle doesn't shift which block it sees. An update that reaches
+  # the agent before its sync can touch no block yet, so changed may first
+  # run with none.
   def test_a_block_added_above_during_the_pause_does_not_shift_what_changed_sees
     ada = person
     names = roster(ada)
     seen = Queue.new
-    run = agent(Class.new(Reviewer) { define_method(:changed) { |blocks| seen << blocks.map(&:text) } })
+    run = agent(Class.new(Reviewer) { define_method(:changed) { |blocks| seen << blocks.map(&:text) if blocks.any? } })
     wait_until { names.call.include?("Reviewer") }
 
     ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "target") }
