@@ -3,27 +3,27 @@
 require "securerandom"
 
 module Y
-  class Agent
-    # The agent lock: a key in an ActiveSupport::Cache store
-    # holding this agent's token. It is written only if absent, and a thread
-    # of its own renews it every LOCK_TTL / 3 seconds while the agent stays,
-    # however long a handler or a model call takes. It lapses LOCK_TTL
-    # seconds after the last renewal, so an agent whose process died doesn't
-    # hold the document for good.
+  class Collaborator
+    # The collaborator lock: a key in an ActiveSupport::Cache store holding
+    # this collaborator's token. It is written only if absent, and a thread of
+    # its own renews it every LOCK_TTL / 3 seconds while the collaborator
+    # stays, however long a handler or a model call takes. It lapses LOCK_TTL
+    # seconds after the last renewal, so a collaborator whose process died
+    # doesn't hold the document for good.
     #
     # Cache stores have no atomic compare-and-set, so a renewal and a release
-    # read the key and then write or delete it. That leaves one gap: a
-    # process that stalls longer than LOCK_TTL loses the lock, and while it
-    # comes back, it can briefly overlap the agent that took over. Its next
+    # read the key and then write or delete it. That leaves one gap: a process
+    # that stalls longer than LOCK_TTL loses the lock, and while it comes
+    # back, it can briefly overlap the collaborator that took over. Its next
     # renewal sees the other token and it stops.
     class Lock
       # One key per document, or per document and `as` when it's given. A
       # record is named by its GlobalID, so a Person and a Team with the same
       # id don't share a key.
       def self.key(document, as)
-        return "yrby:agent:#{document.key}" if as.nil?
+        return "yrby:collaborator:#{document.key}" if as.nil?
 
-        "yrby:agent:#{document.key}:#{as.respond_to?(:to_global_id) ? as.to_global_id : as}"
+        "yrby:collaborator:#{document.key}:#{as.respond_to?(:to_global_id) ? as.to_global_id : as}"
       end
 
       def initialize(store, key)
@@ -40,7 +40,7 @@ module Y
         @held
       end
 
-      # False once another agent holds the lock.
+      # False once another collaborator holds the lock.
       def held? = @held
 
       def release

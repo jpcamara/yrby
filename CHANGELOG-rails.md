@@ -35,16 +35,17 @@ These are new, and they may change in a minor release. See
   until acked, and a dropped socket reconnects. `presence=` shows the client
   to others and renews itself. It sends the URL's origin, and `headers:`
   add anything else the connection checks. It needs the async-websocket gem.
-- `Y::Agent` runs a Ruby process as a participant in a document, from a
-  job or anywhere else. A subclass defines `joined` and `changed(blocks)`
-  and sets `self.presence =`. `Reviewer.run(post.collaborative_document(:body),
-  url:, headers:)` joins with a grant, calls `changed` with live handles to
-  the blocks people changed once their typing settles, and returns when
-  nobody else has been present for `idle` seconds, after `max_stay`, or on
-  `leave`. One agent works on a document at a time, through a lock in
+- `Y::Collaborator` takes part in a document the way a person does, from a
+  job or anywhere else. A subclass defines `joined` and `changed(blocks)`,
+  where an AI agent calls its model, and sets `self.presence =`.
+  `Reviewer.run(post.collaborative_document(:body), url:, headers:)` joins
+  with a grant, calls `changed` with live handles to the blocks people
+  changed once their typing settles, and returns when nobody else has been
+  present for `idle` seconds, after `max_stay`, or on `leave`. One
+  collaborator works on a document at a time, through a lock in
   `Rails.cache`, or one per person with `as: person`. An error in `joined`
-  or `changed` ends the agent and raises out of `run`. `require "y/agent"`
-  to use it.
+  or `changed` ends the collaborator and raises out of `run`.
+  `require "y/collaborator"` to use it.
 
 ## [0.8.0] - 2026-11-03
 

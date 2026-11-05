@@ -23,7 +23,7 @@ module Y
       def append(update) = document_row.append(update)
 
       # A signed grant for this document, what a page, a Ruby client, or a
-      # Y::Agent subscribes with. It's a signed GlobalID scoped to this
+      # Y::Collaborator subscribes with. It's a signed GlobalID scoped to this
       # attribute, and Y::Collaborative.locate turns it back into the record.
       # Pass expires_in: to limit how long it lasts. Without it GlobalID's own
       # default applies, which is one month under Rails. The option goes

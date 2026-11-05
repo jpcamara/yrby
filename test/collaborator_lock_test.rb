@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require "test_helper"
-require "y/agent"
+require "y/collaborator"
 require "active_support"
 require "active_support/cache"
 
-class AgentLockTest < Minitest::Test
+class CollaboratorLockTest < Minitest::Test
   def setup
     @store = ActiveSupport::Cache::MemoryStore.new
     @locks = []
@@ -16,10 +16,10 @@ class AgentLockTest < Minitest::Test
   end
 
   def lock
-    Y::Agent::Lock.new(@store, "yrby:agent:doc").tap { |l| @locks << l }
+    Y::Collaborator::Lock.new(@store, "yrby:collaborator:doc").tap { |l| @locks << l }
   end
 
-  def test_only_one_agent_takes_the_lock
+  def test_only_one_collaborator_takes_the_lock
     first = lock
     second = lock
 
@@ -31,17 +31,17 @@ class AgentLockTest < Minitest::Test
   def test_a_renewal_that_finds_another_holder_gives_the_lock_up
     first = lock
     first.take
-    @store.write("yrby:agent:doc", "another agent")
+    @store.write("yrby:collaborator:doc", "another collaborator")
     first.send(:renew)
 
     refute_predicate first, :held?
-    assert_equal "another agent", @store.read("yrby:agent:doc")
+    assert_equal "another collaborator", @store.read("yrby:collaborator:doc")
   end
 
   def test_a_renewal_keeps_the_lock_while_it_is_ours
     first = lock
     first.take
-    @store.delete("yrby:agent:doc") # as if it had lapsed with nobody waiting
+    @store.delete("yrby:collaborator:doc") # as if it had lapsed with nobody waiting
     first.send(:renew)
 
     assert_predicate first, :held?
@@ -59,7 +59,7 @@ class AgentLockTest < Minitest::Test
     stale.instance_variable_set(:@held, true) # it believes it still holds it
     stale.release
 
-    refute_nil @store.read("yrby:agent:doc"), "the successor's lock survives"
+    refute_nil @store.read("yrby:collaborator:doc"), "the successor's lock survives"
   end
 
   Document = Data.define(:key)
@@ -68,9 +68,9 @@ class AgentLockTest < Minitest::Test
   def test_a_lock_per_document_or_per_document_and_person
     doc = Document.new(key: "post/1/body")
 
-    assert_equal "yrby:agent:post/1/body", Y::Agent::Lock.key(doc, nil)
-    assert_equal "yrby:agent:post/1/body:ada", Y::Agent::Lock.key(doc, "ada")
-    assert_equal "yrby:agent:post/1/body:gid://app/Person/1",
-                 Y::Agent::Lock.key(doc, Person.new(to_global_id: "gid://app/Person/1"))
+    assert_equal "yrby:collaborator:post/1/body", Y::Collaborator::Lock.key(doc, nil)
+    assert_equal "yrby:collaborator:post/1/body:ada", Y::Collaborator::Lock.key(doc, "ada")
+    assert_equal "yrby:collaborator:post/1/body:gid://app/Person/1",
+                 Y::Collaborator::Lock.key(doc, Person.new(to_global_id: "gid://app/Person/1"))
   end
 end

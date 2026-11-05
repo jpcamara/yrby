@@ -3,15 +3,16 @@
 require "active_support/duration"
 require "logger"
 require "y/action_cable/client"
-require "y/agent/lock"
+require "y/collaborator/lock"
 
 module Y
-  # Takes part in a document the way a person does. It joins over the cable with a
-  # grant, shows up among the people editing, hears what they write once
-  # their typing settles, and leaves when they do. Subclass it, and run it
-  # from a job:
+  # Takes part in a document the way a person does. It joins over the cable
+  # with a grant, shows up among the people editing, hears what they write
+  # once their typing settles, and leaves when they do. It has no model of its
+  # own: an AI agent is a collaborator whose `changed` calls one. Subclass it,
+  # and run it from a job:
   #
-  #   class Reviewer < Y::Agent
+  #   class Reviewer < Y::Collaborator
   #     def joined
   #       self.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
   #       edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewing.") }
@@ -26,28 +27,28 @@ module Y
   #     def perform(post) = Reviewer.run(post.collaborative_document(:body), url: "wss://example.com/cable")
   #   end
   #
-  # `run` follows the document until nobody else has been present for
-  # `idle` seconds, the agent has stayed `max_stay` seconds, or `leave` is
-  # called. It always clears its presence and unsubscribes on the way out.
-  # An error in `joined` or `changed` ends the agent and raises out of
+  # `run` follows the document until nobody else has been present for `idle`
+  # seconds, the collaborator has stayed `max_stay` seconds, or `leave` is
+  # called. It always clears its presence and unsubscribes on the way out. An
+  # error in `joined` or `changed` ends the collaborator and raises out of
   # `run`; rescue it in the method to carry on.
   #
-  # Only one agent works on a document at a time. Pass `as:` to allow one
-  # per person instead, such as `as: person` for the agent a person brought.
-  # The lock lives in `lock:`, Rails.cache by default, so it holds across
-  # processes when the cache is shared. `run` returns :busy without joining
-  # when another agent holds it.
-  class Agent
+  # Only one collaborator works on a document at a time. Pass `as:` to allow
+  # one per person instead, such as `as: person` for the collaborator a person
+  # brought. The lock lives in `lock:`, Rails.cache by default, so it holds
+  # across processes when the cache is shared. `run` returns :busy without
+  # joining when another collaborator holds it.
+  class Collaborator
     SETTLE = 1.5          # seconds of quiet before changed sees a burst of edits
     SETTLE_AT_MOST = 5    # seconds of steady typing before changed sees it anyway
-    IDLE = 120            # seconds with nobody else present before the agent leaves
+    IDLE = 120            # seconds with nobody else present before it leaves
     MAX_STAY = 2 * 60 * 60
     GONE = 30             # a person whose presence hasn't renewed in this long has left
-    LOCK_TTL = 60         # the lock lapses this long after the agent's last renewal
+    LOCK_TTL = 60         # the lock lapses this long after its last renewal
     ROOT = "root"         # the root XmlText Lexical and Lexxy edit, whose blocks changed reports
 
-    # Runs an agent until it leaves. Returns :left, or :busy when another
-    # agent holds the document.
+    # Runs a collaborator until it leaves. Returns :left, or :busy when another
+    # collaborator holds the document.
     def self.run(document, **) = new(document, **).run
 
     attr_reader :document
@@ -55,7 +56,8 @@ module Y
     # `document` is a record's collaborative document, such as
     # post.collaborative_document(:body), which names its own grant and
     # channel.
-    def initialize(document, url:, headers: {}, idle: IDLE, max_stay: MAX_STAY, as: nil, lock: Agent.default_lock) # rubocop:disable Metrics/ParameterLists -- the document, the connection, and how long to stay
+    def initialize(document, url:, headers: {}, idle: IDLE, max_stay: MAX_STAY, as: nil, # rubocop:disable Metrics/ParameterLists -- the document, the connection, and how long to stay
+                   lock: Collaborator.default_lock)
       @document = document
       @url = url
       @headers = headers
@@ -71,7 +73,7 @@ module Y
 
     # Runs as a task of the caller's reactor when there is one. Otherwise it
     # starts one on the calling thread, such as a job's, and holds that
-    # thread until the agent leaves.
+    # thread until the collaborator leaves.
     def run
       return :busy unless !@lock || @lock.take
 
@@ -88,10 +90,11 @@ module Y
       @lock&.release
     end
 
-    # How the agent appears to the people in the document: the hash editors
-    # render, such as { "user" => { "name" => "Reviewer" } }. nil, the
+    # How the collaborator appears to the people in the document: the hash
+    # editors render, such as { "user" => { "name" => "Reviewer" } }. nil, the
     # default, keeps it out of their roster. Set it in `joined`, or in
-    # `initialize` to show up as the agent joins, and again to change it.
+    # `initialize` to show up as the collaborator joins, and again to change
+    # it.
     attr_reader :presence
 
     def presence=(state)
@@ -99,7 +102,7 @@ module Y
       @client&.presence = state
     end
 
-    # Called once the agent has joined and the document has loaded.
+    # Called once the collaborator has joined and the document has loaded.
     def joined; end
 
     # Called with live handles (Y::XmlText) to the top-level blocks people
@@ -108,14 +111,14 @@ module Y
     # stays on its block while people edit around it, and writing to one
     # whose block was deleted raises Y::Error. A change outside the root,
     # such as to a map, comes right away with an empty list: it's a click,
-    # not typing. The agent's own edits never show up here.
+    # not typing. The collaborator's own edits never show up here.
     def changed(blocks); end
 
     # Edit the document. Returns the update, or nil when nothing changed.
-    # Raises Y::Error once another agent holds the document, so an agent
-    # that outlived the lock stops writing.
+    # Raises Y::Error once another collaborator holds the document, so a
+    # collaborator that outlived the lock stops writing.
     def edit(&)
-      raise Y::Error, "another agent holds #{@document.key}" unless holding?
+      raise Y::Error, "another collaborator holds #{@document.key}" unless holding?
 
       @client.edit(&)
     end
@@ -138,7 +141,7 @@ module Y
 
     private
 
-    # The agent's copy of the document, for its hooks to read.
+    # The collaborator's copy of the document, for its hooks to read.
     attr_reader :doc
 
     def join
@@ -146,7 +149,7 @@ module Y
       params = { grant:, name: @document.name }
       @doc = Y::Doc.new
       @client = Y::ActionCable::Client.new(@url, params:, headers: @headers, channel: @document.channel, doc: @doc,
-                                                 root: ROOT, logger: Agent.default_logger)
+                                                 root: ROOT, logger: Collaborator.default_logger)
       @client.on_update { |_update, doc, touched| @changes << anchors(doc, touched || []) }
       @client.on_awareness { |frame| see(frame) }
       @client.subscribe
@@ -173,13 +176,13 @@ module Y
     def leave_after_error
       @client&.unsubscribe
     rescue Y::Error => e
-      Agent.default_logger.error(e.message)
+      Collaborator.default_logger.error(e.message)
     end
 
     def holding? = @lock.nil? || @lock.held?
 
     # People already in the document announce themselves only when they next
-    # renew their presence, so the agent can't know it is alone until one
+    # renew their presence, so the collaborator can't know it is alone until one
     # renewal window has passed since it joined.
     def alone?(started) = now - started > Y::ActionCable::Client::RENEW && people.empty?
 
@@ -207,9 +210,9 @@ module Y
              .sort_by(&:first).map(&:last)
     end
 
-    # Presence frames from everyone, this agent's own included. A person's
-    # editor renews their presence every 15 seconds, so a clock that stops
-    # moving means they left without saying so.
+    # Presence frames from everyone, this collaborator's own included. A
+    # person's editor renews their presence every 15 seconds, so a clock that
+    # stops moving means they left without saying so.
     def see(frame)
       @people_lock.synchronize do
         @people.apply_update(frame)

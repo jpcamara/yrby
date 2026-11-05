@@ -4,7 +4,7 @@ These APIs are new. They may change in any minor release, and they aren't
 covered by yrby's usual compatibility promise. Everything else is in the
 [README](../README.md).
 
-`require "y/action_cable/client"` and `require "y/agent"` print a warning in
+`require "y/action_cable/client"` and `require "y/collaborator"` print a warning in
 Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 
 - [Y::Map (live shared maps)](#ymap-live-shared-maps)
@@ -15,7 +15,7 @@ Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 - [Streaming into a document](#streaming-into-a-document)
 - [Editing a document from Ruby](#editing-a-document-from-ruby)
 - [Joining a document from a Ruby process](#joining-a-document-from-a-ruby-process)
-- [Agents](#agents)
+- [Collaborators](#collaborators)
 
 ## Y::Map (live shared maps)
 
@@ -329,16 +329,17 @@ returns the frame to send, `apply_update(frame)` reads another client's, and
 a document writes its edits under, and a presence for the same writer uses it
 so editors tie a caret to its author.
 
-## Agents
+## Collaborators
 
-`Y::Agent` takes part in a document the way a person does: it joins with
-a grant, shows up among the people editing, hears what they write, and
-leaves when they do. Subclass it, and run it from a job.
+`Y::Collaborator` takes part in a document the way a person does: it joins
+with a grant, shows up among the people editing, hears what they write, and
+leaves when they do. It has no model of its own: an AI agent is a
+collaborator whose `changed` calls one. Subclass it, and run it from a job.
 
 ```rb
-require "y/agent"
+require "y/collaborator"
 
-class Reviewer < Y::Agent
+class Reviewer < Y::Collaborator
   def joined
     self.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
     edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewing.") }
@@ -360,57 +361,58 @@ class ReviewJob < ApplicationJob
 end
 ```
 
-An agent overrides two methods, and each has a default that does nothing:
+A collaborator overrides two methods, and each has a default that does nothing:
 
 - `joined` runs once the document has loaded, and can write right away.
 - `changed(blocks)` gets live handles (`Y::XmlText`) to the blocks people
   changed, in document order, once their typing has paused for a moment or
-  after five seconds of steady typing, and never the agent's own edits. A
+  after five seconds of steady typing, and never the collaborator's own edits. A
   handle stays on its block while people keep editing around it, so a slow
   model call still writes where it meant to. Writing to one whose block was
   deleted raises `Y::Error`. A change outside the root, such as to a map,
   comes right away with an empty list.
 
-Inside them, `doc` is the agent's copy of the document, `edit` changes it and
-sends the change, `people` lists who else is present, `document` is what
-`run` was given, and `leave` ends the agent once the method returns.
-`self.presence =` is how the agent shows up in the editor's roster, such as
-`{ "user" => { "name" => "Reviewer" } }`. Without it, it doesn't. Set it in
-`joined`, or in `initialize` to show up as it joins, and set it again to
-show what it's working on or put its caret somewhere.
+Inside them, `doc` is the collaborator's copy of the document, `edit` changes
+it and sends the change, `people` lists who else is present, `document` is
+what `run` was given, and `leave` ends the collaborator once the method
+returns. `self.presence =` is how the collaborator shows up in the editor's
+roster, such as `{ "user" => { "name" => "Reviewer" } }`. Without it, it
+doesn't. Set it in `joined`, or in `initialize` to show up as it joins, and
+set it again to show what it's working on or put its caret somewhere.
 
-The agent signs its own grant for the document, good for `max_stay:` plus a
-minute. `url:` and `headers:` work as they do for `Y::ActionCable::Client`
-above. Enqueue the job from code that has already checked the person may
-edit the post, since the agent gets the same access.
+The collaborator signs its own grant for the document, good for `max_stay:`
+plus a minute. `url:` and `headers:` work as they do for
+`Y::ActionCable::Client` above. Enqueue the job from code that has already
+checked the person may edit the post, since the collaborator gets the same
+access.
 
-`run` returns when the agent leaves. In a job it holds the job's thread for
-that long, with the agent's connection on a reactor in that thread. Inside a
-reactor (Falcon, an `Async` block) it runs as a task of that one. A job that
-runs an agent holds a worker for as long as the agent stays, so give agents
-their own queue.
+`run` returns when the collaborator leaves. In a job it holds the job's thread
+for that long, with the collaborator's connection on a reactor in that thread.
+Inside a reactor (Falcon, an `Async` block) it runs as a task of that one. A
+job that runs a collaborator holds a worker for as long as the collaborator
+stays, so give collaborators their own queue.
 
-The agent leaves when nobody else has been present for `idle:` seconds (120
-by default), after `max_stay:` (two hours), or when it calls `leave`. People
-already in the document show up only when their editor next renews its
-presence, so the agent waits one renewal window, 15 seconds, before it
-decides it is alone. It always clears its presence and unsubscribes on the
-way out.
+The collaborator leaves when nobody else has been present for `idle:` seconds
+(120 by default), after `max_stay:` (two hours), or when it calls `leave`.
+People already in the document show up only when their editor next renews its
+presence, so the collaborator waits one renewal window, 15 seconds, before it
+decides it is alone. It always clears its presence and unsubscribes on the way
+out.
 
-An error in `joined` or `changed` ends the agent. It leaves, and the error
-raises out of `run`, so a job retries it as it would any other error.
+An error in `joined` or `changed` ends the collaborator. It leaves, and the
+error raises out of `run`, so a job retries it as it would any other error.
 Rescue in the method to carry on instead.
 
-One agent works on a document at a time. Pass `as:` to allow one per person
-instead, such as `as: person` when each person can bring their own agent. A
-record is named by its GlobalID. The lock is in `Rails.cache` by default,
-so it holds across processes when the cache is shared. Pass `lock:` for
-another `ActiveSupport::Cache` store. A thread renews it while
-the agent stays, so a slow model call doesn't let it lapse. `run` returns
-`:busy` without joining when another agent holds the document, and `:left`
-otherwise. Cache stores can't compare and set in one step, so a process that
-stalls for over a minute can lose the lock and briefly overlap the agent that
-took over. Its writes raise `Y::Error` from then on.
+One collaborator works on a document at a time. Pass `as:` to allow one per
+person instead, such as `as: person` when each person can bring their own
+agent. A record is named by its GlobalID. The lock is in `Rails.cache` by
+default, so it holds across processes when the cache is shared. Pass `lock:`
+for another `ActiveSupport::Cache` store. A thread renews it while the
+collaborator stays, so a slow model call doesn't let it lapse. `run` returns
+`:busy` without joining when another collaborator holds the document, and
+`:left` otherwise. Cache stores can't compare and set in one step, so a
+process that stalls for over a minute can lose the lock and briefly overlap
+the collaborator that took over. Its writes raise `Y::Error` from then on.
 
 The first argument is usually `record.collaborative_document(:name)`, which
 names its own grant and channel. Any object that responds to `key`, `name`,
