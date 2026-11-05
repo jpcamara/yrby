@@ -132,6 +132,22 @@ class CollaboratorTest < Minitest::Test
     assert task, "the collaborator runs in a reactor"
   end
 
+  # On its reactor, the collaborator starts no threads: its connection and
+  # its lock's renewals are tasks there, so a fiber job costs no thread.
+  def test_the_collaborator_starts_no_threads_of_its_own
+    seen = Queue.new
+    looks = Class.new(Reviewer) do
+      define_method(:joined) do
+        seen << Thread.list.map(&:inspect)
+        leave
+      end
+    end
+    run = collaborator(looks)
+
+    assert_equal :left, run.join(10)&.value
+    assert_empty seen.pop.grep(%r{/lib/y/})
+  end
+
   # changed gets the blocks themselves, so a block added above one while the
   # edits settle doesn't shift which block it sees. An update that reaches the
   # collaborator before its sync can touch no block yet, so changed may first
