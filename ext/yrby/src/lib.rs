@@ -39,11 +39,9 @@ struct RbDoc(Doc, Unsent);
 /// returned yet. Every transaction but a peer's lands here when it commits,
 /// after yrs is done changing the document, whichever thread or fiber made
 /// it and whether or not an edit was running. So no local write is left out.
+/// They're merged only when an edit takes them, so until then the document
+/// holds the bytes of every local write.
 type Unsent = std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
-
-/// Past this many unsent updates, they merge into one, so a document that is
-/// never edited doesn't keep every write apart.
-const UNSENT_MERGE_AT: usize = 64;
 
 /// Compile-time proof that the wrapped Doc is thread-safe. If a future yrs
 /// upgrade makes Doc lose Send/Sync, this fails the build instead of silently
@@ -190,11 +188,6 @@ impl RbDoc {
             }
             let mut unsent = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             unsent.push(event.update.clone());
-            if unsent.len() >= UNSENT_MERGE_AT {
-                if let Ok(merged) = yrs::merge_updates_v1(&*unsent) {
-                    *unsent = vec![merged];
-                }
-            }
         })
         .map_err(|e| yrb_error(e.to_string()))?;
         Ok(RbDoc(doc, unsent))
@@ -338,7 +331,7 @@ impl RbDoc {
             // One transaction from the snapshot of the blocks to the commit,
             // under an origin of its own: another write can't change the
             // blocks in between, and its events don't count.
-            let key = shared::observer_key();
+            let key = shared::remote_key();
             let mut txn = doc.transact_mut_with(key.clone());
             let fragment = yrs::WriteTxn::get_or_insert_xml_fragment(&mut txn, root.as_str());
             let branch: &yrs::branch::Branch = fragment.as_ref();
@@ -1391,7 +1384,7 @@ mod tests {
     #[ruby_test]
     fn unsent_updates_merge_into_one_that_carries_them_all() {
         let doc = new_doc();
-        for n in 0..(UNSENT_MERGE_AT * 2) {
+        for n in 0..128 {
             push(&doc, "t", &n.to_string());
         }
         let fresh = new_doc();

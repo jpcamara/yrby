@@ -45,11 +45,10 @@ pub fn is_remote(origin: Option<&yrs::Origin>) -> bool {
 /// The largest integer a double represents exactly (2^53).
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
-/// A key no other observer uses. yrs registers an observer under a key and
-/// removes it by that key, so two observers on one document need different
-/// ones. It's also the origin of the transaction that applies a peer's
-/// update, so it starts with `REMOTE`.
-pub fn observer_key() -> yrs::Origin {
+/// An origin for a transaction that applies a peer's update, and a key no
+/// other observer uses: yrs registers an observer under a key and removes it
+/// by that key, so two observers on one document need different ones.
+pub fn remote_key() -> yrs::Origin {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     format!("{REMOTE}:{n}").as_str().into()

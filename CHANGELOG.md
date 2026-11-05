@@ -19,9 +19,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or fiber, or in a block that raised comes with the next edit. Before this,
   the edit returned everything the document gained while the block ran, so
   an update applied from a peer meanwhile was sent again as the edit's own,
-  and a caller had to lock the document to keep them apart. Edits on one
-  document now run one at a time, so each update's clocks are consecutive. A
-  peer's update doesn't wait for an edit.
+  and a caller had to lock the document to keep them apart. Each edit takes
+  everything unsent at once, so the updates edits return have no gaps
+  between them. A peer's update doesn't wait for an edit.
 
 ### Experimental
 
