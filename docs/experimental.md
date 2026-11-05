@@ -4,8 +4,8 @@ These APIs are new. They may change in any minor release, and they aren't
 covered by yrby's usual compatibility promise. Everything else is in the
 [README](../README.md).
 
-`require "y/action_cable/client"` and `require "y/collaborator"` print a warning in
-Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
+`require "y/action_cable/client"`, `require "y/collaborator"`, and
+`require "y/agent"` print a warning in Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 
 - [Y::Map (live shared maps)](#ymap-live-shared-maps)
 - [Y::Array (live shared lists)](#yarray-live-shared-lists)
@@ -16,6 +16,7 @@ Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 - [Editing a document from Ruby](#editing-a-document-from-ruby)
 - [Joining a document from a Ruby process](#joining-a-document-from-a-ruby-process)
 - [Collaborators](#collaborators)
+- [Agents](#agents)
 
 ## Y::Map (live shared maps)
 
@@ -418,3 +419,62 @@ the collaborator that took over. Its writes raise `Y::Error` from then on.
 The first argument is usually `record.collaborative_document(:name)`, which
 names its own grant and channel. Any object that responds to `key`, `name`,
 `grant(expires_in:)`, and `channel` works.
+
+## Agents
+
+`Y::Agent`, in the `yrby-agent` gem, is a collaborator with a model. When
+people's typing settles, it hands the blocks they changed to a model through
+[RubyLLM](https://rubyllm.com), with tools that read the document and edit
+its blocks. Add `gem "yrby-agent"` to the Gemfile.
+
+```rb
+require "y/agent"
+
+class Proofreader < Y::Agent
+  model "gpt-5.6-luna"
+  instructions "Fix spelling mistakes in the blocks people change, using the tools. Change nothing else."
+end
+
+class ProofreadJob < ApplicationJob
+  def perform(post)
+    Proofreader.run(post.collaborative_document(:body), url: "wss://example.com/cable")
+  end
+end
+```
+
+`model`, `instructions`, `tools`, `thinking`, and `temperature` are
+RubyLLM::Agent's settings, and take what it takes, such as `provider:`.
+`llm` is the RubyLLM::Agent itself, for any other setting. `run` and
+everything else work as they do for `Y::Collaborator`.
+
+`changed(blocks)` asks the model about the changed blocks, listed by id:
+
+```text
+People changed these blocks:
+
+b2 (paragraph): We ship on Fridya after the reveiw.
+```
+
+The model gets four tools:
+
+- `read_document` lists every block, one per line, as `b1 (heading h2): Launch plan`.
+- `rewrite_block(id, text)` replaces a block's text, as plain text, so its
+  formatting is lost. What a person types into the block at the same time
+  is kept.
+- `insert_paragraph(text, after:)` adds a paragraph after a block, or at the
+  end without `after`.
+- `delete_block(id)` deletes a block.
+
+An id stays on its block for the whole stay, wherever people move it, so the
+model can name a block it read a moment ago while people keep typing. A tool
+given an id that's gone tells the model to read the document again. Every
+write goes through `edit`, so people see each one as the model makes it.
+
+Each ask is a fresh chat. The tools read the document as it is now, so the
+model needs no history, and a stay of hours never grows one. Override
+`changed` to ask something else, and call `ask(message)` for any other
+question. It returns the model's reply, and a block gets each chunk as it
+streams in. `chat` is the fresh chat `ask` uses, to set more on first, such as
+`chat.with_temperature(0).ask(message)`. Override `document_tools` to give the
+model fewer tools, such as `[Y::Agent::Tools::ReadDocument]` for an agent that
+only answers.
