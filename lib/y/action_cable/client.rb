@@ -187,7 +187,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     def close_and_raise(reason)
       @closed = true
-      @commands << [:close, 0]
+      @commands << [:close, [0, false]]
       raise Y::Error, reason
     end
 

@@ -150,10 +150,18 @@ class ActionCableClientServerTest < Minitest::Test
     assert_includes STORE_LOCK.synchronize { STORE[@key].dup }, update
   end
 
+  # The client closes on the way out, and its reactor ends without an
+  # error of its own, which Async would only log.
   def test_a_rejected_subscription_raises
-    error = assert_raises(Y::Error) { client("private-room").subscribe(timeout: 5) }
+    rejected = client("private-room")
+    error = nil
+    _, logged = capture_io do
+      error = assert_raises(Y::Error) { rejected.subscribe(timeout: 5) }
+      rejected.instance_variable_get(:@runner).join(5)
+    end
 
     assert_match(/rejected/, error.message)
+    assert_empty logged
   end
 
   # Inside a reactor the client is a task of the caller's, so a Sync block
