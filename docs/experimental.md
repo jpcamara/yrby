@@ -229,10 +229,13 @@ rest), what a process keeps to put a block back the way it was.
 A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
 as its own update. `Doc#edit` runs a block that writes to the document and
-returns the update its writes produced, or nil when the document didn't
-change. The update holds everything the document gained while the block
-ran, so a write another thread or peer made meanwhile is in it too. Applying
-an update twice changes nothing, so that only adds bytes:
+returns an update with every local write no edit has returned yet, or nil
+when there's nothing to send. The document keeps every local write until an
+edit returns it, so a write made outside the block, or in a block that
+raised, comes with the next update. Send every update an edit returns: an
+edit in a thread the block didn't start, such as a pool thread, takes the
+block's earlier writes too. An update applied from a peer is never in it,
+and doesn't wait for the block:
 
 ```ruby
 doc = Y::Doc.new
@@ -252,7 +255,7 @@ caret follows what it writes.
 A job, a console, or a controller edits a record's document with `edit`. It
 loads the current document, yields it, records what the block changed in the
 document's rows, and broadcasts the update so open editors apply it. It
-returns the update, or nil when the block changed nothing.
+returns the update, or nil when the block wrote nothing.
 
 ```ruby
 post.collaborative_document(:body).edit do |doc|

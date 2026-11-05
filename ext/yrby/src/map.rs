@@ -17,7 +17,7 @@ use crate::array::RbArray;
 use crate::nogvl;
 use crate::read::out_to_any;
 use crate::shared::{
-    any_to_ruby, guarded, identity, key_to_string, resolve, ruby_to_invalue, to_in, Child, ORIGIN,
+    any_to_ruby, identity, key_to_string, resolve, ruby_to_invalue, to_in, write, Child,
 };
 use crate::text::RbText;
 
@@ -168,10 +168,9 @@ impl RbMap {
         let key = key_to_string(key)?;
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let m = resolve::<MapRef, _>(&txn, id).ok_or("map no longer exists")?;
-            m.insert(&mut txn, key, to_in(iv));
+        write(doc, move |txn| {
+            let m = resolve::<MapRef, _>(txn, id).ok_or("map no longer exists")?;
+            m.insert(txn, key, to_in(iv));
             Ok(())
         })?;
         Ok(value)
@@ -183,10 +182,9 @@ impl RbMap {
     fn set_text(&self, key: Value, content: String) -> Result<RbText, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
-        let text = guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let m = resolve::<MapRef, _>(&txn, id).ok_or("map no longer exists")?;
-            Ok(identity(&m.insert(&mut txn, key, TextPrelim::new(content))))
+        let text = write(doc, move |txn| {
+            let m = resolve::<MapRef, _>(txn, id).ok_or("map no longer exists")?;
+            Ok(identity(&m.insert(txn, key, TextPrelim::new(content))))
         })?;
         Ok(RbText::new(self.doc.clone(), text))
     }
@@ -195,14 +193,13 @@ impl RbMap {
     fn delete(&self, key: Value) -> Result<Value, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
-        let prev: Option<Any> = guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let Some(m) = resolve::<MapRef, _>(&txn, id) else {
+        let prev: Option<Any> = write(doc, move |txn| {
+            let Some(m) = resolve::<MapRef, _>(txn, id) else {
                 return Ok(None);
             };
             // Convert before removing (a removed shared ref would dangle).
-            let prev = m.get(&txn, &key).map(|v| out_to_any(&txn, &v));
-            m.remove(&mut txn, &key);
+            let prev = m.get(txn, &key).map(|v| out_to_any(txn, &v));
+            m.remove(txn, &key);
             Ok(prev)
         })?;
         let ruby = Ruby::get().unwrap();
@@ -214,10 +211,9 @@ impl RbMap {
 
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            if let Some(m) = resolve::<MapRef, _>(&txn, id) {
-                m.clear(&mut txn);
+        write(doc, move |txn| {
+            if let Some(m) = resolve::<MapRef, _>(txn, id) {
+                m.clear(txn);
             }
             Ok(())
         })

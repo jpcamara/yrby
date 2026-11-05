@@ -43,7 +43,7 @@ module Y
       # Edits the document from Ruby the way a browser does: yields the
       # current document, records what the block changed, and broadcasts it so
       # open editors apply it. Returns the update, or nil when the block
-      # changed nothing.
+      # wrote nothing.
       #
       #   post.collaborative_document(:body).edit do |doc|
       #     Y::Lexxy.append_paragraph(doc, "Reviewed by ops.")

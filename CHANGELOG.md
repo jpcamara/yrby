@@ -15,6 +15,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Experimental
 
+- `Y::Doc#edit` returns the document's own writes and never a peer's. The
+  document keeps the update of every local transaction until an edit returns
+  it, merged into one, so a write made outside an edit, from another thread
+  or fiber, or in a block that raised comes with the next edit. Before this,
+  the edit returned everything the document gained while the block ran, so
+  an update applied from a peer meanwhile was sent again as the edit's own,
+  and a caller had to lock the document to keep them apart. Each edit takes
+  everything unsent at once, so the updates edits return have no gaps
+  between them. A peer's update doesn't wait for an edit.
+
 - `Y::Map#set_text(key, content = "")` stores a new `Y.Text` at a key and
   returns its live `Y::Text`. `Y::Array#push_text(content = "")` and
   `#insert_text(index, content = "")` do the same in a list. Before this,
