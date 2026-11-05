@@ -11,8 +11,8 @@ require "json"
 require "logger"
 require "y/action_cable/client/session"
 
-# y/agent loads this file too, so one warning covers both.
-warn "yrby: Y::ActionCable::Client and Y::Agent are experimental and may change in a minor release. " \
+# y/collaborator loads this file too, so one warning covers both.
+warn "yrby: Y::ActionCable::Client and Y::Collaborator are experimental and may change in a minor release. " \
      "Warning[:experimental] = false turns this off.", category: :experimental
 
 module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren

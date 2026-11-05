@@ -48,8 +48,8 @@ class CollaborativeAttributeTest < ActionCable::Channel::TestCase
     assert_equal 0, Y::Document.count
   end
 
-  # The page, the agent, and a Ruby client all subscribe to the channel the
-  # document names, so an app's own subclass is declared once.
+  # The page, the collaborator, and a Ruby client all subscribe to the channel
+  # the document names, so an app's own subclass is declared once.
   def test_the_channel_is_the_one_the_model_declared
     page_class = Class.new(Page) { has_collaborative_document :body, channel: "PageDocumentChannel" }
     custom = page_class.create!(title: "custom")
