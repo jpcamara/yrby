@@ -75,19 +75,20 @@ module Y
     # starts one on the calling thread, such as a job's, and holds that
     # thread until the collaborator leaves.
     def run
-      return :busy unless !@lock || @lock.take
-
       Sync do
-        join
-        joined
-        follow
-        @client.unsubscribe # raises when an update was never acked
-        :left
-      ensure
-        leave_after_error
+        next :busy unless !@lock || @lock.take
+
+        begin
+          join
+          joined
+          follow
+          @client.unsubscribe # raises when an update was never acked
+          :left
+        ensure
+          leave_after_error
+          @lock&.release
+        end
       end
-    ensure
-      @lock&.release
     end
 
     # How the collaborator appears to the people in the document: the hash

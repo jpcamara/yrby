@@ -1,15 +1,16 @@
 # frozen_string_literal: true
 
+require "async"
 require "securerandom"
 
 module Y
   class Collaborator
     # The collaborator lock: a key in an ActiveSupport::Cache store holding
-    # this collaborator's token. It is written only if absent, and a thread of
-    # its own renews it every LOCK_TTL / 3 seconds while the collaborator
-    # stays, however long a handler or a model call takes. It lapses LOCK_TTL
-    # seconds after the last renewal, so a collaborator whose process died
-    # doesn't hold the document for good.
+    # this collaborator's token. It is written only if absent, and a task on
+    # the collaborator's reactor renews it every LOCK_TTL / 3 seconds while
+    # the collaborator stays, so a handler waiting on a model call doesn't
+    # let it lapse. It lapses LOCK_TTL seconds after the last renewal, so a
+    # collaborator whose process died doesn't hold the document for good.
     #
     # Cache stores have no atomic compare-and-set, so a renewal and a release
     # read the key and then write or delete it. That leaves one gap: a process
@@ -33,10 +34,11 @@ module Y
         @held = false
       end
 
-      # Takes the lock if nobody holds it, and starts renewing it.
+      # Takes the lock if nobody holds it, and starts renewing it in a task
+      # of the current reactor. `release` stops the task.
       def take
         @held = @store.write(@key, @token, unless_exist: true, expires_in: LOCK_TTL) ? true : false
-        @renewer = Thread.new { renew_until_lost } if @held
+        @renewer = Async::Task.current.async { renew_until_lost } if @held
         @held
       end
 
@@ -44,7 +46,7 @@ module Y
       def held? = @held
 
       def release
-        @renewer&.kill
+        @renewer&.stop
         @store.delete(@key) if @held && @store.read(@key) == @token
         @held = false
       end

@@ -11,8 +11,14 @@ class CollaboratorLockTest < Minitest::Test
     @locks = []
   end
 
-  def teardown
-    @locks.each(&:release)
+  # A lock renews itself in a task of the current reactor, so a test takes
+  # locks on one, and releases them before the reactor waits for the task.
+  def on_reactor
+    Sync do
+      yield
+    ensure
+      @locks.each(&:release)
+    end
   end
 
   def lock
@@ -20,46 +26,54 @@ class CollaboratorLockTest < Minitest::Test
   end
 
   def test_only_one_collaborator_takes_the_lock
-    first = lock
-    second = lock
+    on_reactor do
+      first = lock
+      second = lock
 
-    assert first.take
-    refute second.take
-    refute_predicate second, :held?
+      assert first.take
+      refute second.take
+      refute_predicate second, :held?
+    end
   end
 
   def test_a_renewal_that_finds_another_holder_gives_the_lock_up
-    first = lock
-    first.take
-    @store.write("yrby:collaborator:doc", "another collaborator")
-    first.send(:renew)
+    on_reactor do
+      first = lock
+      first.take
+      @store.write("yrby:collaborator:doc", "another collaborator")
+      first.send(:renew)
 
-    refute_predicate first, :held?
-    assert_equal "another collaborator", @store.read("yrby:collaborator:doc")
+      refute_predicate first, :held?
+      assert_equal "another collaborator", @store.read("yrby:collaborator:doc")
+    end
   end
 
   def test_a_renewal_keeps_the_lock_while_it_is_ours
-    first = lock
-    first.take
-    @store.delete("yrby:collaborator:doc") # as if it had lapsed with nobody waiting
-    first.send(:renew)
+    on_reactor do
+      first = lock
+      first.take
+      @store.delete("yrby:collaborator:doc") # as if it had lapsed with nobody waiting
+      first.send(:renew)
 
-    assert_predicate first, :held?
-    refute lock.take
+      assert_predicate first, :held?
+      refute lock.take
+    end
   end
 
   def test_release_frees_the_lock_but_never_a_successors
-    first = lock
-    first.take
-    first.release
+    on_reactor do
+      first = lock
+      first.take
+      first.release
 
-    assert lock.take
+      assert lock.take
 
-    stale = lock
-    stale.instance_variable_set(:@held, true) # it believes it still holds it
-    stale.release
+      stale = lock
+      stale.instance_variable_set(:@held, true) # it believes it still holds it
+      stale.release
 
-    refute_nil @store.read("yrby:collaborator:doc"), "the successor's lock survives"
+      refute_nil @store.read("yrby:collaborator:doc"), "the successor's lock survives"
+    end
   end
 
   Document = Data.define(:key)
