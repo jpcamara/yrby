@@ -46,7 +46,9 @@ type Unsent = std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
 /// `Unsent`'s list. A push or a take holds it only briefly, so taking it
 /// with the GVL held never waits long.
 fn lock(unsent: &Unsent) -> std::sync::MutexGuard<'_, Vec<Vec<u8>>> {
-    unsent.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    unsent
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// How many updates `merge_unsent` merges at once.
@@ -1447,7 +1449,10 @@ mod tests {
         doc.1.lock().unwrap().pop();
         let fresh = new_doc();
         fresh.apply_update(take(&doc).unwrap()).unwrap();
-        assert_eq!(fresh.read_text("t".into()).unwrap().as_deref(), Some("kept"));
+        assert_eq!(
+            fresh.read_text("t".into()).unwrap().as_deref(),
+            Some("kept")
+        );
     }
 
     #[ruby_test]
