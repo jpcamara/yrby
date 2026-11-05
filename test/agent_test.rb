@@ -60,6 +60,9 @@ class AgentTest < Minitest::Test
     end
   end
 
+  # A client keeps its doc private; a test reads it to check what arrived.
+  def doc_of(client) = client.send(:doc)
+
   def wait_until(timeout: 10)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
     until (value = yield)
@@ -85,11 +88,11 @@ class AgentTest < Minitest::Test
     end
     run = agent(answers, idle: 1)
 
-    wait_until { ada.doc.read_xml("root").to_s.include?("Reviewer here.") }
+    wait_until { doc_of(ada).read_xml("root").to_s.include?("Reviewer here.") }
     wait_until { names.call.include?("Reviewer") }
     ada.edit { |doc| Y::Lexxy.append_paragraph(doc, "Please review.") }
 
-    assert(wait_until { ada.doc.read_xml("root").to_s.include?("Saw: Please review.") })
+    assert(wait_until { doc_of(ada).read_xml("root").to_s.include?("Saw: Please review.") })
 
     ada.unsubscribe
 
