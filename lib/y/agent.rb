@@ -6,7 +6,7 @@ require "y/action_cable/client"
 require "y/agent/lock"
 
 module Y
-  # A Ruby process taking part in a document. It joins over the cable with a
+  # Takes part in a document the way a person does. It joins over the cable with a
   # grant, shows up among the people editing, hears what they write once
   # their typing settles, and leaves when they do. Subclass it, and run it
   # from a job:
