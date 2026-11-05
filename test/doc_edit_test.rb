@@ -25,7 +25,7 @@ class DocEditTest < Minitest::Test
     assert_nil(doc.edit { |d| d.get_text("content") })
   end
 
-  def test_successive_diffs_carry_only_their_own_chunk
+  def test_successive_edits_carry_only_their_own_chunk
     doc = Y::Doc.new
     block = nil
     setup = doc.edit { |d| block = Y::Lexical.append_paragraph(d, "") }
@@ -160,6 +160,23 @@ class DocEditTest < Minitest::Test
     fresh.apply_update(outer)
 
     assert_equal "fiber thread", fresh.read_text("t")
+  end
+
+  # A thread the block starts stops counting as nested once the edit
+  # returns, so its later edits return their writes and keep nothing back.
+  def test_a_thread_the_block_starts_edits_on_its_own_once_the_edit_returns
+    doc = Y::Doc.new
+    text = doc.get_text("t")
+    go = Queue.new
+    worker = nil
+    doc.edit { worker = Thread.new { go.pop && [doc.edit { text << "later" }, doc.edit { nil }] } }
+    go << true
+    later, after = worker.value
+    fresh = Y::Doc.new
+    fresh.apply_update(later)
+
+    assert_equal "later", fresh.read_text("t")
+    assert_nil after
   end
 
   def test_a_frozen_document_can_still_be_edited
