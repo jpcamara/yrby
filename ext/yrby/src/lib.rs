@@ -43,6 +43,38 @@ struct RbDoc(Doc, Unsent);
 /// holds the bytes of every local write.
 type Unsent = std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
 
+/// `Unsent`'s list. A push or a take holds it only briefly, so taking it
+/// with the GVL held never waits long.
+fn lock(unsent: &Unsent) -> std::sync::MutexGuard<'_, Vec<Vec<u8>>> {
+    unsent.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// How many updates `merge_unsent` merges at once.
+const MERGE_FAN_IN: usize = 16;
+
+/// The updates merged into one, a few at a time and then the results again.
+/// One merge of them all costs time quadratic in how many there are.
+fn merge_unsent(updates: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+    let mut level: Vec<Vec<u8>> = match updates {
+        [update] => return Ok(update.clone()),
+        _ => merge_chunks(updates)?,
+    };
+    while level.len() > 1 {
+        level = merge_chunks(&level)?;
+    }
+    Ok(level.pop().unwrap_or_default())
+}
+
+fn merge_chunks(updates: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+    updates
+        .chunks(MERGE_FAN_IN)
+        .map(|chunk| match chunk {
+            [update] => Ok(update.clone()),
+            _ => yrs::merge_updates_v1(chunk).map_err(|e| e.to_string()),
+        })
+        .collect()
+}
+
 /// Compile-time proof that the wrapped Doc is thread-safe. If a future yrs
 /// upgrade makes Doc lose Send/Sync, this fails the build instead of silently
 /// shipping a thread-unsafe gem.
@@ -186,8 +218,7 @@ impl RbDoc {
             if shared::is_remote(txn.origin()) {
                 return;
             }
-            let mut unsent = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            unsent.push(event.update.clone());
+            lock(&sink).push(event.update.clone());
         })
         .map_err(|e| yrb_error(e.to_string()))?;
         Ok(RbDoc(doc, unsent))
@@ -418,33 +449,30 @@ impl RbDoc {
     }
 
     /// Every update in `Unsent`, merged into one, or nil for none. Taking them
-    /// empties it. If the merge fails they stay.
+    /// empties it, and writes made meanwhile wait for the next take. The
+    /// merge runs without the GVL. If it fails, or an interrupt comes back
+    /// with it (a signal trap can raise even where `Thread.handle_interrupt`
+    /// masks), the updates go back ahead of those writes.
     fn take_unsent(&self) -> Result<Option<RString>, Error> {
-        let unsent = &self.1;
-        let merged = nogvl(move || -> Result<Option<Vec<u8>>, String> {
-            let mut unsent = unsent
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let merged = match unsent.len() {
-                0 => return Ok(None),
-                1 => unsent[0].clone(),
-                _ => yrs::merge_updates_v1(&*unsent).map_err(|e| e.to_string())?,
-            };
-            unsent.clear();
-            Ok(Some(merged))
-        })?
-        .map_err(yrb_error)?;
-        Ok(merged.map(|update| binary_string(&update)))
+        let taken = std::mem::take(&mut *lock(&self.1));
+        if taken.is_empty() {
+            return Ok(None);
+        }
+        match nogvl(|| merge_unsent(&taken)).and_then(|merged| merged.map_err(yrb_error)) {
+            Ok(merged) => Ok(Some(binary_string(&merged))),
+            Err(error) => {
+                let mut unsent = lock(&self.1);
+                let since = std::mem::replace(&mut *unsent, taken);
+                unsent.extend(since);
+                Err(error)
+            }
+        }
     }
 
-    /// Put a taken update back, for an outer edit to return as well.
+    /// Put a taken update back ahead of anything written since, for the next
+    /// take to return again.
     fn keep_unsent(&self, update: RString) {
-        let update = copy_bytes(update);
-        let mut unsent = self
-            .1
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        unsent.push(update);
+        lock(&self.1).insert(0, copy_bytes(update));
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -1384,7 +1412,7 @@ mod tests {
     #[ruby_test]
     fn unsent_updates_merge_into_one_that_carries_them_all() {
         let doc = new_doc();
-        for n in 0..128 {
+        for n in 0..300 {
             push(&doc, "t", &n.to_string());
         }
         let fresh = new_doc();
@@ -1408,6 +1436,18 @@ mod tests {
             fresh.read_text("t".into()).unwrap().as_deref(),
             Some("inner outer")
         );
+    }
+
+    #[ruby_test]
+    fn unsent_updates_stay_when_the_merge_fails() {
+        let doc = new_doc();
+        push(&doc, "t", "kept");
+        doc.1.lock().unwrap().push(vec![255]);
+        assert!(doc.take_unsent().is_err());
+        doc.1.lock().unwrap().pop();
+        let fresh = new_doc();
+        fresh.apply_update(take(&doc).unwrap()).unwrap();
+        assert_eq!(fresh.read_text("t".into()).unwrap().as_deref(), Some("kept"));
     }
 
     #[ruby_test]

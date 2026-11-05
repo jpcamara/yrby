@@ -13,6 +13,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   costs about the same at any length: 80k one-character appends took 2.5 s
   and now take 48 ms.
 
+### Experimental
+
 - `Y::Doc#edit` returns the document's own writes and never a peer's. The
   document keeps the update of every local transaction until an edit returns
   it, merged into one, so a write made outside an edit, from another thread
@@ -22,8 +24,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a caller had to lock the document to keep them apart. Each edit takes
   everything unsent at once, so the updates edits return have no gaps
   between them. A peer's update doesn't wait for an edit.
-
-### Experimental
 
 - `Y::Map#set_text(key, content = "")` stores a new `Y.Text` at a key and
   returns its live `Y::Text`. `Y::Array#push_text(content = "")` and

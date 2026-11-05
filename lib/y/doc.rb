@@ -16,14 +16,24 @@ module Y
     # block. Each edit takes everything unsent at once, so the updates edits
     # return have no gaps between them. An edit inside another, including one
     # in a fiber or thread the outer block starts, returns what it took and
-    # leaves it for the outer edit to return again.
+    # leaves it for the outer edit to return again. Once the outer edit
+    # returns, a thread it started edits on its own.
+    #
+    # An exception raised as `edit` returns, such as a Thread#raise or a
+    # signal trap, loses the update the edit took. A caller that must send
+    # every update masks interrupts around `edit` and doesn't raise from a
+    # trap.
     def edit
-      outer = Fiber[:yrby_editing] || [] # inherited by fibers and threads the block starts
-      nested = outer.include?(self)
-      Fiber[:yrby_editing] = [*outer, self]
+      # The edits running in this fiber, inherited by the fibers and threads
+      # their blocks start. Each is `[doc]` until it ends, then empty.
+      outer = (Fiber[:yrby_editing] || []).reject(&:empty?)
+      nested = outer.any? { |running| running.include?(self) }
+      running = [self]
+      Fiber[:yrby_editing] = [*outer, running]
       begin
         yield self
       ensure
+        running.clear
         Fiber[:yrby_editing] = outer
       end
       take_unsent(nested)
@@ -47,10 +57,9 @@ module Y
 
     private
 
-    # A pending interrupt is raised when the masked block ends, after the
-    # take, so the update goes back to the document before it's raised. An
-    # interrupt after this returns is the caller's to guard against, as
-    # Y::ActionCable::Client#edit does.
+    # An interrupt that arrives during the take is raised once the masked
+    # block ends, and the taken update goes back to the document first, for
+    # the next edit to return. A nested edit has already put it back.
     def take_unsent(nested)
       taken = nil
       Thread.handle_interrupt(Object => :never) do
