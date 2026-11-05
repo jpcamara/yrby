@@ -6,6 +6,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- yrby builds against yrs 0.28.1. An insert into a text no longer recounts
+  the UTF-16 length of each string before it, so appending to a long text
+  costs about the same at any length: 80k one-character appends took 2.5 s
+  and now take 48 ms.
+
 ### Experimental
 
 - `Y::Map#set_text(key, content = "")` stores a new `Y.Text` at a key and
