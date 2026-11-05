@@ -79,9 +79,10 @@ module Y
         join
         joined
         follow
+        @client.unsubscribe # raises when an update was never acked
         :left
       ensure
-        @client&.unsubscribe
+        leave_after_error
       end
     ensure
       @lock&.release
@@ -110,8 +111,6 @@ module Y
     # not typing. The agent's own edits never show up here.
     def changed(blocks); end
 
-    def doc = @client.doc
-
     # Edit the document. Returns the update, or nil when nothing changed.
     # Raises Y::Error once another agent holds the document, so an agent
     # that outlived the lock stops writing.
@@ -139,11 +138,15 @@ module Y
 
     private
 
+    # The agent's copy of the document, for its hooks to read.
+    attr_reader :doc
+
     def join
       grant = @document.grant(expires_in: ActiveSupport::Duration.build(@max_stay + LOCK_TTL))
       params = { grant:, name: @document.name }
-      @client = Y::ActionCable::Client.new(@url, params:, headers: @headers, channel: @document.channel, root: ROOT,
-                                                 logger: Agent.default_logger)
+      @doc = Y::Doc.new
+      @client = Y::ActionCable::Client.new(@url, params:, headers: @headers, channel: @document.channel, doc: @doc,
+                                                 root: ROOT, logger: Agent.default_logger)
       @client.on_update { |_update, doc, touched| @changes << anchors(doc, touched || []) }
       @client.on_awareness { |frame| see(frame) }
       @client.subscribe
@@ -163,6 +166,14 @@ module Y
         touched = settle(touched) unless touched.empty?
         changed(blocks(touched)) if holding?
       end
+    end
+
+    # Unsubscribe on the way out of an error, which says more than an unacked
+    # update would. After a normal leave this does nothing.
+    def leave_after_error
+      @client&.unsubscribe
+    rescue Y::Error => e
+      Agent.default_logger.error(e.message)
     end
 
     def holding? = @lock.nil? || @lock.held?

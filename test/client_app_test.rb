@@ -33,6 +33,9 @@ class ClientAppTest < Minitest::Test
     client
   end
 
+  # A client keeps its doc private; a test reads it to check what arrived.
+  def doc_of(client) = client.send(:doc)
+
   def wait_until(timeout: 5)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
     until yield
@@ -52,7 +55,7 @@ class ClientAppTest < Minitest::Test
 
     assert_equal "<p>Reviewed by the agent.</p>", get("/text/body").fetch("html")
     assert_equal "Reviewed by the agent.", seen.pop(timeout: 5)
-    assert_equal "Reviewed by the agent.", reader.doc.read_xml("root")
+    assert_equal "Reviewed by the agent.", doc_of(reader).read_xml("root")
   end
 
   def test_a_connection_without_the_token_is_turned_away
@@ -91,12 +94,12 @@ class ClientAppTest < Minitest::Test
     agent = client(name: "notes").subscribe
     agent.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
 
-    wait_until { watcher_presence.states[agent.doc.client_id] }
+    wait_until { watcher_presence.states[doc_of(agent).client_id] }
 
-    assert_equal "Reviewer", watcher_presence.states[agent.doc.client_id].dig("user", "name")
+    assert_equal "Reviewer", watcher_presence.states[doc_of(agent).client_id].dig("user", "name")
 
     agent.unsubscribe
-    wait_until { watcher_presence.states[agent.doc.client_id].nil? }
+    wait_until { watcher_presence.states[doc_of(agent).client_id].nil? }
 
     assert_predicate watcher, :synced?
   end

@@ -41,6 +41,11 @@ class ActionCableClientServerTest < Minitest::Test
     def authorized?(key) = !key.start_with?("private")
   end
 
+  # A room that drops the updates a client sends, so none is acked.
+  class UnackedChannel < RoomChannel
+    def receive(data) = (super unless data.key?("id"))
+  end
+
   # One server for the whole run.
   def self.port
     @port ||= begin
@@ -66,13 +71,15 @@ class ActionCableClientServerTest < Minitest::Test
     @clients.each(&:unsubscribe)
   end
 
-  def client(key = @key, **)
+  def client(key = @key, channel: "ActionCableClientServerTest::RoomChannel", **)
     client = Y::ActionCable::Client.new("ws://127.0.0.1:#{self.class.port}/cable",
-                                        channel: "ActionCableClientServerTest::RoomChannel", params: { id: key },
-                                        logger: Logger.new(File::NULL), **)
+                                        channel:, params: { id: key }, logger: Logger.new(File::NULL), **)
     @clients << client
     client
   end
+
+  # A client keeps its doc private; a test reads it to check what arrived.
+  def doc_of(client) = client.send(:doc)
 
   def wait_until(timeout: 5)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
@@ -95,7 +102,7 @@ class ActionCableClientServerTest < Minitest::Test
 
     assert_equal [update], STORE_LOCK.synchronize { STORE[@key].dup }, "the server recorded it before acking"
     assert_equal [update, "sent over the socket", [0]], seen.pop(timeout: 5)
-    assert_equal "sent over the socket", reader.doc.read_xml("root")
+    assert_equal "sent over the socket", doc_of(reader).read_xml("root")
   end
 
   def test_editing_after_unsubscribe_raises_and_leaves_the_doc_alone
@@ -103,14 +110,21 @@ class ActionCableClientServerTest < Minitest::Test
     writer.unsubscribe
 
     assert_raises(Y::Error) { writer.edit { |d| Y::Lexical.append_paragraph(d, "too late") } }
-    assert_equal "", writer.doc.read_xml("root").to_s
+    assert_equal "", doc_of(writer).read_xml("root").to_s
+  end
+
+  def test_unsubscribe_raises_when_an_update_was_never_acked
+    writer = client(channel: "ActionCableClientServerTest::UnackedChannel").subscribe
+    writer.edit { |d| Y::Lexical.append_paragraph(d, "never acked") }
+
+    assert_raises(Y::Error) { writer.unsubscribe(timeout: 0.2) }
   end
 
   def test_a_document_already_in_the_store_arrives_with_the_handshake
     STORE_LOCK.synchronize { STORE[@key] << Y::Doc.new.edit { |d| Y::Lexical.append_paragraph(d, "before") } }
     joined = client.subscribe
 
-    assert_equal "before", joined.doc.read_xml("root")
+    assert_equal "before", doc_of(joined).read_xml("root")
   end
 
   def test_presence_reaches_the_other_client
@@ -119,9 +133,9 @@ class ActionCableClientServerTest < Minitest::Test
     client.on_awareness { |frame| seen.apply_update(frame) }.subscribe
     first.presence = { "name" => "Agent" }
 
-    wait_until { seen.states[first.doc.client_id] }
+    wait_until { seen.states[doc_of(first).client_id] }
 
-    assert_equal({ "name" => "Agent" }, seen.states[first.doc.client_id])
+    assert_equal({ "name" => "Agent" }, seen.states[doc_of(first).client_id])
   end
 
   # Each reconnect is a new handshake with a new key. The caller's headers
