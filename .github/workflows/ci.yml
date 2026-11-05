@@ -8,7 +8,7 @@ on:
 jobs:
   gem:
     name: Gem (Ruby ${{ matrix.ruby }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -50,7 +50,7 @@ jobs:
 
   eslint:
     name: Demo JS (ESLint)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
       run:
@@ -63,7 +63,7 @@ jobs:
 
   client:
     name: yrby-client (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       matrix:
@@ -81,7 +81,7 @@ jobs:
 
   browser:
     name: Element browser tests (Chrome)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
@@ -133,7 +133,7 @@ jobs:
 
   demo:
     name: Demo e2e (Ruby ${{ matrix.ruby }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
