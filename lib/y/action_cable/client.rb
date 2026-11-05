@@ -16,7 +16,7 @@ warn "yrby: Y::ActionCable::Client and Y::Agent are experimental and may change 
      "Warning[:experimental] = false turns this off.", category: :experimental
 
 module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
-  # A Ruby process that joins a document the way a browser does: over the
+  # Joins a document the way a browser does: over the
   # cable's websocket, as a client of the document channel. It holds a
   # Y::Doc, follows the document, and sends its own edits and presence
   # through the channel, so the server records, acks, and distributes them

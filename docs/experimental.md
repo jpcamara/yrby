@@ -331,7 +331,7 @@ so editors tie a caret to its author.
 
 ## Agents
 
-`Y::Agent` runs a Ruby process as a participant in a document: it joins with
+`Y::Agent` takes part in a document the way a person does: it joins with
 a grant, shows up among the people editing, hears what they write, and
 leaves when they do. Subclass it, and run it from a job.
 
