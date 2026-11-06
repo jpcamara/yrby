@@ -101,7 +101,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
-- [Experimental: writing from Ruby](#experimental-writing-from-ruby)
+- [Experimental: writing from Ruby, and collaborators](#experimental-writing-from-ruby-and-collaborators)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
 - [Message Type Constants](#message-type-constants)
@@ -664,6 +664,16 @@ the `authorize_document` block with the record and the attribute name, or to
 accept any valid grant when there's no block. A subclass can override
 `authorized?` directly and read the located record from `record`.
 
+A page subscribes to the channel its document names, `Y::DocumentChannel`
+unless the model says otherwise. Name a subclass where you declare the
+attribute, and the tag, a Ruby client, and a collaborator all use it:
+
+```ruby
+class Post < ApplicationRecord
+  has_collaborative_document :body, channel: "PostDocumentChannel"
+end
+```
+
 ### Grant lifetime and refresh
 
 A grant lasts as long as GlobalID's signed-id default, which is one month under
@@ -1077,7 +1087,7 @@ The browser clients manage presence (cursors, selections). The server doesn't
 set or hold presence state, and it relays awareness frames without reading
 them. See `yrby-client` for the client-side awareness API.
 
-## Experimental: writing from Ruby
+## Experimental: writing from Ruby, and collaborators
 
 These APIs are new. They may change in any minor release, and they aren't
 covered by yrby's usual compatibility promise.
@@ -1088,6 +1098,11 @@ covered by yrby's usual compatibility promise.
 - Anchors: a block's identity as a value
 - Streaming into a document with `Doc#edit`
 - Editing a record's document from Ruby
+- Joining a document from a Ruby process, with `Y::ActionCable::Client`
+- Collaborators, with `Y::Collaborator`
+
+`require "y/action_cable/client"` and `require "y/collaborator"` print a warning in
+Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 
 ## Thread Safety
 
