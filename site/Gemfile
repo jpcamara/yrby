@@ -42,8 +42,8 @@ gem "anycable-rails", "~> 1.6"
 # The published gems, so the site runs what a reader installs. yrby-rails
 # provides the channel concern and the storage models. The site's documents
 # are Y::Document rows, as in the docs.
-gem "yrby", "~> 0.8"
-gem "yrby-rails", "~> 0.7"
+gem "yrby", "~> 0.9"
+gem "yrby-rails", "~> 0.8"
 
 # Collaborative Lexxy editing over yrby. It's require: false because the gem's
 # engine requires the lexxy gem, whose engine sets up Action Text helpers in
@@ -52,7 +52,7 @@ gem "yrby-rails", "~> 0.7"
 # requires only lexxy_realtime/collaborative. That's the storage concern. It
 # checks for has_rich_text and, without it, saves the rendered HTML to a plain
 # column. The editor JavaScript comes from npm.
-gem "lexxy-realtime", "~> 0.8", require: false
+gem "lexxy-realtime", "~> 0.9", require: false
 
 # A lexxy-realtime client uses a signed GlobalID to prove which record and
 # field it may join. Rails apps normally get globalid through Active Job,

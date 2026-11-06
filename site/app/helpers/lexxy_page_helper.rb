@@ -57,7 +57,7 @@ module LexxyPageHelper
       # config/routes.rb: resources :posts do get :grant, on: :member end
       def grant
         @post = current_user.posts.find(params[:id]) # your own authorization, again
-        render json: { grant: @post.collaborative_rich_text_grant(:body, expires_in: 10.minutes) }
+        render json: { grant: @post.collaborative_document(:body).grant(expires_in: 10.minutes) }
       end
     RUBY
   end

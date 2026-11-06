@@ -106,7 +106,7 @@ module RoomSweeper
     end
 
     # The Lexxy demo's Note records use the same TTL. Every render saves the
-    # note (refresh_collaborative_rich_text), so updated_at tracks writes. If
+    # note (collaborative_document(:body).refresh), so updated_at tracks writes. If
     # a note's document still exists, the document sweep above handles it,
     # because deleting the note would delete a document someone may be using.
     # Once the document is gone, or if nobody ever wrote to the room, a stale
