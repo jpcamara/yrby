@@ -1,34 +1,25 @@
-# Tracks rooms and their limits.
+# Starts rooms and seats people in their documents, within the site's caps:
 #
-# The documents live in SQLite through the gem's models. The channel's hooks
-# are `Y::Document.load_state` and `Y::Document.append`, the same setup the
-# docs describe. The gem's models don't know about rooms or limits, so this
-# class keeps track of the site's caps:
+#   rooms          how many rooms can exist at once (a disk limit)
+#   peers          how many connections one document takes
+#   subscriptions  how many documents one connection can be in
+#   size           how large one document can grow (the document goes
+#                  read-only at the cap)
 #
-#   seats     who is in which room right now (peers per room, and the
-#             sweeper's check that a room is empty before it's deleted)
-#   rooms     how many documents can exist at once (a disk limit)
-#   size      how large one document can grow (the room goes read-only at
-#             the cap)
+# Rooms and seats are rows (Room, Seat), so every server process counts the
+# same ones. `start` and `join` each run in one transaction, and Rails begins
+# SQLite transactions IMMEDIATE, so two processes can't both take the last
+# room or the last seat. The sweeper deletes rooms and documents in
+# transactions too, so a join can't seat someone in a room as it's deleted.
 #
-# Seats and the size cache live in process memory. A seat goes away when its
-# connection closes, and every connection runs through this server's embedded
-# Go process, so there's nothing here worth saving. The documents themselves
-# are in the database.
-#
-# The room cap counts more than saved rows. A document isn't created until a
-# room's first append, but a subscription takes a seat as soon as it joins.
-# Without extra tracking, a flood of `subscribe` commands for different valid
-# keys would all be let in (none of their rows exist yet) and then each create
-# a document, going over the cap. So a new key with a seat counts as a
-# reservation until its document exists (first append) or its last occupant
-# leaves. The cap applies to saved rows plus live reservations.
+# The size cache lives in process memory. Each process adds the writes it lets
+# in and re-reads the database every SIZE_CACHE_TTL, so with several processes
+# a document can go past its cap by what the others wrote in that window.
 #
 # Concurrency: the RPC requests share this object. Under Falcon they're fibers
-# that switch at IO and scheduler yields, and the sweeper thread uses it too.
-# The reactor can serve requests concurrently, so the mutex is needed, and an
-# uncontended mutex is cheap. Database reads happen outside the lock so a
-# fiber never waits on SQLite while holding it.
+# that switch at IO and scheduler yields, and the sweeper thread uses it too,
+# so the size cache sits behind a mutex. Database reads happen outside the lock
+# so a fiber never waits on SQLite while holding it.
 class Rooms
   class << self
     attr_writer :current
@@ -36,74 +27,65 @@ class Rooms
     def current = @current ||= new
   end
 
-  attr_reader :max_peers, :max_rooms, :max_document_bytes
+  attr_reader :max_peers, :max_rooms, :max_subscriptions, :max_document_bytes
 
   def initialize(max_peers: Limits::MAX_PEERS_PER_ROOM,
                  max_rooms: Limits::MAX_LIVE_ROOMS,
+                 max_subscriptions: Limits::MAX_SUBSCRIPTIONS_PER_CONNECTION,
                  max_document_bytes: Limits::MAX_DOCUMENT_BYTES,
                  size_cache_ttl: Limits::SIZE_CACHE_TTL)
     @max_peers = max_peers
     @max_rooms = max_rooms
+    @max_subscriptions = max_subscriptions
     @max_document_bytes = max_document_bytes
     @size_cache_ttl = size_cache_ttl
-    @seats = Hash.new(0)
-    @reserved = Set.new # new seated keys whose document doesn't exist yet
-    @evicting = Set.new # keys the sweeper has claimed and will delete
     @sizes = {} # key => [bytes, refreshed_at]; see document_full?
     @mutex = Mutex.new
   end
 
-  # Takes a seat. Returns :ok, :room_full when the room is at its peer cap,
-  # :too_many_rooms when this is a new room and saved plus reserved rooms are
-  # at the cap, or :evicting when the sweeper has claimed the key for deletion.
-  #
-  # The saved count comes from a database query before the lock. The cap is a
-  # safeguard, so being off by one in a race is fine. A new key that's let in
-  # gets reserved inside the lock, so concurrent joins for different new keys
-  # count each other and can't all get in under a stale count.
-  def join(key)
-    new_room = !Y::Document.exists?(key: key)
-    persisted = new_room ? Y::Document.count : nil
+  # The room `slug` names, created if the room cap allows another. nil when
+  # there's no such room and the site has all the rooms it holds.
+  def start(slug)
+    Room.transaction do
+      Room.find_by(slug:) || (Room.create!(slug:) if Room.count < @max_rooms)
+    end
+  end
 
-    @mutex.synchronize do
-      next :evicting if @evicting.include?(key)
-      next :room_full if @seats[key] >= @max_peers
-      next :too_many_rooms unless admit_new_room?(key, new_room, persisted)
+  # Seats `connection_id` in `record`'s document `name`. Returns :ok,
+  # :duplicate when the connection is already in that document, :too_many when
+  # it's in as many documents as it may be, :room_full at the peer cap, or
+  # :gone when the record was deleted after the channel found it.
+  def join(record, name, connection_id)
+    Seat.transaction do
+      seats = Seat.where(room: record, name: name.to_s)
+      next :gone unless record.class.exists?(record.id)
+      next :duplicate if seats.exists?(connection_id:)
+      next :too_many if Seat.where(connection_id:).count >= @max_subscriptions
+      next :room_full if seats.count >= @max_peers
 
-      @seats[key] += 1
+      seats.create!(connection_id:, seen_at: Time.current)
       :ok
     end
   end
 
-  def leave(key)
-    @mutex.synchronize do
-      next unless @seats.key?(key)
-
-      @seats[key] -= 1
-      next if @seats[key].positive?
-
-      @seats.delete(key)
-      @reserved.delete(key) # last occupant left a room that was never saved
-    end
+  def leave(record, name, connection_id)
+    Seat.where(room: record, name: name.to_s, connection_id:).delete_all
     nil
   end
 
-  def peers(key) = @mutex.synchronize { @seats[key] }
-
-  def occupied_keys = @mutex.synchronize { @seats.keys }
-
-  # Returns true if the budget allows one more new room right now. It uses the
-  # same count `join` applies to a new key: saved documents plus live
-  # reservations, against the cap.
-  #
-  # NoteChannel calls this before it creates a Note row on subscribe. A Note's
-  # document key includes the row id, so the key doesn't exist until the row
-  # does. This checks the budget first, and `join` makes the real reservation
-  # once the key exists. Like `join`, it can be off by one in a race, and
-  # that's fine.
-  def room_available?
-    Y::Document.count + @mutex.synchronize { @reserved.size } < @max_rooms
+  # Gives back every seat a closed connection still holds.
+  def leave_all(connection_id)
+    Seat.where(connection_id:).delete_all
+    nil
   end
+
+  # Marks a connection's seats as still in use. See Seat.
+  def seen(connection_id)
+    Seat.where(connection_id:).update_all(seen_at: Time.current)
+    nil
+  end
+
+  def peers(record, name) = Seat.where(room: record, name: name.to_s).count
 
   # The document size cap. The real size is the state bytes plus the update
   # bytes in the database. Running that SUM on every frame would slow down the
@@ -113,10 +95,10 @@ class Rooms
   # So `reserve_write` adds each accepted update's bytes to the cached size as
   # soon as it's let in, before it's saved. That keeps the cap tight at any
   # write rate without a query. The database is only read when the entry is
-  # missing or older than SIZE_CACHE_TTL, to pick up compaction. Compaction
-  # only makes a document smaller, so between reads the cache can only
-  # overestimate. Overestimating is the safe direction for a cap. At worst, a
-  # room that was just compacted stays read-only for a few more seconds.
+  # missing or older than SIZE_CACHE_TTL, to pick up compaction and other
+  # processes' writes. Between reads, the cache misses other processes' writes
+  # (see above), and after a compaction it overestimates, so a document that
+  # was just compacted can stay read-only for a few more seconds.
   def document_full?(key)
     cached_size(key) >= @max_document_bytes
   end
@@ -138,59 +120,18 @@ class Rooms
       # Keep the entry's refreshed_at (or set one) so a stale entry still
       # triggers a database read that picks up compaction.
       @sizes[key] = [live + bytes, entry ? entry[1] : monotonic]
-      # The append creates the row, so after a write the key counts as a saved
-      # document and not a reservation.
-      @reserved.delete(key)
       true
     end
   end
 
-  # Called after the sweeper deletes this room. Its next write starts from
+  # Called after the sweeper deletes a document. Its next write starts from
   # zero.
   def forget(key)
-    @mutex.synchronize do
-      @sizes.delete(key)
-      @evicting.delete(key)
-    end
+    @mutex.synchronize { @sizes.delete(key) }
     nil
   end
 
-  # Coordinates eviction with RoomSweeper. From the sweeper's stale
-  # candidates, this claims the keys that have no occupant and no reservation,
-  # under the lock. It marks them as evicting, so a concurrent join gets
-  # :evicting and a concurrent write can't reopen them. It returns the claimed
-  # keys. The caller checks the database again, deletes the keys that are
-  # still stale, and calls `forget` on each claimed key to clear the mark.
-  #
-  # The seat check and the claim happen in one locked step. If a join got
-  # there first, it holds a seat and the key isn't claimed. If the claim got
-  # there first, the join sees the mark and is refused. So a room that someone
-  # is in or joining is never claimed.
-  def claim_evictions(candidate_keys)
-    @mutex.synchronize do
-      candidate_keys.select do |key|
-        next false unless @seats[key].zero? && !@reserved.include?(key)
-
-        @evicting << key
-        true
-      end
-    end
-  end
-
-  def evicting?(key) = @mutex.synchronize { @evicting.include?(key) }
-
   private
-
-  # The caller holds the mutex. A new key (no seat, no saved document, no
-  # reservation) has to fit under the cap, and then it's reserved. Every other
-  # join, to a room with a seat or a saved document, is let in.
-  def admit_new_room?(key, new_room, persisted)
-    return true unless @seats[key].zero? && new_room && !@reserved.include?(key)
-    return false if persisted + @reserved.size >= @max_rooms
-
-    @reserved << key
-    true
-  end
 
   def cached_size(key)
     now = monotonic

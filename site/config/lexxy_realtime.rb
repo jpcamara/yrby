@@ -13,10 +13,14 @@ require "lexxy_realtime/attribute"
 # first_sighting_of_unknown_types? when a document has a node type with no
 # render rule, LexxyRealtime::DocumentChannel calls grant_purpose when a
 # client subscribes to it by name, and deprecator warns about renamed methods.
+# A Room's rich-text document names channel_name as its channel. In the gem
+# it's a setting, and this app fixes it to LexxyChannel.
 module LexxyRealtime
   @unknown_types_seen = Concurrent::Map.new
 
   def self.grant_purpose(name) = "lexxy_realtime/#{name}"
+
+  def self.channel_name = "LexxyChannel"
 
   def self.deprecator = @deprecator ||= ActiveSupport::Deprecation.new("0.10", "lexxy-realtime")
 

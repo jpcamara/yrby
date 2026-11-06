@@ -1,5 +1,5 @@
 // Load test for the yrby site. Runs raw Action Cable WebSocket clients, which
-// are much lighter than browsers, against DocumentChannel across several rooms
+// are much lighter than browsers, against RoomChannel across several rooms
 // at a steady edit rate. Reports connections held, throughput (acked edits per
 // second; the channel acks every saved update), fan-out (remote updates seen),
 // latency from an edit to a peer seeing it, the share of sent frames acked, and
@@ -32,13 +32,13 @@ const m = { opened: 0, subscribed: 0, sent: 0, acked: 0, recv: 0, edits: 0, erro
 const pingSent = new Map()
 
 class Client {
-  constructor(room, idx, pinger, token) {
+  constructor(room, idx, pinger, grant) {
     this.room = room
     this.pinger = pinger // the room's designated pinger sends pings; peers time them
     this.frameId = 0
     this.key = `${SLUG}/${room}`
     this.doc = new Y.Doc()
-    this.identifier = JSON.stringify({ channel: "DocumentChannel", token })
+    this.identifier = JSON.stringify({ channel: "RoomChannel", grant, name: SLUG })
     this.subscribed = new Promise((r) => (this._sub = r))
     this.ping = this.doc.getMap("ping")
     if (!pinger) {
@@ -104,18 +104,19 @@ const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) =>
 
 async function main() {
   console.log(`load: ${CLIENTS} clients / ${ROOMS} rooms / ${RATE} edits/s/client / ${DURATION / 1000}s -> ${WS}`)
-  // DocumentChannel subscribes with a signed grant. Fetch each room's page once
-  // and share its token with every client in that room.
-  const tokens = []
+  // RoomChannel subscribes with the room document's grant. Start each room,
+  // fetch its page once, and share its grant with every client in that room.
+  const grants = []
   for (let r = 0; r < ROOMS; r++) {
+    await fetch(`${BASE}/demos/${SLUG}/lt-${r}/start`, { method: "POST", headers: { Origin: BASE }, redirect: "manual" })
     const page = await fetch(`${BASE}/demos/${SLUG}/lt-${r}`).then((res) => res.text())
-    tokens[r] = page.match(/data-token="([^"]+)"/)?.[1]
-    if (!tokens[r]) throw new Error(`no room token on the lt-${r} demo page`)
+    grants[r] = page.match(/data-grant="([^"]+)"/)?.[1]
+    if (!grants[r]) throw new Error(`no grant on the lt-${r} demo page`)
   }
   const clients = []
   for (let i = 0; i < CLIENTS; i++) {
     // the first client in each room is its pinger; the rest time the pings
-    clients.push(new Client(`lt-${i % ROOMS}`, i, i < ROOMS, tokens[i % ROOMS]))
+    clients.push(new Client(`lt-${i % ROOMS}`, i, i < ROOMS, grants[i % ROOMS]))
     if (i % 25 === 24) await sleep(60) // ramp up slowly so the accept queue isn't flooded
   }
   await Promise.race([Promise.all(clients.map((c) => c.subscribed)), sleep(20000)])

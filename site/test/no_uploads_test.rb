@@ -57,7 +57,7 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     # path. The test checks ActionText::TagHelper because the lexxy gem's
     # engine can define an empty ActionText module.
     assert_not defined?(ActionText::TagHelper), "Action Text must not be loaded"
-    assert_not Note.respond_to?(:has_rich_text), "Note must use a plain body column"
+    assert_not Room.respond_to?(:has_rich_text), "Room must use a plain body column"
   end
 
   test "the app exposes no upload route" do
@@ -66,11 +66,13 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     assert_empty paths.grep(%r{blob|upload|attachment|rails/active_storage})
   end
 
-  test "every HTTP route is a GET" do
-    # The one exception is AnyCable's RPC endpoint, which matches any verb.
-    # Only the embedded anycable-go calls it, over localhost with the AnyCable
-    # secret, and RoomGuarded throttles every channel it reaches.
-    routes = Rails.application.routes.routes.reject { |route| route.path.spec.to_s == "/_anycable" }
+  test "every HTTP route is a GET but starting a room" do
+    # AnyCable's RPC endpoint matches any verb. Only the embedded anycable-go
+    # calls it, over localhost with the AnyCable secret, and RoomGuarded
+    # throttles every channel it reaches. Starting a room is a POST with no
+    # body, which the method gate lets through only on that path.
+    exceptions = ["/_anycable", "/demos/:demo/:room/start(.:format)"]
+    routes = Rails.application.routes.routes.reject { |route| exceptions.include?(route.path.spec.to_s) }
 
     assert_equal ["GET"], routes.map(&:verb).uniq, "found a write endpoint, but this site only reads over HTTP"
   end
@@ -108,18 +110,18 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
   end
 
   test "rendering drops attachment nodes from a crafted document" do
-    note = Note.create!(room: "no-uploads-probe")
+    room = Room.create!(slug: "no-uploads-probe")
     state = File.binread(File.expand_path("fixtures/lexxy_full.bin", __dir__))
-    note.collaborative_document(:body).append(state)
+    room.collaborative_document(:body).append(state)
 
-    assert note.collaborative_document(:body).refresh
-    body = note.reload.body
+    assert room.collaborative_document(:body).refresh
+    body = room.reload.body
 
     assert_includes body, "<h1>Heading One</h1>", "text content is kept"
     assert_not_includes body, "action-text-attachment", "attachment nodes render to nothing"
     assert_not_includes body, "attachment-gallery", "gallery wrappers render to nothing"
     assert_not_includes body, "data:", "no data: URLs reach the stored column"
   ensure
-    note&.destroy
+    room&.destroy
   end
 end

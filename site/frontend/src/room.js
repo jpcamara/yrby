@@ -236,11 +236,13 @@ export function showRoomState(provider) {
 }
 
 // Builds the provider for a shape demo's room and sets up the shared page
-// parts. The client never names its document. It sends the signed token the
-// server rendered into the mount element, and DocumentChannel gets the key
-// from that.
+// parts. The client never names its document. It sends the grant and name
+// the server rendered into the mount element, the same params
+// collaborative_document_tag gives <yrby-document>, and RoomChannel opens
+// the room document the grant was signed for.
 export function connectRoom(ydoc, mount) {
-  const provider = new ActionCableProvider(ydoc, roomConsumer(), "DocumentChannel", { token: mount.dataset.token })
+  const { grant, name } = mount.dataset
+  const provider = new ActionCableProvider(ydoc, roomConsumer(), "RoomChannel", { grant, name })
   provider.awareness.setLocalStateField("user", user)
   provider.onStatusChange(({ status: state }) => {
     // disconnect() clears this client's awareness entry, and
@@ -258,7 +260,7 @@ export function connectRoom(ydoc, mount) {
 
 // The "server-side read" panel on every demo. It calls a GET endpoint that
 // rebuilds the document in Ruby with read_text, read_xml, read_map, or
-// read_array, or returns note.body for the Lexxy demo. It fetches when
+// read_array, or returns room.body for the Lexxy demo. It fetches when
 // the panel opens and again after edits while it's open, so it shows what the
 // server reads back as you type. The fetch is debounced, which gives the
 // server time to record the change and avoids a request per keystroke. Does

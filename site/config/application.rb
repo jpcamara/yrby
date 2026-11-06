@@ -24,7 +24,7 @@ module Site
 
     config.autoload_lib(ignore: %w[assets tasks])
 
-    # LexxyRealtime::DocumentChannel, which NoteChannel extends. The gem's
+    # LexxyRealtime::DocumentChannel, which LexxyChannel extends. The gem's
     # engine would add this directory, and this app doesn't load the engine.
     config.eager_load_paths << File.join(Gem.loaded_specs.fetch("lexxy-realtime").full_gem_path, "app/channels")
 

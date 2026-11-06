@@ -1,66 +1,66 @@
 # The live demos. None of these responses can be cached, because every page
 # belongs to a room and the room's state changes.
 class DemosController < ApplicationController
+  # Starting a room is a POST from the room's page. The site has no sessions
+  # to hold a CSRF token, so #start checks that the request's Origin is this
+  # site instead.
+  skip_forgery_protection only: :start
   before_action :no_store
-  before_action :load_demo, only: %i[new_room show]
+  before_action :load_demo, only: %i[new_room show start stored]
+  before_action :load_slug, only: %i[show start body stored]
 
   def index
     @demos = Demos::ALL
   end
 
-  # A bare /demos/:demo creates a room id and redirects to it, so each visitor
+  # A bare /demos/:demo picks a room id and redirects to it, so each visitor
   # gets their own room without picking a name.
   def new_room
     redirect_to demo_room_path(@demo.slug, Demos.new_room)
   end
 
+  # A room's page, with the demo's document. The page renders
+  # collaborative_document_tag (Lexxy) or the document's grant (the shape
+  # demos), so the client never names a document. A GET never creates the
+  # room (see #start), so a room nobody has started shows a button that
+  # starts it.
   def show
-    @room = params[:room].to_s
-    return head :not_found unless Demos.valid_room?(@room)
+    @room = Room.find_by(slug: @slug)
+    return render :start, status: :not_found unless @room
 
-    @document_key = Demos.document_key(@demo.slug, @room)
+    @document = @room.collaborative_document(Demos.field(@demo))
+  end
 
-    if @demo.slug == "lexxy"
-      # The Lexxy demo uses a record, like lexxy-realtime does, with one Note
-      # per room. The page doesn't create the Note. A GET is anonymous and has
-      # no limit, so a crawler fetching room URLs could create any number of
-      # rows. The page renders a signed token for the room and field as the
-      # <yrby-document> grant. NoteChannel verifies it and creates the Note on
-      # subscribe, within the room limits.
-      @note_grant = Note.room_token(@room, :body)
-    else
-      # The shape demos work the same way. This action signs a token for the
-      # document, and DocumentChannel verifies it. The channel doesn't accept
-      # a document key from the client, so a client without a token can't
-      # subscribe.
-      @room_token = Demos.room_token(@demo.slug, @room)
+  # Starts a room: creates its row, within the room cap, and redirects to it.
+  # The pages never create a room, because a GET is anonymous and a crawler
+  # fetching room URLs could create any number of rows. This is a POST with
+  # no body, and Rack::Attack throttles it per IP.
+  def start
+    return head :forbidden unless request.origin == request.base_url
+    unless Rooms.current.start(@slug)
+      return render plain: "The demos have as many rooms as they can hold. Try again later.\n",
+                    status: :service_unavailable
     end
+
+    redirect_to demo_room_path(@demo.slug, @slug), status: :see_other
   end
 
-  # note.body as JSON. NoteChannel renders the document with Y::Lexxy after
-  # every update and saves the HTML to note.body, so this read-only endpoint
-  # returns current HTML without a browser involved. The e2e test polls it.
+  # room.body as JSON. LexxyChannel renders the Lexxy document with Y::Lexxy
+  # after every update and saves the HTML to room.body, so this read-only
+  # endpoint returns current HTML without a browser involved. The e2e test
+  # polls it.
   def body
-    room = params[:room].to_s
-    return head :not_found unless Demos.valid_room?(room)
-
-    note = Note.find_by(room: room)
-    render json: { body: note&.body }
+    render json: { body: Room.find_by(slug: @slug)&.body }
   end
 
-  # The shape demos' version of #body. It loads the stored Y::Document and
-  # reads it in Ruby with read_text, read_xml, read_map, or read_array. Like
-  # #body, it's read-only and anonymous. It never creates a document, so a
-  # crawler fetching room URLs can't create rows.
+  # The shape demos' version of #body. It loads the room's stored document
+  # and reads it in Ruby with read_text, read_xml, read_map, or read_array.
+  # Like #body, it's read-only and anonymous.
   def stored
-    demo = Demos.find(params[:demo])
-    return head :not_found if demo.nil? || demo.read.nil?
+    return head :not_found if @demo.read.nil?
 
-    room = params[:room].to_s
-    return head :not_found unless Demos.valid_room?(room)
-
-    state = Y::Document.load_state(Demos.document_key(demo.slug, room))
-    render json: { body: Demos.read_stored(demo.read, state) }
+    state = Room.find_by(slug: @slug)&.collaborative_document(@demo.slug)&.load_state
+    render json: { body: Demos.read_stored(@demo.read, state) }
   end
 
   private
@@ -68,6 +68,11 @@ class DemosController < ApplicationController
   def load_demo
     @demo = Demos.find(params[:demo])
     head :not_found if @demo.nil?
+  end
+
+  def load_slug
+    @slug = params[:room].to_s
+    head :not_found unless Demos.valid_room?(@slug)
   end
 
   def no_store

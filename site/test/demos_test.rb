@@ -3,6 +3,12 @@ require "test_helper"
 class DemosTest < ActionDispatch::IntegrationTest
   setup { Rack::Attack.cache.store.clear }
 
+  def start_room(demo = "tiptap", slug = "room1", origin: "http://www.example.com")
+    post "/demos/#{demo}/#{slug}/start", headers: { "Origin" => origin }
+  end
+
+  def room = Room.find_by!(slug: "room1")
+
   test "the demo index lists every demo" do
     get "/demos"
 
@@ -14,9 +20,9 @@ class DemosTest < ActionDispatch::IntegrationTest
     get "/demos/tiptap"
 
     assert_response :redirect
-    room = response.location[%r{/demos/tiptap/(.+)\z}, 1]
+    slug = response.location[%r{/demos/tiptap/(.+)\z}, 1]
 
-    assert Demos.valid_room?(room), "#{room.inspect} is not a valid room id"
+    assert Demos.valid_room?(slug), "#{slug.inspect} is not a valid room id"
   end
 
   test "two visitors get different rooms" do
@@ -27,30 +33,110 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_not_equal first, response.location
   end
 
+  test "a room nobody started shows a button that starts it" do
+    get "/demos/tiptap/room1"
+
+    assert_response :not_found
+    assert_includes response.body, "Start the room"
+    assert_includes response.body, %(action="/demos/tiptap/room1/start")
+  end
+
+  test "many page GETs create no rooms" do
+    20.times { |i| get "/demos/lexxy/room#{i}" }
+
+    assert_equal 0, Room.count, "a GET must not create a room"
+  end
+
+  test "starting a room creates it and goes to its page" do
+    start_room
+
+    assert_response :see_other
+    assert_redirected_to "/demos/tiptap/room1"
+    assert Room.exists?(slug: "room1")
+    assert_equal 0, Y::Document.count, "documents are created by the channel, not the start"
+  end
+
+  test "starting a room that exists goes to it" do
+    Room.create!(slug: "room1")
+
+    start_room("kanban")
+
+    assert_redirected_to "/demos/kanban/room1"
+    assert_equal 1, Room.count
+  end
+
+  test "a start from another origin is refused" do
+    start_room(origin: "https://evil.example")
+
+    assert_response :forbidden
+    assert_equal 0, Room.count
+  end
+
+  test "a start at the room cap is refused" do
+    Rooms.current = Rooms.new(max_rooms: 1)
+    Room.create!(slug: "taken")
+
+    start_room
+
+    assert_response :service_unavailable
+    assert_not Room.exists?(slug: "room1")
+  end
+
+  test "a start for an unknown demo or a malformed room is a 404" do
+    start_room("wiki")
+
+    assert_response :not_found
+
+    start_room("tiptap", "a" * 33)
+
+    assert_response :not_found
+    assert_equal 0, Room.count
+  end
+
   test "every demo page renders with its document key and bundle" do
+    Room.create!(slug: "room1")
+
     Demos::ALL.each do |demo|
       get "/demos/#{demo.slug}/room1"
 
       assert_response :success, "#{demo.slug} did not render"
       # The Lexxy page names its Yjs document in <lexxy-collaboration doc-id>.
       key_attribute = demo.slug == "lexxy" ? "doc-id" : "data-document-key"
+      key = room.collaborative_document(Demos.field(demo)).key
 
-      assert_includes response.body, %(#{key_attribute}="#{demo.slug}/room1")
+      assert_includes response.body, %(#{key_attribute}="#{key}")
       assert_includes response.body, "/#{demo.slug}.js"
     end
   end
 
-  test "every shape demo page includes a signed document grant" do
-    Demos::ALL.reject { |d| d.slug == "lexxy" }.each do |demo|
-      get "/demos/#{demo.slug}/room1"
+  test "every shape demo page renders the room document's grant" do
+    Room.create!(slug: "room1")
 
-      token = response.body[/data-token="([^"]+)"/, 1]
+    Demos.shape_slugs.each do |slug|
+      get "/demos/#{slug}/room1"
 
-      assert_predicate token, :present?, "#{demo.slug} page has no token"
-      # The client subscribes with this token, and it verifies to this document
-      # key. The Lexxy page's room token works the same way.
-      assert_equal "#{demo.slug}/room1", Demos.verified_key(token)
+      grant = response.body[/data-grant="([^"]+)"/, 1]
+
+      # The client subscribes to RoomChannel with this grant and name, and the
+      # grant resolves to this room for this demo's document only.
+      assert_equal room, Y::Collaborative.locate(grant, slug), "#{slug} page has no grant for the room"
+      assert_nil Y::Collaborative.locate(grant, "body")
+      assert_includes response.body, %(data-name="#{slug}")
     end
+  end
+
+  test "the lexxy page renders the room's grant for the body field" do
+    Room.create!(slug: "room1")
+
+    get "/demos/lexxy/room1"
+
+    element = response.body[/<yrby-document [^>]+>/]
+
+    assert_includes element, %(name="body")
+    assert_includes element, %(channel="LexxyChannel")
+    grant = element[/grant="([^"]+)"/, 1]
+
+    assert_equal room, GlobalID::Locator.locate_signed(grant, for: LexxyRealtime.grant_purpose("body"))
   end
 
   test "a demo page is not cached" do
@@ -60,6 +146,8 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the demo page includes the room link and the second window button" do
+    Room.create!(slug: "room1")
+
     get "/demos/kanban/room1"
 
     assert_includes response.body, "http://www.example.com/demos/kanban/room1"
@@ -67,6 +155,8 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the nav keeps the room across demos" do
+    Room.create!(slug: "room1")
+
     get "/demos/kanban/room1"
 
     Demos::ALL.reject { |d| d.slug == "kanban" }.each do |demo|
@@ -86,57 +176,25 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
-  test "visiting a demo page does not create a room" do
-    get "/demos/tiptap/room1"
-
-    assert_equal 0, Y::Document.count, "documents are created by the channel, not the page"
-  end
-
-  test "the lexxy page creates no note and renders a room token as the body field's grant" do
-    get "/demos/lexxy/room1"
-
-    assert_response :success
-    # Anyone can GET this page with no limit, so it must not create a row.
-    # Otherwise a crawler fetching room URLs would create Notes without limit.
-    assert_equal 0, Note.count, "the page must not create the note on a GET"
-    assert_equal 0, Y::Document.count
-
-    element = response.body[/<yrby-document [^>]+>/]
-
-    assert_includes element, %(name="body")
-    assert_includes element, %(channel="NoteChannel")
-    token = element[/grant="([^"]+)"/, 1]
-
-    assert_predicate token, :present?
-    # The token verifies to this room for the body field.
-    assert_equal "room1", Note.verified_room(token, "body")
-    # It doesn't verify for any other field, like the gem's grant.
-    assert_nil Note.verified_room(token, "title")
-  end
-
-  test "many lexxy page GETs create zero notes" do
-    20.times { |i| get "/demos/lexxy/room#{i}" }
-
-    assert_equal 0, Note.count, "GETs must not create note rows"
-  end
-
   test "the lexxy editor mounts with attachments disabled" do
+    Room.create!(slug: "room1")
+
     get "/demos/lexxy/room1"
 
     assert_includes response.body, %(attachments="false")
   end
 
   test "the body endpoint returns the rendered body column" do
-    note = Note.create!(room: "room1", body: "<h1>from Ruby</h1>")
+    Room.create!(slug: "room1", body: "<h1>from Ruby</h1>")
 
     get "/demos/lexxy/room1/body"
 
     assert_response :success
     assert_equal "no-store", response.headers["cache-control"]
-    assert_equal({ "body" => note.body }, response.parsed_body)
+    assert_equal({ "body" => "<h1>from Ruby</h1>" }, response.parsed_body)
   end
 
-  test "the body endpoint returns nil for a room with no note" do
+  test "the body endpoint returns nil for a room that doesn't exist" do
     get "/demos/lexxy/nothere/body"
 
     assert_response :success
@@ -151,8 +209,12 @@ class DemosTest < ActionDispatch::IntegrationTest
 
   # --- the shape demos' server-side read (DemosController#stored) ------------
 
+  def store(demo, update)
+    Room.find_or_create_by!(slug: "room1").collaborative_document(demo).append(update)
+  end
+
   test "the stored endpoint reads a Y.Text demo back as a string" do
-    Y::Document.append("codemirror/room1", Updates::CODE_TEXT)
+    store(:codemirror, Updates::CODE_TEXT)
 
     get "/demos/codemirror/room1/stored"
 
@@ -162,7 +224,7 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint reads a Y.XmlFragment demo back as block text" do
-    Y::Document.append("tiptap/room1", Updates::PROSEMIRROR_DEFAULT)
+    store(:tiptap, Updates::PROSEMIRROR_DEFAULT)
 
     get "/demos/tiptap/room1/stored"
 
@@ -171,7 +233,7 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint reads a Y.Map demo back as JSON" do
-    Y::Document.append("whiteboard/room1", Updates::SHAPES_MAP)
+    store(:whiteboard, Updates::SHAPES_MAP)
 
     get "/demos/whiteboard/room1/stored"
 
@@ -183,7 +245,7 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint reads a form field held in a Y.Text as a string" do
-    Y::Document.append("form/room1", Updates::FORM_MAP)
+    store(:form, Updates::FORM_MAP)
 
     get "/demos/form/room1/stored"
 
@@ -195,7 +257,7 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint reads a Y.Array demo back as JSON" do
-    Y::Document.append("kanban/room1", Updates::CARDS_ARRAY)
+    store(:kanban, Updates::CARDS_ARRAY)
 
     get "/demos/kanban/room1/stored"
 
@@ -210,7 +272,7 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint reads chat messages with their reactions per person" do
-    Y::Document.append("chat/room1", Updates::MESSAGES_ARRAY)
+    store(:chat, Updates::MESSAGES_ARRAY)
 
     get "/demos/chat/room1/stored"
 
@@ -222,7 +284,7 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint sorts keys in nested objects" do
-    Y::Document.append("spreadsheet/room1", Updates::ROWS_ARRAY)
+    store(:spreadsheet, Updates::ROWS_ARRAY)
 
     get "/demos/spreadsheet/room1/stored"
 
@@ -232,6 +294,15 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint returns nil for a room with no document" do
+    Room.create!(slug: "room1")
+
+    get "/demos/kanban/room1/stored"
+
+    assert_response :success
+    assert_nil response.parsed_body["body"]
+  end
+
+  test "the stored endpoint returns nil for a room that doesn't exist" do
     get "/demos/kanban/nothere/stored"
 
     assert_response :success
@@ -255,6 +326,8 @@ class DemosTest < ActionDispatch::IntegrationTest
   end
 
   test "the stored endpoint does not create a document" do
+    Room.create!(slug: "room1")
+
     get "/demos/kanban/room1/stored"
 
     assert_response :success

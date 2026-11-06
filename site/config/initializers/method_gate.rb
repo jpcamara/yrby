@@ -8,14 +8,17 @@
 #   embedded anycable-go POSTs every cable command there with a JSON body.
 #   Rack::Attack still checks its bearer token and answers an outside caller
 #   with a 404 (see rack_attack.rb), so this gate doesn't open it up.
+# - Starting a room goes through: a POST with no body. Rack::Attack throttles
+#   it per IP, and DemosController#start checks the Origin.
 # - Everything else gets 405 with an Allow header.
 #
-# The site has no forms, no CSP report endpoint, and no other POST target.
-# Anything that needs one has to be added here on purpose.
+# The site has no CSP report endpoint and no other POST target. Anything that
+# needs one has to be added here on purpose.
 class MethodGate
   READ_METHODS = %w[GET HEAD].freeze
   # /_anycable and its command paths (/_anycable/connect, /command, ...).
   RPC_PATH = %r{\A/_anycable(?:/[a-z_]+)?\z}
+  ROOM_START = %r{\A/demos/[a-z]+/[A-Za-z0-9_-]+/start\z}
   HEADERS = { "content-type" => "text/plain; charset=utf-8", "cache-control" => "no-store" }.freeze
 
   def initialize(app)
@@ -25,6 +28,7 @@ class MethodGate
   def call(env)
     return refuse(415, "This site doesn't accept uploads.\n") if multipart?(env)
     return @app.call(env) if READ_METHODS.include?(env["REQUEST_METHOD"]) || rpc_path?(env["PATH_INFO"].to_s)
+    return @app.call(env) if room_start?(env)
 
     refuse(405, "This site only serves GET and HEAD requests.\n", "allow" => "GET, HEAD")
   end
@@ -34,6 +38,10 @@ class MethodGate
   def multipart?(env) = env["CONTENT_TYPE"].to_s.strip.downcase.start_with?("multipart/")
 
   def rpc_path?(path) = RPC_PATH.match?(path)
+
+  def room_start?(env)
+    env["REQUEST_METHOD"] == "POST" && env["CONTENT_LENGTH"].to_i.zero? && ROOM_START.match?(env["PATH_INFO"].to_s)
+  end
 
   def refuse(status, body, extra = {})
     [status, HEADERS.merge(extra), [body]]

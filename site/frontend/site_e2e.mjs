@@ -75,6 +75,15 @@ const clickAt = async (session, selector) => {
 // the test sets the size itself.
 const VIEWPORT = ["1280", "720"]
 
+// A room page only syncs once the room is started, which is a POST from the
+// page's button. One start covers every demo in the room.
+const startRoom = async (room) => {
+  const res = await fetch(`${BASE}/demos/tiptap/${room}/start`, { method: "POST", headers: { Origin: BASE }, redirect: "manual" })
+  if (res.status !== 303) throw new Error(`starting ${room} answered ${res.status}`)
+}
+await startRoom(ROOM)
+await startRoom(`${ROOM}-other`)
+
 const synced = (s) => js(s, `!!(window.__yrby && window.__yrby.provider.synced)`)
 const openBoth = async (path) => {
   for (const s of SESSIONS) {
@@ -84,11 +93,11 @@ const openBoth = async (path) => {
   for (const s of SESSIONS) await waitFor(`${s} synced on ${path}`, async () => (await synced(s)) === true)
 }
 
-// --- 0) Rich text (Lexxy): two browsers through NoteChannel -----------------
+// --- 0) Rich text (Lexxy): two browsers through LexxyChannel ----------------
 // This part runs the published lexxy-realtime stack end to end: the
-// <yrby-document> wrapper with a room token as its grant, NoteChannel on top of
+// <yrby-document> wrapper with the room's grant, LexxyChannel on top of
 // LexxyRealtime::DocumentChannel, the record-based document, and the server
-// rendering the document into the note's plain body column with Y::Lexxy. No
+// rendering the document into the room's plain body column with Y::Lexxy. No
 // other demo renders on the server.
 await openBoth(`/demos/lexxy/${ROOM}`)
 
@@ -112,19 +121,19 @@ await waitFor("lexxy presence lists two people", async () => (await lexxyChips(B
 check("B sees two people in the lexxy room", (await lexxyChips(B)) === 2)
 
 // The stored HTML column. Poll the GET endpoint until the server-rendered
-// note.body includes what was typed. Y::Lexxy produced this HTML in Ruby, and
+// room.body includes what was typed. Y::Lexxy produced this HTML in Ruby, and
 // no browser serialized it.
 const storedBody = async () => {
   const res = await fetch(`${BASE}/demos/lexxy/${ROOM}/body`)
   return (await res.json()).body || ""
 }
-await waitFor("note.body materializes server-side", async () =>
+await waitFor("room.body materializes server-side", async () =>
   (await storedBody()).includes("lexxy from A") && (await storedBody()).includes("and B"))
 const body = await storedBody()
 check(`the stored column is server-rendered HTML (${body.slice(0, 40)}…)`,
   body.startsWith("<p>") && body.includes("lexxy from A"))
 
-// --- 1) Rich text (Tiptap): same shape through DocumentChannel ---------------
+// --- 1) Rich text (Tiptap): same shape through RoomChannel -------------------
 await openBoth(`/demos/tiptap/${ROOM}`)
 
 const prose = (s) => js(s, `JSON.stringify(window.__yrby.editor ? window.__yrby.editor.getText() : null)`)

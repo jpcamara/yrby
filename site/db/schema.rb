@@ -10,18 +10,29 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 20_260_906_000_001) do
+ActiveRecord::Schema[8.1].define(version: 20_261_106_000_001) do
   create_table "example_documents", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
   end
 
-  create_table "notes", force: :cascade do |t|
+  create_table "rooms", force: :cascade do |t|
+    t.string "slug", null: false
     t.text "body"
     t.datetime "created_at", null: false
-    t.string "room", null: false
     t.datetime "updated_at", null: false
-    t.index ["room"], name: "index_notes_on_room", unique: true
+    t.index ["slug"], name: "index_rooms_on_slug", unique: true
+  end
+
+  create_table "seats", force: :cascade do |t|
+    t.string "room_type", null: false
+    t.integer "room_id", null: false
+    t.string "name", null: false
+    t.string "connection_id", null: false
+    t.datetime "seen_at", null: false
+    t.index ["connection_id"], name: "index_seats_on_connection_id"
+    t.index %w[room_type room_id name connection_id], name: "index_seats_uniqueness", unique: true
+    t.index ["seen_at"], name: "index_seats_on_seen_at"
   end
 
   create_table "y_document_updates", force: :cascade do |t|

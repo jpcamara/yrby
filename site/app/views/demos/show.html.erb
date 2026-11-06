@@ -48,7 +48,7 @@
   <%= render "demos/#{@demo.slug}" %>
 
   <%# The server-side read panel for the shape demos. The Lexxy demo has its
-      own note.body panel that works the same way. Both fetch when opened and
+      own room.body panel that works the same way. Both fetch when opened and
       refetch after each change while open. read_text and read_xml return a
       string, and read_map and read_array return JSON. %>
   <% if @demo.read %>
