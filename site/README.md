@@ -406,8 +406,8 @@ object storage. Four small pieces keep it that way.
 - **Method gate.** `config/initializers/method_gate.rb` answers any multipart
   body with 415, and any method other than GET and HEAD with 405, before
   routing. The exceptions are the AnyCable RPC endpoint, which anycable-go
-  POSTs to and Rack::Attack keeps private, and starting a room, a POST with
-  no body. The cable's WebSocket upgrade is a GET.
+  POSTs to and Rack::Attack keeps private, and starting a room or inviting an
+  agent, POSTs with no body. The cable's WebSocket upgrade is a GET.
 - **CSP.** `img-src` is `'self'`, with no `data:` or `blob:`, and `media-src`
   and `frame-src` are `'none'`. An image embedded in a document can't load. The
   frontend build writes Lexxy's inline SVG chevrons out as files and fails if a
@@ -726,6 +726,65 @@ demo's document.
 read the server's `{ notice: ... }` messages. `yrby-client`'s provider ignores
 messages it doesn't recognize. The mixin it builds reaches the provider through
 a closure and doesn't use `this`, so wrapping its `received` handler is safe.
+
+### The shared page with agents
+
+`/space` opens a Lexxy room as a shared page (`/demos/lexxy/:room/space`).
+It's the same room and the same Lexxy document as the Lexxy demo, laid out
+like a document app. Each person on the page can invite their own agent, a
+Ruby process that joins over the cable with the room's grant, the way a
+browser does.
+
+To ask for a change, select text in one paragraph and choose "Ask for
+change". The request goes into the document's `asks` map, so every browser on
+the page shows it:
+
+1. The person's agent claims it. Its selection covers the asked-about text,
+   and its presence says it's working and since when. The page shows a
+   "Working for Ns" pill under the paragraph.
+2. Its proposed wording streams into the request as the model writes.
+3. Anyone on the page can Accept, Undo, or ask for a change. Accept replaces
+   the selected characters in that person's browser, as an ordinary edit, so
+   the server records it and `room.body` updates like it does after typing.
+   Until then the page itself doesn't change.
+
+- `DemosController#agent` takes the POST, with the person's id, name, and
+  color in the query string. It checks that the Origin is this site and that
+  the room exists, takes the person's seat in `AgentSeats`, and enqueues
+  `PageAgentJob`.
+- `PageAgentJob` runs `PageAgent` (`app/agents/`), a `Y::Agent` subclass
+  from yrby-agent, which holds the connection, the presence, and the model.
+  The model gets `read_document` and no tools that edit, so the page changes
+  only on Accept. Each person brings one agent, so the person's seat in
+  `AgentSeats` is the agent's lock, and `AgentSeats` also caps how many a
+  room takes. `PageAgent` answers the asks and documents their fields.
+- Jobs run on Solid Queue in processes of their own: `bin/serve` starts
+  `bin/jobs` beside Falcon, and `JOB_PROCESSES` sets how many worker
+  processes it forks. Each agent is a fiber (`config/queue.yml`). Seats
+  and the daily model budget are database rows, so every process counts
+  the same ones. The queue has its own SQLite file.
+- `AgentModel` asks the agent's chat, on Fireworks AI through ruby_llm, when
+  `FIREWORKS_API_KEY` is set, and streams a canned reply otherwise, so
+  development and tests run without a key. `AGENT_MODEL` picks the model.
+
+The limits, in `config/limits.rb`:
+
+| Limit | Default | Why |
+|---|---|---|
+| `MAX_AGENTS` | 6 | each agent holds a fiber and a connection while it stays |
+| `MAX_AGENTS_PER_ROOM` | 3 | one per person, and more than three on a page is hard to follow |
+| `AGENT_INVITES_PER_HOUR` | 6 per IP | an invitation starts a model call |
+| `AGENT_CALLS_PER_DAY` | 300 | caps the model bill; past it the request says so |
+| `AGENT_IDLE` | 60 s | the agent leaves once nobody else is in the room |
+| `AGENT_MAX_STAY` | 15 min | and after this however busy the room is |
+
+The agent joins at the origin the inviting browser used. Set
+`AGENT_CABLE_URL` to send it another way, such as straight to the local
+proxy.
+
+The invitation goes through the method gate like starting a room: a POST
+with no body, only on `/demos/lexxy/:room/agent`. Active Job is loaded for
+it. Active Storage still isn't, and the boot guard checks that separately.
 
 ### Building the bundles and the stylesheet
 
