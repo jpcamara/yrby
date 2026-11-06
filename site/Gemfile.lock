@@ -222,11 +222,11 @@ GEM
     language_server-protocol (3.17.0.6)
     lexxy (1.0.0)
       railties (>= 8.0.2)
-    lexxy-realtime (0.8.0)
+    lexxy-realtime (0.9.0)
       lexxy (>= 0.9.29, < 2.0)
       rails (>= 8.0.2)
       yrby (~> 0.8, >= 0.8.1)
-      yrby-rails (~> 0.7)
+      yrby-rails (~> 0.8)
     lint_roller (1.1.0)
     localhost (1.8.0)
       bake
@@ -391,13 +391,13 @@ GEM
       base64
       websocket-extensions (>= 0.1.0)
     websocket-extensions (0.1.5)
-    yrby (0.8.1-aarch64-linux)
-    yrby (0.8.1-aarch64-linux-musl)
-    yrby (0.8.1-arm64-darwin)
-    yrby (0.8.1-x86_64-darwin)
-    yrby (0.8.1-x86_64-linux)
-    yrby (0.8.1-x86_64-linux-musl)
-    yrby-rails (0.7.0)
+    yrby (0.9.0-aarch64-linux)
+    yrby (0.9.0-aarch64-linux-musl)
+    yrby (0.9.0-arm64-darwin)
+    yrby (0.9.0-x86_64-darwin)
+    yrby (0.9.0-x86_64-linux)
+    yrby (0.9.0-x86_64-linux-musl)
+    yrby-rails (0.8.0)
       actioncable (>= 7.1)
       actionview (>= 7.1)
       activerecord (>= 7.1)
@@ -405,7 +405,7 @@ GEM
       base64 (~> 0.2)
       globalid (>= 1.0)
       railties (>= 7.1)
-      yrby (>= 0.7.0)
+      yrby (>= 0.9.0)
     zeitwerk (2.8.3)
 
 PLATFORMS
@@ -431,7 +431,7 @@ DEPENDENCIES
   debug
   falcon (>= 0.55)
   globalid
-  lexxy-realtime (~> 0.8)
+  lexxy-realtime (~> 0.9)
   rack-attack (~> 6.7)
   railties (~> 8.1.3, >= 8.1.3.1)
   rubocop
@@ -439,8 +439,8 @@ DEPENDENCIES
   rubocop-rake
   sqlite3 (>= 2.1)
   tzinfo-data
-  yrby (~> 0.8)
-  yrby-rails (~> 0.7)
+  yrby (~> 0.9)
+  yrby-rails (~> 0.8)
 
 CHECKSUMS
   action_text-trix (2.1.19) sha256=7012f59421009cf284aa651294896414d653a61a2417c9b8714c8476d2f74009
@@ -518,7 +518,7 @@ CHECKSUMS
   json (3.0.2) sha256=8e6d7e7b11384c21230430cef90b71f14849a34a1f4452796670f7c981bd19df
   language_server-protocol (3.17.0.6) sha256=5ef2c0c138f8267e1bc631d3328347d354f96724b0af22f2c79516120443b7f0
   lexxy (1.0.0) sha256=fdf28c85671d3441483d69f3eebb9760231a99b3e2dd1c9c4d49054aaa7a9b06
-  lexxy-realtime (0.8.0) sha256=3c4bd48ceffa01e213dcb0f1a36bdd9c8db6d12cc9db29ce8ee7fb36c1cb01a4
+  lexxy-realtime (0.9.0) sha256=41504976260df76507c75b26e782d1147d5e94bcf9c40c7df90953e68606f3c9
   lint_roller (1.1.0) sha256=2c0c845b632a7d172cb849cc90c1bce937a28c5c8ccccb50dfd46a485003cc87
   localhost (1.8.0) sha256=df7ea825b4f64949c588c17efac86bc47ddc4460d723778abe933b71759b2701
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
@@ -592,13 +592,13 @@ CHECKSUMS
   useragent (0.16.11) sha256=700e6413ad4bb954bb63547fa098dddf7b0ebe75b40cc6f93b8d54255b173844
   websocket-driver (0.8.2) sha256=97c556b019bf3410b4961002ac501621e9322d3f8a7bc02161a09301cc4c4146
   websocket-extensions (0.1.5) sha256=1c6ba63092cda343eb53fc657110c71c754c56484aad42578495227d717a8241
-  yrby (0.8.1-aarch64-linux) sha256=5974eed1606e76ea7dfe37372ac79fa2840533d2a5216466715677a428d217bb
-  yrby (0.8.1-aarch64-linux-musl) sha256=1ab1e604da86d8f9e0279757273559fd331432dd87daa346994da2501142fe75
-  yrby (0.8.1-arm64-darwin) sha256=80d52973206e0fefa27ff82fc74e431487428fc628c745ff291024b89912f23e
-  yrby (0.8.1-x86_64-darwin) sha256=dc987d2ac758ef0d2f73061e92e7481d87e11772927cc5e20809fb7933b77b5c
-  yrby (0.8.1-x86_64-linux) sha256=cd884ec18860e195897fc9a72ee0511c3465acd75bb0a1470b5646b8b928b13f
-  yrby (0.8.1-x86_64-linux-musl) sha256=a77fed2c453c565cb81eb00703364d5e693bc4cfdf4403000e6e55ba8f1710b0
-  yrby-rails (0.7.0) sha256=1327ae9b98a57aa391fff70085094d30e5e9cbd059f056d3316e16c5f4075aa0
+  yrby (0.9.0-aarch64-linux) sha256=aee43f85d1c2e228a764fde320eb9c8c397f80e83b22db40f691e579840dacc3
+  yrby (0.9.0-aarch64-linux-musl) sha256=68031b11c97755788214dc13f967b5a33277312d5b0d57a73604b2caae72060b
+  yrby (0.9.0-arm64-darwin) sha256=0ed2ad21e0fe7d95eec2e1df6f3bb8ea12b257af598d24a14baa821535c31d20
+  yrby (0.9.0-x86_64-darwin) sha256=bb3a28618932453346b64ac7739e36f4a1f8547cdfc76a8a92ab5bc2f209bf2d
+  yrby (0.9.0-x86_64-linux) sha256=37ee1ad325f6d85dbcb1ffd49b6a5211ecd59f5f57ef92c4957c9190eedad116
+  yrby (0.9.0-x86_64-linux-musl) sha256=321aac84ce82be03ff2cd5ce24eec9878b4410fe26f0c9c6cf0606cf6aae52fc
+  yrby-rails (0.8.0) sha256=8024beb10c20f8510a9b9cfd464851ff236bfe5f3666f65e0d4703f901149b74
   zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
 
 BUNDLED WITH

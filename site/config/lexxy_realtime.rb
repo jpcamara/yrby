@@ -6,16 +6,19 @@
 # config/application.rb adds to the load paths.
 require "concurrent/map"
 require "lexxy_realtime/collaborative"
+require "lexxy_realtime/attribute"
 
 # lib/lexxy_realtime.rb defines these next to its engine require, so this app
 # defines them itself, with the same bodies. The concern calls
 # first_sighting_of_unknown_types? when a document has a node type with no
-# render rule, and LexxyRealtime::DocumentChannel calls grant_purpose when a
-# client subscribes to it by name.
+# render rule, LexxyRealtime::DocumentChannel calls grant_purpose when a
+# client subscribes to it by name, and deprecator warns about renamed methods.
 module LexxyRealtime
   @unknown_types_seen = Concurrent::Map.new
 
   def self.grant_purpose(name) = "lexxy_realtime/#{name}"
+
+  def self.deprecator = @deprecator ||= ActiveSupport::Deprecation.new("0.10", "lexxy-realtime")
 
   def self.first_sighting_of_unknown_types?(key) = @unknown_types_seen.put_if_absent(key, true).nil?
 end

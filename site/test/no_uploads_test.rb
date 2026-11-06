@@ -112,7 +112,7 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     state = File.binread(File.expand_path("fixtures/lexxy_full.bin", __dir__))
     note.collaborative_document(:body).append(state)
 
-    assert note.refresh_collaborative_rich_text(:body)
+    assert note.collaborative_document(:body).refresh
     body = note.reload.body
 
     assert_includes body, "<h1>Heading One</h1>", "text content is kept"

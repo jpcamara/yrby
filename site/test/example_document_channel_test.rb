@@ -9,7 +9,7 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
   end
 
   def join_example
-    subscribe grant: @document.collaborative_sgid(:body), name: "body", session_id: "example-session"
+    subscribe grant: @document.collaborative_document(:body).grant, name: "body", session_id: "example-session"
   end
 
   test "the gem's channel syncs the example and releases its room seat" do
@@ -30,7 +30,7 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
 
   test "a grant used with the wrong attribute name creates no storage" do
     assert_no_difference "Y::Document.count" do
-      subscribe grant: @document.collaborative_sgid(:body), name: "secret"
+      subscribe grant: @document.collaborative_document(:body).grant, name: "secret"
     end
 
     assert_predicate subscription, :rejected?
@@ -38,7 +38,7 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
 
   test "a valid grant for another record is rejected" do
     other = ExampleDocument.create!
-    subscribe grant: other.collaborative_sgid(:body), name: "body"
+    subscribe grant: other.collaborative_document(:body).grant, name: "body"
 
     assert_predicate subscription, :rejected?
   end

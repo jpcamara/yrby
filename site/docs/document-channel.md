@@ -123,7 +123,7 @@ browser never gets to pick which record or attribute it edits.
 
 ```erb
 <%# the view picks the record attribute and signs it %>
-<%= tag.div data: { grant: post.collaborative_sgid(:body) } %>
+<%= tag.div data: { grant: post.collaborative_document(:body).grant } %>
 ```
 
 ```ruby
