@@ -1,7 +1,8 @@
 # The live demos. None of these responses can be cached, because every page
 # belongs to a room and the room's state changes.
 class DemosController < ApplicationController
-  # Starting a room is a POST from the room's page. The site has no sessions
+  # Starting a room is a POST, from a demo link or from the page of a room
+  # nobody has started. The site has no sessions
   # to hold a CSRF token, so #start checks that the request's Origin is this
   # site instead.
   skip_forgery_protection only: :start
@@ -14,7 +15,8 @@ class DemosController < ApplicationController
   end
 
   # A bare /demos/:demo picks a room id and redirects to it, so each visitor
-  # gets their own room without picking a name.
+  # gets their own room without picking a name. The demo links POST to #start
+  # instead, which also creates the room.
   def new_room
     redirect_to demo_room_path(@demo.slug, Demos.new_room)
   end
@@ -32,6 +34,7 @@ class DemosController < ApplicationController
   end
 
   # Starts a room: creates its row, within the room cap, and redirects to it.
+  # A POST to /demos/:demo/start has no room, so it starts a new one.
   # The pages never create a room, because a GET is anonymous and a crawler
   # fetching room URLs could create any number of rows. This is a POST with
   # no body, and Rack::Attack throttles it per IP.
@@ -71,7 +74,7 @@ class DemosController < ApplicationController
   end
 
   def load_slug
-    @slug = params[:room].to_s
+    @slug = params[:room]&.to_s || Demos.new_room
     head :not_found unless Demos.valid_room?(@slug)
   end
 

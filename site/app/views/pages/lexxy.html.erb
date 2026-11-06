@@ -45,10 +45,9 @@
     submitted itself, so search, mailers, and show pages work without
     changes.
   </p>
-  <p class="mt-4">
-    <%= link_to "Watch the saved HTML update as you type →", demo_path("lexxy"), rel: "nofollow",
-                class: "text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
-  </p>
+  <%= button_to "Watch the saved HTML update as you type →", demo_open_path("lexxy"), authenticity_token: false,
+                form_class: "mt-4",
+                class: "cursor-pointer text-accent underline decoration-rose-400/40 underline-offset-2 hover:decoration-rose-400" %>
 </section>
 
 <section class="border-t border-zinc-800/70 py-14">
@@ -183,7 +182,8 @@
     <a class="hover:text-accent" href="https://github.com/jpcamara/lexxy-realtime">GitHub</a>
     <a class="hover:text-accent" href="https://rubygems.org/gems/lexxy-realtime">RubyGems</a>
     <a class="hover:text-accent" href="https://www.npmjs.com/package/lexxy-realtime">npm</a>
-    <%= link_to "Live demo", demo_path("lexxy"), rel: "nofollow", class: "hover:text-accent" %>
+    <%= button_to "Live demo", demo_open_path("lexxy"), authenticity_token: false,
+                  class: "cursor-pointer hover:text-accent" %>
     <%= link_to "yrby docs", doc_path("getting-started"), class: "hover:text-accent" %>
   </nav>
 </section>

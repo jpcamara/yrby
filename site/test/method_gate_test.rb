@@ -33,8 +33,14 @@ class MethodGateTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "starting a room is the one POST the gate lets through" do
+  test "starting a room is a POST the gate lets through" do
     post "/demos/tiptap/room1/start", headers: { "Origin" => "http://www.example.com" }
+
+    assert_response :see_other
+  end
+
+  test "opening a demo is a POST the gate lets through" do
+    post "/demos/tiptap/start", headers: { "Origin" => "http://www.example.com" }
 
     assert_response :see_other
   end
