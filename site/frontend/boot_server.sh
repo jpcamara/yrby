@@ -10,8 +10,8 @@
 # --bind. The Go server calls Rails over HTTP RPC at /_anycable, and that's the
 # only connection between them.
 #
-# bin/serve runs one Falcon worker unless FALCON_COUNT says otherwise. See
-# "Why one process by default" in site/README.md.
+# bin/serve runs four Falcon workers unless FALCON_COUNT says otherwise. See
+# "Several processes" in site/README.md.
 #
 # Runs the server in the background, waits until it's healthy, and writes the
 # thrust pid to $SERVER_PIDFILE so the caller can stop it.

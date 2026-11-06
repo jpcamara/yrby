@@ -7,9 +7,9 @@
 # ConnectionGuard, and RoomGuarded (frames per second and the rest), all of
 # which run in Ruby on the RPC calls.
 #
-# Rack::Attack's counters live in this process's memory. That works because the
-# site runs one process by default. With more workers, each one keeps its own
-# counts (see "Why one process by default" in README.md).
+# Rack::Attack's counters live in each process's memory. With several workers,
+# each one keeps its own counts, so a limit can get up to that many times looser
+# (see "Several processes" in README.md).
 class Rack::Attack
   cache.store = ActiveSupport::Cache::MemoryStore.new(size: 8.megabytes)
 
