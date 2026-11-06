@@ -122,8 +122,11 @@ class Room < ApplicationRecord
 end
 ```
 
-`DemosController#start` creates the row, from a button on the room's page.
-A GET never does, so a crawler fetching room URLs creates nothing. The pages
+`DemosController#start` creates the row. The demo links are buttons that POST
+to `/demos/:demo/start`, which picks a new room, creates it, and redirects to
+it. A room nobody has started, such as a shared link to a swept room, shows a
+button that starts it. A GET never creates a room, so a crawler fetching room
+URLs creates nothing. The pages
 render each document's grant: the Lexxy page with
 `collaborative_document_tag(@room, :body)`, the shape demos as `data-grant`
 on their mount, which `frontend/src/room.js` hands to the provider.
@@ -631,7 +634,7 @@ the site, so they stay in sync:
   serves these from `DocPage` and `Demos`. They aren't committed static files,
   so the URL set and the canonical host stay correct as pages are added.
   `robots.txt` lets crawlers index the docs and the `/demos` index, and
-  disallows each `/demos/:slug` prefix. A bare demo URL creates a new room and
+  disallows each `/demos/:slug` prefix. A bare demo URL picks a new room id and
   redirects, so a crawler that followed those links would generate unlimited
   URLs. Demo room pages are also `noindex, nofollow`, with `/demos` as their
   canonical URL.

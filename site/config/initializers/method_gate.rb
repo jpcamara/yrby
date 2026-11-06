@@ -18,7 +18,7 @@ class MethodGate
   READ_METHODS = %w[GET HEAD].freeze
   # /_anycable and its command paths (/_anycable/connect, /command, ...).
   RPC_PATH = %r{\A/_anycable(?:/[a-z_]+)?\z}
-  ROOM_START = %r{\A/demos/[a-z]+/[A-Za-z0-9_-]+/start\z}
+  ROOM_START = %r{\A/demos/[a-z]+(?:/[A-Za-z0-9_-]+)?/start\z}
   HEADERS = { "content-type" => "text/plain; charset=utf-8", "cache-control" => "no-store" }.freeze
 
   def initialize(app)

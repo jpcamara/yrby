@@ -33,6 +33,24 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_not_equal first, response.location
   end
 
+  test "the demo links start a new room" do
+    get "/demos"
+
+    assert_includes response.body, %(action="/demos/tiptap/start")
+  end
+
+  test "opening a demo starts a new room and goes to it" do
+    post "/demos/tiptap/start", headers: { "Origin" => "http://www.example.com" }
+
+    assert_response :see_other
+    slug = response.location[%r{/demos/tiptap/(.+)\z}, 1]
+
+    assert Room.exists?(slug: slug)
+    post "/demos/tiptap/start", headers: { "Origin" => "http://www.example.com" }
+
+    assert_equal 2, Room.count, "each click gets its own room"
+  end
+
   test "a room nobody started shows a button that starts it" do
     get "/demos/tiptap/room1"
 

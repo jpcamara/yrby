@@ -744,9 +744,13 @@
            hover:border-zinc-600;
   }
 
-  .demo-list li a {
-    @apply font-semibold text-zinc-100 after:absolute after:inset-0
-           hover:text-accent;
+  .demo-list li form {
+    @apply inline;
+  }
+
+  .demo-list li button {
+    @apply cursor-pointer font-semibold text-zinc-100 after:absolute
+           after:inset-0 hover:text-accent;
   }
 
   .demo-list li {

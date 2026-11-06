@@ -28,9 +28,8 @@
   <ul class="demo-list">
     <% @demos.each do |demo| %>
       <li>
-        <%# nofollow because each click creates a new room for that visitor.
-            robots.txt also disallows the room paths. %>
-        <%= link_to demo.title, demo_path(demo.slug), rel: "nofollow" %>
+        <%# A POST, because each click creates a new room for that visitor. %>
+        <%= button_to demo.title, demo_open_path(demo.slug), authenticity_token: false %>
         <code><%= demo.shape %></code>
         <span><%= demo.blurb %></span>
       </li>

@@ -24,7 +24,9 @@ Rails.application.routes.draw do
   # A bare demo URL picks a room id and redirects to it, so every visitor gets
   # a separate room.
   get "demos/:demo", to: "demos#new_room", as: :demo
-  # Starting a room creates its row (see DemosController#start).
+  # Starting a room creates its row (see DemosController#start). Without a
+  # room it starts a new one, which is where the demo links go.
+  post "demos/:demo/start", to: "demos#start", as: :demo_open
   post "demos/:demo/:room/start", to: "demos#start", as: :demo_start
   # The Lexxy demo's stored HTML column (see DemosController#body).
   get "demos/lexxy/:room/body", to: "demos#body", as: :demo_room_body

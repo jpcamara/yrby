@@ -71,7 +71,7 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     # calls it, over localhost with the AnyCable secret, and RoomGuarded
     # throttles every channel it reaches. Starting a room is a POST with no
     # body, which the method gate lets through only on that path.
-    exceptions = ["/_anycable", "/demos/:demo/:room/start(.:format)"]
+    exceptions = ["/_anycable", "/demos/:demo/start(.:format)", "/demos/:demo/:room/start(.:format)"]
     routes = Rails.application.routes.routes.reject { |route| exceptions.include?(route.path.spec.to_s) }
 
     assert_equal ["GET"], routes.map(&:verb).uniq, "found a write endpoint, but this site only reads over HTTP"
