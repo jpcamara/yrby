@@ -1,10 +1,10 @@
 # yrby site
 
 The documentation and live-demo site for [yrby](https://github.com/jpcamara/yrby).
-It's a Rails app, and its demo rooms use the same storage the docs describe:
-`Y::Document.load_state` and `Y::Document.append`, the gem's own models, on a
-SQLite file. There's no Postgres or Redis, and the server keeps no document
-state in process memory between messages.
+It's a Rails app, and its demo rooms use the setup the docs describe: a `Room`
+record with `has_collaborative_document` and `has_collaborative_rich_text`,
+stored as the gem's own models in a SQLite file. There's no Postgres or Redis,
+and the server keeps no document state in process memory between messages.
 
 WebSockets go through [anycable-thruster](https://github.com/anycable/thruster),
 which is Thruster with anycable-go embedded in the proxy. `thrust bin/serve`
@@ -15,7 +15,8 @@ handles short requests.
 ```
 site/
 ├── app/lib/           room caps, rate limiters, the demo list, the docs model
-├── app/channels/      DocumentChannel, NoteChannel, the guards, and the connection
+├── app/channels/      RoomChannel, LexxyChannel, the guards, and the connection
+├── app/models/        Room, Seat, and the example document
 ├── config/limits.rb   every rate, size, and count limit, with the reasoning for each
 ├── db/                the vendored yrby:tables migration and the schema
 ├── docs/              the documentation pages, as markdown
@@ -44,11 +45,12 @@ panel calls `collaborative_document(:body).y_doc.read_text("content")` in Rails.
 seats, frame limits, write budget, and awareness rules as the room demos. The
 guards go on the gem's class because a guard on an app subclass could be
 skipped by a client that subscribes to `Y::DocumentChannel` by name.
-lexxy-realtime's channel and `NoteChannel` extend `Y::DocumentChannel`, so
-they get the same guards. An `authorize_document` block on `Y::DocumentChannel`
-only lets this example's body through
-(`config/initializers/record_channels.rb`). These limits are this site's
-policy for an anonymous demo. Your app doesn't need them to use yrby.
+lexxy-realtime's channel, `RoomChannel`, and `LexxyChannel` extend
+`Y::DocumentChannel`, so they get the same guards. An `authorize_document`
+block on `Y::DocumentChannel` only lets this example's body through
+(`config/initializers/record_channels.rb`), and `RoomChannel` and
+`LexxyChannel` set their own blocks for the rooms. These limits are this
+site's policy for an anonymous demo. Your app doesn't need them to use yrby.
 
 The idle-document sweeper clears this example's CRDT content like any other
 room, and the record itself stays. Every visitor shares this one document. The
@@ -108,12 +110,26 @@ file under `storage/`, created by `db:prepare`, which `boot_server.sh` runs.
 
 ## Document storage
 
-`DocumentChannel` uses the hooks from the docs as written:
+Each room is a `Room` record with a document per demo, declared the way the
+docs describe:
 
 ```ruby
-on_load { |key| Y::Document.load_state(key) }
-on_change { |key, update| Y::Document.append(key, update) }
+class Room < ApplicationRecord
+  include LexxyRealtime::Collaborative
+
+  has_collaborative_rich_text :body, nodes: SUPPRESSED_NODES # the Lexxy demo
+  Demos.shape_slugs.each { |slug| has_collaborative_document slug }
+end
 ```
+
+`DemosController#start` creates the row, from a button on the room's page.
+A GET never does, so a crawler fetching room URLs creates nothing. The pages
+render each document's grant: the Lexxy page with
+`collaborative_document_tag(@room, :body)`, the shape demos as `data-grant`
+on their mount, which `frontend/src/room.js` hands to the provider.
+`RoomChannel` is yrby-rails' `Y::DocumentChannel` and `LexxyChannel` is
+lexxy-realtime's channel, each with an `authorize_document` block that opens
+any room's documents. The site's own code never loads or appends a document.
 
 The site's size cap is checked before the update reaches `on_change`.
 `RoomGuarded` reserves the bytes through `Rooms#reserve_write` (see
@@ -132,8 +148,9 @@ The channel rebuilds state from the database on each message, so the number of
 rooms is limited by disk space and not by what one Ruby process can hold. It
 also means the [Storage](/docs/storage) page describes the code running here.
 
-The site's own code around the hooks is in `app/lib/rooms.rb` (seats, caps, and
-a cached size check) and `app/lib/room_sweeper.rb` (deleting idle rooms).
+The site's own code around the documents is in `app/lib/rooms.rb` (starting
+rooms, seats, caps, and a cached size check) and `app/lib/room_sweeper.rb`
+(deleting idle documents and rooms).
 
 Rooms are temporary on purpose. Documents survive restarts and deploys because
 they're rows on a volume. The sweeper deletes rooms nobody has touched for 24
@@ -144,8 +161,8 @@ a constraint.
 ## The stack
 
 ```
-browser ──ws──► thrust (Go) ──HTTP RPC──► Falcon ──► DocumentChannel ──► Y::Document
-        ──http─►    │                                                    (SQLite)
+browser ──ws──► thrust (Go) ──HTTP RPC──► Falcon ──► RoomChannel ──► Y::Document
+        ──http─►    │                                                (SQLite)
                     └──► Falcon (pages)
 ```
 
@@ -170,25 +187,31 @@ native extension under Falcon. The demo app's e2e suite boots under both Puma
 and Falcon, and this site runs the Falcon setup in production, with the
 extension inside the fiber scheduler.
 
-### Why one process by default
+### Several processes
 
 Falcon runs with `--count 1` unless you set otherwise. With SQLite behind the
-hooks, the documents don't need a single process. The store is shared on disk,
+documents, they don't need a single process. The store is shared on disk,
 broadcasts already go through the embedded Go server, and SQLite in WAL mode
 handles several processes on one box.
 
-The throttle bookkeeping is what assumes one process. The seats and size cache
-in `Rooms`, `ConnectionLimiter`, `ConnectionGuard`, `WriteBudget`, and
-Rack::Attack's counters all live in process memory. With N workers, each one
-enforces its own copy, so the caps can get up to N times looser. The site runs
-one process by default, so each limit is counted in one place. A demo site
-doesn't need more.
+Rooms and seats are rows too, so every process counts the same ones.
+anycable-go sends each command to whichever Falcon process takes it, so a
+subscribe and its unsubscribe often reach different processes. Counting seats
+in process memory would leak them, and a leaked seat would hold a peer slot
+and refuse that connection's next join. `Rooms` takes a room or a seat in one
+transaction, and Rails begins SQLite transactions IMMEDIATE, so two processes
+can't both take the last one. The peer cap, the subscription cap, and the room
+cap are exact with any number of processes.
 
-`FALCON_COUNT` (or `WEB_CONCURRENCY`) turns on forked workers. Setting
-`FALCON_THREADS` as well switches Falcon to its hybrid container, with forks
-times threads. Use these for load tests, or for deployments where approximate
-caps are acceptable. To scale out with exact caps, move those counters to a
-shared cache, and probably move the database to Postgres.
+The rest of the throttle bookkeeping lives in process memory: the size cache
+in `Rooms`, `ConnectionLimiter`, `ConnectionGuard`'s buckets, `WriteBudget`,
+and Rack::Attack's counters. With N processes, each one enforces its own copy,
+so those caps can get up to N times looser. That's fine for a demo. To make
+them exact, move them to a shared cache.
+
+`FALCON_COUNT` (or `WEB_CONCURRENCY`) sets the number of forked workers.
+Setting `FALCON_THREADS` as well switches Falcon to its hybrid container, with
+forks times threads.
 
 Sockets end in Go, so Rails builds a fresh channel instance for every command,
 and instance variables don't survive between commands. Anything the channel
@@ -196,8 +219,8 @@ needs to remember, such as whether it holds a seat in the room or has already
 sent the full-room notice, is declared with `state_attr_accessor` and sent back
 and forth as JSON in the RPC exchange. The channel passes the key to
 `sync_receive` on every call for the same reason. This is the AnyCable setup
-yrby's README describes. The per-connection frame bucket and subscription
-budget are different: they live in `ConnectionGuard`, in process memory.
+yrby's README describes. The per-connection frame bucket and subscribe rate
+are different: they live in `ConnectionGuard`, in process memory.
 
 ### Concurrency
 
@@ -205,8 +228,8 @@ Under Falcon, RPC requests run as fibers, mostly on one thread. They switch at
 IO and scheduler yields, not preemptively. SQLite handles concurrent document
 writes, in WAL mode with Rails' busy timeout.
 
-The site's own bookkeeping (the seats and size cache in `Rooms`, and
-`ConnectionLimiter`) still takes explicit locks. A fiber can yield wherever IO
+The site's own in-memory bookkeeping (the size cache in `Rooms`,
+`ConnectionLimiter`, and `ConnectionGuard`) still takes explicit locks. A fiber can yield wherever IO
 happens, the reactor can serve requests concurrently, the sweeper runs on a real
 `Thread`, and an uncontended mutex is cheap. Database reads happen outside the
 locks, so a fiber never waits on SQLite while it holds one. The code is also
@@ -225,16 +248,17 @@ summarizes them.
 | 0. anycable-go | concurrent sockets, process-wide | 500 | The hard ceiling, enforced by the process that holds the sockets. Set with `ANYCABLE_MAX_CONN`. The Ruby caps below add a per-IP limit and a soft cap in front of it. |
 | 1. Rack::Attack | page requests per IP | 60 / minute | A reader loads a page every few seconds. Static files and `/up` don't count. Public requests to `/_anycable` are blocked, and the Go server's authenticated RPC calls skip the throttle. |
 | 2. Connection | concurrent sockets per IP | 8 | Opening a second window is the point of the demo, and a visitor may open one per page. More than that is a script. The count uses the real client IP (it accounts for trusted proxies), and each slot has a token, so a disconnect frees its own slot and not the oldest one. |
-| 2. Connection guard | subscriptions per socket | 20 | Each subscription takes a room seat and can create a document. This limits how many rooms one socket can reach (160 per IP, with the per-IP cap). |
+| 1. Rack::Attack | room starts per IP | 30 / hour | Starting a room creates a `Room` row. Pages never do. |
+| 2. Seats | subscriptions per socket | 20 | Each subscription takes a seat and can create a document. This limits how many documents one socket can reach (160 per IP, with the per-IP cap). |
 | 2. Connection guard | subscribe commands per socket | 5 / s, burst 20 | Stops a socket from cycling through rooms with repeated subscribe and unsubscribe. |
 | 3. Token bucket | frames per second, per socket | 40, burst 120 | Typing plus awareness at pointer-event rate stays well under this. There's one bucket **per connection**, so re-subscribing doesn't reset the burst, and extra subscriptions don't add rate. |
 | 3. Token bucket | dropped frames before the socket closes | 200 | Short runs of dropped frames are normal during a fast drag. A client that keeps going past 200 isn't a person. |
 | 3. Write budget | document writes per second, process-wide | 400, burst 800 | A shared limit in front of single-writer SQLite. Past it, the server drops document frames, so a flood slows writes down without locking up the database with `SQLITE_BUSY`. Awareness frames don't count. |
 | 4. Frame size | bytes per frame | 128 KiB | yrby's default is 8 MiB, sized for a real app's initial `SyncStep2`. Demo documents are tiny. This is the *decoded* cap. See the Go message cap in layer 0. |
 | 5. Document size | bytes per room | 512 KiB | About ten times a realistic demo document. The server reserves the bytes before it accepts an update, so the update that would cross the cap is the one refused. At the cap the room becomes read-only and the page says so. |
-| 6. Room caps | peers per room | 12 | More than a dozen carets is unreadable, and each peer is another target for every broadcast. One connection can hold at most one seat in a room. |
-| 6. Room caps | documents on disk | 2000 | 2000 x 512 KiB keeps the database file to about 1 GB of disk. The count includes **reservations**: rooms with a seated visitor that haven't been written yet. That way a flood of `subscribe`s can't get past the cap before their documents exist. |
-| 7. Eviction | idle time before a room is deleted | 24 hours | Rooms are public and anonymous, and the site says they're temporary. A link shared in the morning still works after dinner. The sweeper claims a room under a lock before deleting it, so it can't delete a room that someone is joining or writing to. |
+| 6. Room caps | peers per document | 12 | More than a dozen carets is unreadable, and each peer is another target for every broadcast. One connection can hold at most one seat in a document. |
+| 6. Room caps | rooms at once | 2000 | Rooms use disk, not memory. A room holds up to one document per demo, and a real demo document is tens of kilobytes. Only starting a room creates one, and starts are throttled per IP. |
+| 7. Eviction | idle time before a document or room is deleted | 24 hours | Rooms are public and anonymous, and the site says they're temporary. A link shared in the morning still works after dinner. The sweeper deletes in a transaction, so it can't delete a document that someone is joining. |
 
 Rack::Attack has no throttle for cable handshakes. `/cable` never passes
 through Rack, because the Go server answers it in the proxy, so a limit there
@@ -247,19 +271,12 @@ since every message on the cable goes through them.
 The sections below cover the limits that need more explanation than a table
 row.
 
-### Reservations and per-connection buckets
+### Per-connection buckets
 
-A room has no database row until its first write, but a subscription takes a
-seat as soon as it joins. Without extra accounting, a burst of `subscribe`s for
-different keys would all be admitted (there are no rows yet) and then each
-create a document, going past the room cap. So the first seat in a brand-new
-room counts as a *reservation* against the cap until the room is written or its
-last occupant leaves.
-
-The frame bucket and the subscribe budget belong to the connection for a
-similar reason. A bucket per subscription would reset on every subscribe, and a
-socket with several subscriptions would get several buckets' worth of rate. One
-bucket per socket avoids both problems.
+The frame bucket and the subscribe rate belong to the connection. A bucket per
+subscription would reset on every subscribe, and a socket with several
+subscriptions would get several buckets' worth of rate. One bucket per socket
+avoids both problems.
 
 ### The RPC endpoint
 
@@ -301,48 +318,53 @@ The true size of a room is its snapshot bytes plus its tail bytes, which takes
 a SUM over rows. That's too expensive to run on every frame. Polling it would
 leave a gap where a flood could append megabytes between polls.
 
-So `Rooms` keeps a cached size per room. `Rooms#reserve_write` adds each
+So `Rooms` keeps a cached size per document. `Rooms#reserve_write` adds each
 update's bytes to the cache when it admits the update, which keeps the cap
 accurate at any write rate without a query on the hot path. The server re-reads
 the database only when a cache entry is older than 30 seconds, to pick up
-compaction. Compaction only shrinks the true size, so between refreshes the
-cache can only overestimate, which is the safe direction for a cap. At worst, a
-room that was just compacted stays read-only for a few extra seconds.
+compaction and other processes' writes. Between refreshes, a process doesn't
+see what the others wrote, so with several processes a document can go a
+little past its cap. After a compaction the cache overestimates, so a document
+that was just compacted can stay read-only for a few extra seconds.
 
 ### Idle eviction
 
-Most visitors create a room and leave within a minute. Without the sweeper
-(`app/lib/room_sweeper.rb`, one thread, a sweep every five minutes), normal use
-would reach the 2000-document cap. A room is stale when it has had no write
-within the TTL and nobody is in it. The sweeper never evicts an occupied room.
+Most visitors start a room and leave within a minute. Without the sweeper
+(`app/lib/room_sweeper.rb`, one thread per process, a sweep every five
+minutes), normal use would reach the 2000-room cap. A document is stale when it
+has had no write within the TTL and nobody is seated in it. A room goes once it
+has no documents left, nobody in it, and no Lexxy render within the TTL. The
+sweeper never deletes an occupied document.
 
-The sweeper can't just delete a snapshot of stale rooms. A join or an append
-could happen in between, and it would delete a document out from under an
-active session. So the stale set is only a list of candidates. `Rooms` then
-checks seats and marks, in one locked step, the candidates that have no
-occupant and no reservation. After that, a join is refused and a write can't
-reopen them. The sweeper reads the database again and deletes only the rooms
-that are still stale.
+A join or an append could land between finding the stale documents and
+deleting them, which would delete a document out from under an active session.
+So the sweeper finds and deletes them in one transaction, and a join takes its
+seat in one transaction too. Rails begins SQLite transactions IMMEDIATE, so
+one waits for the other: either the join lands first and the document is kept,
+or the delete does and the join starts a fresh document.
 
 ### Leaked connections
 
-The same sweep cleans up leaked connections. The Disconnect RPC frees a seat
-and a connection slot, but that RPC might never arrive (a dropped socket, a
-network partition). A leaked seat is worse than a leaked slot. It keeps a room
-occupied, so the sweeper won't evict it, and it holds a peer slot forever.
+The same sweep cleans up leaked connections. The Disconnect RPC frees a
+connection's seats and its slot, but that RPC might never arrive (a dropped
+socket, a network partition, a process that crashed). A leaked seat is worse
+than a leaked slot. It keeps a document occupied, so the sweeper won't delete
+it, and it holds a peer slot.
 
-So the sweep cleans up a connection based on when the server last heard from it.
-`ConnectionGuard` records the last frame the server saw from each connection.
-When a connection has been silent longer than the TTL (an hour), the sweep
-releases its room seats and its connection slot (by the slot's token). Releasing
-the seats frees the peer slots and lets an abandoned room be evicted.
+So seats have a clock of their own. While frames arrive, each process
+refreshes a connection's `Seat#seen_at` at most once a minute, and the sweep
+deletes seats older than ten minutes. That frees the peer slots and lets an
+abandoned room go. Slots are per process: `ConnectionGuard` records the last
+frame each process saw from a connection, and when a connection has been
+silent there longer than an hour, the sweep frees the slot that process gave
+it (by the slot's token).
 
-Any frame resets the clock, whether it's a document update or awareness. That's
-one reason awareness goes through `send` (see below). yrby-client re-sends
-awareness on a heartbeat, so a reader with an idle tab open stays connected.
-If the sweep cleans up a connection that's still open, the caps get looser for
-a while, and nobody is turned away. `ANYCABLE_MAX_CONN` on the Go process is the hard ceiling on real
-sockets.
+Any frame resets both clocks, whether it's a document update or awareness.
+That's one reason awareness goes through `send` (see below). yrby-client
+re-sends awareness on a heartbeat, so a reader with an idle tab open stays
+connected. If the sweep cleans up a connection that's still open, the caps get
+looser for a while, and nobody is turned away. `ANYCABLE_MAX_CONN` on the Go
+process is the hard ceiling on real sockets.
 
 ### Presence goes through send
 
@@ -376,9 +398,9 @@ object storage. Four small pieces keep it that way.
   fails instead of mounting upload routes.
 - **Method gate.** `config/initializers/method_gate.rb` answers any multipart
   body with 415, and any method other than GET and HEAD with 405, before
-  routing. The one exception is the AnyCable RPC endpoint, which anycable-go
-  POSTs to and Rack::Attack keeps private. The cable's WebSocket upgrade is a
-  GET.
+  routing. The exceptions are the AnyCable RPC endpoint, which anycable-go
+  POSTs to and Rack::Attack keeps private, and starting a room, a POST with
+  no body. The cable's WebSocket upgrade is a GET.
 - **CSP.** `img-src` is `'self'`, with no `data:` or `blob:`, and `media-src`
   and `frame-src` are `'none'`. An image embedded in a document can't load. The
   frontend build writes Lexxy's inline SVG chevrons out as files and fails if a
@@ -395,9 +417,10 @@ object storage. Four small pieces keep it that way.
 ### Process-local counters
 
 Rack::Attack's cache is an `ActiveSupport::Cache::MemoryStore`, so its counters
-live in this process like the rest of the throttle bookkeeping. That works
-because the site runs one process. With several processes, all of this would
-need a shared cache, and most of it would be better handled at the CDN.
+live in each process, like the buckets and the size cache. With N processes
+they're up to N times looser (see [Several processes](#several-processes)).
+Making them exact would take a shared cache, and most of it would be better
+handled at the CDN.
 
 ## Caching
 
@@ -521,9 +544,9 @@ from the request, because the request host changes behind Cloudflare or on a
 plain-http LAN box. **It defaults to the `yrby.example.com` placeholder, and
 the SEO tags are wrong until you set it.**
 
-Each setup runs the app on one machine. The database volume attaches to one
-box, and the throttle counters assume one process. That's fine for a demo
-site, and moving to a bigger box is a one-line change.
+Each setup runs the app on one machine, because the database volume attaches
+to one box. That's fine for a demo site, and moving to a bigger box is a
+one-line change.
 
 The Dockerfile and `boot_server.sh` also set `MAX_REQUEST_BODY=65536` for
 thrust, a cap on request bodies at the proxy. Every public route is a GET, so
@@ -542,7 +565,7 @@ around 10 KB, so 500 sockets take 5-10 MB. Ruby holds nothing per connection
 between messages. Rails builds the channel object for one command and then
 discards it, so an idle client costs Rails nothing. A document uses RAM only
 while it's being loaded or applied. Documents live in SQLite, and the room caps
-(2000 documents at 512 KiB) keep the database file to about 1 GB of disk. What
+(2000 rooms, 512 KiB per document) bound the database file on disk. What
 stays in memory is Rails plus the yrby native extension, 150-200 MB. The rest
 of a 1 GB machine is headroom for CRDT work in progress. Applying an update
 allocates memory, and `on_load` replays a room's snapshot and tail into a fresh
@@ -625,7 +648,7 @@ There are eight demo pages, picked to cover different Yjs shapes:
 
 | Page | Shape | What it shows |
 |---|---|---|
-| Lexxy | `Y.XmlText` | Lexxy on the published lexxy-realtime stack: the `<yrby-document>` wrapper, a channel built on the gem's, a record-backed document, and the server rendering `note.body` with `Y::Lexxy` |
+| Lexxy | `Y.XmlText` | Lexxy on the published lexxy-realtime stack: the `<yrby-document>` wrapper, a channel built on the gem's, a record-backed document, and the server rendering `room.body` with `Y::Lexxy` |
 | Tiptap | `Y.XmlFragment` | The same shape through Tiptap's own Collaboration extension |
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges, with sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map, the way canvas tools store shapes |
@@ -637,37 +660,31 @@ There are eight demo pages, picked to cover different Yjs shapes:
 ### The Lexxy demo
 
 The Lexxy page uses the published `lexxy-realtime` gem and npm package (both
-0.8.0) the way a real app would. These are the parts that differ for public,
+0.9.0) the way a real app would. These are the parts that differ for public,
 anonymous rooms, and why:
 
-- **The record.** Each room is a `Note`. `NoteChannel` creates it on
-  subscribe, never on the page GET. `has_collaborative_rich_text :body` comes
-  from the gem's Collaborative concern, which checks whether Action Text is
-  loaded. This app doesn't have Action Text, so the concern uses its
-  plain-column path. After each update, the channel renders the document with
-  `Y::Lexxy` and writes the HTML directly into `notes.body`. The page's
-  "Stored HTML" panel reads that column back through a GET-only JSON endpoint.
-  The server rendered that markup, with no browser involved. The `nodes:` rules
-  on the macro render attachment nodes as nothing, because the site accepts no
-  uploads.
-- **The grant.** The gem's form helper signs a GlobalID for a saved record,
-  and this page can't create a `Note` on a GET. A GET is anonymous and has no
-  cap, so a crawler could otherwise create rows without limit. So the page
-  signs the room id for the `body` field (`Note.room_token`) and renders it as
-  the `grant` of a `<yrby-document name="body" channel="NoteChannel">`.
-- **The channel.** `NoteChannel` extends the gem's
-  `LexxyRealtime::DocumentChannel` and overrides three things. `locate_record`
-  finds the room's `Note` from the room token. `subscribed` creates the `Note`
-  first, within the room budget. Its `authorize_document` block allows
-  everyone, because the rooms are public. A token for a different field
-  doesn't verify, and the parent still rejects a field that isn't declared
-  with `has_collaborative_rich_text`. The rest is the gem's channel: storage,
-  acknowledgments, and rendering `note.body`. The seats and throttles come
-  from `RecordChannelGuard` and `RoomGuarded` on `Y::DocumentChannel`, like the
-  record-backed example's.
-- **The markup.** `collaborative_rich_textarea` needs a saved record and
-  builds the editor with Lexxy's Action Text form helpers, which this app
-  doesn't load. So the page renders the helper's markup directly: a
+- **The record.** The room's `Room` row holds the Lexxy document as
+  `has_collaborative_rich_text :body`, from the gem's Collaborative concern,
+  which checks whether Action Text is loaded. This app doesn't have Action
+  Text, so the concern uses its plain-column path. After each update, the
+  channel renders the document with `Y::Lexxy` and writes the HTML directly
+  into `rooms.body`. The page's "Stored HTML" panel reads that column back
+  through a GET-only JSON endpoint. The server rendered that markup, with no
+  browser involved. The `nodes:` rules on the macro render attachment nodes as
+  nothing, because the site accepts no uploads.
+- **The grant.** The page renders `collaborative_document_tag(@room, :body)`,
+  which signs the room's GlobalID for the `body` field and names the channel
+  `config/lexxy_realtime.rb` sets, `LexxyChannel`.
+- **The channel.** `LexxyChannel` extends the gem's
+  `LexxyRealtime::DocumentChannel` with an `authorize_document` block that
+  allows any room, because the rooms are public. The parent still rejects a
+  field that isn't declared with `has_collaborative_rich_text`. The rest is
+  the gem's channel: storage, acknowledgments, and rendering `room.body`. The
+  seats and throttles come from `RecordChannelGuard` and `RoomGuarded` on
+  `Y::DocumentChannel`, like the record-backed example's.
+- **The markup.** `collaborative_rich_textarea` builds the editor with Lexxy's
+  Action Text form helpers, which this app doesn't load. So the page renders
+  the helper's markup directly: `collaborative_document_tag` for the
   `<yrby-document>` around the `<lexxy-editor>`, with a
   `<lexxy-collaboration doc-id>` inside it. `frontend/src/lexxy.js` imports
   `lexxy-realtime`, which registers both elements, and passes `setConsumer` a
@@ -691,9 +708,10 @@ The demos are ports of the pages in
 setup, presence chips, status line, and room bar live in
 `frontend/src/room.js`, so each demo file holds only its Yjs binding.
 
-Each visitor gets a fresh room: `/demos/tiptap` creates one and redirects. The
-demo nav keeps the room id, so switching pages keeps you in the same room with
-a different document key.
+Each visitor gets a fresh room: `/demos/tiptap` picks a room id and
+redirects, and the page offers a button that starts the room. The demo nav
+keeps the room id, so switching pages keeps you in the same room, in that
+demo's document.
 
 `frontend/src/room.js` also wraps the Action Cable consumer so the page can
 read the server's `{ notice: ... }` messages. `yrby-client`'s provider ignores
@@ -760,8 +778,8 @@ and it differs from one in a few ways:
   can edit.
 - No accounts or ownership. Anyone with a document's link can write to it, and
   the sweeper deletes it after a day without changes.
-- One process on one box. The throttle accounting assumes it, and the demo
-  doesn't need more.
+- One box. Seats and rooms are exact across processes, but the in-memory
+  throttles are per process, and the database volume attaches to one machine.
 
 `examples/actioncable-demo` in this repo covers a production setup: Postgres,
 AnyCable, multiple processes, and the full test and load suites.

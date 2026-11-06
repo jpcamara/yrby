@@ -20,12 +20,10 @@ class ExampleDocumentChannelTest < ActionCable::Channel::TestCase
 
     assert(transmissions.any? { |message| message["ack"] == 3 })
     assert_equal "hello world", @document.collaborative_document(:body).y_doc.read_text("content")
-    key = @document.collaborative_document(:body).key
-
-    assert_equal 1, Rooms.current.peers(key)
+    assert_equal 1, Rooms.current.peers(@document, "body")
     unsubscribe
 
-    assert_equal 0, Rooms.current.peers(key)
+    assert_equal 0, Rooms.current.peers(@document, "body")
   end
 
   test "a grant used with the wrong attribute name creates no storage" do

@@ -22,13 +22,17 @@ module ApplicationCable
       self.client_ip = ip
       self.slot_token = token
       # Register with the guard now. If the Disconnect RPC never arrives, the
-      # guard's liveness sweep can still free this slot and any room seats.
-      # See ConnectionGuard.
+      # guard's liveness sweep can still free this slot. See ConnectionGuard.
       ConnectionGuard.current.register(connection_id, ip, token)
     end
 
     def disconnect
-      ConnectionGuard.current.forget(connection_id) if connection_id
+      if connection_id
+        ConnectionGuard.current.forget(connection_id)
+        # Each subscription's unsubscribe gives back its seat. This catches any
+        # left over, such as one whose unsubscribe failed.
+        Rooms.current.leave_all(connection_id)
+      end
       return if client_ip.blank?
 
       ConnectionLimiter.current.release(client_ip, slot_token)

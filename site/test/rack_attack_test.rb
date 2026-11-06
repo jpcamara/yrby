@@ -95,6 +95,19 @@ class RackAttackTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "room starts are throttled per IP" do
+    Limits::ROOM_STARTS_PER_HOUR.times do |i|
+      post "/demos/tiptap/room#{i}/start", headers: { "Origin" => "http://www.example.com" }
+
+      assert_response :see_other
+    end
+
+    post "/demos/tiptap/one-more/start", headers: { "Origin" => "http://www.example.com" }
+
+    assert_response :too_many_requests
+    assert_not Room.exists?(slug: "one-more")
+  end
+
   test "the throttle is per address" do
     Limits::PAGE_REQUESTS.times { get "/docs/getting-started" }
 

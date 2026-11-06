@@ -2,10 +2,10 @@
 # public and anonymous, so any client can send frames to `receive` on any of
 # these channels (layers 2-6 of config/limits.rb).
 #
-# Channels that include this call `take_seat(key)` from `subscribed` after
-# their own authorization, call `release_seat(key)` from `unsubscribed`, and
-# send `receive` through `guarded_receive(data, key)`. That method checks, in
-# order:
+# Channels that include this call `take_seat(record, name)` from `subscribed`
+# after their own authorization, call `release_seat(record, name)` from
+# `unsubscribed`, and send `receive` through `guarded_receive(data, key)`.
+# That method checks, in order:
 #
 # 1. the per-connection frame bucket, closing the socket if it keeps flooding
 # 2. the encoded frame size
@@ -16,15 +16,16 @@
 # it goes read-only, the client gets one notice, and awareness keeps working.
 # Frames that pass all four go to yrby's `sync_receive`.
 #
-# Before a seat is taken, the connection guard admits the subscription. It
-# checks the subscription count, the subscribe rate, and that the connection
-# has at most one seat per room. The frame bucket and the subscription budget
-# are tracked per connection, so a socket can't reset a burst or multiply its
-# rate by subscribing again.
+# Before a seat is taken, the connection guard checks the subscribe rate.
+# Rooms#join then checks the subscription count, that the connection has at
+# most one seat per document, and the peer cap, against Seat rows every
+# server process shares. The frame bucket and the subscribe rate are tracked
+# per connection, so a socket can't reset a burst or multiply its rate by
+# subscribing again.
 #
 # Sockets terminate in anycable-go and every command builds a new channel
 # instance, so anything that has to last between commands is channel state.
-module RoomGuarded # rubocop:disable Metrics/ModuleLength -- one guard, read top to bottom
+module RoomGuarded
   extend ActiveSupport::Concern
 
   # The Y.message_kind code for a frame with document state (an Update or a
@@ -47,9 +48,9 @@ module RoomGuarded # rubocop:disable Metrics/ModuleLength -- one guard, read top
     max_frame_bytes Limits::MAX_FRAME_BYTES
 
     # Per-subscription state, kept across RPC calls:
-    #   seat      this subscription holds a place in the room
+    #   seat      this subscription holds a Seat
     #   notified  the notices already sent, comma-separated
-    # ConnectionGuard tracks the frame bucket and subscription budget per
+    # ConnectionGuard tracks the frame bucket and subscribe rate per
     # connection.
     state_attr_accessor :seat, :notified
   end
@@ -76,56 +77,31 @@ module RoomGuarded # rubocop:disable Metrics/ModuleLength -- one guard, read top
 
   private
 
-  def take_seat(key)
-    case admit_subscription(key)
-    when :ok
-      seat_the_room(key)
-    when :too_many
-      logger.warn("#{self.class.name}: connection over its subscription cap; refusing #{key}")
-      false
-    when :duplicate
-      logger.info("#{self.class.name}: connection already seated in #{key}")
-      false
-    when :rate_limited
-      logger.warn("#{self.class.name}: connection subscribing too fast; refusing #{key}")
-      false
+  def take_seat(record, name)
+    unless ConnectionGuard.current.admit_subscription(connection.connection_id)
+      logger.warn("#{self.class.name}: connection subscribing too fast; refusing #{name}")
+      return false
+    end
+
+    status = Rooms.current.join(record, name, connection.connection_id)
+    log_refused_seat(status, name) unless status == :ok
+    self.seat = status == :ok
+  end
+
+  def log_refused_seat(status, name)
+    case status
+    when :too_many then logger.warn("#{self.class.name}: connection over its subscription cap; refusing #{name}")
+    when :duplicate then logger.info("#{self.class.name}: connection already seated in #{name}")
+    when :room_full then logger.info("#{self.class.name}: #{name} is at #{Limits::MAX_PEERS_PER_ROOM} peers")
+    when :gone then logger.info("#{self.class.name}: the room was deleted; refusing #{name}")
     end
   end
 
-  def seat_the_room(key)
-    case Rooms.current.join(key)
-    when :ok
-      self.seat = true
-      true
-    when :room_full
-      release_subscription(key)
-      logger.info("#{self.class.name}: #{key} is at #{Limits::MAX_PEERS_PER_ROOM} peers")
-      false
-    when :too_many_rooms
-      release_subscription(key)
-      logger.warn("#{self.class.name}: #{Limits::MAX_LIVE_ROOMS} live rooms; refusing #{key}")
-      false
-    when :evicting
-      release_subscription(key)
-      logger.info("#{self.class.name}: #{key} is being evicted; refusing the join")
-      false
-    end
-  end
-
-  def release_seat(key)
+  def release_seat(record, name)
     return unless seat
 
-    Rooms.current.leave(key)
-    release_subscription(key)
+    Rooms.current.leave(record, name, connection.connection_id) if record
     self.seat = false
-  end
-
-  def admit_subscription(key)
-    ConnectionGuard.current.admit_subscription(connection.connection_id, key)
-  end
-
-  def release_subscription(key)
-    ConnectionGuard.current.release_subscription(connection.connection_id, key)
   end
 
   def guarded_receive(data, key)
@@ -133,6 +109,7 @@ module RoomGuarded # rubocop:disable Metrics/ModuleLength -- one guard, read top
       close_if_flooding(key)
       return
     end
+    Rooms.current.seen(connection.connection_id) if ConnectionGuard.current.seat_touch_due?(connection.connection_id)
 
     encoded = data.is_a?(Hash) ? data["update"] : nil
     return unless encoded.is_a?(String)

@@ -11,14 +11,14 @@
 #   0. anycable-go           max concurrent sockets         (ANYCABLE_MAX_CONN)
 #   1. Rack::Attack          per-IP HTTP request rate       (rack_attack.rb)
 #   2. ConnectionLimiter     concurrent WebSockets per IP   (connection.rb)
-#   2. ConnectionGuard       subscriptions per WebSocket    (connection_guard.rb)
+#   2. Rooms                 subscriptions per WebSocket    (rooms.rb)
 #   3. ConnectionGuard       frames per second per socket   (connection_guard.rb)
 #   3. WriteBudget           document writes per second     (write_budget.rb, process-wide)
 #   4. frame size cap        bytes per frame                (room_guarded.rb)
 #   5. document size cap     bytes per room, total          (rooms.rb)
 #   6. room caps             peers per room, rooms on disk  (rooms.rb)
 #   7. idle eviction         stale rooms deleted            (room_sweeper.rb)
-#   7. leak reaping          silent connections reaped      (connection_guard.rb)
+#   7. leak reaping          silent connections reaped      (connection_guard.rb, room_sweeper.rb)
 #
 # Awareness frames go through the same guarded `send` path as document frames,
 # from layer 3 on. The demo doesn't use AnyCable whispers, which would relay
@@ -59,15 +59,15 @@ module Limits
   # --- Subscriptions (per physical connection) -------------------------------
   #
   # One WebSocket can open many channel subscriptions, and every subscription
-  # takes a room seat and can create a document. Without a per-connection cap,
-  # one socket could subscribe to thousands of different rooms and create a
-  # document in each. The room cap counts a brand-new key only when it's first
-  # seated, so it wouldn't stop that. These limit how far one socket can reach.
+  # takes a seat and can create a document in a room someone started. Without a
+  # per-connection cap, one socket could sit in every room at once. These limit
+  # how far one socket can reach.
 
   # Concurrent subscriptions one connection may hold. A person opens one room per
   # page and a handful of pages. Twenty is plenty for that and far below what a
   # script would need. With the per-IP connection cap of 8, one address can hold
-  # at most 160 rooms at once, well under MAX_LIVE_ROOMS.
+  # at most 160 seats at once. Rooms#join counts Seat rows, so this holds across
+  # server processes.
   MAX_SUBSCRIPTIONS_PER_CONNECTION = Integer(ENV.fetch("MAX_SUBSCRIPTIONS_PER_CONNECTION", 20))
 
   # Rate limit on `subscribe` commands from one connection, as a token bucket.
@@ -86,7 +86,7 @@ module Limits
   MAX_CONNECTIONS = Integer(ENV.fetch("MAX_CONNECTIONS", 500))
 
   # How long a connection can go silent before the guard treats it as leaked
-  # and frees its room seats and connection slot. `release` normally frees a
+  # and frees its connection slot. `release` normally frees a
   # slot as soon as the Disconnect RPC arrives. This covers the case where that
   # RPC never arrives (a dropped socket, a network partition). The clock resets
   # on every frame the server sees, document update or awareness, since the demo
@@ -94,6 +94,15 @@ module Limits
   # heartbeat (about every 15s), well under this hour, so a reader with an idle
   # tab open isn't reaped. Only a dead connection is. See ConnectionGuard.
   CONNECTION_SLOT_TTL = 60 * 60 # seconds
+
+  # A seat's own liveness clock (Seat#seen_at). While frames arrive, each
+  # server process refreshes a connection's seats at most once per interval,
+  # so a live seat is never much older than the interval plus the 15-second
+  # awareness heartbeat. A seat older than SEAT_TTL belongs to a connection
+  # whose unsubscribe never arrived, and the sweeper deletes it, which frees the
+  # peer slot and lets an abandoned room go.
+  SEAT_TOUCH_INTERVAL = 60 # seconds
+  SEAT_TTL = 10 * 60 # seconds
 
   # --- Frames ----------------------------------------------------------------
 
@@ -160,10 +169,16 @@ module Limits
   # and the page says so.
   MAX_DOCUMENT_BYTES = 512 * 1024
 
-  # Documents on disk at once. 2000 x MAX_DOCUMENT_BYTES puts a 1 GB ceiling on
-  # the database file, which fits on any volume. Rooms last a day before the
-  # sweeper deletes them, so they pile up, and they use disk, not memory.
+  # Rooms at once. A room holds up to one document per demo, so the ceiling on
+  # the database file is MAX_LIVE_ROOMS x the demo count x MAX_DOCUMENT_BYTES.
+  # A real demo document is tens of kilobytes, far under the cap. Rooms last a
+  # day before the sweeper deletes them, so they pile up, and they use disk,
+  # not memory. Only DemosController#start creates a room.
   MAX_LIVE_ROOMS = 2000
+
+  # Rooms one IP can start in an hour (Rack::Attack). Each start creates a
+  # Room row.
+  ROOM_STARTS_PER_HOUR = 30
 
   # Peers in one room. More than a dozen carets in a demo document is
   # unreadable, and the server sends every update to each peer.

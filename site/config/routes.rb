@@ -21,11 +21,13 @@ Rails.application.routes.draw do
   get "examples/document/stored", to: "examples#stored"
 
   get "demos", to: "demos#index"
-  # A bare demo URL creates a room and redirects to it, so every visitor gets
+  # A bare demo URL picks a room id and redirects to it, so every visitor gets
   # a separate room.
   get "demos/:demo", to: "demos#new_room", as: :demo
+  # Starting a room creates its row (see DemosController#start).
+  post "demos/:demo/:room/start", to: "demos#start", as: :demo_start
   # The Lexxy demo's stored HTML column (see DemosController#body).
-  get "demos/lexxy/:room/body", to: "demos#body", as: :demo_note_body
+  get "demos/lexxy/:room/body", to: "demos#body", as: :demo_room_body
   # The server-side read for the other demos: Ruby rebuilds the document from
   # stored state (see DemosController#stored).
   get "demos/:demo/:room/stored", to: "demos#stored", as: :demo_stored

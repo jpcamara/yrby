@@ -74,6 +74,11 @@ class Rack::Attack
 
   throttle("pages/ip", limit: Limits::PAGE_REQUESTS, period: Limits::PAGE_PERIOD, &:ip)
 
+  # Starting a room creates a Room row, so it gets a limit of its own.
+  throttle("room starts/ip", limit: Limits::ROOM_STARTS_PER_HOUR, period: 60 * 60) do |req|
+    req.ip if req.post? && req.path.end_with?("/start")
+  end
+
   self.throttled_responder = lambda do |request|
     match = request.env["rack.attack.match_data"] || {}
     retry_after = (match[:period] || Limits::PAGE_PERIOD).to_i

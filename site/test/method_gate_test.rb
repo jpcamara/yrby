@@ -1,8 +1,8 @@
 require "test_helper"
 
 # The method gate (config/initializers/method_gate.rb): only GET and HEAD
-# reach the app, apart from the AnyCable RPC endpoint, and a multipart body is
-# refused on every path.
+# reach the app, apart from the AnyCable RPC endpoint and an empty POST that
+# starts a room, and a multipart body is refused on every path.
 class MethodGateTest < ActionDispatch::IntegrationTest
   setup { Rack::Attack.cache.store.clear }
 
@@ -31,6 +31,19 @@ class MethodGateTest < ActionDispatch::IntegrationTest
         assert_equal "no-store", response.headers["cache-control"]
       end
     end
+  end
+
+  test "starting a room is the one POST the gate lets through" do
+    post "/demos/tiptap/room1/start", headers: { "Origin" => "http://www.example.com" }
+
+    assert_response :see_other
+  end
+
+  test "a room start with a body is refused" do
+    post "/demos/tiptap/room1/start", params: { slug: "x" }, headers: { "Origin" => "http://www.example.com" }
+
+    assert_response :method_not_allowed
+    assert_equal 0, Room.count
   end
 
   test "a _method override can't turn a POST into something else" do

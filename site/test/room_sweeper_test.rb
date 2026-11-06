@@ -1,119 +1,133 @@
 require "test_helper"
 
 class RoomSweeperTest < ActiveSupport::TestCase
-  def make_room(key, age:)
-    Y::Document.append(key, Updates::HELLO)
-    document = Y::Document.find_by!(key: key)
-    stamp = Time.current - age
+  def make_room(slug, age:)
+    room = Room.create!(slug:)
+    room.update_columns(created_at: age.ago, updated_at: age.ago)
+    room
+  end
+
+  # A document for `room`'s `name`, written and last touched `age` ago.
+  def make_document(room, name, age:)
+    room.collaborative_document(name).append(Updates::HELLO)
+    document = Y::Document.find_by!(record: room, name: name.to_s)
+    stamp = age.ago
     document.update_columns(created_at: stamp, updated_at: stamp)
     document.updates.update_all(created_at: stamp)
     document
   end
 
-  test "a sweep deletes stale rooms and their rows" do
-    make_room("tiptap/stale", age: 2.hours)
+  test "a sweep deletes a stale document and then its empty room" do
+    room = make_room("stale", age: 2.hours)
+    document = make_document(room, :tiptap, age: 2.hours)
 
-    assert_equal ["tiptap/stale"], RoomSweeper.run_once(ttl: 1.hour)
-    assert_not Y::Document.exists?(key: "tiptap/stale")
+    assert_equal [document.key, "room:stale"], RoomSweeper.run_once(ttl: 1.hour)
+    assert_not Room.exists?(slug: "stale")
+    assert_equal 0, Y::Document.count
     assert_equal 0, Y::DocumentUpdate.count
   end
 
-  test "a room with a recent write is kept even if the document row is old" do
-    document = make_room("tiptap/active", age: 2.hours)
+  test "a document with a recent write is kept even if its row is old" do
+    room = make_room("active", age: 2.hours)
+    document = make_document(room, :tiptap, age: 2.hours)
     # A new append. Appends don't change the document row's updated_at, so it
     # stays old, but the new update row counts as activity.
     document.updates.create!(payload: Updates::CHAIN[0])
 
     assert_empty RoomSweeper.run_once(ttl: 1.hour)
-    assert Y::Document.exists?(key: "tiptap/active")
+    assert Room.exists?(slug: "active")
   end
 
-  test "an occupied room is kept however stale it is" do
-    make_room("tiptap/quiet", age: 2.days)
-    Rooms.current.join("tiptap/quiet")
+  test "a stale document someone is seated in is kept, and so is its room" do
+    room = make_room("quiet", age: 2.days)
+    make_document(room, :tiptap, age: 2.days)
+    Rooms.current.join(room, "tiptap", "c1")
 
     assert_empty RoomSweeper.run_once(ttl: 1.hour)
-    assert Y::Document.exists?(key: "tiptap/quiet")
+    assert Y::Document.exists?(record: room, name: "tiptap")
+    assert Room.exists?(slug: "quiet")
   end
 
-  test "eviction clears the room's cached size" do
-    # HELLO is larger than this small cap, so the room reads as full from the
-    # database. With a long cache TTL, only `forget` from the sweep can clear
-    # the cached size.
-    Rooms.current = Rooms.new(max_document_bytes: 5, size_cache_ttl: 3600)
-    make_room("tiptap/stale", age: 2.hours)
+  test "a seat in one document doesn't keep another stale document" do
+    room = make_room("mixed", age: 2.days)
+    stale = make_document(room, :kanban, age: 2.days)
+    Rooms.current.join(room, "tiptap", "c1")
 
-    assert Rooms.current.document_full?("tiptap/stale")
+    assert_equal [stale.key], RoomSweeper.run_once(ttl: 1.hour)
+    assert Room.exists?(slug: "mixed"), "the room has a visitor"
+  end
 
-    RoomSweeper.run_once(ttl: 1.hour)
+  test "a stale room with nobody in it and no documents is swept" do
+    make_room("empty", age: 2.days)
 
-    assert_not Rooms.current.document_full?("tiptap/stale"),
-               "a recreated room must not keep the deleted room's size"
+    assert_equal ["room:empty"], RoomSweeper.run_once(ttl: 1.day)
+  end
+
+  test "a stale room is kept while someone is in it" do
+    room = make_room("seated", age: 2.days)
+    Rooms.current.join(room, "body", "c1")
+
+    assert_empty RoomSweeper.run_once(ttl: 1.day), "the room has a visitor who hasn't typed yet"
+
+    Rooms.current.leave(room, "body", "c1")
+
+    assert_equal ["room:seated"], RoomSweeper.run_once(ttl: 1.day)
   end
 
   test "a fresh room is not swept" do
-    Y::Document.append("tiptap/new", Updates::HELLO)
+    Room.create!(slug: "new")
 
-    assert_empty RoomSweeper.run_once(ttl: 1.hour)
+    assert_empty RoomSweeper.run_once(ttl: 1.day)
+  end
+
+  test "a document from before rooms had rows goes after the TTL" do
+    Y::Document.append("tiptap/old", Updates::HELLO)
+    document = Y::Document.find_by!(key: "tiptap/old")
+    document.update_columns(updated_at: 2.days.ago)
+    document.updates.update_all(created_at: 2.days.ago)
+
+    assert_equal ["tiptap/old"], RoomSweeper.run_once(ttl: 1.day)
+  end
+
+  test "leaked seats are deleted, which frees their room" do
+    room = make_room("leaked", age: 2.days)
+    Rooms.current.join(room, "tiptap", "gone")
+    Seat.update_all(seen_at: (Limits::SEAT_TTL + 60).seconds.ago)
+
+    assert_equal ["room:leaked"], RoomSweeper.run_once(ttl: 1.day)
+    assert_equal 0, Seat.count
+  end
+
+  test "a seat seen recently is kept" do
+    room = make_room("live", age: 2.days)
+    Rooms.current.join(room, "tiptap", "here")
+
+    RoomSweeper.run_once(ttl: 1.day)
+
+    assert_equal 1, Seat.count
+  end
+
+  test "eviction clears the document's cached size" do
+    # HELLO is larger than this small cap, so the document reads as full from
+    # the database. With a long cache TTL, only `forget` from the sweep can
+    # clear the cached size.
+    Rooms.current = Rooms.new(max_document_bytes: 5, size_cache_ttl: 3600)
+    document = make_document(make_room("stale", age: 2.hours), :tiptap, age: 2.hours)
+
+    assert Rooms.current.document_full?(document.key)
+
+    RoomSweeper.run_once(ttl: 1.hour)
+
+    assert_not Rooms.current.document_full?(document.key),
+               "a recreated document must not keep the deleted one's size"
   end
 
   test "a failing sweep is logged and does not raise" do
     broken = Object.new
-    def broken.occupied_keys = raise("seats are on fire")
+    def broken.forget(_key) = raise("sizes are on fire")
+    make_document(make_room("stale", age: 2.hours), :tiptap, age: 2.hours)
 
-    assert_equal [], RoomSweeper.run_once(rooms: broken)
-  end
-
-  test "a stale note whose document is gone is swept" do
-    note = Note.create!(room: "old")
-    note.update_columns(updated_at: 2.days.ago)
-
-    assert_includes RoomSweeper.run_once(ttl: 1.day), "note:old"
-    assert_not Note.exists?(room: "old")
-  end
-
-  test "a note is kept while its document is fresh" do
-    note = Note.create!(room: "busy")
-    document = note.collaborative_document(:body).document_row
-    note.update_columns(updated_at: 2.days.ago)
-
-    RoomSweeper.run_once(ttl: 1.day)
-
-    # The document was just created, so both are kept. A stale note doesn't
-    # delete a live document.
-    assert Note.exists?(room: "busy")
-    assert Y::Document.exists?(key: "note/#{note.id}/body")
-
-    # Once the document is stale, one pass deletes both. The document sweep
-    # runs first, so the note sweep then finds a note with no document.
-    document.update_columns(updated_at: 2.days.ago)
-    evicted = RoomSweeper.run_once(ttl: 1.day)
-
-    assert_includes evicted, "note/#{note.id}/body"
-    assert_includes evicted, "note:busy"
-    assert_not Note.exists?(room: "busy")
-  end
-
-  test "a stale note with no document is kept while someone is in its room" do
-    note = Note.create!(room: "seated")
-    note.update_columns(updated_at: 2.days.ago)
-    key = Y::Document.key_for(note, :body)
-    Rooms.current.join(key)
-
-    assert_empty RoomSweeper.run_once(ttl: 1.day)
-    assert Note.exists?(room: "seated"), "the room has a visitor who hasn't typed yet"
-
-    Rooms.current.leave(key)
-
-    assert_includes RoomSweeper.run_once(ttl: 1.day), "note:seated"
-    assert_not Note.exists?(room: "seated")
-  end
-
-  test "a fresh note is not swept" do
-    Note.create!(room: "new")
-
-    assert_empty RoomSweeper.run_once(ttl: 1.day)
-    assert Note.exists?(room: "new")
+    assert_equal [], RoomSweeper.run_once(rooms: broken, ttl: 1.hour)
   end
 
   test "the sweeper thread starts once and can be stopped" do
