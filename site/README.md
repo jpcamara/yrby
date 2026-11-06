@@ -170,7 +170,11 @@ browser ──ws──► thrust (Go) ──HTTP RPC──► Falcon ──► R
 handles `/cable` and proxies everything else to Falcon. For connect, subscribe,
 and every message, it calls Rails at `/_anycable`, the HTTP RPC endpoint
 AnyCable mounts in the app. Rails sends broadcasts back to the Go server over
-localhost. There's one node, so neither direction needs Redis.
+localhost, on one connection per process that stays open
+(`config/initializers/anycable_broadcasts.rb`). AnyCable's adapter would open
+a new connection per broadcast, and at a few hundred document updates a second
+that runs the box out of ports. There's one node, so neither direction needs
+Redis.
 
 This split keeps the site cheap to run. Ruby holds nothing between messages. A
 client that's connected but idle is a goroutine in Go, with no thread or object
