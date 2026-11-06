@@ -6,19 +6,17 @@
 # proxy tells its upstream. Puma reads PORT on its own, but Falcon takes a
 # --bind URL, so this script converts it.
 #
-# Documents live in the database (Y::Document), so any worker can serve any
-# room, and several workers are fine for the documents. The throttle
-# accounting is per process: Rooms seats, caps, and byte counts,
-# ConnectionGuard budgets, and Rack::Attack counters. With N workers, each one
-# enforces its own copy, so the caps can get up to N times looser. The site
-# runs one process by default so each limit is counted in one place.
-# FALCON_COUNT turns on forked workers, and FALCON_THREADS with it switches to
-# Falcon's hybrid container (forks x threads). Use them for load tests, or for
-# deployments that accept approximate caps. See "Why one process by default"
-# in site/README.md.
+# Falcon runs four worker processes, so RPC calls use more than one core.
+# Documents, rooms, and seats live in the database, so any worker can serve
+# any command. The rest of the throttle accounting is per process: the size
+# cache, ConnectionGuard buckets, WriteBudget, and Rack::Attack counters.
+# With N workers each one enforces its own copy, so those caps can get up to
+# N times looser. FALCON_COUNT sets the number of workers, and FALCON_THREADS
+# with it switches to Falcon's hybrid container (forks x threads). See
+# "Several processes" in site/README.md.
 set -euo pipefail
 
-COUNT="${FALCON_COUNT:-${WEB_CONCURRENCY:-1}}"
+COUNT="${FALCON_COUNT:-${WEB_CONCURRENCY:-4}}"
 THREADS="${FALCON_THREADS:-0}"
 
 # Plain http, because Falcon defaults to https with a self-signed cert. Bind to

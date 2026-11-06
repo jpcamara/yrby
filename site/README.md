@@ -193,8 +193,8 @@ extension inside the fiber scheduler.
 
 ### Several processes
 
-Falcon runs with `--count 1` unless you set otherwise. With SQLite behind the
-documents, they don't need a single process. The store is shared on disk,
+Falcon runs four worker processes unless `FALCON_COUNT` says otherwise, so
+RPC calls use more than one core. With SQLite behind the documents, they don't need a single process. The store is shared on disk,
 broadcasts already go through the embedded Go server, and SQLite in WAL mode
 handles several processes on one box.
 
@@ -570,8 +570,9 @@ between messages. Rails builds the channel object for one command and then
 discards it, so an idle client costs Rails nothing. A document uses RAM only
 while it's being loaded or applied. Documents live in SQLite, and the room caps
 (2000 rooms, 512 KiB per document) bound the database file on disk. What
-stays in memory is Rails plus the yrby native extension, 150-200 MB. The rest
-of a 1 GB machine is headroom for CRDT work in progress. Applying an update
+stays in memory is Rails plus the yrby native extension, 150-200 MB in each of
+the four Falcon processes. The rest of the machine is headroom for CRDT work
+in progress. Applying an update
 allocates memory, and `on_load` replays a room's snapshot and tail into a fresh
 `Y::Doc` on each handshake.
 
@@ -582,7 +583,8 @@ memory alone, the Go side could hold several thousand sockets.
 CPU is the real limit, and Ruby is what uses it. Every document frame is an RPC
 call into the Falcon reactor plus a native CRDT apply. yrby releases the GVL
 for that work, so the fiber scheduler keeps serving while the native code runs.
-Still, one shared vCPU can't handle 500 people typing at once. SQLite adds a
+One process is one reactor on one core, which is why the site runs four. Still,
+a two-vCPU box can't handle 500 people typing at once. SQLite adds a
 write per update and a read per load on the same box, which is negligible at
 demo scale with WAL.
 

@@ -32,7 +32,8 @@ Rails.application.configure do
   config.silence_healthcheck_path = "/up"
   config.active_support.report_deprecations = false
 
-  # The site runs one process by default, so it uses an in-memory cache.
+  # Nothing in the site reads Rails.cache across processes (rooms and seats are
+  # rows), so each process has its own in-memory cache.
   config.cache_store = :memory_store
 
   config.i18n.fallbacks = true

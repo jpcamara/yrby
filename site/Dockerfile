@@ -116,7 +116,6 @@ ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 EXPOSE 3000
 
 # One command runs the proxy, the embedded AnyCable server, and Falcon.
-# bin/serve runs one Falcon worker unless FALCON_COUNT says otherwise, because
-# the throttle counters live in process memory. See "Why one process by
-# default" in README.md.
+# bin/serve runs four Falcon workers unless FALCON_COUNT says otherwise. See
+# "Several processes" in README.md.
 CMD ["bundle", "exec", "thrust", "./bin/serve"]
