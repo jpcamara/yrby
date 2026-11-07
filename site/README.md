@@ -179,6 +179,18 @@ a new connection per broadcast, and at a few hundred document updates a second
 that runs the box out of ports. There's one node, so neither direction needs
 Redis.
 
+The demo pages connect to `/yjs/` instead, a binary y-protocols endpoint
+that anycable-go serves next to `/cable`. It comes from forks of AnyCable
+(jpcamara/anycable, branch `yjs-adapter`) and Thruster, so production runs a
+thrust binary built from those, not the one in the anycable-thruster gem. Each
+document gets its own socket. The first frame carries the channel identifier
+with the signed grant, and after that frames are raw Yjs bytes with no JSON
+envelope, so a keystroke reaches the other browsers as about 30 bytes instead
+of about 340. The endpoint hands every frame to the same `RoomChannel`, so
+connect, subscribe, and receive work as they do over `/cable`.
+`ANYCABLE_YJS_WHISPER=false` keeps awareness on the guarded path described
+below. The documents page still uses `/cable`.
+
 This split keeps the site cheap to run. Ruby holds nothing between messages. A
 client that's connected but idle is a goroutine in Go, with no thread or object
 in Ruby. Awareness frames do reach Ruby on this site, because the demo sends
