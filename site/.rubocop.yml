@@ -1,0 +1,78 @@
+# The site is a Rails app. It inherits the repo root's cops (the root config's
+# AllCops/Exclude applies here from either directory) and turns off the few
+# rules that only make sense for a library.
+#
+# This file uses no `inherit_gem` and no plugins beyond the root's. That way
+# `bundle exec rubocop` gives the same answer from the repo root and from this
+# directory, and the root doesn't need the site's dev dependencies.
+
+plugins:
+  - rubocop-minitest
+  - rubocop-rake
+
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "bin/**/*"
+    - "frontend/node_modules/**/*"
+    - "tmp/**/*"
+    - "log/**/*"
+    - "vendor/**/*"
+
+# Rails applications don't carry the magic comment; the framework and every
+# generator omit it.
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+# Controllers, channels, and config classes don't need a doc comment each.
+Style/Documentation:
+  Enabled: false
+
+# Double quotes throughout, matching the gem.
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+Layout/LineLength:
+  Max: 120
+
+# Rails config is one long block per environment, and tests have a lot of
+# assertions.
+Metrics/BlockLength:
+  Exclude:
+    - "config/**/*"
+    - "db/schema.rb" # generated
+    - "test/**/*"
+
+Metrics/ClassLength:
+  Exclude:
+    - "test/**/*"
+
+Metrics/MethodLength:
+  Max: 30
+  Exclude:
+    - "test/**/*"
+
+Metrics/AbcSize:
+  Max: 32
+  Exclude:
+    - "test/**/*"
+
+Minitest/MultipleAssertions:
+  Enabled: false
+
+# `bucket.take` returns true or false, but it consumes a token, so it isn't a
+# predicate. `take?` would read like a question that doesn't change the bucket.
+Naming/PredicateMethod:
+  AllowedMethods:
+    - take
+
+# `class Rack::Attack` is how every Rack::Attack initializer is written, and
+# `class ApplicationCable::ConnectionTest` is Rails' own generated form.
+Style/ClassAndModuleChildren:
+  Exclude:
+    - "config/initializers/**/*"
+    - "test/**/*"
