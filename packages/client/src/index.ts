@@ -18,6 +18,10 @@ export type {
   CableSubscription,
 } from "./actioncable_provider.js";
 
+// Binary y-protocols WebSocket in place of an Action Cable consumer.
+export { createBinaryConsumer, CloseUnauthorized } from "./binary_consumer.js";
+export type { BinaryConsumerOptions } from "./binary_consumer.js";
+
 // Optional base64 helpers for transports that carry frames as strings.
 export { toBase64, fromBase64 } from "./base64.js";
 
