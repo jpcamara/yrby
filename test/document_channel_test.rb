@@ -89,6 +89,47 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     refute_empty doc.read_text("content").to_s
   end
 
+  def test_an_update_is_relayed_to_the_document_stream
+    subscribe grant: grant, name: "body"
+    frame = Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+
+    assert_broadcast_on(subscription.send(:sync_stream_name), { "update" => Base64.strict_encode64(frame) }) do
+      perform :receive, "update" => Base64.strict_encode64(frame), "id" => 3
+    end
+  end
+
+  # anycable-rails' broadcasting_to_others excludes the socket that sent the
+  # current command from broadcasts made inside its block. This stands in for
+  # it and counts the calls.
+  module FakeAnyCableRails
+    class << self
+      attr_accessor :calls
+
+      def broadcasting_to_others
+        self.calls += 1
+        yield
+      end
+    end
+  end
+
+  def test_under_anycable_the_sender_is_left_out_of_the_relay
+    defined_any_cable = !defined?(::AnyCable)
+    Object.const_set(:AnyCable, Module.new) if defined_any_cable
+    ::AnyCable.const_set(:Rails, FakeAnyCableRails)
+    FakeAnyCableRails.calls = 0
+    subscribe grant: grant, name: "body"
+    frame = Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+
+    assert_broadcast_on(subscription.send(:sync_stream_name), { "update" => Base64.strict_encode64(frame) }) do
+      perform :receive, "update" => Base64.strict_encode64(frame), "id" => 3
+    end
+    assert_equal 1, FakeAnyCableRails.calls, "the relay goes through broadcasting_to_others"
+    assert_includes transmissions, { "ack" => 3 }
+  ensure
+    ::AnyCable.send(:remove_const, :Rails) if defined?(::AnyCable::Rails)
+    Object.send(:remove_const, :AnyCable) if defined_any_cable
+  end
+
   def test_a_missing_grant_is_rejected
     subscribe name: "body"
 

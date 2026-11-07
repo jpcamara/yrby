@@ -270,10 +270,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     # Single broadcast point so relay semantics live in one place and tests can
-    # observe distribution. Store-backed streams intentionally echo to the
-    # sender; applying the same CRDT update twice is a no-op.
+    # observe distribution. Under AnyCable the sender's socket is left out: it
+    # already has the update, and the ack tells it the update was saved. Plain
+    # Action Cable can't leave a subscriber out, so there the sender gets its
+    # own update back, which the CRDT applies as a no-op.
     def sync_distribute(encoded)
-      ActionCable.server.broadcast(sync_stream_name, sync_envelope(encoded))
+      broadcast = -> { ActionCable.server.broadcast(sync_stream_name, sync_envelope(encoded)) }
+      defined?(::AnyCable::Rails) ? ::AnyCable::Rails.broadcasting_to_others(&broadcast) : broadcast.call
     end
 
     # Transmit raw protocol bytes to this connection.

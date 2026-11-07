@@ -7,6 +7,14 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Under AnyCable, the document channel no longer sends an update back to the
+  connection that sent it. That client already has the update, and the ack
+  tells it the update was saved. This cuts what a typing client downloads by
+  about a third. Plain Action Cable can't leave a subscriber out of a
+  broadcast, so there the sender still gets its update back.
+
 ## [0.8.0] - 2026-11-03
 
 Requires yrby 0.9.0 or later.
