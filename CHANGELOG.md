@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- yrby-client: `createBinaryConsumer(url)` connects `ActionCableProvider`
+  to a binary y-protocols WebSocket instead of Action Cable's JSON. Each
+  document gets its own socket. The first frame is a y-protocols auth
+  message carrying the channel identifier, so a grant never appears in a
+  URL. Updates are acked as `[101][id]` instead of a JSON envelope. A
+  receiver gets about 21 bytes per keystroke where the JSON envelope took
+  about 290 compressed. It needs a server that speaks this framing, such as
+  AnyCable with the yjs endpoint.
+
 ### Changed
 
 - yrby builds against yrs 0.28.1. An insert into a text no longer recounts
