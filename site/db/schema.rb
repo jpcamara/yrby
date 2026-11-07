@@ -11,6 +11,17 @@
 # It's strongly recommended that you check this file into your version control system.
 
 ActiveRecord::Schema[8.1].define(version: 20_261_106_000_001) do
+  create_table "agent_call_days", primary_key: "day", id: :date, force: :cascade do |t|
+    t.integer "calls", default: 0, null: false
+  end
+
+  create_table "agent_seats", force: :cascade do |t|
+    t.string "room", null: false
+    t.string "owner", null: false
+    t.datetime "created_at", null: false
+    t.index %w[room owner], name: "index_agent_seats_on_room_and_owner", unique: true
+  end
+
   create_table "example_documents", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false

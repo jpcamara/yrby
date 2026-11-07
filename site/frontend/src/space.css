@@ -1,0 +1,442 @@
+/* The shared page with agents (frontend/src/space.js): a white page, hairline
+ * borders, pill buttons, and agents drawn as rings. Lexxy keeps its own light
+ * styles; this file sets the frame around it and the agent UI. */
+
+:root {
+  --ink: #282828;
+  --ink-strong: #171717;
+  --muted: #737373;
+  --faint: #b9b9b9;
+  --line: #e5e5e5;
+  --hover: #f3f3f3;
+  --rail: #f9f9f9;
+  --blue: #0169cc;
+  --blue-tint: rgba(1, 105, 204, 0.1);
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body.space {
+  height: 100%;
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.space-app {
+  display: flex;
+  height: 100%;
+}
+
+/* --- the rail --- */
+
+.space-rail {
+  display: flex;
+  flex: 0 0 56px;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 0;
+  border-right: 1px solid var(--line);
+  background: var(--rail);
+}
+
+.rail-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 10px;
+  border-radius: 9px;
+  background: var(--ink-strong);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.rail-item {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.rail-item:hover, .rail-item.is-active { background: #ececec; color: var(--ink); }
+
+.rail-item svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- the top bar --- */
+
+.space-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.space-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+}
+
+.space-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.crumb-dim, .crumb-sep { color: var(--muted); }
+
+.space-status {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+.space-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatars {
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+}
+
+.avatars > * { margin-left: -6px; box-shadow: 0 0 0 2px #fff; }
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #1f2937;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* An agent: a thick ring in its person's color. */
+.agent-dot {
+  --agent: #b8bfd3;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 7px solid var(--agent);
+  border-radius: 50%;
+  background: #fff;
+}
+
+.agent-dot.is-working { animation: dot-pulse 1.2s ease-in-out infinite; }
+
+@keyframes dot-pulse {
+  50% { transform: scale(0.86); }
+}
+
+/* --- pills --- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font: 500 14px/1 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill:disabled { opacity: 0.6; cursor: default; }
+.pill[hidden] { display: none; }
+
+.pill-icon {
+  font-style: normal;
+  line-height: 1;
+}
+
+.icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-stop { fill: currentColor; stroke: none; }
+.request-send .icon { width: 17px; height: 17px; stroke-width: 2.2; }
+
+.pill .agent-dot { width: 16px; height: 16px; border-width: 4px; }
+
+.pill-outline {
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.pill-outline:hover, .pill-ghost:hover { background: var(--hover); }
+
+.pill-accept {
+  height: 30px;
+  padding: 0 13px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 13px;
+}
+
+.pill-accept:hover { background: #000; }
+.pill-ghost { height: 30px; padding: 0 11px; font-size: 13px; }
+
+/* --- the page --- */
+
+.space-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.space-page {
+  position: relative;
+  max-width: 820px;
+  padding: 36px 64px 160px 96px;
+}
+
+.page-title {
+  margin: 0 0 8px;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.page-hint {
+  margin: 0 0 26px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.page-hint strong { color: var(--ink); font-weight: 600; }
+
+/* Lexxy without its border, toolbar, or padding, so the text sits on the
+ * page. */
+.space-page lexxy-editor {
+  border: 0;
+  background: transparent;
+  --lexxy-editor-padding: 0;
+  --lexxy-color-ink: var(--ink);
+  --lexxy-font-base: var(--font);
+}
+
+.space-page .lexxy-editor__content {
+  min-height: 50vh;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.7;
+  outline: none;
+}
+
+.space-page .lexxy-editor__content h2 { font-size: 22px; font-weight: 600; }
+.space-page .lexxy-editor__content h3 { font-size: 18px; font-weight: 600; }
+.space-page .lexxy-editor__content p { margin: 0 0 0.75em; }
+
+/* The text a request is about, drawn without touching the editor's DOM. */
+::highlight(yrby-ask) {
+  background-color: rgba(1, 105, 204, 0.16);
+  color: var(--blue);
+}
+
+/* --- the selection bar and request field --- */
+
+.selection-bar {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.selection-bar[hidden] { display: none; }
+.selection-bar.asking { padding: 4px 4px 4px 14px; }
+
+.request-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(420px, 70vw);
+}
+
+.request-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: 14px var(--font);
+}
+
+.request-input::placeholder { color: var(--muted); }
+
+.request-send {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* --- request cards: under the paragraph they're about --- */
+
+.ask-card {
+  --agent: #b8bfd3;
+  position: absolute;
+  z-index: 10;
+  left: 80px;
+  right: 48px;
+  padding: 12px 14px 14px;
+  border: 2px solid #ececec;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.ask-head .agent-dot { width: 18px; height: 18px; border-width: 5px; }
+.ask-agent { font-weight: 600; white-space: nowrap; }
+
+.ask-prompt {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-proposal {
+  margin: 10px 0 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--blue-tint);
+  color: var(--blue);
+  font-size: 16px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.ask-error {
+  margin: 10px 0 0;
+  color: #b42318;
+  font-size: 14px;
+}
+
+/* Undo · Ask for change · Accept, overlapping the card's bottom edge. */
+.ask-bar, .working-pill {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: fit-content;
+  margin: 12px auto -30px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.ask-bar .request-form { padding-left: 10px; }
+
+.working-pill {
+  gap: 14px;
+  min-width: 220px;
+  padding: 4px 4px 4px 16px;
+  border-radius: 22px;
+  justify-content: space-between;
+}
+
+.working-label { color: var(--muted); font-size: 14px; }
+
+.working-stop {
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+}
+
+.working-stop span { display: none; }
+.working-stop:hover { background: #000; }
+
+/* --- toasts --- */
+
+.space-toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  z-index: 50;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 14px;
+  transform: translateX(-50%);
+}
+
+.space-toast[hidden] { display: none; }
+.space-toast.is-notice { background: #b42318; }
+
+@media (max-width: 720px) {
+  .space-rail { display: none; }
+  .space-page { padding: 24px 16px 140px; }
+  .ask-card { left: 0; right: 0; }
+  .crumb-dim, .crumb-sep, #invite-agent span { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-dot.is-working { animation: none; }
+}

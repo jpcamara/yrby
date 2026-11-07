@@ -39,11 +39,24 @@ gem "falcon", ">= 0.55"
 # any_cable broadcast adapter, channel state, and whispers.
 gem "anycable-rails", "~> 1.6"
 
-# The published gems, so the site runs what a reader installs. yrby-rails
-# provides the channel concern and the storage models. The site's documents
-# are Y::Document rows, as in the docs.
-gem "yrby", "~> 0.9"
-gem "yrby-rails", "~> 0.8"
+# yrby-rails provides the channel concern and the storage models. The
+# site's documents are Y::Document rows, as in the docs.
+#
+# The gems build from yrby-agent's pull request until it ships. They share
+# one lib directory, so yrby-rails can't come from git while yrby comes
+# from RubyGems: the checkout's lib/y.rb would load first, without the
+# native extension. Building yrby from source needs Rust.
+# TODO: back to the published gems once yrby-agent ships.
+#
+# The agent demo: PageAgent is a Y::Agent from yrby-agent, which brings
+# ruby_llm. It's require: false so the app loads it with the agent, not at
+# boot. The agent joins a room over the cable with async-websocket.
+git "https://github.com/jpcamara/yrby.git", branch: "feat/yrby-agent" do
+  gem "yrby", force_ruby_platform: true
+  gem "yrby-agent", require: false
+  gem "yrby-rails"
+end
+gem "async-websocket"
 
 # Collaborative Lexxy editing over yrby. It's require: false because the gem's
 # engine requires the lexxy gem, whose engine sets up Action Text helpers in
@@ -53,6 +66,11 @@ gem "yrby-rails", "~> 0.8"
 # checks for has_rich_text and, without it, saves the rendered HTML to a plain
 # column. The editor JavaScript comes from npm.
 gem "lexxy-realtime", "~> 0.9", require: false
+
+# Runs the demo agents as jobs. Its fiber workers (config/queue.yml) run each
+# agent as a fiber on one reactor thread, on the async gem Falcon already
+# brings.
+gem "solid_queue", "~> 1.7"
 
 # A lexxy-realtime client uses a signed GlobalID to prove which record and
 # field it may join. Rails apps normally get globalid through Active Job,

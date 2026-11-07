@@ -6,6 +6,7 @@ require "active_record/railtie"
 require "action_controller/railtie"
 require "action_view/railtie"
 require "action_cable/engine"
+require "active_job/railtie"
 require "rails/test_unit/railtie"
 
 require "bundler"
@@ -27,6 +28,13 @@ module Site
     # LexxyRealtime::DocumentChannel, which LexxyChannel extends. The gem's
     # engine would add this directory, and this app doesn't load the engine.
     config.eager_load_paths << File.join(Gem.loaded_specs.fetch("lexxy-realtime").full_gem_path, "app/channels")
+
+    # Demo agents run as Solid Queue jobs in processes of their own
+    # (bin/jobs, config/queue.yml), each agent a fiber. Fiber workers need
+    # fiber-scoped execution state, which also suits Falcon.
+    config.active_job.queue_adapter = :solid_queue
+    config.solid_queue.connects_to = { database: { writing: :queue } }
+    config.active_support.isolation_level = :fiber
 
     # Deny all framing, since the demos aren't meant to be embedded.
     # ActionDispatch::Response copies default_headers in a railtie initializer,

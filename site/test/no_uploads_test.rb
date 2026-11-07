@@ -48,7 +48,10 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
   test "Active Record is loaded for the document store and the other frameworks are not" do
     assert Object.const_defined?("ActiveRecord"), "Y::Document uses ActiveRecord, so it must be loaded"
 
-    %w[ActionMailer ActionMailbox ActiveJob].each do |framework|
+    # Active Job is loaded for the demo agents, which run on Solid Queue.
+    # Active Storage would need it, but the boot guard refuses Active Storage
+    # on its own.
+    %w[ActionMailer ActionMailbox].each do |framework|
       assert_not Object.const_defined?(framework), "#{framework} should not be loaded"
     end
 
@@ -66,12 +69,14 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     assert_empty paths.grep(%r{blob|upload|attachment|rails/active_storage})
   end
 
-  test "every HTTP route is a GET but starting a room" do
+  test "every HTTP route is a GET but starting a room and inviting the agent" do
     # AnyCable's RPC endpoint matches any verb. Only the embedded anycable-go
     # calls it, over localhost with the AnyCable secret, and RoomGuarded
-    # throttles every channel it reaches. Starting a room is a POST with no
-    # body, which the method gate lets through only on that path.
-    exceptions = ["/_anycable", "/demos/:demo/start(.:format)", "/demos/:demo/:room/start(.:format)"]
+    # throttles every channel it reaches. Starting a room and inviting the
+    # agent are POSTs with no body, which the method gate lets through only on
+    # those paths.
+    exceptions = ["/_anycable", "/demos/:demo/start(.:format)", "/demos/:demo/:room/start(.:format)",
+                  "/demos/lexxy/:room/agent(.:format)"]
     routes = Rails.application.routes.routes.reject { |route| exceptions.include?(route.path.spec.to_s) }
 
     assert_equal ["GET"], routes.map(&:verb).uniq, "found a write endpoint, but this site only reads over HTTP"
