@@ -1,19 +1,19 @@
 // Page setup shared by every demo: the provider, the room bar, presence, and
 // the status line. Each demo's own file only sets up its Yjs binding.
 //
-// The consumer comes from @anycable/web because the server is AnyCable.
-// anycable-go, embedded in the thrust proxy, handles every socket. The
-// provider also works with @rails/actioncable.
+// The demos sync over a binary y-protocols WebSocket at /yjs/, which AnyCable
+// (embedded in the thrust proxy) serves next to /cable. Frames go over the
+// wire as raw bytes, with no JSON envelope and no channel identifier on every
+// message, and the same Rails channel handles them. See binary_consumer.js.
 //
-// AnyCable subscriptions have `whisper`, which sends a message straight to
-// other clients without going through Ruby. yrby-client's provider uses it for
-// awareness when it's there. This demo hides `whisper` from the provider (see
-// countTransport). The rooms are public and anonymous, so a raw client could
-// use a whisper to send document frames to its peers with no checks. Without
-// it, awareness goes over `send` like document updates do, and the server
-// throttles and validates every frame.
-import { createConsumer } from "@anycable/web"
+// Awareness goes through Rails like document updates do. The server is
+// started with ANYCABLE_YJS_WHISPER=false, so the yjs endpoint sends presence
+// frames to the channel instead of whispering them to other clients. The
+// rooms are public and anonymous, and this way the server throttles and
+// validates every frame. The page also hides `whisper` from the provider (see
+// countTransport), which keeps the counts in __yrbyTransport meaningful.
 import { ActionCableProvider } from "yrby-client"
+import { createBinaryConsumer } from "./binary_consumer.js"
 
 const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia", "Alan"]
 const COLORS = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#818cf8", "#e879f9", "#f472b6"]
@@ -98,10 +98,9 @@ function countTransport(subscription) {
   const counts = { sends: 0, awarenessSends: 0, documentSends: 0, canWhisper: false }
   window.__yrbyTransport = counts
 
-  // Hide whisper from the provider. Without it, yrby-client sends awareness
-  // with `send`, so presence goes through guarded_receive like every other
-  // frame. The raw AnyCable subscription still has whisper. The demo just
-  // doesn't use it. See the note at the top of this file.
+  // Hide whisper from the provider, so yrby-client sends awareness with
+  // `send`. On the binary socket both calls write the same raw frame, and the
+  // server decides where awareness goes. See the note at the top of this file.
   subscription.whisper = undefined
 
   const send = subscription.send.bind(subscription)
@@ -114,14 +113,9 @@ function countTransport(subscription) {
   return subscription
 }
 
-// action_cable_meta_tag renders a same-origin path ("/cable"). The AnyCable
-// client wants an absolute ws:// or wss:// URL, so build one here without
-// relying on how either side handles relative URLs.
-function cableUrl() {
-  const meta = document.querySelector("meta[name=action-cable-url]")
-  const path = meta?.getAttribute("content") || "/cable"
-  if (/^wss?:/.test(path)) return path
-  return new URL(path, location.href).href.replace(/^http/, "ws")
+// The yjs endpoint shares the page's origin, like /cable.
+function yjsUrl() {
+  return new URL("/yjs/", location.href).href.replace(/^http/, "ws")
 }
 
 // The copy link and second window buttons. The site is about watching two
@@ -191,11 +185,11 @@ export function renderPresence(provider) {
   )
 }
 
-// The cable consumer every demo uses: @anycable/web, wrapped so the page reads
+// The consumer every demo uses: the binary socket, wrapped so the page reads
 // the server's notices and the provider never sees `whisper`. The Lexxy page
 // hands it to <yrby-document>, and the other demos pass it to their provider.
 export function roomConsumer() {
-  return noticeAwareConsumer(createConsumer(cableUrl()), {
+  return noticeAwareConsumer(createBinaryConsumer(yjsUrl()), {
     onNotice: ({ notice }) =>
       showNotice(
         notice === "file_refused"
