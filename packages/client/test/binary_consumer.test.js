@@ -19,6 +19,7 @@ function fakeSockets() {
     close(code) { this.closedWith = code ?? 1000; }
     open() { this.readyState = 1; this.onopen?.(); }
     deliver(bytes) { this.onmessage?.({ data: new Uint8Array(bytes).buffer }); }
+    deliverText(text) { this.onmessage?.({ data: text }); }
     drop(code = 1006) { this.readyState = 3; this.onclose?.({ code }); }
   }
   return { sockets, FakeSocket };
@@ -154,4 +155,14 @@ test("a silent socket is closed so it reconnects", (t) => {
   assert.equal(sockets[0].closedWith, null);
   t.mock.timers.tick(1_000);
   assert.notEqual(sockets[0].closedWith, null);
+});
+
+test("text frames reach the handler as JSON", () => {
+  const { sockets, FakeSocket } = fakeSockets();
+  const received = [];
+  const consumer = createBinaryConsumer("ws://test/yjs/", { WebSocket: FakeSocket });
+  consumer.subscriptions.create({ channel: "RoomChannel" }, { received: (m) => received.push(m) });
+  sockets[0].open();
+  sockets[0].deliverText('{"notice":"full"}');
+  assert.deepEqual(received, [{ notice: "full" }]);
 });

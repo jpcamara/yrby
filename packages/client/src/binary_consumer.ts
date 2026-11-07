@@ -9,7 +9,8 @@
 // document. The first frame is a y-protocols auth message carrying the
 // channel identifier, so a signed grant travels inside the socket instead of
 // the URL. Reliable updates go out as [100][id][frame] and come back acked as
-// [101][id]. Everything else is a plain y-protocols frame.
+// [101][id]. Everything else is a plain y-protocols frame, except the
+// channel's own messages, which arrive as JSON text frames.
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 import { toBase64, fromBase64 } from "./base64.js";
@@ -110,9 +111,12 @@ class BinarySubscription implements CableSubscription {
     };
 
     socket.onmessage = (event: MessageEvent) => {
-      if (this.#socket !== socket || !(event.data instanceof ArrayBuffer)) return;
+      if (this.#socket !== socket) return;
       this.#touch();
-      this.handlers.received?.(decode(new Uint8Array(event.data)));
+      // Text frames carry the channel's own JSON messages, which have no
+      // y-protocols form.
+      const message = event.data instanceof ArrayBuffer ? decode(new Uint8Array(event.data)) : parseJSON(event.data);
+      this.handlers.received?.(message);
     };
 
     socket.onclose = (event: CloseEvent) => {
@@ -151,6 +155,14 @@ function decode(frame: Uint8Array): { update: string } | { ack: number } | null 
   try {
     const d = decoding.createDecoder(frame.subarray(1));
     return { ack: decoding.readVarUint(d) };
+  } catch {
+    return null;
+  }
+}
+
+function parseJSON(data: unknown): unknown {
+  try {
+    return JSON.parse(String(data));
   } catch {
     return null;
   }
