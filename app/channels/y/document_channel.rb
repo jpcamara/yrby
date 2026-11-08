@@ -43,6 +43,8 @@ module Y
     else
       attr_accessor :authorized_document_key
     end
+    # Private, so a client can't call the accessors as channel actions.
+    private :authorized_document_key, :authorized_document_key=
 
     # Sets the shipped channel's authorized? check as a block. Configure it in
     # Rails.application.config.to_prepare. The block receives the located
