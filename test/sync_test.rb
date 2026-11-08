@@ -738,7 +738,7 @@ class SyncTest < Minitest::Test
     helper.transmits = []
     message = update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
 
-    helper.sync_receive(message, "doc-key")
+    helper.send(:sync_receive, message, "doc-key")
 
     assert_equal [["yrby:doc-key", message]], sent
   end
@@ -749,7 +749,7 @@ class SyncTest < Minitest::Test
     helper.logger = nil
     helper.define_singleton_method(:sync_logger) { Logger.new(log) }
 
-    helper.sync_subscribed("doc")
+    helper.send(:sync_subscribed, "doc")
 
     assert_match(/subscription rejected/, log.string)
   end
