@@ -170,6 +170,52 @@ jobs:
         if: failure()
         run: tail -200 tmp/rage-server.log || true
 
+  anycable:
+    name: AnyCable
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install anycable-go
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/anycable-go \
+            https://github.com/anycable/anycable/releases/download/v1.6.20/anycable-go-linux-amd64
+          sudo chmod +x /usr/local/bin/anycable-go
+          anycable-go -v
+
+      - name: Build the gem
+        run: bundle exec rake compile
+
+      # The AnyCable fixture has its own bundle, so Rage and anycable-core
+      # stay out of the main suite.
+      - name: Install the AnyCable fixture
+        working-directory: test/anycable
+        run: bundle install
+      - name: Y::AnyCable tests
+        working-directory: test/anycable
+        run: bundle exec ruby y_any_cable_test.rb
+
+      # A two-worker Rage app answers anycable-go's HTTP RPC. Same checks as
+      # the Rage job, plus refused connections and JWT identifiers.
+      - run: npm ci
+        working-directory: packages/client
+      - name: Clients through anycable-go
+        working-directory: packages/client
+        run: npm run test:anycable
+
+      - name: Print server logs on failure
+        if: failure()
+        run: tail -200 tmp/anycable-rpc.log tmp/anycable-go.log || true
+
   demo:
     name: Demo e2e (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest
