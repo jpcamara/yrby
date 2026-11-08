@@ -369,7 +369,59 @@ await ab(B, "select", "#form [data-key=role]", "Designer")
 check("A sees B's pick",
   !!(await converge("role picked", (s) => js(s, `document.querySelector("#form [data-key=role]").value`), (v) => v === "Designer")))
 
+// --- 7) Whiteboard: a Y.Map of notes ----------------------------------------
+await openBoth(`/demos/whiteboard/${ROOM}`)
+
+const noteTexts = (s) => js(s, `JSON.stringify([...window.__yrby.shapes.values()].map((m) => m.get("text")).sort())`)
+check("both whiteboards hold the seeded notes",
+  !!(await converge("seeded notes", noteTexts, (v) => JSON.parse(v).length === 2)))
+await js(A, `window.__yrby.addNote(80, 200, "note from A"); true`)
+check("a note added in one window reaches the other",
+  !!(await converge("added note", noteTexts, (v) => v.includes("note from A"))))
+
+// --- 8) Code: a Y.Text in CodeMirror, and the binding's cleanup ---------------
+await openBoth(`/demos/codemirror/${ROOM}`)
+
+// The shared text, and whether this page's editor shows it. The editor's own
+// text includes the other person's caret label, so it can't be compared
+// between windows.
+const code = (s) => js(s, `JSON.stringify(document.querySelector(".cm-content") ? window.__yrby.ytext.toString() : null)`)
+const editorShows = (s, text) => js(s, `!!document.querySelector(".cm-content")?.innerText.includes(${JSON.stringify(text)})`)
+check("both editors show the starter snippet",
+  !!(await converge("starter snippet", code, (v) => v.includes("function greet"))))
+await clickAt(A, ".cm-content")
+await ab(A, "keyboard", "type", "code from A ")
+check("A's code reaches B", !!(await converge("code typed", code, (v) => v.includes("code from A"))))
+check("B's editor shows A's code", await waitFor("B's editor shows A's code", () => editorShows(B, "code from A")))
+
+// Removing the element aborts the session's signal. The page's cleanup
+// removes the editor and stops the presence chips, and the next sync binds a
+// new editor without leaving the old one behind.
+await js(B, `window.cmElement = document.querySelector("yrby-document"); window.cmParent = cmElement.parentNode; cmElement.remove(); true`)
+check("removing the element destroys its editor",
+  await waitFor("editor removed", async () => (await js(B, `document.querySelectorAll(".cm-editor").length`)) === 0))
+await js(B, `cmParent.append(cmElement); true`)
+check("putting the element back binds one editor again",
+  await waitFor("editor rebound", async () => (await js(B, `document.querySelectorAll(".cm-editor").length`)) === 1))
+check("the rebound editor shows the room's text",
+  await waitFor("rebound editor text", () => editorShows(B, "code from A")))
+
+// --- 9) A rejected subscription shows the room notice -----------------------
+// A grant the server can't verify. RoomChannel rejects it, and the notice
+// from room.js's consumer wrapper shows up through the element.
+await js(A, `(() => {
+  const el = document.createElement("yrby-document")
+  el.setAttribute("channel", "RoomChannel")
+  el.setAttribute("name", "codemirror")
+  el.setAttribute("grant", "not-a-real-grant")
+  document.body.append(el)
+  return true
+})()`)
+check("a rejected element shows the couldn't-join notice",
+  await waitFor("rejection notice", async () =>
+    (await js(A, `(() => { const n = document.querySelector("#notice"); return !n.hidden && n.textContent.startsWith("Couldn't join") })()`)) === true))
+
 await ab(A, "close", "--all")
 console.log("")
 if (failures > 0) { console.log(`FAILED: ${failures} check(s) failed`); process.exit(1) }
-console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban, chat, form")
+console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban, chat, form, whiteboard, code, rejection")
