@@ -3,16 +3,15 @@
   <a href="https://github.com/jpcamara/lexxy-realtime">lexxy-realtime</a>.
   Lexical stores its content in the Yjs document as nested
   <code>Y.XmlText</code> nodes. Each room is a <code>Room</code> record with
-  <code>has_collaborative_rich_text :body</code>, and the page renders the
-  same <code>&lt;yrby-document&gt;</code> wrapper the gem's form helper
-  renders, with the room's grant for <code>body</code>.
-  <code>LexxyChannel</code> extends the gem's
+  <code>has_collaborative_rich_text :body</code>, and the page renders it
+  with <code>form.collaborative_rich_textarea :body</code>, the gem's quick
+  start. <code>LexxyChannel</code> extends the gem's
   <code>LexxyRealtime::DocumentChannel</code> and opens any room's body.
 </p>
 <p>
   After each update, the channel renders the room's whole body to HTML with
-  <code>Y::Lexxy</code> and saves it to <code>body</code>, a plain text column.
-  yrby's tests check that this HTML matches what a live Lexxy editor produces.
-  The panel below loads the column over HTTP, so you can watch the saved HTML
-  change as you type.
+  <code>Y::Lexxy</code> and saves it to <code>body</code>, an Action Text
+  field. yrby's tests check that this HTML matches what a live Lexxy editor
+  produces. The panel below loads it over HTTP, so you can watch the saved
+  HTML change as you type.
 </p>

@@ -28,7 +28,7 @@ Rails.application.routes.draw do
   # room it starts a new one, which is where the demo links go.
   post "demos/:demo/start", to: "demos#start", as: :demo_open
   post "demos/:demo/:room/start", to: "demos#start", as: :demo_start
-  # The Lexxy demo's stored HTML column (see DemosController#body).
+  # The Lexxy demo's stored Action Text body (see DemosController#body).
   get "demos/lexxy/:room/body", to: "demos#body", as: :demo_room_body
   # The server-side read for the other demos: Ruby rebuilds the document from
   # stored state (see DemosController#stored).
@@ -38,4 +38,9 @@ Rails.application.routes.draw do
   # malformed link gets a 404 from the controller. A route constraint would
   # turn it into a routing error.
   get "demos/:demo/:room", to: "demos#show", as: :demo_room
+
+  # `form_with model: @room` on the Lexxy page needs a URL for a room. The
+  # form never submits (there's no submit button, and no route takes a write),
+  # so this only gives it the room's own Lexxy page.
+  resolve("Room") { |room| route_for(:demo_room, "lexxy", room) }
 end

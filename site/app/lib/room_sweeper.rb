@@ -68,14 +68,19 @@ module RoomSweeper
     end
 
     # Deletes rooms with no documents left and nobody seated, once the room
-    # row itself is stale too. Every Lexxy render saves the room
-    # (collaborative_document(:body).refresh), so updated_at tracks those
-    # writes, and a room someone just started is kept for the TTL even before
-    # its first write.
+    # row itself is stale too. Every Lexxy render saves the room's body, which
+    # touches the room (collaborative_document(:body).refresh), so updated_at
+    # tracks those writes, and a room someone just started is kept for the TTL
+    # even before its first write.
     def sweep_rooms(cutoff)
       Room.transaction do
         stale = Room.where(updated_at: ...cutoff).where.missing(:documents, :seats)
-        stale.pluck(:slug).map { |slug| "room:#{slug}" }.tap { stale.delete_all }
+        rows = stale.pluck(:id, :slug)
+        ids = rows.map(&:first)
+        # delete_all skips has_rich_text's dependent destroy, so the bodies go here.
+        ActionText::RichText.where(record_type: "Room", record_id: ids).delete_all
+        Room.where(id: ids).delete_all
+        rows.map { |_, slug| "room:#{slug}" }
       end
     end
 

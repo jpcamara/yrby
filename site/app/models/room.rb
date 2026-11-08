@@ -3,10 +3,9 @@
 # the nav.
 #
 # The Lexxy demo's document is a rich-text field. has_collaborative_rich_text
-# comes from lexxy-realtime's Collaborative concern. This app doesn't use
-# Action Text, and the concern only calls `has_rich_text(name)` when the
-# model responds to it, so `body` is a plain text column. After each update,
-# LexxyChannel renders the document with Y::Lexxy and saves the HTML to it.
+# comes from lexxy-realtime and declares `has_rich_text :body` too, so
+# room.body is Action Text. After each update, LexxyChannel renders the
+# document with Y::Lexxy and saves the HTML to it.
 # The shape demos' documents are plain yrby documents, one per demo, named
 # after it.
 #
@@ -19,8 +18,9 @@ class Room < ApplicationRecord
   # A client that skips the page and talks the protocol directly can still
   # build a document with attachment nodes, and a data: URL in an attachment's
   # url attribute is a file. Y::Lexxy's default schema would render those into
-  # the stored column, so these rules render attachment nodes as nothing and
-  # keep the text.
+  # the body, so these rules render attachment nodes as nothing and keep the
+  # text. Action Text's body writer strips attachments again
+  # (app/lib/no_attachments.rb), whatever rendered the HTML.
   SUPPRESSED_NODES = {
     "action_text_attachment" => ->(_node) { "" },
     "custom_action_text_attachment" => ->(_node) { "" },

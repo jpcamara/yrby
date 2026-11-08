@@ -150,7 +150,7 @@ on a `Y.Map`, a kanban board on a `Y.Array`, or a spreadsheet on a `Y.Array` of
 nested `Y.Map`s. This site has eight [live demos](/demos). In the Lexxy one,
 built on [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime), the
 server renders the rich text to HTML with `Y::Lexxy` after every change and
-saves it to a plain column.
+saves it to the record's Action Text body.
 
 ## Reading a Yjs document in Ruby
 

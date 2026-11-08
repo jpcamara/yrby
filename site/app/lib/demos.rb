@@ -8,8 +8,8 @@ module Demos
 
   # How the server reads a demo's document without a browser: the root name
   # and its type. `kind` picks the Doc reader (read_text, read_xml, read_map,
-  # or read_array). The Lexxy demo has no reader. It saves HTML to the
-  # room.body column, and DemosController#body returns that.
+  # or read_array). The Lexxy demo has no reader. It saves HTML to room.body,
+  # an Action Text field, and DemosController#body returns that.
   Reader = Data.define(:root, :kind)
 
   ALL = [
