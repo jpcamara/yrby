@@ -3,10 +3,12 @@
 # The paths are relative to the site root, which is also how the panels
 # label them.
 module DemoSourceHelper
-  LANGUAGES = { ".erb" => "erb", ".js" => "js" }.freeze
+  LANGUAGES = { ".erb" => "erb", ".js" => "js", ".rb" => "ruby" }.freeze
 
+  # The Lexxy page also shows Room, which declares has_collaborative_rich_text.
   def demo_source_paths(slug)
-    ["app/views/demos/_#{slug}.html.erb", "frontend/src/#{slug}.js"]
+    paths = ["app/views/demos/_#{slug}.html.erb", "frontend/src/#{slug}.js"]
+    slug == "lexxy" ? ["app/models/room.rb", *paths] : paths
   end
 
   # One highlighted file, on the same pipeline and theme as code_block. The

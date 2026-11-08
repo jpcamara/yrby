@@ -127,8 +127,9 @@ class DemosTest < ActionDispatch::IntegrationTest
 
     get "/demos/lexxy/room1"
 
-    # The Lexxy page names its Yjs document in <lexxy-collaboration doc-id>.
-    assert_includes response.body, %(doc-id="#{room.collaborative_document("body").key}")
+    # collaborative_rich_textarea names the client-side Yjs binding in
+    # <lexxy-collaboration doc-id>. The server never sees it.
+    assert_includes response.body, %(doc-id="room-#{room.id}-body")
   end
 
   test "every shape demo page renders a yrby-document for the room document" do
@@ -208,7 +209,7 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %(attachments="false")
   end
 
-  test "the body endpoint returns the rendered body column" do
+  test "the body endpoint returns the stored Action Text HTML" do
     Room.create!(slug: "room1", body: "<h1>from Ruby</h1>")
 
     get "/demos/lexxy/room1/body"

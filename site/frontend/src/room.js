@@ -143,10 +143,10 @@ function setupRoomBar() {
   })
 }
 
-// The site doesn't accept uploads. There's no upload endpoint and the app
-// doesn't install Active Storage. A browser will still turn a pasted or
-// dropped file into content if an editor asks for it, so the page blocks files
-// before any editor sees the event. Text pastes work normally.
+// The site doesn't accept uploads. There's no upload endpoint, and Active
+// Storage draws no routes and stores nothing. A browser will still turn a
+// pasted or dropped file into content if an editor asks for it, so the page
+// blocks files before any editor sees the event. Text pastes work normally.
 const carriesFiles = (transfer) =>
   !!transfer && (Array.from(transfer.types || []).includes("Files") || (transfer.files || []).length > 0)
 

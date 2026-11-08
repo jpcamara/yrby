@@ -126,9 +126,8 @@ end
 to `/demos/:demo/start`, which picks a new room, creates it, and redirects to
 it. A room nobody has started, such as a shared link to a swept room, shows a
 button that starts it. A GET never creates a room, so a crawler fetching room
-URLs creates nothing. Every page
-renders its document with `collaborative_document_tag`: the Lexxy page as
-`collaborative_document_tag(@room, :body)`, the shape demos as
+URLs creates nothing. The Lexxy page renders its document with
+`form.collaborative_rich_textarea :body`, and the shape demos with
 `collaborative_document_tag(@room, @demo.slug, channel: "RoomChannel")`.
 `RoomChannel` is yrby-rails' `Y::DocumentChannel` and `LexxyChannel` is
 lexxy-realtime's channel, each with an `authorize_document` block that opens
@@ -408,30 +407,56 @@ them off.
 
 The site accepts no files. A public, anonymous write surface with a file
 endpoint is a free file host, and this app has no reason to hand out disk or
-object storage. Four small pieces keep it that way.
+object storage. Action Text and Active Storage are loaded, because the Lexxy
+demo's body is an Action Text field, so the layers below keep files out.
+`test/no_uploads_test.rb` checks each one.
 
-- **Boot guard.** `config/initializers/no_upload_frameworks.rb` stops the app
-  from booting if Active Storage or Action Text is loaded. The gems are in the
-  bundle, because lexxy-realtime depends on the `rails` meta-gem, but the app
-  requires only the frameworks it uses. If a later change requires them, boot
-  fails instead of mounting upload routes.
+- **No Active Storage routes.** `config.active_storage.draw_routes = false`
+  (`config/application.rb`), so there are no direct-upload, blob,
+  representation, or disk-service routes. `bin/rails routes` lists none, and
+  every `/rails/active_storage/...` path is a 404.
+- **A service that stores nothing.** `config/storage.yml` has one service,
+  `ActiveStorage::Service::RefusingService`
+  (`lib/active_storage/service/refusing_service.rb`), and every environment
+  uses it. Every upload, download, URL, and delete raises. Active Storage's
+  blob, attachment, and variant records are read-only
+  (`config/initializers/no_uploads.rb`), so no code path can write a row to
+  those tables. The tables exist because Action Text's rich text declares
+  `has_many_attached :embeds`, and they stay empty. Variant processing is
+  `:disabled`, so no image library loads. The boot stops if the routes or the
+  service are configured any other way.
+- **No attachments in the body.** `NoAttachments` (`app/lib/no_attachments.rb`)
+  wraps `ActionText::RichText#body=`. Whatever writes the body, the HTML loses
+  `<action-text-attachment>` and Trix attachment elements, media elements
+  (`img`, `video`, `iframe`, and so on), and any attribute that names a record
+  (`sgid`, `gid`) or loads a file (`src`, a `data:` or `blob:` URL, a CSS
+  `url()`). A signed GlobalID never reaches Action Text's attachable lookup,
+  and `embeds` stays empty. Room's `nodes:` rules already render attachment
+  nodes as nothing. This is the second check.
+- **No upload UI or URLs.** Lexxy's editor tag would render the direct upload
+  and blob URLs. `NoAttachments::EditorTag` replaces it with one that renders
+  neither, sets `attachments="false"` on every editor (so there's no upload
+  button and no file paste or drop in the editor), and doesn't render the
+  body's attachments. `frontend/src/room.js` also cancels file pastes and
+  drops for the whole page.
 - **Method gate.** `config/initializers/method_gate.rb` answers any multipart
   body with 415, and any method other than GET and HEAD with 405, before
   routing. The exceptions are the AnyCable RPC endpoint, which anycable-go
   POSTs to and Rack::Attack keeps private, and starting a room, a POST with
-  no body. The cable's WebSocket upgrade is a GET.
+  no body. The cable's WebSocket upgrade is a GET. No controller takes a
+  room's body as a parameter.
 - **CSP.** `img-src` is `'self'`, with no `data:` or `blob:`, and `media-src`
   and `frame-src` are `'none'`. An image embedded in a document can't load. The
   frontend build writes Lexxy's inline SVG chevrons out as files and fails if a
   `data:` URL is left in a stylesheet.
-- **Cable check.** The editors don't offer uploads (the Tiptap demo has no
-  Image extension, the Lexxy demo sets `attachments="false"`, and
-  `frontend/src/room.js` cancels file pastes and drops), but a client can send
-  any Yjs update. `RoomGuarded` drops a document update that contains a
-  `data:` or `blob:` URL (`app/lib/embedded_files.rb`) before yrby sees it, the
-  same way it drops a write to a full room: not stored, not relayed, not acked.
-  Later edits from that tab build on the dropped one, so they stop syncing
-  too. The page gets a `file_refused` notice once and asks the person to reload.
+- **Cable check.** A client can send any Yjs update. `RoomGuarded` drops a
+  document update that contains a `data:` or `blob:` URL
+  (`app/lib/embedded_files.rb`) before yrby sees it, the same way it drops a
+  write to a full room: not stored, not relayed, not acked. Later edits from
+  that tab build on the dropped one, so they stop syncing too. The page gets a
+  `file_refused` notice once and asks the person to reload.
+- **No other attachments.** No model in the app declares `has_one_attached` or
+  `has_many_attached`.
 
 ### Process-local counters
 
@@ -669,7 +694,7 @@ There are eight demo pages, picked to cover different Yjs shapes:
 
 | Page | Shape | What it shows |
 |---|---|---|
-| Lexxy | `Y.XmlText` | Lexxy on the published lexxy-realtime stack: the `<yrby-document>` wrapper, a channel built on the gem's, a record-backed document, and the server rendering `room.body` with `Y::Lexxy` |
+| Lexxy | `Y.XmlText` | Lexxy on the published lexxy-realtime stack: the gem's quick start on `Room`, a channel built on the gem's, and the server rendering the Action Text `room.body` with `Y::Lexxy` |
 | Tiptap | `Y.XmlFragment` | The same shape through Tiptap's own Collaboration extension |
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges, with sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map, the way canvas tools store shapes |
@@ -684,18 +709,21 @@ The Lexxy page uses the published `lexxy-realtime` gem and npm package (both
 0.9.0) the way a real app would. These are the parts that differ for public,
 anonymous rooms, and why:
 
-- **The record.** The room's `Room` row holds the Lexxy document as
-  `has_collaborative_rich_text :body`, from the gem's Collaborative concern,
-  which checks whether Action Text is loaded. This app doesn't have Action
-  Text, so the concern uses its plain-column path. After each update, the
-  channel renders the document with `Y::Lexxy` and writes the HTML directly
-  into `rooms.body`. The page's "Stored HTML" panel reads that column back
+- **The record.** `Room` declares `has_collaborative_rich_text :body`, which
+  also declares `has_rich_text :body`, so `room.body` is Action Text. After
+  each update, the channel renders the document with `Y::Lexxy` and saves the
+  HTML to it. The page's "Stored HTML" panel reads the stored HTML back
   through a GET-only JSON endpoint. The server rendered that markup, with no
   browser involved. The `nodes:` rules on the macro render attachment nodes as
-  nothing, because the site accepts no uploads.
-- **The grant.** The page renders `collaborative_document_tag(@room, :body)`,
-  which signs the room's GlobalID for the `body` field and names the channel
-  `config/lexxy_realtime.rb` sets, `LexxyChannel`.
+  nothing, and Action Text's body writer strips any attachment that gets past
+  them, because the site accepts no uploads (see [No uploads](#no-uploads)).
+- **The view.** The page is the gem's quick start applied to `Room`:
+  `form_with model: @room` around `form.collaborative_rich_textarea :body`. The
+  helper signs the room's GlobalID for the `body` field and names the channel
+  `config/initializers/lexxy_realtime.rb` sets, `LexxyChannel`. The form never
+  submits. It has no submit button, the method gate refuses its PATCH, and no
+  route takes one. A `resolve("Room")` route gives it the room's page as its
+  URL.
 - **The channel.** `LexxyChannel` extends the gem's
   `LexxyRealtime::DocumentChannel` with an `authorize_document` block that
   allows any room, because the rooms are public. The parent still rejects a
@@ -703,26 +731,16 @@ anonymous rooms, and why:
   the gem's channel: storage, acknowledgments, and rendering `room.body`. The
   seats and throttles come from `RecordChannelGuard` and `RoomGuarded` on
   `Y::DocumentChannel`, like the record-backed example's.
-- **The markup.** `collaborative_rich_textarea` builds the editor with Lexxy's
-  Action Text form helpers, which this app doesn't load. So the page renders
-  the helper's markup directly: `collaborative_document_tag` for the
-  `<yrby-document>` around the `<lexxy-editor>`, with a
-  `<lexxy-collaboration doc-id>` inside it. `frontend/src/lexxy.js` imports
-  `lexxy-realtime`, which registers both elements, and passes `setConsumer` a
-  function that returns the same AnyCable consumer as the other demos, with
-  the room bar, the full-room notice, and whispers hidden. On each
+- **The script.** `frontend/src/lexxy.js` imports `lexxy-realtime`, which
+  registers the `<yrby-document>` and `<lexxy-collaboration>` the helper
+  renders, and passes `setConsumer` a function that returns the same AnyCable
+  consumer as the other demos, with the full-room notice and whispers hidden.
+  It sets the cursor name and color room.js picked, and on each
   `yrby:synced` it wires the presence chips, the status line, and the stored
   HTML panel to the session's provider and Yjs document.
 - **One copy of `lexical`.** `build.mjs` pins `lexical` and `@lexical/yjs` to a
   single copy each, alongside the yjs packages. Two copies of `lexical` break
   node-class identity, the same way two copies of yjs break constructor checks.
-- **Loading the gem without its engine.** The gem is `require: false`. Its
-  engine loads the Lexxy gem's engine, which sets up Action Text helpers in
-  `to_prepare` and can't boot without Action Text. `config/lexxy_realtime.rb`
-  requires `lexxy_realtime/collaborative`, which works on its own, and defines
-  the two module methods the concern and the channel call.
-  `config/application.rb` adds the gem's `app/channels` to the load paths so
-  `LexxyRealtime::DocumentChannel` loads.
 
 The demos are ports of the pages in
 [`examples/actioncable-demo`](../examples/actioncable-demo). Each page

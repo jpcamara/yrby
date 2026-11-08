@@ -6,13 +6,13 @@ require "active_record/railtie"
 require "action_controller/railtie"
 require "action_view/railtie"
 require "action_cable/engine"
+require "active_job/railtie"
+require "active_storage/engine"
+require "action_text/engine"
 require "rails/test_unit/railtie"
 
 require "bundler"
 Bundler.require(*Rails.groups)
-
-# Load lexxy-realtime without its engine. See config/lexxy_realtime.rb.
-require_relative "lexxy_realtime"
 
 # A plain require, because the Rack::Attack initializer reads these constants
 # while the app is still booting, before autoloading is available.
@@ -22,11 +22,20 @@ module Site
   class Application < Rails::Application
     config.load_defaults 8.1
 
-    config.autoload_lib(ignore: %w[assets tasks])
+    # lib/active_storage holds the storage service, which Active Storage
+    # requires by path when it reads config/storage.yml.
+    config.autoload_lib(ignore: %w[active_storage assets tasks])
 
-    # LexxyRealtime::DocumentChannel, which LexxyChannel extends. The gem's
-    # engine would add this directory, and this app doesn't load the engine.
-    config.eager_load_paths << File.join(Gem.loaded_specs.fetch("lexxy-realtime").full_gem_path, "app/channels")
+    # Action Text is here for the Lexxy demo's body, and it brings Active
+    # Storage. This site accepts no files, so Active Storage draws none of its
+    # routes (no direct uploads, blobs, representations, or disk service), and
+    # its one service refuses every read and write
+    # (lib/active_storage/service/refusing_service.rb). See "No uploads" in
+    # the README.
+    config.active_storage.draw_routes = false
+    config.active_storage.service = :refusing
+    # No image processing library to load or call, since there are no images.
+    config.active_storage.variant_processor = :disabled
 
     # Deny all framing, since the demos aren't meant to be embedded.
     # ActionDispatch::Response copies default_headers in a railtie initializer,

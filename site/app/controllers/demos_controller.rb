@@ -47,12 +47,14 @@ class DemosController < ApplicationController
     redirect_to demo_room_path(@demo.slug, @slug), status: :see_other
   end
 
-  # room.body as JSON. LexxyChannel renders the Lexxy document with Y::Lexxy
-  # after every update and saves the HTML to room.body, so this read-only
-  # endpoint returns current HTML without a browser involved. The e2e test
-  # polls it.
+  # The HTML stored in room.body, an Action Text field, as JSON. LexxyChannel
+  # renders the Lexxy document with Y::Lexxy after every update and saves the
+  # HTML to room.body, so this read-only endpoint returns current HTML without
+  # a browser involved. It's the stored string, not Action Text's rendered
+  # layout. The e2e test polls it.
   def body
-    render json: { body: Room.find_by(slug: @slug)&.body }
+    rich_text = Room.find_by(slug: @slug)&.body
+    render json: { body: rich_text&.body&.to_html }
   end
 
   # The shape demos' version of #body. It loads the room's stored document

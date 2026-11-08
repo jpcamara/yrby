@@ -29,8 +29,22 @@ class DemoSourceTest < ActionDispatch::IntegrationTest
     Demos::ALL.each do |demo|
       get "/demos/#{demo.slug}/room1"
 
-      assert_shows_files ["app/views/demos/_#{demo.slug}.html.erb", "frontend/src/#{demo.slug}.js"]
+      files = ["app/views/demos/_#{demo.slug}.html.erb", "frontend/src/#{demo.slug}.js"]
+      files.unshift("app/models/room.rb") if demo.slug == "lexxy"
+
+      assert_shows_files files
     end
+  end
+
+  test "the lexxy page shows the model and form from the quick start" do
+    get "/demos/lexxy/room1"
+    blocks = source_blocks
+
+    assert_includes blocks["app/models/room.rb"], "has_collaborative_rich_text :body"
+    form = "<%= form_with model: @room do |form| %>\n  <%= form.collaborative_rich_textarea :body %>\n<% end %>"
+
+    assert_includes blocks["app/views/demos/_lexxy.html.erb"], form
+    assert_includes blocks["frontend/src/lexxy.js"], %(import { setConsumer } from "lexxy-realtime")
   end
 
   test "the record-backed example shows its view and script as they are on disk" do

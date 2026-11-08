@@ -2,7 +2,7 @@ require "test_helper"
 
 # LexxyChannel, lexxy-realtime's channel opened to any room's body: the
 # room's grant, storage through the record, the server rendering the room's
-# plain body column, and the site's throttles from RecordChannelGuard.
+# Action Text body, and the site's throttles from RecordChannelGuard.
 class LexxyChannelTest < ActionCable::Channel::TestCase
   tests LexxyChannel
 
@@ -19,6 +19,7 @@ class LexxyChannelTest < ActionCable::Channel::TestCase
   def document = @room.collaborative_document(:body)
   def subscribe_to_room = subscribe(grant: document.grant, name: "body", session_id: "s1")
   def acks = transmissions.filter_map { |m| m["ack"] }
+  def stored_body = @room.reload.body.body&.to_html
 
   test "the room's grant subscribes, takes a seat, and gets the handshake" do
     subscribe_to_room
@@ -71,18 +72,18 @@ class LexxyChannelTest < ActionCable::Channel::TestCase
 
     assert_empty acks
     assert_equal(["file_refused"], transmissions.filter_map { |m| m["notice"] })
-    assert_nil @room.reload.body
+    assert_nil stored_body
   end
 
-  test "a Lexical update is rendered into the plain body column" do
+  test "a Lexical update is rendered into the Action Text body" do
     subscribe_to_room
 
     perform :receive, "update" => Updates.frame(LEXXY_STATE), "id" => 1
 
     assert_equal [1], acks
-    body = @room.reload.body
+    body = stored_body
 
-    assert_predicate body, :present?, "the body column should hold the server-rendered HTML"
+    assert_predicate body, :present?, "the body should hold the server-rendered HTML"
     assert_includes body, "<h1>Heading One</h1>"
   end
 
@@ -91,7 +92,7 @@ class LexxyChannelTest < ActionCable::Channel::TestCase
     perform :receive, "update" => Updates.frame(Updates::HELLO), "id" => 1
 
     assert_equal [1], acks, "the update is still recorded"
-    assert_nil @room.reload.body, "Y::Lexxy returns nil for a non-Lexical document, so body is unchanged"
+    assert_nil stored_body, "Y::Lexxy returns nil for a non-Lexical document, so body is unchanged"
   end
 
   test "the room byte cap applies to this channel" do

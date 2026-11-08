@@ -63,6 +63,16 @@ class RoomSweeperTest < ActiveSupport::TestCase
     assert_equal ["room:empty"], RoomSweeper.run_once(ttl: 1.day)
   end
 
+  test "a swept room's Action Text body goes with it" do
+    room = make_room("lexxy", age: 2.days)
+    ActionText::RichText.create!(record: room, name: "body", body: "<p>hi</p>")
+    room.update_columns(updated_at: 2.days.ago) # the body's save touched the room
+    kept = Room.create!(slug: "kept", body: "<p>kept</p>")
+
+    assert_equal ["room:lexxy"], RoomSweeper.run_once(ttl: 1.day)
+    assert_equal [kept.id], ActionText::RichText.pluck(:record_id)
+  end
+
   test "a stale room is kept while someone is in it" do
     room = make_room("seated", age: 2.days)
     Rooms.current.join(room, "body", "c1")
