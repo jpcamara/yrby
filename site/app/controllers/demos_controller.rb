@@ -21,9 +21,8 @@ class DemosController < ApplicationController
     redirect_to demo_room_path(@demo.slug, Demos.new_room)
   end
 
-  # A room's page, with the demo's document. The page renders
-  # collaborative_document_tag (Lexxy) or the document's grant (the shape
-  # demos), so the client never names a document. A GET never creates the
+  # A room's page, with the demo's document. Every page renders
+  # collaborative_document_tag, so the client never names a document. A GET never creates the
   # room (see #start), so a room nobody has started shows a button that
   # starts it.
   def show

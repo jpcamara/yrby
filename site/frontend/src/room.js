@@ -1,5 +1,7 @@
-// Page setup shared by every demo: the provider, the room bar, presence, and
-// the status line. Each demo's own file only sets up its Yjs binding.
+// Page setup shared by every demo: the consumer, the room bar, presence, and
+// the status line. Each page renders a <yrby-document> with
+// collaborative_document_tag, and the demo's own file binds its editor to the
+// document when the element emits yrby:synced.
 //
 // The demos sync over a binary y-protocols WebSocket at /yjs/, which AnyCable
 // (embedded in the thrust proxy) serves next to /cable. Frames go over the
@@ -12,7 +14,6 @@
 // rooms are public and anonymous, and this way the server throttles and
 // validates every frame. The page also hides `whisper` from the provider (see
 // countTransport), which keeps the counts in __yrbyTransport meaningful.
-import { ActionCableProvider } from "yrby-client"
 import { createBinaryConsumer } from "./binary_consumer.js"
 
 const NAMES = ["Ada", "Grace", "Linus", "Yukihiro", "Barbara", "Dennis", "Radia", "Alan"]
@@ -187,7 +188,9 @@ export function renderPresence(provider) {
 
 // The consumer every demo uses: the binary socket, wrapped so the page reads
 // the server's notices and the provider never sees `whisper`. The Lexxy page
-// hands it to <yrby-document>, and the other demos pass it to their provider.
+// hands it to lexxy-realtime's setConsumer, and the other demos set it as
+// YrbyDocumentElement.consumer. Either way <yrby-document> calls it once and
+// reuses the result.
 export function roomConsumer() {
   return noticeAwareConsumer(createBinaryConsumer(yjsUrl()), {
     onNotice: ({ notice }) =>
@@ -229,27 +232,30 @@ export function showRoomState(provider) {
   }
 }
 
-// Builds the provider for a shape demo's room and sets up the shared page
-// parts. The client never names its document. It sends the grant and name
-// the server rendered into the mount element, the same params
-// collaborative_document_tag gives <yrby-document>, and RoomChannel opens
-// the room document the grant was signed for.
-export function connectRoom(ydoc, mount) {
-  const { grant, name } = mount.dataset
-  const provider = new ActionCableProvider(ydoc, roomConsumer(), "RoomChannel", { grant, name })
-  provider.awareness.setLocalStateField("user", user)
-  provider.onStatusChange(({ status: state }) => {
-    // disconnect() clears this client's awareness entry, and
-    // setLocalStateField does nothing while the local state is null. After a
-    // reconnect, set the identity again or other people won't see this browser.
-    if (state !== "disconnected" && !provider.awareness.getLocalState()) {
-      provider.awareness.setLocalState({ user })
-    }
+// Called from each shape demo's yrby:synced listener, with the event's
+// detail. It shows this browser's name and color to the room, runs the status
+// line, presence chips, and stored panel for the session, and exposes it as
+// window.__yrby for the browser console and the e2e tests, along with the
+// demo's own `extra` fields. Returns a function that stops all of it, for the
+// session's abort signal. It leaves the document and provider alone, because
+// the session owns them.
+export function enterRoom({ doc, provider, lease }, extra = {}) {
+  const join = () => lease.setPresence({ user })
+  join()
+  // disconnect() clears this client's awareness entry, and
+  // setLocalStateField does nothing while the local state is null. After a
+  // reconnect, set the identity again or other people won't see this browser.
+  const offRejoin = provider.onStatusChange(({ status: state }) => {
+    if (state !== "disconnected" && !provider.awareness.getLocalState()) join()
   })
-
-  showRoomState(provider)
-  setupRoomPage()
-  return provider
+  window.__yrby = { provider, ydoc: doc, user, ...extra }
+  const stopRoomState = showRoomState(provider)
+  const stopStoredPanel = wireStoredPanel(doc)
+  return () => {
+    offRejoin()
+    stopRoomState()
+    stopStoredPanel()
+  }
 }
 
 // The "server-side read" panel on every demo. It calls a GET endpoint that

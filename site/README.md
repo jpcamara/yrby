@@ -126,10 +126,10 @@ end
 to `/demos/:demo/start`, which picks a new room, creates it, and redirects to
 it. A room nobody has started, such as a shared link to a swept room, shows a
 button that starts it. A GET never creates a room, so a crawler fetching room
-URLs creates nothing. The pages
-render each document's grant: the Lexxy page with
-`collaborative_document_tag(@room, :body)`, the shape demos as `data-grant`
-on their mount, which `frontend/src/room.js` hands to the provider.
+URLs creates nothing. Every page
+renders its document with `collaborative_document_tag`: the Lexxy page as
+`collaborative_document_tag(@room, :body)`, the shape demos as
+`collaborative_document_tag(@room, @demo.slug, channel: "RoomChannel")`.
 `RoomChannel` is yrby-rails' `Y::DocumentChannel` and `LexxyChannel` is
 lexxy-realtime's channel, each with an `authorize_document` block that opens
 any room's documents. The site's own code never loads or appends a document.
@@ -725,8 +725,10 @@ anonymous rooms, and why:
   `LexxyRealtime::DocumentChannel` loads.
 
 The demos are ports of the pages in
-[`examples/actioncable-demo`](../examples/actioncable-demo). The provider
-setup, presence chips, status line, and room bar live in
+[`examples/actioncable-demo`](../examples/actioncable-demo). Each page
+renders a `<yrby-document>`, and its demo file binds the editor when the
+element emits `yrby:synced` and cleans it up when `detail.signal` aborts. The
+consumer, presence chips, status line, and room bar live in
 `frontend/src/room.js`, so each demo file holds only its Yjs binding.
 
 Each visitor gets a fresh room: `/demos/tiptap` picks a room id and
@@ -734,8 +736,10 @@ redirects, and the page offers a button that starts the room. The demo nav
 keeps the room id, so switching pages keeps you in the same room, in that
 demo's document.
 
-`frontend/src/room.js` also wraps the Action Cable consumer so the page can
-read the server's `{ notice: ... }` messages. `yrby-client`'s provider ignores
+`frontend/src/room.js` also wraps the consumer so the page can read the
+server's `{ notice: ... }` messages. The demos set it as
+`YrbyDocumentElement.consumer`, and the Lexxy page passes it to
+lexxy-realtime's `setConsumer`. `yrby-client`'s provider ignores
 messages it doesn't recognize. The mixin it builds reaches the provider through
 a closure and doesn't use `this`, so wrapping its `received` handler is safe.
 

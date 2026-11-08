@@ -1,6 +1,8 @@
 <%# The toolbar sits above the grid so adding a row doesn't move its buttons. %>
-<div id="toolbar"></div>
-<table id="grid" data-document-key="<%= @document.key %>" data-grant="<%= @document.grant %>" data-name="<%= @document.name %>">
-  <thead></thead>
-  <tbody></tbody>
-</table>
+<%= collaborative_document_tag @room, @demo.slug, channel: "RoomChannel" do %>
+  <div id="toolbar"></div>
+  <table id="grid">
+    <thead></thead>
+    <tbody></tbody>
+  </table>
+<% end %>
