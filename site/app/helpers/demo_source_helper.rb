@@ -20,8 +20,14 @@ module DemoSourceHelper
   def demo_source_note(slug)
     room_js = tag.code("frontend/src/room.js")
     if slug == "lexxy"
-      safe_join(["Only the Lexxy parts of each file are shown. The rest is the site's shared room bar, ",
-                 "presence chips, stored HTML panel, and consumer, wired up in ", room_js, " and not shown."])
+      setup = safe_join(["Setup: add ", tag.code(%(gem "lexxy-realtime")), ", run ",
+                         tag.code("bin/rails generate lexxy_realtime:install"), " and ",
+                         tag.code("bin/rails db:migrate"),
+                         ", then ", tag.code("npm install lexxy-realtime"),
+                         " (with import maps, the generator adds the pins instead). The app needs Action Text."])
+      shown = safe_join(["Only the Lexxy parts of each file are shown. The rest is the site's shared room bar, ",
+                         "presence chips, stored HTML panel, and consumer, wired up in ", room_js, " and not shown."])
+      safe_join([setup, shown], tag.br)
     else
       safe_join(["The room bar, presence chips, status line, and consumer come from ", room_js,
                  ", which every demo shares."])

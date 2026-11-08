@@ -60,7 +60,7 @@ class DemoSourceTest < ActionDispatch::IntegrationTest
 
     assert_equal <<~RUBY, blocks["app/models/room.rb"]
       class Room < ApplicationRecord
-        # nodes: renders attachment nodes as nothing, because the site takes no uploads.
+        # nodes: is this site's no-uploads guard. In your app: has_collaborative_rich_text :body
         has_collaborative_rich_text :body, nodes: SUPPRESSED_NODES
       end
     RUBY
