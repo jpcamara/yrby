@@ -245,7 +245,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # refused it, the log line also says how to fix that, so a channel that
     # never defined authorized? doesn't fail silently.
     def sync_reject_unauthorized
-      logger.info do
+      sync_logger.info do
         hint = if method(:authorized?).owner == Sync
                  ". This channel needs to define authorized?(key). " \
                    "Return true for public documents."
@@ -273,8 +273,18 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # observe distribution. Store-backed streams intentionally echo to the
     # sender; applying the same CRDT update twice is a no-op.
     def sync_distribute(encoded)
-      ActionCable.server.broadcast(sync_stream_name, sync_envelope(encoded))
+      sync_broadcast(sync_stream_name, sync_envelope(encoded))
     end
+
+    # Sends a message to everyone on a stream. Action Cable's server by
+    # default. A channel on another cable server (Y::Rage) overrides it.
+    def sync_broadcast(stream, message)
+      ::ActionCable.server.broadcast(stream, message)
+    end
+
+    # The logger for rejections, dropped frames, and gaps. The channel's own
+    # logger by default. Y::Rage overrides it.
+    def sync_logger = logger
 
     # Transmit raw protocol bytes to this connection.
     def sync_transmit(bytes)
@@ -299,7 +309,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # sync_log_context returns, so a drop can be tied to a specific document,
     # update, and connection.
     def sync_log_drop(level, reason, id = nil)
-      logger.public_send(level) do
+      sync_logger.public_send(level) do
         parts = ["key=#{@sync_key.inspect}"]
         parts << "id=#{id}" unless id.nil?
         # A broken context hook must surface, not take down frame handling.
@@ -320,7 +330,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # count, gap age). Errors in the hook are swallowed; observability must
     # never break frame handling.
     def sync_observe_gap
-      logger.info do
+      sync_logger.info do
         parts = ["key=#{@sync_key.inspect}"]
         parts << sync_log_context_safe
         "[yrby] causal gap present (pending until its dependency arrives): #{parts.compact.join(" ")}"
@@ -331,7 +341,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       begin
         instance_exec(@sync_key, &hook)
       rescue StandardError => e
-        logger.error { "[yrby] on_gap hook raised (#{e.class}); continuing: key=#{@sync_key.inspect}" }
+        sync_logger.error { "[yrby] on_gap hook raised (#{e.class}); continuing: key=#{@sync_key.inspect}" }
       end
     end
 

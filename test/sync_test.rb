@@ -718,4 +718,39 @@ class SyncTest < Minitest::Test
     assert_equal expected.encode_state_vector, rebuilt.encode_state_vector,
                  "the recorded log converges to all five clients under concurrency"
   end
+
+  # A channel on another cable server overrides sync_broadcast and
+  # sync_logger. Everything else stays the concern's.
+  def test_relays_go_through_sync_broadcast_with_the_stream_and_envelope
+    sent = []
+    klass = Class.new do
+      include Y::ActionCable::Sync
+
+      on_load { |_key| nil }
+      on_change { |_key, _update| nil }
+
+      attr_accessor :transmits
+
+      def transmit(data) = transmits << data
+      define_method(:sync_broadcast) { |stream, message| sent << [stream, message] }
+    end
+    helper = klass.new
+    helper.transmits = []
+    message = update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+
+    helper.sync_receive(message, "doc-key")
+
+    assert_equal [["yrby:doc-key", message]], sent
+  end
+
+  def test_logs_go_through_sync_logger
+    log = StringIO.new
+    helper = helper_for(authorized: false)
+    helper.logger = nil
+    helper.define_singleton_method(:sync_logger) { Logger.new(log) }
+
+    helper.sync_subscribed("doc")
+
+    assert_match(/subscription rejected/, log.string)
+  end
 end
