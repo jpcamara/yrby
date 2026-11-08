@@ -13,7 +13,8 @@ Bundler::GemHelper.install_tasks(name: "yrby")
 Rake::TestTask.new(:test) do |t|
   t.libs << "test"
   t.libs << "lib"
-  t.test_files = FileList["test/**/*_test.rb"]
+  # test/rage runs in its own bundle with Rage loaded (see its Gemfile).
+  t.test_files = FileList["test/**/*_test.rb"].exclude("test/rage/**/*")
 end
 
 desc "Build the yrby-rails gem into pkg/"

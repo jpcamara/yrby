@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+# The Rage fixture's own bundle, apart from the gem's, so Rage never loads
+# into the main test suite.
+source "https://rubygems.org"
+
+gem "rage-rb", "~> 1.29"
+gem "sqlite3"
+gem "yrby", path: "../.."
+gem "yrby-rails", path: "../.."
+
+gem "minitest", "~> 5.0"

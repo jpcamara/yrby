@@ -101,6 +101,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
+  - [Rage](#rage)
 - [Experimental: writing from Ruby](#experimental-writing-from-ruby)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
@@ -1076,6 +1077,54 @@ server acks it again. Awareness is ephemeral and isn't acked.
 The browser clients manage presence (cursors, selections). The server doesn't
 set or hold presence state, and it relays awareness frames without reading
 them. See `yrby-client` for the client-side awareness API.
+
+### Rage
+
+[Rage](https://github.com/rage-rb/rage) apps get the same channel. Add
+`yrby-rails` to the Gemfile. When Rage is loaded, the gem loads `Y::Rage` and
+the `Y::Document` models without the Rails engine, so the storage hooks default
+to `Y::Document` as they do in Rails. Create the two tables from
+[`create_y_tables.rb`](lib/generators/yrby/tables/templates/create_y_tables.rb)
+with your migration tool.
+
+```rb
+# app/channels/document_channel.rb
+class DocumentChannel < Rage::Cable::Channel
+  include Y::Rage
+
+  def subscribed = sync_subscribed(params[:id])
+  def receive(data) = sync_receive(data)
+
+  private
+
+  def authorized?(key) = current_user&.member_of?(key)
+end
+
+# config/routes.rb
+mount Rage.cable.application, at: "/cable"
+```
+
+`yrby-client`'s `ActionCableProvider` connects to it unchanged. To write from
+Ruby, record the update and then broadcast it:
+
+```rb
+update = doc.edit { doc.get_text("body").push("Reviewed.") }
+Y::Document.append(key, update)
+Y::Rage.broadcast(key, update)
+```
+
+Rage turns away a WebSocket whose `Origin` doesn't match
+`config.cable.allowed_request_origins`, and one with no `Origin` header at
+all. Browsers send it. A client that doesn't, such as a Node script, needs
+`config.cable.disable_request_forgery_protection = true`, so only set that
+where you trust every client.
+
+The workers of one `rage s` share broadcasts through Iodine. Separate servers
+need Rage's Redis pub/sub adapter (`config/pubsub.yml`) to reach each other's
+clients, the way Action Cable needs a cross-process adapter.
+
+`Y::DocumentChannel`, `collaborative_document_tag`, and
+`collaborative_document(name).edit` are Rails-only.
 
 ## Experimental: writing from Ruby
 

@@ -131,6 +131,45 @@ jobs:
         if: failure()
         run: tail -200 tmp/browser-server.log || true
 
+  rage:
+    name: Rage
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the gem
+        run: bundle exec rake compile
+
+      # The Rage fixture has its own bundle, so Rage stays out of the main
+      # suite.
+      - name: Install the Rage fixture
+        working-directory: test/rage
+        run: bundle install
+      - name: Y::Rage tests
+        working-directory: test/rage
+        run: bundle exec ruby y_rage_test.rb
+
+      # Clients converge through a two-worker Rage server, with acks,
+      # presence, a write from Ruby, a late joiner, and a rejected key.
+      - run: npm ci
+        working-directory: packages/client
+      - name: Clients against the Rage app
+        working-directory: packages/client
+        run: npm run test:rage
+
+      - name: Print server log on failure
+        if: failure()
+        run: tail -200 tmp/rage-server.log || true
+
   demo:
     name: Demo e2e (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest

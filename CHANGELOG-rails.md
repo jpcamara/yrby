@@ -7,6 +7,18 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `include Y::Rage` in a `Rage::Cable::Channel` syncs documents over Rage
+  (rage-rb) with the same API as `Y::ActionCable`: `on_load`, `on_change`,
+  `authorized?`, `sync_subscribed`, and `sync_receive`.
+  `Y::Rage.broadcast(key, update)` sends an update written from Ruby. When
+  Rage is loaded, yrby-rails loads `Y::Rage` and the `Y::Document` models
+  without the Rails engine.
+- A sync channel relays through `sync_broadcast(stream, message)` and logs
+  through `sync_logger`. They default to Action Cable's server and the
+  channel's logger, and `Y::Rage` overrides both.
+
 ## [0.8.0] - 2026-11-03
 
 Requires yrby 0.9.0 or later.

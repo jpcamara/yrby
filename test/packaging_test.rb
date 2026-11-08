@@ -20,6 +20,12 @@ class PackagingTest < Minitest::Test
     assert_empty files.grep(/action_cable|actioncable|yrby-rails|update_log/), "Rails-layer files ship in yrby-rails"
   end
 
+  # Y::Rage builds on Y::ActionCable::Sync, so it ships beside it.
+  def test_the_rage_channel_ships_in_yrby_rails
+    refute_includes load_spec("yrby.gemspec").files, "lib/y/rage.rb"
+    assert_includes load_spec("yrby-rails.gemspec").files, "lib/y/rage.rb"
+  end
+
   def test_core_gem_ships_its_own_essentials
     files = load_spec("yrby.gemspec").files
 
