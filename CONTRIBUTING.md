@@ -95,6 +95,28 @@ each other.
 The fixture has no authentication beyond the grants under test, so only run
 it locally.
 
+### Rage tests
+
+`Y::Rage` is tested against a small Rage app in `test/rage`, which has its own
+bundle so Rage never loads into the main suite. After `bundle exec rake
+compile`:
+
+```bash
+cd test/rage
+bundle install
+bundle exec ruby y_rage_test.rb   # Y::Rage against real Rage
+
+cd ../../packages/client
+npm ci
+npm run test:rage
+```
+
+`npm run test:rage` starts the app with two workers and drives it with
+`ActionCableProvider` clients: concurrent edits converge and are acked,
+presence reaches the other client, an update written from Ruby reaches both,
+a late joiner loads from storage, and an unauthorized key is rejected. The
+server log goes to `tmp/rage-server.log`.
+
 ### Submission checks
 
 - Keep the binding layer thin; put testable logic in pure functions.

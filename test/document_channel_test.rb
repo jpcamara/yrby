@@ -118,6 +118,17 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
     refute_empty doc.read_text("content").to_s
   end
 
+  # Relays go through Action Cable's server unless a channel overrides
+  # sync_broadcast.
+  def test_an_update_is_broadcast_through_action_cable
+    subscribe grant: grant, name: "body"
+    message = { "update" => Base64.strict_encode64(Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)) }
+
+    assert_broadcast_on(Y::ActionCable.stream_name(@page.collaborative_document(:body).key), message) do
+      perform :receive, message
+    end
+  end
+
   def test_a_missing_grant_is_rejected
     subscribe name: "body"
 

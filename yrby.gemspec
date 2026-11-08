@@ -29,7 +29,7 @@ Gem::Specification.new do |spec|
     "README.md",
     "CHANGELOG.md"
   ] - Dir["lib/yrby-rails.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*",
-          "lib/yrby/**/*", "app/**/*"]
+          "lib/y/rage.rb", "lib/yrby/**/*", "app/**/*"]
 
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/yrby/extconf.rb"]

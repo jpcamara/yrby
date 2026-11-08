@@ -60,7 +60,8 @@
     "test": "npm run build && node --test --test-timeout=30000",
     "test:browser": "node browser/run.mjs",
     "test:browser:turbolinks": "node browser/run_turbolinks.mjs",
-    "test:browser:collaboration": "node browser/run_collaboration.mjs"
+    "test:browser:collaboration": "node browser/run_collaboration.mjs",
+    "test:rage": "npm run build && node rage/run.mjs"
   },
   "license": "MIT",
   "author": "JP Camara <jp@jpcamara.com>",
