@@ -19,6 +19,16 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `sync_logger`. They default to Action Cable's server and the
   channel's logger, and `Y::Rage` overrides both.
 
+### Security
+
+- `Y::ActionCable::Sync`'s methods and `Y::DocumentChannel`'s
+  `authorized_document_key` accessors are private. Action Cable treats a
+  channel's public methods as actions a client can call, so a client could call
+  `sync_subscribed` directly and skip the channel's own `subscribed` and
+  `receive`. Channels that call these from `subscribed` and `receive` keep
+  working. Code that calls them on a channel from outside, such as a test, now
+  needs `send`.
+
 ## [0.8.0] - 2026-11-03
 
 Requires yrby 0.9.0 or later.

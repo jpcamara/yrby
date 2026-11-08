@@ -142,6 +142,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
+    # Everything below is private. Action Cable dispatches a client's
+    # {"action": "..."} to any public instance method the channel adds, so a
+    # public sync_subscribed or sync_receive would be callable from the
+    # browser. Channels call these from their own subscribed and receive.
+    private
+
     # Call from `subscribed`. Checks authorized?, then streams broadcasts for
     # this document and sends the server's opening handshake (SyncStep1 from
     # the store). When authorized? returns false, it rejects the subscription
@@ -224,8 +230,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       sync_send_ack(id, sync_handle_frame(encoded, bytes))
     end
-
-    private
 
     # Whether this subscriber may sync the document named by `key`. The
     # default returns false, so nothing syncs until the channel overrides it:
