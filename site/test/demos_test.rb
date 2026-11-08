@@ -111,35 +111,41 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_equal 0, Room.count
   end
 
-  test "every demo page renders with its document key and bundle" do
+  test "every demo page renders with its bundle" do
     Room.create!(slug: "room1")
 
     Demos::ALL.each do |demo|
       get "/demos/#{demo.slug}/room1"
 
       assert_response :success, "#{demo.slug} did not render"
-      # The Lexxy page names its Yjs document in <lexxy-collaboration doc-id>.
-      key_attribute = demo.slug == "lexxy" ? "doc-id" : "data-document-key"
-      key = room.collaborative_document(Demos.field(demo)).key
-
-      assert_includes response.body, %(#{key_attribute}="#{key}")
       assert_includes response.body, "/#{demo.slug}.js"
     end
   end
 
-  test "every shape demo page renders the room document's grant" do
+  test "the lexxy page names its document key" do
+    Room.create!(slug: "room1")
+
+    get "/demos/lexxy/room1"
+
+    # The Lexxy page names its Yjs document in <lexxy-collaboration doc-id>.
+    assert_includes response.body, %(doc-id="#{room.collaborative_document("body").key}")
+  end
+
+  test "every shape demo page renders a yrby-document for the room document" do
     Room.create!(slug: "room1")
 
     Demos.shape_slugs.each do |slug|
       get "/demos/#{slug}/room1"
 
-      grant = response.body[/data-grant="([^"]+)"/, 1]
+      element = Nokogiri::HTML5(response.body).at_css("yrby-document")
 
-      # The client subscribes to RoomChannel with this grant and name, and the
+      assert element, "#{slug} page has no yrby-document"
+      assert_equal "RoomChannel", element["channel"]
+      assert_equal slug, element["name"]
+      # The element subscribes to RoomChannel with this grant and name, and the
       # grant resolves to this room for this demo's document only.
-      assert_equal room, Y::Collaborative.locate(grant, slug), "#{slug} page has no grant for the room"
-      assert_nil Y::Collaborative.locate(grant, "body")
-      assert_includes response.body, %(data-name="#{slug}")
+      assert_equal room, Y::Collaborative.locate(element["grant"], slug), "#{slug} page has no grant for the room"
+      assert_nil Y::Collaborative.locate(element["grant"], "body")
     end
   end
 

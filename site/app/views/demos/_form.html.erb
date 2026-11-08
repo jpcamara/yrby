@@ -1,1 +1,3 @@
-<div id="form" data-document-key="<%= @document.key %>" data-grant="<%= @document.grant %>" data-name="<%= @document.name %>"></div>
+<%= collaborative_document_tag @room, @demo.slug, channel: "RoomChannel" do %>
+  <div id="form"></div>
+<% end %>
