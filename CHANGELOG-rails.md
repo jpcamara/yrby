@@ -15,6 +15,13 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Y::Rage.broadcast(key, update)` sends an update written from Ruby. When
   Rage is loaded, yrby-rails loads `Y::Rage` and the `Y::Document` models
   without the Rails engine.
+- `Y::AnyCable::Channel` syncs documents behind anycable-go without Rails,
+  with the app (Rage, or any Rack app) answering AnyCable's HTTP RPC. Same
+  API as `Y::ActionCable`. `Y::AnyCable::Connection` is the connection
+  factory: define `identify(request)` to authenticate, and channels read the
+  result, or the identifiers in an anycable-go JWT, through `identifiers`.
+  `Y::AnyCable.broadcast(key, update)` sends an update written from Ruby.
+  Load it with `require "y/any_cable"`.
 - A sync channel relays through `sync_broadcast(stream, message)` and logs
   through `sync_logger`. They default to Action Cable's server and the
   channel's logger, and `Y::Rage` overrides both.

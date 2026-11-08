@@ -102,6 +102,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
   - [Rage](#rage)
+  - [Rage + AnyCable](#rage--anycable)
 - [Experimental: writing from Ruby](#experimental-writing-from-ruby)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
@@ -1125,6 +1126,92 @@ clients, the way Action Cable needs a cross-process adapter.
 
 `Y::DocumentChannel`, `collaborative_document_tag`, and
 `collaborative_document(name).edit` are Rails-only.
+
+### Rage + AnyCable
+
+A Ruby app without Rails can also be the RPC backend for
+[anycable-go](https://docs.anycable.io/anycable-go/getting_started).
+anycable-go holds the WebSockets and calls the app over HTTP for each
+connect, subscribe, and message. `Y::AnyCable` works with any Rack app. Rage
+is the one it's tested with.
+
+Add `yrby-rails` and `anycable-core` to the Gemfile, then:
+
+```rb
+require "y/any_cable"
+
+# app/channels/document_channel.rb
+class DocumentChannel < Y::AnyCable::Channel
+  def subscribed = sync_subscribed(params[:id])
+  # Each RPC call builds a new channel, so pass the key every time.
+  def receive(data) = sync_receive(data, params[:id])
+
+  private
+
+  def authorized?(key) = Membership.exists?(user_id: identifiers["user_id"], key:)
+end
+
+# app/channels/cable_connection.rb
+class CableConnection < Y::AnyCable::Connection
+  # Return the identifiers for the connection, or nil to refuse it.
+  def identify(request)
+    user = User.find_by_session(request.cookies["session"])
+    { "user_id" => user.id } if user
+  end
+end
+
+# config/initializers/anycable.rb (after the app loads)
+AnyCable.connection_factory = CableConnection
+
+# config/routes.rb
+mount AnyCable::HTTRPC::Server.new, at: "/_anycable"
+```
+
+Then point anycable-go at that route, with the same secret on both sides:
+
+```sh
+ANYCABLE_SECRET=... anycable-go --rpc_host=http://localhost:3000/_anycable \
+  --broadcast_adapter=http --http_broadcast_port=8090
+```
+
+```sh
+# the app's environment
+ANYCABLE_SECRET=...
+ANYCABLE_BROADCAST_ADAPTER=http
+ANYCABLE_HTTP_BROADCAST_URL=http://localhost:8090/_broadcast
+```
+
+The secret signs the RPC calls and the broadcasts. The storage hooks default
+to `Y::Document`, as with `Y::Rage`, and the channel has the same `on_load`,
+`on_change`, and `authorized?` API as `Y::ActionCable`. `identify` gets a
+`Rack::Request` for the WebSocket upgrade, and channels read what it returned
+through `identifiers`. A client can only reach `subscribed`, `unsubscribed`,
+and `receive`. Any other action is refused.
+
+To skip the connect call, issue a token with
+`AnyCable::JWT.encode({ "user_id" => user.id })` and have the client connect
+with `?jid=<token>`. anycable-go verifies it (the JWT secret defaults to the
+shared secret), doesn't call `identify`, and passes the token's identifiers to
+each command, so `authorized?` reads them the same way.
+
+Write from Ruby the way `Y::Rage` does, through `Y::AnyCable.broadcast`:
+
+```rb
+update = doc.edit { doc.get_text("body").push("Reviewed.") }
+Y::Document.append(key, update)
+Y::AnyCable.broadcast(key, update)
+```
+
+The HTTP broadcaster needs nothing beyond anycable-go. With several
+anycable-go instances, use Redis (`ANYCABLE_BROADCAST_ADAPTER=redis` and
+`REDIS_URL` on both sides) or NATS instead, so every instance gets every
+broadcast.
+
+`Y::AnyCable::Channel` opens the awareness stream with whispers on, so
+presence can go from client to client inside anycable-go with no RPC. That
+also makes it work with a binary y-protocols endpoint in front of anycable-go
+(the `/yjs/` endpoint in [this Thruster fork](https://github.com/jpcamara/thruster)),
+which is tested locally but not in CI.
 
 ## Experimental: writing from Ruby
 

@@ -61,7 +61,9 @@
     "test:browser": "node browser/run.mjs",
     "test:browser:turbolinks": "node browser/run_turbolinks.mjs",
     "test:browser:collaboration": "node browser/run_collaboration.mjs",
-    "test:rage": "npm run build && node rage/run.mjs"
+    "test:rage": "npm run build && node rage/run.mjs",
+    "test:anycable": "npm run build && node anycable/run.mjs",
+    "test:anycable:yjs": "node anycable/yjs.mjs"
   },
   "license": "MIT",
   "author": "JP Camara <jp@jpcamara.com>",

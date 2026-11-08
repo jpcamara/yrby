@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
     "lib/y/collaborative.rb",
     "lib/y/collaborative/**/*.rb",
     "lib/y/rage.rb",
+    "lib/y/any_cable.rb",
     "app/**/*.rb",
     "lib/generators/**/*",
     "LICENSE",

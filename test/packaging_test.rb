@@ -26,6 +26,12 @@ class PackagingTest < Minitest::Test
     assert_includes load_spec("yrby-rails.gemspec").files, "lib/y/rage.rb"
   end
 
+  # So does Y::AnyCable.
+  def test_the_anycable_channel_ships_in_yrby_rails
+    refute_includes load_spec("yrby.gemspec").files, "lib/y/any_cable.rb"
+    assert_includes load_spec("yrby-rails.gemspec").files, "lib/y/any_cable.rb"
+  end
+
   def test_core_gem_ships_its_own_essentials
     files = load_spec("yrby.gemspec").files
 
