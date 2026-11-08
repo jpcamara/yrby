@@ -25,26 +25,58 @@ class DemoSourceTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "every demo page shows its view and script as they are on disk" do
-    Demos::ALL.each do |demo|
+  # The lines between a file's "begin source excerpt" and "end source
+  # excerpt" comments.
+  def marked_region(path)
+    Rails.root.join(path).read[%r{(?:#|//|<%#) begin source excerpt.*?\n(.*?)^\s*(?:#|//|<%#) end source excerpt}m, 1]
+  end
+
+  test "every shape demo page shows its view and script as they are on disk" do
+    Demos::ALL.reject { |demo| demo.slug == "lexxy" }.each do |demo|
       get "/demos/#{demo.slug}/room1"
 
-      files = ["app/views/demos/_#{demo.slug}.html.erb", "frontend/src/#{demo.slug}.js"]
-      files.unshift("app/models/room.rb") if demo.slug == "lexxy"
-
-      assert_shows_files files
+      assert_shows_files ["app/views/demos/_#{demo.slug}.html.erb", "frontend/src/#{demo.slug}.js"]
     end
   end
 
-  test "the lexxy page shows the model and form from the quick start" do
+  test "the lexxy page shows the marked lines of its model, view, and script" do
+    get "/demos/lexxy/room1"
+
+    assert_response :success
+    blocks = source_blocks
+
+    assert_equal ["app/models/room.rb", "app/views/demos/_lexxy.html.erb", "frontend/src/lexxy.js"], blocks.keys
+
+    model = marked_region("app/models/room.rb")
+
+    assert_equal "class Room < ApplicationRecord\n#{model}end\n", blocks["app/models/room.rb"]
+    assert_equal marked_region("app/views/demos/_lexxy.html.erb"), blocks["app/views/demos/_lexxy.html.erb"]
+    assert_equal marked_region("frontend/src/lexxy.js"), blocks["frontend/src/lexxy.js"]
+  end
+
+  test "the lexxy page shows the recipe from the quick start and none of the site's plumbing" do
     get "/demos/lexxy/room1"
     blocks = source_blocks
 
-    assert_includes blocks["app/models/room.rb"], "has_collaborative_rich_text :body"
-    form = "<%= form_with model: @room do |form| %>\n  <%= form.collaborative_rich_textarea :body %>\n<% end %>"
+    assert_equal <<~RUBY, blocks["app/models/room.rb"]
+      class Room < ApplicationRecord
+        # nodes: renders attachment nodes as nothing, because the site takes no uploads.
+        has_collaborative_rich_text :body, nodes: SUPPRESSED_NODES
+      end
+    RUBY
+    assert_equal <<~ERB, blocks["app/views/demos/_lexxy.html.erb"]
+      <%= form_with model: @room do |form| %>
+        <%= form.collaborative_rich_textarea :body %>
+      <% end %>
+    ERB
+    assert_equal %(import "@37signals/lexxy"\nimport "lexxy-realtime"\n), blocks["frontend/src/lexxy.js"]
 
-    assert_includes blocks["app/views/demos/_lexxy.html.erb"], form
-    assert_includes blocks["frontend/src/lexxy.js"], %(import { setConsumer } from "lexxy-realtime")
+    shown = blocks.values.join
+
+    ["shape_slugs", "has_many", "to_param", "SUPPRESSED_NODES = ", "stored-html", "Stored HTML",
+     "lexxy.css", "room.js", "setConsumer", "setupRoomPage", "yrby:synced"].each do |plumbing|
+      assert_not_includes shown, plumbing
+    end
   end
 
   test "the record-backed example shows its view and script as they are on disk" do

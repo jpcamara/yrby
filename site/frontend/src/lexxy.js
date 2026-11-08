@@ -5,7 +5,10 @@
 // syncs. The rest comes from room.js, which every demo shares: the AnyCable
 // consumer, the cursor name and color, the room bar, the status line, and the
 // stored HTML panel.
+// begin source excerpt
 import "@37signals/lexxy"
+import "lexxy-realtime"
+// end source excerpt
 // Lexxy's package exports only include the JS entry, so import the stylesheet
 // by path. Bun bundles it with lexxy-realtime's caret styles into
 // public/lexxy.css.
