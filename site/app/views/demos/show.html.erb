@@ -69,6 +69,10 @@
       </div>
     </details>
   <% end %>
+
+  <%= render "source_files", paths: demo_source_paths(@demo.slug),
+             note: safe_join(["The room bar, presence chips, status line, and consumer come from ",
+                              tag.code("frontend/src/room.js"), ", which every demo shares."]) %>
 </div>
 
 <%= javascript_include_tag busted("/#{@demo.slug}.js"), defer: true, skip_pipeline: true %>
