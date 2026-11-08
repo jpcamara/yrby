@@ -117,6 +117,34 @@ presence reaches the other client, an update written from Ruby reaches both,
 a late joiner loads from storage, and an unauthorized key is rejected. The
 server log goes to `tmp/rage-server.log`.
 
+### AnyCable tests
+
+`Y::AnyCable` is tested against a Rage app in `test/anycable` that answers
+anycable-go's HTTP RPC. It has its own bundle too. The integration test needs
+[anycable-go](https://docs.anycable.io/anycable-go/getting_started) on `PATH`
+(`brew install anycable-go`, or a binary from its releases), or its path in
+`ANYCABLE_GO`. After `bundle exec rake compile`:
+
+```bash
+cd test/anycable
+bundle install
+bundle exec ruby y_any_cable_test.rb   # Y::AnyCable through anycable-core's RPC handler
+
+cd ../../packages/client
+npm ci
+npm run test:anycable
+```
+
+`npm run test:anycable` starts the app with two workers behind anycable-go
+and runs the same checks as `test:rage`, plus a refused connection and
+identifiers from both `identify` and a JWT. Logs go to `tmp/anycable-rpc.log`
+and `tmp/anycable-go.log`.
+
+`npm run test:anycable:yjs` drives the same app through the `/yjs/` binary
+endpoint. That endpoint is only in the Thruster fork at
+<https://github.com/jpcamara/thruster>, so set `THRUST` to a build of it. CI
+doesn't run this one.
+
 ### Submission checks
 
 - Keep the binding layer thin; put testable logic in pure functions.

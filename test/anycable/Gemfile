@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+# The AnyCable fixture's own bundle, apart from the gem's, so Rage and
+# anycable-core never load into the main test suite.
+source "https://rubygems.org"
+
+gem "anycable-core", "~> 1.6"
+gem "rage-rb", "~> 1.29"
+gem "sqlite3"
+gem "yrby", path: "../.."
+gem "yrby-rails", path: "../.."
+
+gem "minitest", "~> 5.0"
