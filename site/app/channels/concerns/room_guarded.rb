@@ -53,6 +53,16 @@ module RoomGuarded
     # ConnectionGuard tracks the frame bucket and subscribe rate per
     # connection.
     state_attr_accessor :seat, :notified
+
+    # Action Cable lets a client call any public method a channel adds, by
+    # sending {"action": name}. The released yrby-rails leaves its sync
+    # methods and Y::DocumentChannel's key accessor public, and a direct
+    # sync_subscribed call skips the frame bucket and the seat checks. Only
+    # receive stays public. Action Cable calls subscribed and unsubscribed
+    # itself, so they can be private too (RecordChannelGuard's versions are).
+    private :seat, :seat=, :notified, :notified=, :sync_subscribed, :sync_receive
+    private :subscribed if public_method_defined?(:subscribed)
+    private :authorized_document_key, :authorized_document_key= if method_defined?(:authorized_document_key)
   end
 
   # This demo turns off AnyCable whispers.
