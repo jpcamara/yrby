@@ -26,7 +26,7 @@ class Room < ApplicationRecord
   }.freeze
 
   # begin source excerpt
-  # nodes: renders attachment nodes as nothing, because the site takes no uploads.
+  # nodes: is this site's no-uploads guard. In your app: has_collaborative_rich_text :body
   has_collaborative_rich_text :body, nodes: SUPPRESSED_NODES
   # end source excerpt
   Demos.shape_slugs.each { |slug| has_collaborative_document slug }
