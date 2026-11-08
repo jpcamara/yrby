@@ -25,7 +25,10 @@ class Room < ApplicationRecord
     "image_gallery" => ->(_node) { "" }
   }.freeze
 
+  # begin source excerpt
+  # nodes: renders attachment nodes as nothing, because the site takes no uploads.
   has_collaborative_rich_text :body, nodes: SUPPRESSED_NODES
+  # end source excerpt
   Demos.shape_slugs.each { |slug| has_collaborative_document slug }
 
   has_many :documents, class_name: "Y::Document", as: :record, dependent: :destroy

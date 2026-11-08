@@ -8,9 +8,11 @@
     Lexxy editor inside a <yrby-document> that subscribes to LexxyChannel
     with the room's grant. The site's editor tag has no upload button and no
     upload URLs (app/lib/no_attachments.rb). %>
+<%# begin source excerpt %>
 <%= form_with model: @room do |form| %>
   <%= form.collaborative_rich_textarea :body %>
 <% end %>
+<%# end source excerpt %>
 
 <details class="stored group mt-4 rounded-xl border border-zinc-800 bg-panel">
   <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-400 select-none group-open:border-b group-open:border-zinc-800 hover:text-zinc-200">
