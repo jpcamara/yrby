@@ -9,14 +9,6 @@
 # name gets the same limits as one that subscribes to a subclass. Which
 # records a channel opens is up to its authorize_document block.
 module RecordChannelGuard
-  # Checks access before taking a seat, so a refused client never holds one.
-  def subscribed
-    return reject unless locate_record && authorized?(nil)
-    return reject unless take_seat(record, params[:name].to_s)
-
-    super
-  end
-
   # The gems' receive goes straight to sync_receive. This sends the frame
   # through RoomGuarded's checks first. It also looks up the record and checks
   # access again before every frame, as this site always has. The gems only
@@ -26,6 +18,19 @@ module RecordChannelGuard
     return reject_document_subscription unless key && locate_record && authorized?(key)
 
     guarded_receive(data, key)
+  end
+
+  # Action Cable runs the callbacks below itself. They're private so a client
+  # can't call them as actions: running subscribed again, or calling
+  # unsubscribed to give its seat back while staying subscribed.
+  private
+
+  # Checks access before taking a seat, so a refused client never holds one.
+  def subscribed
+    return reject unless locate_record && authorized?(nil)
+    return reject unless take_seat(record, params[:name].to_s)
+
+    super
   end
 
   def unsubscribed
