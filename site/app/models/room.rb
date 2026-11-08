@@ -12,8 +12,6 @@
 # Each document is a Y::Document row tied to the room (`record` plus the
 # name). It's created by its first write and destroyed with the room.
 class Room < ApplicationRecord
-  include LexxyRealtime::Collaborative
-
   # The site doesn't accept uploads, and the editor has attachments turned off.
   # A client that skips the page and talks the protocol directly can still
   # build a document with attachment nodes, and a data: URL in an attachment's
