@@ -18,10 +18,10 @@ module Y
     #
     # The grant and channel come from record.collaborative_document(name), so
     # the tag works for any gem that returns its own document, such as
-    # lexxy-realtime. Pass channel: for an app's own Y::DocumentChannel
-    # subclass. The grant is scoped to this record and attribute. Only render
-    # the tag on pages where
-    # the user may edit the record, because by default anyone holding the
+    # lexxy-realtime. An app's own Y::DocumentChannel subclass is named where
+    # the model declares the attribute, with has_collaborative_document's
+    # channel:. The grant is scoped to this record and attribute. Only render
+    # the tag on pages where the user may edit the record, because by default anyone holding the
     # grant can open the document. To also check the user's current
     # permissions when they subscribe, use Y::DocumentChannel.authorize_document.
     #

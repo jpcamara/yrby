@@ -61,12 +61,13 @@ module Y
     end
 
     class_methods do
-      # Declares how one attribute's document is stored. The shipped channel
-      # and Ruby reads both follow it, and undeclared attributes use plain
-      # Y::Document.
-      def has_collaborative_document(name, encrypted: false) # rubocop:disable Naming/PredicatePrefix
+      # Declares how one attribute's document is stored, and the channel that
+      # serves it: an app's own Y::DocumentChannel subclass, by name. The
+      # shipped channel and Ruby reads both follow it. Undeclared attributes
+      # use plain Y::Document and Y::DocumentChannel.
+      def has_collaborative_document(name, encrypted: false, channel: nil) # rubocop:disable Naming/PredicatePrefix
         self.collaborative_document_options = collaborative_document_options.merge(
-          name.to_s => { encrypted: encrypted }.freeze
+          name.to_s => { encrypted: encrypted, channel: channel&.to_s }.freeze
         ).freeze
       end
 
