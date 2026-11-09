@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 import * as encoding from "lib0/encoding";
 import { writeSyncStep1, writeUpdate } from "y-protocols/sync";
-import { Awareness, encodeAwarenessUpdate } from "y-protocols/awareness";
+import * as decoding from "lib0/decoding";
+import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from "y-protocols/awareness";
 import { YProtocolSession, MessageType } from "../dist/y_protocol_session.js";
 
 const MSG = MessageType;
@@ -464,3 +465,114 @@ test("a handshake during catch-up waits for its own step2", () => {
   assert.equal(eng.synced, true);
   eng.destroy(); doc.destroy(); peer.destroy();
 });
+
+// The server keeps no presence, so a session answers presence from a peer it
+// hasn't seen with its own, once, instead of leaving the newcomer to wait for
+// the next renewal.
+function presenceFrame(awareness) {
+  const e = encoding.createEncoder();
+  encoding.writeVarUint(e, MSG.Awareness);
+  encoding.writeVarUint8Array(e, encodeAwarenessUpdate(awareness, [awareness.clientID]));
+  return encoding.toUint8Array(e);
+}
+
+function present(name) {
+  const doc = new Y.Doc();
+  const awareness = new Awareness(doc);
+  awareness.setLocalStateField("user", name);
+  return { doc, awareness };
+}
+
+test("awareness: presence from a newly seen peer is answered once with ours", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const bob = present("bob");
+  const sent = [];
+  const eng = new YProtocolSession(bob.doc, { awareness: bob.awareness, ...noTimers, send: (f) => sent.push(f) });
+  eng.resume();
+  sent.length = 0;
+  const ada = present("ada");
+  const cy = present("cy");
+
+  eng.receive(presenceFrame(ada.awareness));
+  eng.receive(presenceFrame(cy.awareness)); // joins in the same window, shares the answer
+  assert.equal(sent.length, 0, "the answer waits a moment to cover a burst of joiners");
+  t.mock.timers.tick(250);
+  assert.equal(sent.length, 1, "one answer for both newcomers");
+
+  const seen = new Awareness(new Y.Doc());
+  applyAwarenessFrame(seen, sent[0]);
+  assert.equal(seen.getStates().get(bob.doc.clientID)?.user, "bob", "the answer carries our presence");
+
+  ada.awareness.setLocalStateField("user", "ada lovelace");
+  eng.receive(presenceFrame(ada.awareness)); // a peer we know: no answer
+  t.mock.timers.tick(1000);
+  assert.equal(sent.length, 1);
+
+  eng.destroy();
+  for (const { awareness } of [bob, ada, cy]) awareness.destroy();
+  seen.destroy();
+});
+
+test("awareness: no answer without local presence, or after pause", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const bob = present("bob");
+  const sent = [];
+  const eng = new YProtocolSession(bob.doc, { awareness: bob.awareness, ...noTimers, send: (f) => sent.push(f) });
+  eng.resume();
+  sent.length = 0;
+
+  const ada = present("ada");
+  const cy = present("cy");
+  eng.receive(presenceFrame(ada.awareness));
+  eng.pause();
+  t.mock.timers.tick(1000);
+  assert.equal(sent.length, 0, "pause cancels the answer; resume announces presence itself");
+
+  eng.resume();
+  sent.length = 0;
+  bob.awareness.setLocalState(null);
+  sent.length = 0;
+  eng.receive(presenceFrame(cy.awareness));
+  t.mock.timers.tick(1000);
+  assert.equal(sent.length, 0, "nothing to answer with");
+  eng.destroy();
+  for (const { awareness } of [bob, ada, cy]) awareness.destroy();
+});
+
+test("awareness: a late joiner sees an earlier peer without waiting for a renewal, and the answers stop", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ada = present("ada");
+  const bob = present("bob");
+  const sends = { ada: 0, bob: 0 };
+  // Each session's frames reach the other, as a relay through the server would.
+  const engines = {};
+  engines.ada = new YProtocolSession(ada.doc, {
+    awareness: ada.awareness, ...noTimers,
+    send: (f) => { sends.ada++; engines.bob?.receive(f); },
+  });
+  engines.ada.resume(); // ada is alone; her presence reaches no one
+  engines.bob = new YProtocolSession(bob.doc, {
+    awareness: bob.awareness, ...noTimers,
+    send: (f) => { sends.bob++; engines.ada.receive(f); },
+  });
+  sends.ada = 0;
+  engines.bob.resume(); // bob joins and announces himself
+
+  assert.equal(bob.awareness.getStates().has(ada.doc.clientID), false, "bob doesn't see ada yet");
+  t.mock.timers.tick(250); // ada answers bob
+  assert.equal(bob.awareness.getStates().get(ada.doc.clientID)?.user, "ada", "bob sees ada");
+  t.mock.timers.tick(10_000);
+  assert.equal(sends.ada, 1, "ada answered bob once");
+  assert.equal(sends.bob, 3, "bob sent his handshake, his presence, and one answer to ada, then stopped");
+
+  engines.ada.destroy();
+  engines.bob.destroy();
+  ada.awareness.destroy();
+  bob.awareness.destroy();
+});
+
+function applyAwarenessFrame(awareness, frame) {
+  const decoder = decoding.createDecoder(frame);
+  assert.equal(decoding.readVarUint(decoder), MSG.Awareness);
+  applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), "test");
+}
