@@ -37,6 +37,13 @@ module Site
     # No image processing library to load or call, since there are no images.
     config.active_storage.variant_processor = :disabled
 
+    # Demo agents run as Solid Queue jobs in processes of their own
+    # (bin/jobs, config/queue.yml), each agent a fiber. Fiber workers need
+    # fiber-scoped execution state, which also suits Falcon.
+    config.active_job.queue_adapter = :solid_queue
+    config.solid_queue.connects_to = { database: { writing: :queue } }
+    config.active_support.isolation_level = :fiber
+
     # Deny all framing, since the demos aren't meant to be embedded.
     # ActionDispatch::Response copies default_headers in a railtie initializer,
     # so this has to be set here in the config phase. Set in an initializer, it

@@ -45,13 +45,23 @@ gem "anycable-rails", "~> 1.6"
 # The published gems, so the site runs what a reader installs. yrby-rails
 # provides the channel concern and the storage models. The site's documents
 # are Y::Document rows, as in the docs.
-gem "yrby", "~> 0.9"
-gem "yrby-rails", "~> 0.8"
+gem "yrby", "~> 0.9", ">= 0.9.1"
+gem "yrby-rails", "~> 0.9"
+
+# The agent demo: PageAgent is a Y::Agent from yrby-agent, which brings
+# ruby_llm and async-websocket. It's require: false so the app loads it with
+# the agent, not at boot. It's an alpha, so the version is pinned.
+gem "yrby-agent", "0.1.0.alpha1", require: false
 
 # Collaborative Lexxy editing over yrby: has_collaborative_rich_text on the
 # model and form.collaborative_rich_textarea in the view. The editor
 # JavaScript comes from npm.
 gem "lexxy-realtime", "~> 0.9"
+
+# Runs the demo agents as jobs. Its fiber workers (config/queue.yml) run each
+# agent as a fiber on one reactor thread, on the async gem Falcon already
+# brings.
+gem "solid_queue", "~> 1.7"
 
 # Renders the docs markdown, including GFM tables and fenced code. It's
 # published as a precompiled gem.

@@ -4,6 +4,11 @@
   <link rel="stylesheet" href="<%= busted "/lexxy.css" %>">
 <% end %>
 
+<%# The same room as a shared page, where each person can bring an agent. %>
+<p class="mb-3 text-sm text-zinc-400">
+  <%= link_to "Open this room as a shared page with agents →", demo_space_path(@room), class: "text-accent hover:underline" %>
+</p>
+
 <%# Room declares has_collaborative_rich_text :body. The helper renders the
     Lexxy editor inside a <yrby-document> that subscribes to LexxyChannel
     with the room's grant. The site's editor tag has no upload button and no
