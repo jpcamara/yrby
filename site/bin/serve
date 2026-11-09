@@ -25,8 +25,23 @@ THREADS="${FALCON_THREADS:-0}"
 # directly, skipping the proxy's MAX_REQUEST_BODY and making the RPC mount
 # reachable from the network.
 if [ "$THREADS" != "0" ]; then
-  exec bundle exec falcon serve --bind "http://127.0.0.1:${PORT:-3000}" \
-    --hybrid --forks "$COUNT" --threads "$THREADS"
+  bundle exec falcon serve --bind "http://127.0.0.1:${PORT:-3000}" \
+    --hybrid --forks "$COUNT" --threads "$THREADS" &
 else
-  exec bundle exec falcon serve --bind "http://127.0.0.1:${PORT:-3000}" --count "$COUNT"
+  bundle exec falcon serve --bind "http://127.0.0.1:${PORT:-3000}" --count "$COUNT" &
 fi
+web=$!
+
+# Solid Queue, which runs the demo agents, in processes of its own beside
+# Falcon: a supervisor that forks JOB_PROCESSES workers (config/queue.yml).
+# A signal from thrust stops both, and either one exiting stops the other,
+# so thrust sees the stack go down together.
+bin/jobs &
+jobs=$!
+
+trap 'kill -TERM "$web" "$jobs" 2>/dev/null' TERM INT
+while kill -0 "$web" 2>/dev/null && kill -0 "$jobs" 2>/dev/null; do
+  sleep 1
+done
+kill -TERM "$web" "$jobs" 2>/dev/null || true
+wait

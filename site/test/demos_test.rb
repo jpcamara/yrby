@@ -164,6 +164,52 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_equal room, GlobalID::Locator.locate_signed(grant, for: LexxyRealtime.grant_purpose("body"))
   end
 
+  test "starting from the shared page goes back to the shared page" do
+    post "/demos/lexxy/room1/start?space=1", headers: { "Origin" => "http://www.example.com" }
+
+    assert_redirected_to "/demos/lexxy/room1/space"
+  end
+
+  test "/space starts a new room's shared page" do
+    get "/space"
+
+    assert_response :redirect
+    assert_match %r{/demos/lexxy/[A-Za-z0-9_-]+/space\z}, response.location
+  end
+
+  test "the shared page of a room nobody has started offers to start it" do
+    get "/demos/lexxy/room1/space"
+
+    assert_response :not_found
+    assert_equal 0, Room.count, "the page must not create the room on a GET"
+    assert_includes response.body, %(action="/demos/lexxy/room1/start?space=1")
+  end
+
+  test "the shared page joins the room's Lexxy document" do
+    Room.create!(slug: "room1")
+
+    get "/demos/lexxy/room1/space"
+
+    assert_response :success
+    element = response.body[/<yrby-document [^>]+>/]
+
+    assert_includes element, %(channel="LexxyChannel")
+    grant = element[/grant="([^"]+)"/, 1]
+
+    assert_equal room, GlobalID::Locator.locate_signed(grant, for: LexxyRealtime.grant_purpose("body"))
+    assert_includes response.body, %(doc-id="#{room.collaborative_document(:body).key}")
+    assert_includes response.body, %(attachments="false")
+    assert_includes response.body, "/space.js"
+    assert_includes response.body, %(data-url="/demos/lexxy/room1/agent")
+    assert_includes response.headers["Cache-Control"], "no-store"
+  end
+
+  test "a malformed room on the shared page is not found" do
+    get "/demos/lexxy/#{"a" * 33}/space"
+
+    assert_response :not_found
+  end
+
   test "a demo page is not cached" do
     get "/demos/tiptap/room1"
 
