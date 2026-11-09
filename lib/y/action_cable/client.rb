@@ -62,7 +62,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # reports changed blocks for; nil turns that off.
     def initialize(url, params:, channel: "Y::DocumentChannel", headers: {}, doc: Y::Doc.new, root: "root", logger: nil) # rubocop:disable Metrics/ParameterLists -- the subscription's parts and the doc's
       @endpoint = Async::HTTP::Endpoint.parse(url)
-      @identifier = JSON.generate({ "channel" => channel }.merge(params.transform_keys(&:to_s)))
+      subscription = { "channel" => channel }.merge(params.transform_keys(&:to_s))
+      @identifier = JSON.generate(subscription)
+      # What logs and errors name the subscription by. The grant opens the
+      # document, so it stays out of them.
+      @label = JSON.generate(subscription.except("grant"))
       @headers = headers.map { |name, value| [name.to_s.downcase, value.to_s] }
       @doc = doc
       @awareness = Y::Awareness.new(doc.client_id)
@@ -77,6 +81,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       @queued = 0                   # updates handed over but not yet taken up by the reactor
       @lock = Mutex.new
       @closed = false
+      @turned_away = false # the server closed the client, not the caller
     end
 
     def on_update(&block)
@@ -108,9 +113,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       event = @events.pop(timeout: timeout)
       case event
       when :synced then self
-      when :rejected then close_and_raise("subscription rejected for #{@identifier}")
+      when :rejected then close_and_raise("subscription rejected for #{@label}")
       when String then close_and_raise("the server closed the connection: #{event}")
-      else close_and_raise("no sync within #{timeout}s for #{@identifier}")
+      else close_and_raise("no sync within #{timeout}s for #{@label}")
       end
     end
 
@@ -119,7 +124,16 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # after this. Raises Y::Error when an update was still unacked, since
     # it may never have reached the server.
     def unsubscribe(timeout: 5)
-      return self if @closed
+      # The server may have closed the client already, turning it away on a
+      # reconnect. What it never acked is lost all the same, and the first
+      # unsubscribe says so.
+      if @closed
+        lost = @turned_away && pending?
+        @turned_away = false
+        raise Y::Error, UNACKED if lost
+
+        return self
+      end
 
       @closed = true
       # From inside a callback the runner is the caller, so it can't be
@@ -205,7 +219,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       attempts = 0
       until @closed
         if connection == :stop
-          @closed = true
+          @closed = @turned_away = true
           break
         end
 
@@ -234,7 +248,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     rescue Async::Stop
       raise
     rescue StandardError => e
-      @logger.warn("Y::ActionCable::Client #{@identifier}: #{e.class}: #{e.message}")
+      @logger.warn("Y::ActionCable::Client #{@label}: #{e.class}: #{e.message}")
       :dropped
     end
 
@@ -256,7 +270,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         end
       end
     rescue Async::TimeoutError, JSON::ParserError => e
-      @logger.warn("Y::ActionCable::Client #{@identifier}: #{e.class}: #{e.message}")
+      @logger.warn("Y::ActionCable::Client #{@label}: #{e.class}: #{e.message}")
       :dropped
     end
 
