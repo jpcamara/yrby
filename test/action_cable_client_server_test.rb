@@ -172,7 +172,7 @@ class ActionCableClientServerTest < Minitest::Test
 
     private
 
-    def authorized?(_key) = self.class.allow
+    def authorized?(_key) = TurnsAwayChannel.allow
   end
 
   def test_a_client_turned_away_on_reconnect_is_closed
@@ -186,6 +186,36 @@ class ActionCableClientServerTest < Minitest::Test
     assert_same turned_away, turned_away.unsubscribe
   ensure
     TurnsAwayChannel.allow = true
+  end
+
+  # Turned away on a reconnect with an edit the server never acked.
+  class TurnsAwayUnackedChannel < TurnsAwayChannel
+    def receive(data) = (super unless data.key?("id"))
+  end
+
+  def test_unsubscribe_raises_for_an_edit_lost_when_the_server_turned_the_client_away
+    turned_away = client(channel: "ActionCableClientServerTest::TurnsAwayUnackedChannel").subscribe
+    turned_away.edit { |d| Y::Lexical.append_paragraph(d, "never acked") }
+    TurnsAwayChannel.allow = false
+    ActionCable.server.connections.each(&:close)
+    turned_away.instance_variable_get(:@runner).join(10)
+
+    assert_predicate turned_away, :closed?
+    assert_raises(Y::Error) { turned_away.unsubscribe }
+    assert_same turned_away, turned_away.unsubscribe
+  ensure
+    TurnsAwayChannel.allow = true
+  end
+
+  def test_logs_and_errors_leave_the_grant_out
+    log = StringIO.new
+    params = { grant: "SECRET-GRANT", name: "body" }
+    refused = Y::ActionCable::Client.new("ws://127.0.0.1:1/cable", params:, logger: Logger.new(log))
+    error = assert_raises(Y::Error) { refused.subscribe(timeout: 1) }
+
+    assert_match(/"name":"body"/, error.message)
+    refute_match(/SECRET-GRANT/, error.message)
+    refute_match(/SECRET-GRANT/, log.string)
   end
 
   # Inside a reactor the client is a task of the caller's, so a Sync block
