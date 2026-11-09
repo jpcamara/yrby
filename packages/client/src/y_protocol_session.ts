@@ -8,6 +8,12 @@
 // acknowledge(id) on an { ack } envelope, and receive(frame) for an inbound
 // frame (it returns a reply to send, or null). The session sends local doc and
 // awareness edits from their "update" events.
+//
+// The server keeps no presence, so a peer who joins would see the others only
+// when they next renew, up to 15 seconds later. When presence arrives from a
+// peer this session hasn't seen, it sends its own presence once, ANSWER_DELAY
+// ms later. Peers seen within that window share one answer, and a peer it
+// already knows gets none, so two sessions don't answer each other forever.
 import { Doc, mergeUpdates, applyUpdate } from "yjs";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
@@ -23,6 +29,9 @@ import { ReliableSync, type TimerHandle } from "./reliable_sync.js";
 // The y-protocols frame types yrby speaks, as the leading byte of a frame.
 // Other y-protocols types (auth = 2, query-awareness = 3) are not handled.
 export const MessageType = { Sync: 0, Awareness: 1 } as const;
+
+// Milliseconds between presence from a newly seen peer and our answer.
+const ANSWER_DELAY = 250;
 
 export interface YProtocolSessionOptions {
   /**
@@ -66,6 +75,7 @@ export class YProtocolSession {
   #delivery: ReliableSync;
   #onDocUpdate: (update: Uint8Array, origin: unknown) => void;
   #onAwarenessUpdate?: (change: AwarenessChange, origin: unknown) => void;
+  #answer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(doc: Doc, opts: YProtocolSessionOptions) {
     const { send, awareness = null, resendInterval, onError, setInterval: setTimer, clearInterval: clearTimer } =
@@ -98,7 +108,11 @@ export class YProtocolSession {
         // and our own remote-cleanup in pause(), carry origin === this;
         // re-sending those would echo presence and broadcast tombstones for
         // other clients' cursors.
-        if (origin === this || this.#state.phase === "destroyed") return;
+        if (this.#state.phase === "destroyed") return;
+        if (origin === this) {
+          if (added.some(id => id !== this.doc.clientID)) this.#answerNewPeers();
+          return;
+        }
         const changed = added.concat(updated, removed);
         this.#send(this.#frameAwareness(changed), undefined); // fire-and-forget
       };
@@ -133,6 +147,7 @@ export class YProtocolSession {
   pause(): void {
     if (this.#state.phase === "destroyed") return;
     this.#state = { phase: "unsynced", cycle: {} };
+    this.#cancelAnswer();
     this.#delivery.pause();
     if (this.awareness) {
       const remote = [...this.awareness.getStates().keys()].filter(c => c !== this.doc.clientID);
@@ -218,9 +233,29 @@ export class YProtocolSession {
   destroy(): void {
     if (this.#state.phase === "destroyed") return;
     this.#state = { phase: "destroyed" };
+    this.#cancelAnswer();
     this.doc.off("update", this.#onDocUpdate);
     if (this.awareness && this.#onAwarenessUpdate) this.awareness.off("update", this.#onAwarenessUpdate);
     this.#delivery.destroy();
+  }
+
+  // Sends our presence once, ANSWER_DELAY ms from the first newly seen peer.
+  // pause() and destroy() cancel it; resume() announces presence itself.
+  #answerNewPeers(): void {
+    if (this.#answer !== null || this.#state.phase === "destroyed") return;
+    if (!this.awareness || this.awareness.getLocalState() === null) return;
+    this.#answer = setTimeout(() => {
+      this.#answer = null;
+      if (this.#state.phase !== "destroyed" && this.awareness && this.awareness.getLocalState() !== null) {
+        this.#send(this.#frameAwareness([this.doc.clientID]), undefined);
+      }
+    }, ANSWER_DELAY);
+  }
+
+  #cancelAnswer(): void {
+    if (this.#answer === null) return;
+    clearTimeout(this.#answer);
+    this.#answer = null;
   }
 
   #current(cycle: object): boolean {
