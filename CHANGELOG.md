@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-08
+
 ### Changed
 
 - yrby builds against yrs 0.28.1. An insert into a text no longer recounts
