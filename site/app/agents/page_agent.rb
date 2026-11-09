@@ -53,6 +53,11 @@ class PageAgent < Y::Agent
   # Any change may be a new ask, or one asked again.
   def changed(_blocks) = answer_asks
 
+  # Everyone in the room but other agents. An agent leaves once its people
+  # do, so agents don't keep each other here until AGENT_MAX_STAY. Agents mark
+  # their presence with "agent" (see status).
+  def people = super.reject { |_id, state| state["agent"] }
+
   # The model reads the page for context, and proposes. Only a person's
   # Accept changes the page.
   def document_tools = [Tools::ReadDocument.new(self)]
