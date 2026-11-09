@@ -381,6 +381,11 @@ roster, such as `{ "user" => { "name" => "Reviewer" } }`. Without it, it
 doesn't. Set it in `joined`, or in `initialize` to show up as it joins, and
 set it again to show what it's working on or put its caret somewhere.
 
+The collaborator adds `"collaborator" => true` to the presence it publishes,
+so an editor can show it apart from the people. `people` leaves out every
+presence with that key, so collaborators don't count each other as someone
+present. The key is reserved: keep it out of people's presence.
+
 The collaborator signs its own grant for the document, good for `max_stay:`
 plus a minute. `url:` and `headers:` work as they do for
 `Y::ActionCable::Client` above. Enqueue the job from code that has already
@@ -393,7 +398,7 @@ Inside a reactor (Falcon, an `Async` block) it runs as a task of that one. A
 job that runs a collaborator holds a worker for as long as the collaborator
 stays, so give collaborators their own queue.
 
-The collaborator leaves when nobody else has been present for `idle:` seconds
+The collaborator leaves when no person has been present for `idle:` seconds
 (120 by default), after `max_stay:` (two hours), or when it calls `leave`.
 People already in the document show up only when their editor next renews its
 presence, so the collaborator waits one renewal window, 15 seconds, before it

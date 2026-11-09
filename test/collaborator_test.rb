@@ -43,6 +43,26 @@ class CollaboratorTest < Minitest::Test
     assert_equal :left, run.join(Y::ActionCable::Client::RENEW + 10)&.value
   end
 
+  # Collaborators mark their presence and leave each other out of people, so
+  # two of them leave once the person does instead of keeping each other
+  # there until max_stay.
+  def test_collaborators_leave_when_the_person_does_without_counting_each_other
+    ada = person
+    states = Y::Awareness.new
+    ada.on_awareness { |frame| states.apply_update(frame) }
+    reviewers = -> { states.states.values.compact.select { |state| state.dig("user", "name") == "Reviewer" } }
+    runs = %w[ada linus].map { |owner| collaborator(as: owner, idle: 1, max_stay: 120) }
+    wait_until { reviewers.call.size == 2 }
+
+    assert_equal([true, true], reviewers.call.map { |state| state["collaborator"] })
+
+    ada.unsubscribe
+
+    runs.each { |run| assert_equal :left, run.join(Y::ActionCable::Client::RENEW + 10)&.value }
+  ensure
+    runs&.each(&:kill)
+  end
+
   # Outside a reactor, run starts one on the calling thread and holds it
   # until the collaborator leaves, so a job's thread is the collaborator's.
   def test_presence_can_change_while_the_collaborator_stays

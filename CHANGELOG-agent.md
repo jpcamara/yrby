@@ -27,6 +27,10 @@ release. See [docs/experimental.md](docs/experimental.md).
   `Rails.cache`, or one per person with `as: person`. An error in `joined`
   or `changed` ends the collaborator and raises out of `run`.
   `require "y/collaborator"` to use it.
+- A collaborator's presence carries `"collaborator" => true`, and `people`
+  leaves those out. Two collaborators in a document no longer count each
+  other as people, so they leave once the last person has been gone for
+  `idle` seconds instead of staying until `max_stay`.
 - `Y::Agent`, a `Y::Collaborator` with a model. A subclass sets `model` and
   `instructions`, which are RubyLLM::Agent's, and runs from a job. When
   people's typing settles, `changed` asks the model about the blocks they
