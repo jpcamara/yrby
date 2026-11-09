@@ -49,6 +49,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_08_000003) do
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
   end
 
+  create_table "agent_call_days", primary_key: "day", id: :date, force: :cascade do |t|
+    t.integer "calls", default: 0, null: false
+  end
+
+  create_table "agent_seats", force: :cascade do |t|
+    t.string "room", null: false
+    t.string "owner", null: false
+    t.datetime "created_at", null: false
+    t.index %w[room owner], name: "index_agent_seats_on_room_and_owner", unique: true
+  end
+
   create_table "example_documents", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
