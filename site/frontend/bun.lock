@@ -5,7 +5,7 @@
     "": {
       "name": "yrby-site-frontend",
       "dependencies": {
-        "@37signals/lexxy": "^1.0.0",
+        "@37signals/lexxy": "1.0.0",
         "@anycable/web": "^1.1.1",
         "@codemirror/lang-javascript": "^6.2.2",
         "@codemirror/state": "^6.4.1",
@@ -20,13 +20,13 @@
         "@tiptap/starter-kit": "^2.11.0",
         "codemirror": "^6.0.1",
         "lexical": "^0.44",
-        "lexxy-realtime": "^0.8.0",
+        "lexxy-realtime": "^0.9.0",
         "lib0": "^0.2.117",
         "y-codemirror.next": "^0.3.5",
         "y-prosemirror": "^1.3.7",
         "y-protocols": "^1.0.6",
         "yjs": "^13.6.20",
-        "yrby-client": "^0.7.0",
+        "yrby-client": "^0.7.1",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -386,7 +386,7 @@
 
     "lexical": ["lexical@0.44.0", "", {}, "sha512-ReDUjRlFgkGoPWzvdjr7s16PUVpHATN+2NH2NiZs+PLlISTaIFFgKil2P467oP3Vg+XgmpDsUgmWZsFJTztYjg=="],
 
-    "lexxy-realtime": ["lexxy-realtime@0.8.0", "", { "dependencies": { "@rails/actioncable": "^7.1.0 || ^8.0.0", "yrby-client": "^0.7.0" }, "peerDependencies": { "@37signals/lexxy": "^0.9.29 || ^1.0.0", "@lexical/yjs": "^0.44", "lexical": "^0.44", "y-protocols": "^1.0", "yjs": "^13.6" } }, "sha512-29yBI4vK3PR/q3oy7e1Duw9HaBSkJBi4gBK1IufMizyjawmTpKTvNpVEb3jJ1NesMkSbGN10R/xDhE3WgfBTvw=="],
+    "lexxy-realtime": ["lexxy-realtime@0.9.0", "", { "dependencies": { "@rails/actioncable": "^7.1.0 || ^8.0.0", "yrby-client": "^0.7.1" }, "peerDependencies": { "@37signals/lexxy": "^0.9.29 || ^1.0.0", "@lexical/yjs": "^0.44", "lexical": "^0.44", "y-protocols": "^1.0", "yjs": "^13.6" } }, "sha512-6XasZzWU8WofcA+J7ujDx+eLI4R0rkoVwoKsl0tz1LaN9zDl8h4iI1Rjdc1EsUd51MH7a9wjIcn58iUNUu+8qg=="],
 
     "lib0": ["lib0@0.2.117", "", { "dependencies": { "isomorphic.js": "^0.2.4" }, "bin": { "0serve": "bin/0serve.js", "0gentesthtml": "bin/gentesthtml.js", "0ecdsa-generate-keypair": "bin/0ecdsa-generate-keypair.js" } }, "sha512-DeXj9X5xDCjgKLU/7RR+/HQEVzuuEUiwldwOGsHK/sfAfELGWEyTcf0x+uOvCvK3O2zPmZePXWL85vtia6GyZw=="],
 
@@ -538,7 +538,7 @@
 
     "yocto-queue": ["yocto-queue@0.1.0", "", {}, "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="],
 
-    "yrby-client": ["yrby-client@0.7.0", "", { "dependencies": { "lib0": "^0.2.117" }, "peerDependencies": { "@rails/actioncable": ">= 7.1", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["@rails/actioncable", "y-protocols", "yjs"] }, "sha512-nVvYcC3ohX4GHp++26+IZiN/bpfmfANPl5LneVjKpGTql53uSjRl36F7XZpNbnB4aOdkKV7AecYVBFLVk3p+dA=="],
+    "yrby-client": ["yrby-client@0.7.1", "", { "dependencies": { "lib0": "^0.2.117" }, "peerDependencies": { "@rails/actioncable": ">= 7.1", "y-protocols": "^1.0.5", "yjs": "^13.6.0" }, "optionalPeers": ["@rails/actioncable", "y-protocols", "yjs"] }, "sha512-GOBWZr+TUdLbD6ggcveVLm+zlAo+3VXidpjVrpJHHuwERGvctn6k2bND23tUa0fG2LJMAmZp7h07Ze7ubI0KjQ=="],
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
