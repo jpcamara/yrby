@@ -14,8 +14,10 @@ release. See [docs/experimental.md](docs/experimental.md).
 - `Y::ActionCable::Client` joins a document over the cable's websocket with a
   grant, as a browser does. `edit` sends a change, every update is resent
   until acked, and a dropped socket reconnects. `presence=` shows the client
-  to others and renews itself. It sends the URL's origin, and `headers:`
-  add anything else the connection checks.
+  to others and renews itself, and answers presence from a client it hasn't
+  seen with its own, so a newcomer sees it without waiting for a renewal.
+  It sends the URL's origin, and `headers:` add anything else the
+  connection checks.
 - `Y::Collaborator` takes part in a document the way a person does, from a
   job or anywhere else. A subclass defines `joined` and `changed(blocks)`,
   where an AI agent calls its model, and sets `self.presence =`.

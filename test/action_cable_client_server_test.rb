@@ -138,6 +138,20 @@ class ActionCableClientServerTest < Minitest::Test
     assert_equal({ "name" => "Agent" }, seen.states[doc_of(first).client_id])
   end
 
+  # The server keeps no presence, so a client answers a newcomer's presence
+  # with its own instead of leaving it to wait for the next renewal.
+  def test_a_client_answers_presence_from_a_newly_seen_peer
+    first = client.subscribe
+    first.presence = { "name" => "Agent" }
+    seen = Y::Awareness.new
+    joined = client.on_awareness { |frame| seen.apply_update(frame) }.subscribe
+    joined.presence = { "name" => "Ada" }
+
+    wait_until(timeout: Y::ActionCable::Client::RENEW / 3) { seen.states[doc_of(first).client_id] }
+
+    assert_equal({ "name" => "Agent" }, seen.states[doc_of(first).client_id])
+  end
+
   # Each reconnect is a new handshake with a new key. The caller's headers
   # go out again as they were given.
   def test_a_client_that_sets_its_origin_reconnects_after_a_drop

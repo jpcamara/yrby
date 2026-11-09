@@ -318,7 +318,9 @@ while the block runs stays out of it. Every update carries an
 id and is resent until the server acks it, and a dropped socket reconnects
 with backoff. `presence=` shows the client in the editor's roster and is
 renewed every 15 seconds, since peers drop presence they haven't heard from in
-30.
+30. The server keeps no presence, so when presence arrives from a client the
+client hasn't seen, it sends its own again a quarter second later, and the
+newcomer sees it without waiting for a renewal.
 
 The client runs as a task of the caller's reactor when there is one (Falcon,
 an `Async` block) and in a thread of its own otherwise (Puma, a job, a
