@@ -31,10 +31,12 @@ Gem::Specification.new do |spec|
   spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  # Y::Agent is a Y::Collaborator, in yrby-rails from the release after 0.8.0.
-  # Raise this to that release when it ships.
-  spec.add_dependency "yrby-rails", ">= 0.8"
-  # Y::Agent's settings are RubyLLM::Agent's, new in ruby_llm 2.0.
+  # Y::Agent is a Y::Collaborator, new in yrby-rails 0.9.0.
+  spec.add_dependency "yrby-rails", ">= 0.9.0.alpha1"
+  # Y::Collaborator joins over Y::ActionCable::Client, which yrby-rails leaves
+  # optional; an agent always needs it.
+  spec.add_dependency "async-websocket", ">= 0.30"
+  # Y::Agent's settings are RubyLLM::Agent's.
   spec.add_dependency "ruby_llm", "~> 2.1"
 
   spec.add_development_dependency "minitest", "~> 5.0"

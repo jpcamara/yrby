@@ -56,7 +56,7 @@ module Y
 
     # The tools the model gets with each ask: Tools::ALL, which read the
     # document and edit its blocks. Override it to give the model fewer,
-    # such as [Tools::ReadDocument] for an agent that only answers.
+    # such as [Tools::ReadDocument.new(self)] for an agent that only answers.
     def document_tools = Tools::ALL.map { |tool| tool.new(self) }
 
     # Live handles to the document's top-level blocks, in order.

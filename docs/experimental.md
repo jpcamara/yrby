@@ -476,5 +476,5 @@ model needs no history, and a stay of hours never grows one. Override
 question. It returns the model's reply, and a block gets each chunk as it
 streams in. `chat` is the fresh chat `ask` uses, to set more on first, such as
 `chat.with_temperature(0).ask(message)`. Override `document_tools` to give the
-model fewer tools, such as `[Y::Agent::Tools::ReadDocument]` for an agent that
+model fewer tools, such as `[Y::Agent::Tools::ReadDocument.new(self)]` for an agent that
 only answers.
