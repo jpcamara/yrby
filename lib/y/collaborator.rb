@@ -27,11 +27,16 @@ module Y
   #     def perform(post) = Reviewer.run(post.collaborative_document(:body), url: "wss://example.com/cable")
   #   end
   #
-  # `run` follows the document until nobody else has been present for `idle`
+  # `run` follows the document until no person has been present for `idle`
   # seconds, the collaborator has stayed `max_stay` seconds, or `leave` is
   # called. It always clears its presence and unsubscribes on the way out. An
   # error in `joined` or `changed` ends the collaborator and raises out of
   # `run`; rescue it in the method to carry on.
+  #
+  # A collaborator's presence carries "collaborator" => true, so editors can
+  # tell it apart from the people, and other collaborators don't count it
+  # as someone present. The key is reserved: leave it out of people's
+  # presence.
   #
   # Only one collaborator works on a document at a time. Pass `as:` to allow
   # one per person instead, such as `as: person` for the collaborator a person
@@ -41,11 +46,12 @@ module Y
   class Collaborator
     SETTLE = 1.5          # seconds of quiet before changed sees a burst of edits
     SETTLE_AT_MOST = 5    # seconds of steady typing before changed sees it anyway
-    IDLE = 120            # seconds with nobody else present before it leaves
+    IDLE = 120            # seconds with no person present before it leaves
     MAX_STAY = 2 * 60 * 60
     GONE = 30             # a person whose presence hasn't renewed in this long has left
     LOCK_TTL = 60         # the lock lapses this long after its last renewal
     ROOT = "root"         # the root XmlText Lexical and Lexxy edit, whose blocks changed reports
+    KEY = "collaborator"  # marks a collaborator's presence, which people leaves out
 
     # Runs a collaborator until it leaves. Returns :left, or :busy when another
     # collaborator holds the document.
@@ -95,12 +101,12 @@ module Y
     # editors render, such as { "user" => { "name" => "Reviewer" } }. nil, the
     # default, keeps it out of their roster. Set it in `joined`, or in
     # `initialize` to show up as the collaborator joins, and again to change
-    # it.
+    # it. Others see it with "collaborator" => true added.
     attr_reader :presence
 
     def presence=(state)
       @presence = state
-      @client&.presence = state
+      @client&.presence = state && marked(state)
     end
 
     # Called once the collaborator has joined and the document has loaded.
@@ -124,12 +130,13 @@ module Y
       @client.edit(&)
     end
 
-    # Everyone else in the document, as { client_id => their presence state }.
+    # The people in the document, as { client_id => their presence state }:
+    # everyone else present except collaborators.
     def people
       own = doc.client_id
       @people_lock.synchronize do
         @people.states.select do |id, state|
-          id != own && state && (renewed = @renewals[id]) && now - renewed.last < GONE
+          id != own && state && !collaborator?(state) && (renewed = @renewals[id]) && now - renewed.last < GONE
         end
       end
     end
@@ -154,8 +161,11 @@ module Y
       @client.on_update { |_update, doc, touched| @changes << anchors(doc, touched || []) }
       @client.on_awareness { |frame| see(frame) }
       @client.subscribe
-      @client.presence = @presence if @presence
+      @client.presence = marked(@presence) if @presence
     end
+
+    def marked(state) = state.merge(KEY => true)
+    def collaborator?(state) = state.is_a?(Hash) && state[KEY]
 
     def follow
       started = now
