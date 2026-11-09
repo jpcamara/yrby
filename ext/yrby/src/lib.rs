@@ -352,10 +352,11 @@ impl RbDoc {
     }
 
     /// Apply `update` and report which blocks of the root `XmlText` named
-    /// `root` it touched, as ordinals: a change inside a block, a block
-    /// added, or a block removed (the ordinal it had). Ordinals count the
-    /// root's `XmlText` blocks, as `xml_text(n)` does, so a divider or an
-    /// image above a block doesn't shift it. This is what lets a process
+    /// `root` it touched, as ordinals: a change inside a block, or a block
+    /// added. A removed block is gone, so it isn't reported, and every
+    /// ordinal names a block the document has after the update. Ordinals
+    /// count the root's `XmlText` blocks, as `xml_text(n)` does, so a divider
+    /// or an image above a block doesn't shift it. This is what lets a process
     /// following a document react to the part that changed.
     fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
         let bytes = copy_bytes(update);
@@ -372,7 +373,6 @@ impl RbDoc {
             let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
             let sink = hits.clone();
             let root_ref = target.clone();
-            let before = Children::of(&txn, &target);
             let ours = key.clone();
             target.observe_deep(key.clone(), move |txn, events| {
                 if txn.origin() != Some(&ours) {
@@ -386,7 +386,7 @@ impl RbDoc {
                             hits.push(children.ordinal(i))
                         }
                         Some(_) => {}
-                        None => root_positions(txn, event, &before, &children, &mut hits),
+                        None => root_positions(txn, event, &children, &mut hits),
                     }
                 }
             });
@@ -891,14 +891,6 @@ impl Children {
     fn is_block(&self, index: u32) -> bool {
         self.0.iter().any(|(at, block)| *block && *at == index)
     }
-
-    /// How many blocks start in `from..to`.
-    fn blocks_in(&self, from: u32, to: u32) -> u32 {
-        self.0
-            .iter()
-            .filter(|(at, block)| *block && (from..to).contains(at))
-            .count() as u32
-    }
 }
 
 /// A presence handle a Ruby process can use to appear as a live collaborator.
@@ -1036,12 +1028,11 @@ impl RbAwareness {
 fn root_positions(
     txn: &yrs::TransactionMut,
     event: &yrs::types::Event,
-    before: &Children,
     after: &Children,
     hits: &mut Vec<u32>,
 ) {
     use yrs::types::{Change, Delta, Event};
-    let (mut old, mut new) = (0u32, 0u32);
+    let mut new = 0u32;
     let added = |item: &yrs::Out, new: &mut u32, hits: &mut Vec<u32>| {
         if matches!(item, yrs::Out::YXmlText(_)) {
             hits.push(after.ordinal(*new));
@@ -1051,36 +1042,27 @@ fn root_positions(
             _ => 1,
         };
     };
-    let removed = |old: u32, n: u32, hits: &mut Vec<u32>| {
-        let first = before.ordinal(old);
-        hits.extend(first..first + before.blocks_in(old, old + n));
-    };
     match event {
         Event::XmlFragment(e) => {
             for change in e.delta(txn) {
                 match change {
-                    Change::Retain(n) => (old, new) = (old + n, new + n),
+                    Change::Retain(n) => new += n,
                     Change::Added(items) => {
                         for item in items {
                             added(item, &mut new, hits);
                         }
                     }
-                    Change::Removed(n) => {
-                        removed(old, *n, hits);
-                        old += n;
-                    }
+                    // A removed block is gone, so there's nothing to name.
+                    Change::Removed(_) => {}
                 }
             }
         }
         Event::XmlText(e) => {
             for delta in e.delta(txn) {
                 match delta {
-                    Delta::Retain(n, _) => (old, new) = (old + n, new + n),
+                    Delta::Retain(n, _) => new += n,
                     Delta::Inserted(item, _) => added(item, &mut new, hits),
-                    Delta::Deleted(n) => {
-                        removed(old, *n, hits);
-                        old += n;
-                    }
+                    Delta::Deleted(_) => {}
                 }
             }
         }
@@ -1545,7 +1527,7 @@ mod tests {
         let changed = doc
             .apply_update_changes(update_since(&peer, before), "root".into())
             .unwrap();
-        assert_eq!(changed.as_value().inspect(), "[1, 2]");
+        assert_eq!(changed.as_value().inspect(), "[1]");
         assert_eq!(
             doc.read_xml("root".into()).unwrap().as_deref(),
             Some("one\nnew\ntwo")
@@ -1583,7 +1565,6 @@ mod tests {
         assert!(!children.is_block(0));
         assert!(children.is_block(1));
         assert_eq!(children.ordinal(2), 1);
-        assert_eq!(children.blocks_in(0, 3), 2);
     }
 
     #[ruby_test]

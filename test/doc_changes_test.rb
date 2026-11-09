@@ -39,18 +39,31 @@ class DocChangesTest < Minitest::Test
     assert_equal "one\nbetween\ntwo\na\nb\nthree", @peer.read_xml("root")
   end
 
-  def test_a_block_removed_names_the_ordinal_it_had
-    update = @src.edit { @src.get_xml_text("root").delete_xml_text(0) }
+  # A removed block is gone, so nothing names it. Its old ordinal would name
+  # the block after it, which nobody touched.
+  def test_a_block_removed_names_nothing
+    update = @src.edit { @src.get_xml_text("root").delete_xml_text(1) }
 
-    assert_equal [0], @peer.apply_update_changes(update, "root")
-    assert_equal "two\na\nb", @peer.read_xml("root")
+    assert_empty @peer.apply_update_changes(update, "root")
+    assert_equal "one\na\nb", @peer.read_xml("root")
   end
 
-  def test_blocks_removed_together_name_every_ordinal_they_had
+  def test_blocks_removed_together_name_nothing
     update = @src.edit { @src.get_xml_text("root").delete(0, 2) }
 
-    assert_equal [0, 1], @peer.apply_update_changes(update, "root")
+    assert_empty @peer.apply_update_changes(update, "root")
     assert_equal "a\nb", @peer.read_xml("root")
+  end
+
+  def test_an_edit_beside_a_removed_block_names_only_the_edited_one
+    update = @src.edit do
+      root = @src.get_xml_text("root")
+      root.xml_text(1).insert(-1, "!")
+      root.delete_xml_text(0)
+    end
+
+    assert_equal [0], @peer.apply_update_changes(update, "root")
+    assert_equal "two!\na\nb", @peer.read_xml("root")
   end
 
   def test_an_update_already_applied_changes_nothing
