@@ -780,6 +780,7 @@ var applyAwarenessUpdate = (awareness, update, origin) => {
 
 // src/y_protocol_session.ts
 var MessageType = { Sync: 0, Awareness: 1 };
+var ANSWER_DELAY = 250;
 var YProtocolSession = class {
   doc;
   awareness;
@@ -789,6 +790,7 @@ var YProtocolSession = class {
   #delivery;
   #onDocUpdate;
   #onAwarenessUpdate;
+  #answer = null;
   constructor(doc, opts) {
     const { send, awareness = null, resendInterval, onError, setInterval: setTimer, clearInterval: clearTimer } = opts ?? {};
     if (!doc) throw new TypeError("YProtocolSession requires a Y.Doc");
@@ -811,7 +813,11 @@ var YProtocolSession = class {
     this.doc.on("update", this.#onDocUpdate);
     if (this.awareness) {
       this.#onAwarenessUpdate = ({ added, updated, removed }, origin) => {
-        if (origin === this || this.#state.phase === "destroyed") return;
+        if (this.#state.phase === "destroyed") return;
+        if (origin === this) {
+          if (added.some((id) => id !== this.doc.clientID)) this.#answerNewPeers();
+          return;
+        }
         const changed = added.concat(updated, removed);
         this.#send(this.#frameAwareness(changed), void 0);
       };
@@ -842,6 +848,7 @@ var YProtocolSession = class {
   pause() {
     if (this.#state.phase === "destroyed") return;
     this.#state = { phase: "unsynced", cycle: {} };
+    this.#cancelAnswer();
     this.#delivery.pause();
     if (this.awareness) {
       const remote = [...this.awareness.getStates().keys()].filter((c) => c !== this.doc.clientID);
@@ -920,9 +927,27 @@ var YProtocolSession = class {
   destroy() {
     if (this.#state.phase === "destroyed") return;
     this.#state = { phase: "destroyed" };
+    this.#cancelAnswer();
     this.doc.off("update", this.#onDocUpdate);
     if (this.awareness && this.#onAwarenessUpdate) this.awareness.off("update", this.#onAwarenessUpdate);
     this.#delivery.destroy();
+  }
+  // Sends our presence once, ANSWER_DELAY ms from the first newly seen peer.
+  // pause() and destroy() cancel it; resume() announces presence itself.
+  #answerNewPeers() {
+    if (this.#answer !== null || this.#state.phase === "destroyed") return;
+    if (!this.awareness || this.awareness.getLocalState() === null) return;
+    this.#answer = setTimeout(() => {
+      this.#answer = null;
+      if (this.#state.phase !== "destroyed" && this.awareness && this.awareness.getLocalState() !== null) {
+        this.#send(this.#frameAwareness([this.doc.clientID]), void 0);
+      }
+    }, ANSWER_DELAY);
+  }
+  #cancelAnswer() {
+    if (this.#answer === null) return;
+    clearTimeout(this.#answer);
+    this.#answer = null;
   }
   #current(cycle) {
     return this.#state.phase !== "destroyed" && this.#state.cycle === cycle;

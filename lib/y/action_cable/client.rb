@@ -53,6 +53,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     RESEND = 1     # seconds between retransmits of unacked updates
     STALE = 15     # seconds without a message before the socket is given up; the server pings every 3
     RENEW = 15     # seconds between presence renewals; peers drop a client they haven't heard from in 30
+    ANSWER = 0.25  # seconds between presence from a newly seen peer and the client's answer
     LEAVE_GRACE = 0.25 # seconds between clearing presence and unsubscribing
     BACKOFF = [1, 2, 4, 8].freeze # seconds before each reconnect, then the last for good
     UNACKED = "unsubscribed before the server acked every update"
@@ -71,6 +72,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       @doc = doc
       @awareness = Y::Awareness.new(doc.client_id)
       @presence = nil
+      @peers = Y::Awareness.new # who this client has seen, to answer newcomers
       @session = Session.new(doc, @identifier, root: root) do |message|
         @outgoing << JSON.generate(message)
       end
@@ -82,6 +84,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       @lock = Mutex.new
       @closed = false
       @turned_away = false # the server closed the client, not the caller
+      @session.on_awareness { |frame| hear(frame) }
     end
 
     def on_update(&block)
@@ -90,7 +93,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     end
 
     def on_awareness(&block)
-      @session.on_awareness { |*args| callback(block, args) }
+      @on_awareness = block
       self
     end
 
@@ -280,6 +283,29 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       loop do
         sleep RENEW
         @session.send_awareness(@awareness.set_local_state(@presence)) if @presence
+      end
+    end
+
+    def hear(frame)
+      answer_new_peers(frame)
+      callback(@on_awareness, [frame]) if @on_awareness
+    end
+
+    # The server keeps no presence, so a peer who joins would see this client
+    # only at its next renewal. Presence from a client id it hasn't seen gets
+    # an answer ANSWER seconds later; newcomers in that window share it, and a
+    # peer it already knows gets none, so two clients don't answer each other
+    # forever.
+    def answer_new_peers(frame)
+      seen = @peers.clocks.keys
+      @peers.apply_update(frame)
+      return if @answering || !@presence || (@peers.clocks.keys - seen - [doc.client_id]).empty?
+
+      @answering = true
+      @task.async do
+        sleep ANSWER
+        @answering = false
+        @session.send_awareness(@awareness.set_local_state(@presence)) if @presence && !@closed
       end
     end
 

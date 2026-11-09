@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- yrby-client: a session answers presence from a peer it hasn't seen with
+  its own, once, 250 ms later. The server relays presence without keeping
+  it, so before this a peer who joined saw the others only at their next
+  renewal, up to 15 seconds later. Newcomers in that window share one
+  answer, and a peer the session already knows gets none.
+
 ## [0.9.1] - 2026-11-08
 
 ### Changed
