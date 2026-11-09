@@ -1098,11 +1098,12 @@ covered by yrby's usual compatibility promise.
 - Anchors: a block's identity as a value
 - Streaming into a document with `Doc#edit`
 - Editing a record's document from Ruby
-- Joining a document from a Ruby process, with `Y::ActionCable::Client`
-- Collaborators, with `Y::Collaborator`
+- From the `yrby-agent` gem: joining a document from a Ruby process with
+  `Y::ActionCable::Client`, collaborators with `Y::Collaborator`, and agents
+  with `Y::Agent`
 
-`require "y/action_cable/client"` and `require "y/collaborator"` print a warning in
-Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
+`require "y/action_cable/client"`, `require "y/collaborator"`, and
+`require "y/agent"` print a warning in Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 
 ## Thread Safety
 

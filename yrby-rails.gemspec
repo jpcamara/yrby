@@ -22,8 +22,6 @@ Gem::Specification.new do |spec|
     "lib/yrby/**/*.rb",
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
-    "lib/y/collaborator.rb",
-    "lib/y/collaborator/**/*.rb",
     "lib/y/collaborative.rb",
     "lib/y/collaborative/**/*.rb",
     "app/**/*.rb",
@@ -31,7 +29,7 @@ Gem::Specification.new do |spec|
     "LICENSE",
     "README.md",
     "CHANGELOG-rails.md"
-  ]
+  ] - Dir["lib/yrby/agent/**/*", "lib/y/action_cable/client.rb", "lib/y/action_cable/client/**/*"]
   spec.require_paths = ["lib"]
 
   spec.metadata["source_code_uri"] = spec.homepage
