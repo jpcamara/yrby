@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
     "lib/y/collaborative.rb",
     "lib/y/collaborative/**/*.rb",
     "app/**/*.rb",
+    "app/assets/javascript/**/*",
     "lib/generators/**/*",
     "LICENSE",
     "README.md",
