@@ -6,6 +6,14 @@ project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+
+- Deleting a block no longer hands `Y::Collaborator#changed` the block after
+  it. It needs the next yrby, whose `Doc#apply_update_changes` leaves removed
+  blocks out.
+
+## [0.1.0.alpha1] - 2026-11-09
+
 The first release. Everything here is experimental and may change in any
 release. See [docs/experimental.md](docs/experimental.md).
 
