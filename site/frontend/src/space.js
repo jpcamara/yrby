@@ -72,28 +72,36 @@ function flash(button, text) {
   setTimeout(() => { label.textContent = was }, 1800)
 }
 
-// Asks the server to start your agent in this room. It answers "joining",
-// "here" when it's already in, or "busy" when the room or the site is full.
+// Why your agent couldn't come, as a toast and as the reason on an ask's card.
+const CANT_COME = {
+  busy: ["Every agent seat is taken right now. Try again in a few minutes.", "every agent seat is taken right now"],
+  limited: ["You've invited an agent a lot this hour. Try again later.", "you've invited an agent a lot this hour"],
+  refused: ["Your agent couldn't join this page.", "it couldn't join this page"],
+  offline: ["Couldn't reach the server.", "the server couldn't be reached"],
+}
+
+// Asks the server to start your agent in this room. The server answers
+// "joining", "here" when it's already in, or "busy" when the room or the site
+// is full. Returns null once the agent is coming, or why it can't
+// (a CANT_COME key).
 async function inviteAgent() {
-  const query = new URLSearchParams({ owner: me.id, name: me.name, color: me.color })
-  const response = await fetch(`${inviteButton.dataset.url}?${query}`, { method: "POST" })
-  const json = response.headers.get("content-type")?.includes("json") ? await response.json() : {}
-  if (json.status === "joining" || json.status === "here") return true
-  toast(json.status === "busy" ? "Every agent seat is taken right now. Try again in a few minutes."
-    : response.status === 429 ? "You've invited an agent a lot this hour. Try again later."
-      : "Your agent couldn't join this page.")
-  return false
+  try {
+    const query = new URLSearchParams({ owner: me.id, name: me.name, color: me.color })
+    const response = await fetch(`${inviteButton.dataset.url}?${query}`, { method: "POST" })
+    const json = response.headers.get("content-type")?.includes("json") ? await response.json() : {}
+    if (json.status === "joining" || json.status === "here") return null
+    return json.status === "busy" ? "busy" : response.status === 429 ? "limited" : "refused"
+  } catch {
+    return "offline"
+  }
 }
 
 inviteButton.addEventListener("click", async () => {
   inviteButton.disabled = true
-  try {
-    if (await inviteAgent()) inviteButton.querySelector("span").textContent = "Your agent is joining…"
-  } catch {
-    toast("Couldn't reach the server.")
-  } finally {
-    inviteButton.disabled = false
-  }
+  const problem = await inviteAgent()
+  if (problem) toast(CANT_COME[problem][0])
+  else inviteButton.querySelector("span").textContent = "Your agent is joining…"
+  inviteButton.disabled = false
 })
 
 function toast(text) {
@@ -197,7 +205,16 @@ class Session {
         owner: me.id, askedBy: me.name, prompt, original, paragraph, from, to, status: "asked", createdAt: Date.now(),
       })) ask.set(key, value)
     }, "ask")
-    if (!this.myAgent()) inviteAgent().catch(() => toast("Couldn't reach the server."))
+    this.summonAgent(id)
+  }
+
+  // An ask needs your agent. When it can't come, the ask fails with the
+  // reason, so its card says so and offers Try again instead of waiting for
+  // an agent that isn't on its way.
+  async summonAgent(id) {
+    if (this.myAgent()) return
+    const problem = await inviteAgent()
+    if (problem) this.update(id, { status: "failed", error: CANT_COME[problem][1] })
   }
 
   update(id, fields) {
@@ -386,7 +403,10 @@ class Session {
       parts.push(el("p", "ask-error", `${agentName} couldn't answer: ${ask.get("error") ?? "something went wrong"}.`))
       parts.push(el("div", "ask-bar", [
         button("ghost", "Dismiss", () => this.update(id, { status: "undone" })),
-        button("accept", "Try again", () => this.update(id, { status: "asked", error: undefined })),
+        button("accept", "Try again", () => {
+          this.update(id, { status: "asked", error: undefined })
+          this.summonAgent(id)
+        }),
       ]))
     }
     card.replaceChildren(...parts)

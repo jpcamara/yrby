@@ -136,4 +136,14 @@ class PageAgentTest < ActiveSupport::TestCase
   test "its model can read the page but not edit it" do
     assert_equal ["read_document"], agent_with(FakeModel.new).document_tools.map(&:name)
   end
+
+  test "other agents don't count as people, so agents don't keep each other in the room" do
+    agent = agent_with(FakeModel.new)
+    person = Y::Awareness.new(101)
+    other_agent = Y::Awareness.new(102)
+    agent.send(:see, person.set_local_state(%({"name":"Ada","color":"#f87171"})))
+    agent.send(:see, other_agent.set_local_state(%({"name":"Bo's agent","agent":{"owner":"bo","status":"idle"}})))
+
+    assert_equal [101], agent.people.keys
+  end
 end
