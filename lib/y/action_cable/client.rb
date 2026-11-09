@@ -94,6 +94,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # True while updates are in flight: handed over, sent, but not yet acked.
     def pending? = @lock.synchronize { @queued.positive? } || @session.pending?
 
+    # True once the client has left, or the server ended its subscription
+    # (rejected it on a reconnect, or asked it not to reconnect).
+    def closed? = @closed
+
     # Connect, subscribe, and wait up to `timeout` seconds for the document
     # to arrive. Raises Y::Error when the subscription is rejected or the
     # server does not answer in time.
@@ -200,7 +204,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       renewal = @task.async { renew_presence }
       attempts = 0
       until @closed
-        break if connection == :stop
+        if connection == :stop
+          @closed = true
+          break
+        end
 
         attempts += 1
         sleep BACKOFF[[attempts, BACKOFF.size].min - 1]

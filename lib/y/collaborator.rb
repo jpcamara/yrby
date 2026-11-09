@@ -76,7 +76,7 @@ module Y
     # thread until the collaborator leaves.
     def run
       Sync do
-        next :busy unless !@lock || @lock.take
+        next :busy if @lock && !@lock.take
 
         begin
           join
@@ -160,7 +160,7 @@ module Y
     def follow
       started = now
       alone_since = nil
-      until @leaving || now - started > @max_stay || !holding?
+      until @leaving || @client.closed? || now - started > @max_stay || !holding?
         alone_since = alone?(started) ? alone_since || now : nil
         break if alone_since && now - alone_since > @idle
 

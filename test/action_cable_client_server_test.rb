@@ -164,6 +164,30 @@ class ActionCableClientServerTest < Minitest::Test
     assert_empty logged
   end
 
+  # A room whose server turns the client away on its next handshake, as one
+  # does when a grant expires.
+  class TurnsAwayChannel < RoomChannel
+    singleton_class.attr_accessor :allow
+    self.allow = true
+
+    private
+
+    def authorized?(_key) = self.class.allow
+  end
+
+  def test_a_client_turned_away_on_reconnect_is_closed
+    turned_away = client(channel: "ActionCableClientServerTest::TurnsAwayChannel").subscribe
+    TurnsAwayChannel.allow = false
+    ActionCable.server.connections.each(&:close)
+    turned_away.instance_variable_get(:@runner).join(10)
+
+    assert_predicate turned_away, :closed?
+    assert_raises(Y::Error) { turned_away.edit { |d| Y::Lexical.append_paragraph(d, "lost") } }
+    assert_same turned_away, turned_away.unsubscribe
+  ensure
+    TurnsAwayChannel.allow = true
+  end
+
   # Inside a reactor the client is a task of the caller's, so a Sync block
   # waits for it: leave before the block ends.
   def test_the_client_runs_as_a_task_inside_a_reactor
