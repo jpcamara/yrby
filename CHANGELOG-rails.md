@@ -7,6 +7,10 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-09
+
+Requires yrby 0.9.0 or later.
+
 ### Security
 
 - `Y::ActionCable::Sync`'s methods and `Y::DocumentChannel`'s
