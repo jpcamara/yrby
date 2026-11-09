@@ -278,14 +278,14 @@ to a document's subscribers, for code that records updates itself.
 
 ## Joining a document from a Ruby process
 
-`Y::ActionCable::Client` joins a document the way a browser does: over the
+`Y::ActionCable::Client`, in the `yrby-agent` gem, joins a document the way a browser does: over the
 cable's websocket, as a subscriber of the document channel, with a grant. The
 server records, acks, and relays its edits like anyone else's, and it applies
 everyone else's edits to its own `Y::Doc`. An agent, a worker, or a script
 runs as one, outside the web process.
 
 ```rb
-# Gemfile: gem "async-websocket"
+# Gemfile: gem "yrby-agent"
 require "y/action_cable/client"
 
 client = Y::ActionCable::Client.new(
@@ -332,7 +332,7 @@ so editors tie a caret to its author.
 
 ## Collaborators
 
-`Y::Collaborator` takes part in a document the way a person does: it joins
+`Y::Collaborator`, also in the `yrby-agent` gem, takes part in a document the way a person does: it joins
 with a grant, shows up among the people editing, hears what they write, and
 leaves when they do. It has no model of its own: an AI agent is a
 collaborator whose `changed` calls one. Subclass it, and run it from a job.

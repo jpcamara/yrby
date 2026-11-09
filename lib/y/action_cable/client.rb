@@ -5,15 +5,15 @@ begin
   require "async/http/endpoint"
   require "async/websocket/client"
 rescue LoadError => e
-  raise LoadError, "Y::ActionCable::Client needs the async-websocket gem. Add it to your Gemfile. (#{e.message})"
+  raise LoadError, "Y::ActionCable::Client needs the async-websocket gem, which yrby-agent depends on. (#{e.message})"
 end
 require "json"
 require "logger"
 require "y/action_cable/client/session"
 
-# y/collaborator loads this file too, so one warning covers both.
-warn "yrby: Y::ActionCable::Client and Y::Collaborator are experimental and may change in a minor release. " \
-     "Warning[:experimental] = false turns this off.", category: :experimental
+# y/collaborator and y/agent load this file too, so one warning covers all three.
+warn "yrby-agent: Y::ActionCable::Client, Y::Collaborator, and Y::Agent are experimental " \
+     "and may change in any release. Warning[:experimental] = false turns this off.", category: :experimental
 
 module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
   # Joins a document the way a browser does: over the
