@@ -70,6 +70,20 @@ end
 
 task default: %i[compile test]
 
+# Spike (docs/no-magnus.md): the C-ABI build, Marco Roth's pattern. Builds
+# lib/y/yrby_c.bundle beside the magnus one; YRBY_NATIVE=c loads it instead.
+desc "Build the spike C extension (ext/yrby_c) into lib/y"
+task "spike:compile_c" do
+  build = "tmp/yrby_c"
+  mkdir_p build
+  ruby_bin = RbConfig.ruby
+  Dir.chdir(build) do
+    sh ruby_bin, File.expand_path("ext/yrby_c/extconf.rb", __dir__)
+    sh "make", "-j"
+  end
+  cp Dir["#{build}/yrby_c.{bundle,so}"], "lib/y/"
+end
+
 desc "Clean build artifacts"
 task :clean do
   sh "cargo clean" if File.exist?("Cargo.toml")

@@ -1,0 +1,2 @@
+#!/bin/sh
+cd tmp/magnus_slice/build && ruby ../extconf.rb >/dev/null && exec make
