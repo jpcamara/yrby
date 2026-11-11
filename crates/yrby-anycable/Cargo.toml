@@ -25,4 +25,4 @@ serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.2", features = ["full"] }
 tonic = "0.14"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-yrs = { version = "0.27", features = ["sync"] }
+yrs = { version = "0.28.1", features = ["sync"] }

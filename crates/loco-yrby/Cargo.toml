@@ -40,4 +40,4 @@ sea-orm = { version = "2.0", features = ["sqlx-sqlite", "runtime-tokio-rustls", 
 sea-orm-migration = { version = "2.0", features = ["sqlx-sqlite", "runtime-tokio-rustls", "sqlx-postgres"] }
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["full"] }
-yrs = "0.27"
+yrs = "0.28.1"

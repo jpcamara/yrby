@@ -18,7 +18,7 @@ categories = ["data-structures", "network-programming"]
 engine = ["dep:async-trait", "dep:base64", "dep:jsonwebtoken", "dep:serde", "dep:serde_json", "dep:tracing"]
 
 [dependencies]
-yrs = { version = "0.27", features = ["sync"] }
+yrs = { version = "0.28.1", features = ["sync"] }
 async-trait = { version = "0.1.92", optional = true }
 base64 = { version = "0.23", optional = true }
 jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"], optional = true }
