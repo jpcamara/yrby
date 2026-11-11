@@ -44,6 +44,7 @@ require "y/agent"
 #              [title, subtitle]
 class BoardAgent < Y::Agent
   include BoardWrites
+  include BoardSteps
 
   model ENV.fetch("AGENT_MODEL", "accounts/fireworks/routers/glm-5p3-fast"), provider: :openai,
                                                                              assume_model_exists: true
@@ -123,7 +124,7 @@ class BoardAgent < Y::Agent
     return unless working?(id)
 
     said = reply.gsub(/\s+/, " ").strip[0, 600]
-    edit { write(id, "status" => "done", "plan" => said) }
+    edit { write(id, "status" => "done", "plan" => said, "activity" => nil) }
   end
 
   # The part of the board the asker could see, as [x, y, w, h].

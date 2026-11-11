@@ -849,10 +849,15 @@ through tools (`BoardTools`), choosing every place and size itself:
 - `delete_items` removes items and the connectors attached to them.
 - `set_title` sets the board's title and subtitle.
 
-`BoardWrites` makes each change in its own edit, a moment apart, with the
-agent's cursor on it, so everyone watches it work. A tool's result tells the
-model when what it placed overlaps something, so it can fix its layout.
-When it's done, what it says goes on the ask's card.
+`BoardSteps` makes each change in its own edit, a moment apart, with the
+agent's cursor on it, so everyone watches it work. The agent selects every
+item a call changes, in its color, and its ask's card says what it's doing
+("Moving 3 items"). A tool's result tells the model when what it placed
+overlaps something, crosses a frame's edge, or falls outside the area the
+person can see, so it can fix its layout. `BoardModel`'s instructions carry
+general drawing guidance (timelines as a road with milestone pills,
+illustrations, a finale), not layouts. When it's done, what it says goes on
+the ask's card.
 
 Undo puts the board back. Items the ask added carry its id and are
 removed. For anything it changed or deleted, the ask keeps the item as it
