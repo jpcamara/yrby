@@ -1,12 +1,14 @@
+require "json"
+require "securerandom"
 require "y/agent"
 
-# One person's agent on a board (/demos/board/:room). A person asks it to
-# draw something. The ask goes into the board's "asks" map, so everyone sees
-# it, and the agent claims it. The model writes a plan, one line per thing to
-# draw, and BoardLayout places each line as it arrives. The agent writes each
-# item onto the board itself, a moment apart, and moves its cursor to it, so
-# everyone watches it draw. Every item it adds carries the ask's id, which is
-# what the ask's Undo removes.
+# One person's agent on a board (/demos/board/:room). A person asks it for
+# something. The ask goes into the board's "asks" map, so everyone sees it,
+# and the agent claims it. The model works the board through tools
+# (BoardTools): it looks at what's there, then adds, changes, moves, connects,
+# and deletes items, and sets the title, choosing every place and size
+# itself. The agent makes each change a moment apart with its cursor on it,
+# so everyone watches it work.
 #
 # The board document:
 #
@@ -22,26 +24,38 @@ require "y/agent"
 #              again (for a change, or after a failure) becomes the owner.
 #   askedBy    that person's name
 #   prompt     what they asked for
-#   at         { x, y }: the top left of what they could see, where it draws
+#   view       { x, y, w, h }: the part of the board they could see
+#   at         { x, y }: the top left of that, from before `view`
 #   createdAt  epoch milliseconds
 #   status     "asked", then "working", then "done" or "failed". The browser
 #              sets "stopped", "undone", "dismissed", or "asked" again.
-#   previous, earlier   on an ask for a change: the plan it drew and the
-#              prompt it drew it for
+#   previous, earlier   on an ask for a change: what the agent said it did,
+#              and the prompt it did it for
 #
-# The agent writes startedAt, origin (where the drawing starts, so a redraw
-# lands in the same place), plan, drawn (how many items), titled (it set the
-# board's title), and error.
+# The agent writes startedAt, drawn (how many changes it made this time),
+# plan (what it said it did), error, and what the ask's Undo needs:
+#
+#   before     Y.Map of item id -> the item as JSON before this ask first
+#              changed or deleted it. Items the ask added carry `ask` instead.
+#   after      Y.Map of item id -> the item as JSON after the ask's last
+#              change to it, or "" once it deleted it. Undo restores an item
+#              only if it still looks like this, so later edits by people stay.
+#   titleBefore, titleAfter   the same for the title and subtitle, as JSON
+#              [title, subtitle]
 class BoardAgent < Y::Agent
+  include BoardWrites
+
   model ENV.fetch("AGENT_MODEL", "accounts/fireworks/routers/glm-5p3-fast"), provider: :openai,
                                                                              assume_model_exists: true
   thinking effort: :low
   instructions <<~TEXT
-    You draw on a shared whiteboard that people are editing live. You answer
-    with a plan in JSON lines, exactly as asked, and nothing else.
+    You work on a shared whiteboard that people are editing live, through
+    tools. You decide what to draw, where, and how big. People watch each
+    change land as you make it.
   TEXT
 
-  PACE = 0.3 # seconds between items, so people see it draw
+  PACE = 0.25 # seconds between changes, so people see it work
+  VIEW = [1400, 900].freeze # the area to use when an ask has no view
 
   def initialize(document, owner:, model: nil, pace: PACE, **)
     super(document, **)
@@ -60,9 +74,7 @@ class BoardAgent < Y::Agent
   # Everyone but other agents, as on the Lexxy page (PageAgent#people).
   def people = super.reject { |_id, state| state["agent"] }
 
-  # The board is in the prompt, and the agent writes what the model plans,
-  # so the model gets no tools.
-  def document_tools = []
+  def document_tools = BoardTools.all(self)
 
   # Answers every ask waiting for this agent, oldest first.
   def answer_asks = waiting.each { |id, ask| answer(id, ask) }
@@ -70,7 +82,6 @@ class BoardAgent < Y::Agent
   private
 
   def asks = doc.get_map("asks")
-  def board = BoardContents.new(doc)
 
   def waiting
     asks.keys.map { |id| [id, asks.get_map(id)] }
@@ -80,70 +91,58 @@ class BoardAgent < Y::Agent
 
   def answer(id, ask)
     started = epoch_ms
-    origin = board.origin(id, ask)
+    @ask = id
+    @changes = 0
+    @acted = false
+    zs = board.items.to_h.values.filter_map { |item| item["z"] if item.is_a?(Hash) }
+    @high = zs.max.to_i
+    @low = zs.min.to_i
     edit do
-      board.remove(id) # an ask for a change redraws
-      write(id, "status" => "working", "startedAt" => started, "origin" => { "x" => origin[0], "y" => origin[1] },
-                "drawn" => 0, "error" => nil)
+      write(id, "status" => "working", "startedAt" => started, "drawn" => 0, "error" => nil)
+      a = asks.get_map(id)
+      a["before"] = {} unless a.get_map("before")
+      a["after"] = {} unless a.get_map("after")
     end
-    layout = BoardLayout.new(origin:, titled: board.titled? && !ask["titled"], above: board.top_z)
-    working(id, started) { draw(id, ask, layout) }
+    working(id, started) { work(id, ask) }
   rescue AgentModel::Error => e
     edit { write(id, "status" => "failed", "error" => e.message) } if working?(id)
+  rescue AgentModel::Stopped
+    nil # people stopped or undid it; the ask already says so
+  ensure
+    @ask = nil
   end
 
-  def draw(id, ask, layout)
-    buffer = +""
-    stopped = false
-    @model.plan(ask["prompt"].to_s, board: board.summary(id), previous: ask["previous"],
-                                    earlier: ask["earlier"]) do |chunk|
-      buffer << chunk
-      while (line = buffer.slice!(/\A[^\n]*\n/))
-        stopped ||= !place(id, layout.add(line))
-      end
-      break if stopped
+  def work(id, ask)
+    reply = +""
+    @model.draw(prompt: ask["prompt"].to_s, board: board.listing(id), view: view_of(ask),
+                previous: ask["previous"], earlier: ask["earlier"]) do |chunk|
+      reply.clear if @acted # only what it says after its last tool call
+      @acted = false
+      reply << chunk
     end
-    return unless !stopped && place(id, layout.add(buffer)) && place(id, layout.finish)
+    return unless working?(id)
 
-    edit { write(id, "status" => "done", "plan" => layout.lines.join("\n"), "drawn" => layout.count) }
+    said = reply.gsub(/\s+/, " ").strip[0, 600]
+    edit { write(id, "status" => "done", "plan" => said) }
   end
 
-  # Writes each item, with the cursor on it first. False once the ask isn't
-  # being worked on anymore, because someone stopped or undid it.
-  def place(id, placed) # rubocop:disable Naming/PredicateMethod -- it draws, and says whether it could go on
-    placed.each do |item|
-      return false unless working?(id)
+  # The part of the board the asker could see, as [x, y, w, h].
+  def view_of(ask)
+    view = ask["view"]
+    return view.values_at("x", "y", "w", "h").map(&:to_i) if view.is_a?(Hash) && view["w"].to_i.positive?
 
-      point(item.at, id)
-      edit { draw_item(id, item) }
-      sleep @pace
-    end
-    true
+    at = ask["at"].is_a?(Hash) ? ask["at"].values_at("x", "y").map(&:to_i) : [0, 0]
+    [*at, *VIEW]
   end
 
-  # A title goes only on a board without one, or replaces the one this ask
-  # set before.
-  def draw_item(id, item)
-    ask = asks.get_map(id)
-    if item.is_a?(BoardLayout::Title)
-      return if board.titled? && !ask["titled"]
-
-      board.title(item)
-      ask["titled"] = true
-    else
-      board.put(item, ask: id, by: "agent:#{@owner.id}")
-      ask["drawn"] = ask["drawn"].to_i + 1
-    end
-  end
-
-  def working?(id) = asks.get_map(id)&.[]("status") == "working"
+  def working?(id) = id && asks.get_map(id)&.[]("status") == "working"
 
   def write(id, fields)
     ask = asks.get_map(id) or return
     fields.each { |key, value| value.nil? ? ask.delete(key) : ask[key] = value }
   end
 
-  # While it draws, its presence says so and since when, and which ask.
+  # While it works, its presence says so and since when, and which ask.
   def working(id, started)
     self.presence = status("working", started, id)
     yield

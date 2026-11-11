@@ -144,10 +144,9 @@ class BoardLayoutTest < ActiveSupport::TestCase
   end
 
   test "the canned plan reads a subject, a start, and an end from the ask" do
-    lines = +""
-    BoardModel::Canned.new.plan("@agent Lay out an illustrated timeline for the Huckleberry Pie launch, " \
-                                "from locking the flavor to holiday delivery", board: "") { |chunk| lines << chunk }
-    plan = lines.lines.map { |line| JSON.parse(line) }
+    plan = BoardModel::Canned.new(nil).plan_for("@agent Lay out an illustrated timeline for the Huckleberry Pie " \
+                                                "launch, from locking the flavor to holiday delivery")
+                             .map { |line| JSON.parse(line) }
 
     assert_equal "Huckleberry Pie launch", plan.first["text"]
     steps = plan.select { |line| line["kind"] == "step" }

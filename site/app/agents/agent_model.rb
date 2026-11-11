@@ -8,6 +8,9 @@
 # answer.
 class AgentModel
   class Error < StandardError; end
+  # Raised from a tool when people stopped or undid the ask mid-call. It ends
+  # the call without counting as a model failure.
+  class Stopped < StandardError; end
 
   TIMEOUT = /timeout|timed out/i
 
@@ -60,7 +63,7 @@ class AgentModel
 
     stalled = ask(prompt, again: true, &) == :stalled
     ask(prompt, again: false, &) if stalled
-  rescue Error
+  rescue Error, Stopped
     raise
   rescue StandardError => e
     Rails.logger.warn("AgentModel: #{e.class}: #{e.message}")
