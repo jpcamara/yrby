@@ -817,8 +817,53 @@ The agent joins at the origin the inviting browser used. Set
 proxy.
 
 The invitation goes through the method gate like starting a room: a POST
-with no body, only on `/demos/lexxy/:room/agent`. Active Job is loaded for
-it. Active Storage still isn't, and the boot guard checks that separately.
+with no body, only on `/demos/lexxy/:room/agent` and
+`/demos/spreadsheet/:room/agent` (the agent sheet, below). Active Job is
+loaded for it. Active Storage still isn't, and the boot guard checks that
+separately.
+
+### The agent sheet
+
+`/sheet` opens a room's agent sheet (`/demos/spreadsheet/:room/sheet`): a
+spreadsheet with tabs, formulas, and a side panel where each person asks
+their own agent for something. It uses the room's `sheet` document over
+`RoomChannel`, separate from the Spreadsheet demo's document.
+
+- **The document.** `tabs` is a Y.Array of tab ids. `sheets` maps each tab id
+  to a Y.Map with its `name`, its `cells` (`"B4"` to a Y.Map of `input`,
+  `format`, `bold`, `fill`, `by`, and `ask`), and its column `widths`. Only
+  what people type is shared. `asks` holds the asks, as on the shared page.
+  `app/agents/sheet_agent.rb` documents every field.
+- **Formulas.** Each browser computes values with `frontend/src/formula.js`,
+  a small engine written for this page: arithmetic, comparisons, `&`, `%`,
+  cell, range, whole-column, absolute, and cross-tab references
+  (`Historical!C:C`, `'Last year'!A1`), and SUM, AVERAGE, MIN, MAX, COUNT,
+  ROUND, ABS, IF, SUMIF, and SUMIFS. It caches values and recomputes only what
+  depends on a changed cell. Errors are values: `#REF!`, `#DIV/0!`, `#CIRC!`,
+  `#VALUE!`, `#NAME?`, and `#ERROR!`. Renaming a tab rewrites the formulas
+  that name it. `node --test formula_test.mjs` in `frontend/` runs its tests.
+- **Editing.** Arrow keys and clicks select, typing replaces, F2 or a double
+  click edits, Enter and Tab commit, and the formula bar edits the selected
+  cell. Copy and paste carry plain values. Undo and redo use a
+  `Y.UndoManager` that tracks only this browser's own edits.
+- **Presence.** Each person's selected cell, and each agent's, is outlined in
+  their color with a name tag. An agent's outline is dashed.
+- **A new room** starts with an empty "Pre-orders" tab and a "Historical" tab
+  of last year's orders (`frontend/src/sheet_seed.js`), so an ask such as
+  "Draft a forecast for pre-orders from last year's numbers" has something to
+  read.
+- **Asks.** `SheetAgentJob` runs `SheetAgent`, with the same seats, budget,
+  and limits as `PageAgent`. The model gets every non-empty cell's input in
+  its prompt and answers with JSON lines (`{"cell":"B4","input":"=...",
+  "format":"number"}`). The agent writes each cell as its line arrives and
+  moves its cell cursor there, 200 ms apart, so people watch it work. Unlike
+  the shared page, it writes the document itself, but each cell it writes
+  carries the ask's id, and the ask keeps each cell as it was before the ask.
+  The ask's card offers Undo, which restores the cells nobody has changed
+  since, and Ask for a change, which sends the same ask back with a new
+  prompt. `SheetModel` asks Fireworks when `FIREWORKS_API_KEY` is set and
+  otherwise streams a canned forecast built from formulas over the
+  Historical tab.
 
 ### Building the bundles and the stylesheet
 

@@ -12,7 +12,7 @@
     This room hasn't started yet. Starting it creates the room's record,
     which holds a document for each demo. Anyone with the link can then join.
   </p>
-  <%= button_to "Start the room", demo_start_path(@demo.slug, @slug, space: (1 if @space)), authenticity_token: false,
+  <%= button_to "Start the room", demo_start_path(@demo.slug, @slug, space: (1 if @space), sheet: (1 if @sheet)), authenticity_token: false,
                 form_class: "mt-6",
                 class: "cursor-pointer rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500" %>
 </section>
