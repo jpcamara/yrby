@@ -21,6 +21,8 @@
 /public/hero.js
 /public/space.js
 /public/space.css
+/public/board.js
+/public/board.css
 /public/*.js.map
 
 # Built stylesheet (Tailwind via `bun run build:css`)

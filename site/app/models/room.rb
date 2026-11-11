@@ -30,6 +30,8 @@ class Room < ApplicationRecord
   has_collaborative_rich_text :body, nodes: SUPPRESSED_NODES
   # end source excerpt
   Demos.shape_slugs.each { |slug| has_collaborative_document slug }
+  # The agent board's document (BoardsController), on its own channel.
+  has_collaborative_document :board, channel: "BoardChannel"
 
   has_many :documents, class_name: "Y::Document", as: :record, dependent: :destroy
   has_many :seats, as: :room, dependent: :delete_all

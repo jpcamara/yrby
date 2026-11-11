@@ -21,6 +21,15 @@ Rails.application.routes.draw do
   get "examples/document/stored", to: "examples#stored"
 
   get "demos", to: "demos#index"
+  # The agent board, a whiteboard where people's agents draw
+  # (BoardsController). /board starts a new room. These come before the
+  # demo routes, which would read "board" as a demo.
+  get "board", to: "boards#new", as: :new_board
+  get "demos/board", to: "boards#new"
+  post "demos/board/start", to: "boards#start", as: :board_open
+  get "demos/board/:room", to: "boards#show", as: :board
+  post "demos/board/:room/start", to: "boards#start", as: :board_start
+  post "demos/board/:room/agent", to: "boards#agent", as: :board_agent
   # A bare demo URL picks a room id and redirects to it, so every visitor gets
   # a separate room.
   get "demos/:demo", to: "demos#new_room", as: :demo

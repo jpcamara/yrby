@@ -353,6 +353,9 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     # those paths.
     exceptions = ["/_anycable", "/demos/:demo/start(.:format)", "/demos/:demo/:room/start(.:format)",
                   "/demos/lexxy/:room/agent(.:format)"]
+    # The agent board's start and invite (BoardsController), the same two POSTs.
+    exceptions += ["/demos/board/start(.:format)", "/demos/board/:room/start(.:format)",
+                   "/demos/board/:room/agent(.:format)"]
     routes = Rails.application.routes.routes.reject { |route| exceptions.include?(route.path.spec.to_s) }
 
     assert_equal ["GET"], routes.map(&:verb).uniq, "found a write endpoint, but this site only reads over HTTP"

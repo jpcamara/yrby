@@ -820,6 +820,40 @@ The invitation goes through the method gate like starting a room: a POST
 with no body, only on `/demos/lexxy/:room/agent`. Active Job is loaded for
 it. Active Storage still isn't, and the boot guard checks that separately.
 
+### The agent board
+
+`/board` opens a whiteboard where each person's agent draws
+(`/demos/board/:room`, `BoardsController`). It's the room's `board`
+document, on its own `BoardChannel`, so it doesn't change the Whiteboard
+demo. People pan and zoom their own view and add sticky notes, text,
+shapes, pen strokes, and connectors. Undo and redo take back only your own
+changes (a `Y.UndoManager` that tracks this window's origin).
+
+The document is a `Y.Map` of items keyed by id, each a `Y.Map` with a type,
+a box, a z order, a color, and a `Y.Text` for its words, plus `title` and
+`subtitle` as `Y.Text`. `frontend/src/board.js` lists every field. Presence
+carries each person's name, color, cursor in board units, and selection.
+
+To ask, choose "Ask agent" and say what to draw. The ask goes into the
+`asks` map, as on the shared page, and the person's agent claims it:
+
+1. `BoardModel` asks the model for a plan, one JSON line per thing to draw
+   (a title, a group, a step, a note, a finale), with no coordinates.
+2. `BoardLayout` places each line as it streams in: steps along a winding
+   dashed path with a pill for each label and a note under it, a frame
+   around each group, notes in a grid, and a larger area for the finale.
+3. `BoardAgent` writes each item to the board itself and moves its cursor
+   to it a moment apart, so everyone watches it draw. Every item carries the
+   ask's id. The ask's card offers Undo, which removes them, and "Ask for a
+   change", which has the agent redraw in the same place with its earlier
+   plan as context.
+
+Without `FIREWORKS_API_KEY`, `BoardModel::Canned` streams a twelve-day
+launch timeline built from the ask's words, so the demo draws without a key.
+The board reuses the shared page's seats, budget, and limits. A person's
+board agent takes its own seat (`board:<room>`), and the invitation is a
+POST with no body on `/demos/board/:room/agent`.
+
 ### Building the bundles and the stylesheet
 
 ```bash
