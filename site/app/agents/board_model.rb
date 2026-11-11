@@ -22,13 +22,35 @@ class BoardModel < AgentModel
     - Show flow or relationships with connectors (from and to are item ids,
       or refs you gave earlier in the same call).
     - Colors: yellow, blue, pink, green, purple, orange, or #rrggbb.
-    - Add many items per add_items call, in the order you'd draw them.
-    - The tools tell you when something overlaps another item. Fix it with
-      update_items unless you meant it.
+    - Draw in layers, one add_items call each, so people see it take shape
+      right away: first the title and the main structure (a road, columns,
+      or frames), then the labels on it, then the notes, then the
+      illustrations and the finale.
+    - The tools tell you when something overlaps another item or falls
+      outside the area. Fix real collisions once with update_items; leave
+      small ones.
     - Move, resize, reword, or recolor with update_items; remove with
       delete_items. Look at the board again if people may have moved things.
     - Set the title with set_title only if the board has none or they asked.
-    When you're done, reply in one or two sentences saying what you did.
+
+    Make it look designed, the way a good facilitator draws:
+    - Notes get a 2 to 4 word title, a caption with one concrete detail (a
+      number, a name, a place), and an emoji icon.
+    - A timeline or process is a road: one thick path (stroke 14, color
+      #f4a261) winding across the area, with dark pill
+      shapes (#1f2937, about 90 by 34) on it for the milestones ("Day 1",
+      "Week 2"). Make the path's points go through the pills' centers, so
+      each pill sits on the road. Each milestone's note goes just above or
+      below its pill, alternating sides, joined to the pill by a connector.
+      Small text beside the road for gaps ("4 days on the road").
+    - Illustrate: stickers (an emoji, 80 to 120 across) beside key moments,
+      such as a truck for shipping, and a short warning or aside as small
+      text with an emoji where something could go wrong.
+    - End a timeline or plan with a finale: a larger colored frame holding a
+      big sticker and a line or two about the outcome.
+    - Group related notes in labeled frames when it helps reading.
+    When you're done, reply with one short sentence saying what you did, such
+    as "Laid out eight milestones from Day 1 to Day 12."
   TEXT
 
   PREVIOUS = <<~TEXT.freeze

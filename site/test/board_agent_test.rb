@@ -160,7 +160,8 @@ class BoardAgentTest < ActiveSupport::TestCase
       tool.call(:add_items, items: [NOTE.merge("x" => 550, "y" => 550), NOTE.merge("x" => 2000)])
     end)
 
-    assert_match(/item 1: added as \w+, but it overlaps mill\nitem 2: added as \w+\z/, model.results.first)
+    assert_match(/item 1: added as \w+, but it overlaps mill\n/, model.results.first)
+    assert_match(/item 2: added as \w+, but it's outside the area they can see\z/, model.results.first)
   end
 
   test "its reply is what it said after its last tool call" do
@@ -261,9 +262,36 @@ class BoardAgentTest < ActiveSupport::TestCase
                  model.calls.first.values_at(:prompt, :earlier, :previous)
   end
 
+  test "it selects every item a call changes, and says what it's doing on the card" do
+    person_note("mill", "Call the mill")
+    person_note("farm", "Call the farm", x: 900)
+    person_asks("a1")
+    activity = nil
+    run_with(ScriptModel.new do |tool|
+      tool.call(:update_items, changes: [{ "id" => "mill", "x" => 0 }, { "id" => "farm", "x" => 300 }])
+      activity = ask("a1")["activity"]
+    end)
+
+    assert_equal "Moving 2 items", activity
+    assert_includes @agent.presences.map { |p| p["selection"] }, %w[mill farm]
+    assert_nil ask("a1")["activity"]
+    assert_nil @agent.presences.last["selection"]
+  end
+
+  test "an item that crosses a frame's edge counts as an overlap; one inside it doesn't" do
+    @doc.get_map("items")["box"] = { "type" => "frame", "x" => 0, "y" => 100, "w" => 400, "h" => 300, "z" => 1 }
+    person_asks("a1")
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [NOTE.merge("x" => 40, "y" => 140), NOTE.merge("x" => 300, "y" => 140)])
+    end)
+
+    assert_match(/item 1: added as \w+\n/, model.results.first)
+    assert_match(/item 2: added as \w+, but it overlaps box/, model.results.first)
+  end
+
   test "an ask stops changing the board after its limit" do
     person_asks("a1")
-    stub_const(BoardWrites, :MAX_CHANGES, 2) do
+    stub_const(BoardSteps, :MAX_CHANGES, 2) do
       model = run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE] * 3) })
 
       assert_equal 2, added("a1").size

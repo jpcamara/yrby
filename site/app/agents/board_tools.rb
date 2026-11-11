@@ -15,7 +15,8 @@ module BoardTools
       title: { type: "string", description: "A note's first line" },
       caption: { type: "string", description: "A note's smaller second line" },
       text: { type: "string", description: "A text item's words, or a shape's or frame's label" },
-      color: { type: "string", description: "yellow, blue, pink, green, purple, orange, or #rrggbb" },
+      color: { type: "string", description: "yellow, blue, pink, green, purple, orange, or #rrggbb. " \
+                                            "Paths default to dark ink; give a road a warm color like #f4a261" },
       icon: { type: "string", description: "One emoji, on a note or as a sticker" },
       shape: { type: "string", enum: BoardSpec::SHAPES },
       size: { type: "number", description: "A text item's font size, 12 to 72" },
@@ -23,6 +24,7 @@ module BoardTools
       from: { type: "string", description: "A connector's start: an item id, or a ref from this call" },
       to: { type: "string", description: "A connector's end: an item id, or a ref from this call" },
       dash: { type: "boolean", description: "Dashed line, for a connector or path" },
+      stroke: { type: "number", description: "A path's line width, 1 to 16" },
       points: { type: "array", items: { type: "array", items: { type: "number" } },
                 description: "A path's points, [[x, y], ...] in board units" }
     },
@@ -44,6 +46,11 @@ module BoardTools
     def initialize(agent)
       super()
       @agent = agent
+    end
+
+    def call(tool_call: nil, **arguments)
+      Rails.logger.info("#{self.class.tool_name} #{arguments.to_json[0, 4000]}")
+      super
     end
   end
 

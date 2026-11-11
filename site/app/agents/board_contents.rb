@@ -2,6 +2,8 @@
 # drawing fits, what the model is told about it, and the writes that put a
 # drawing on it. The writes go inside the agent's edit.
 class BoardContents
+  include BoardOverlaps
+
   AREA = [1200, 1100].freeze # about what a drawing covers, to keep it clear of what's there
   BELOW = 160                # the gap above a drawing that goes under everything
   CONTEXT = 40               # items the model hears about
@@ -113,20 +115,6 @@ class BoardContents
     [item["x"].to_f + (item["w"].to_f / 2), item["y"].to_f + (item["h"].to_f / 2)].map(&:round)
   end
 
-  SOLID = %w[note text shape sticker].freeze # frames hold things; lines cross them
-
-  # ", but it overlaps a, b" when the item `key` covers another solid item,
-  # so the model can move one of them. Empty otherwise.
-  def overlap_note(key)
-    solid = items.to_h.select { |_id, thing| thing.is_a?(Hash) && SOLID.include?(thing["type"]) }
-    mine = solid.delete(key) or return ""
-    box = box_of(mine)
-    hits = solid.filter_map { |other, thing| other if overlap?(box, box_of(thing)) }
-    hits.empty? ? "" : ", but it overlaps #{hits.first(5).join(", ")}"
-  end
-
-  def box_of(thing) = thing.values_at("x", "y", "w", "h").map(&:to_f)
-
   # The ids of what the ask `id` added.
   def added_by(id) = items.to_h.filter_map { |key, item| key if item.is_a?(Hash) && item["ask"] == id }
 
@@ -148,8 +136,4 @@ class BoardContents
   def below(boxes) = [boxes.map(&:first).min.round, (boxes.map { |_, top, _, height| top + height }.max + BELOW).round]
 
   def point(hash) = (hash.is_a?(Hash) ? hash : {}).values_at("x", "y").map(&:to_f)
-
-  def overlap?(one, two)
-    one[0] < two[0] + two[2] && two[0] < one[0] + one[2] && one[1] < two[1] + two[3] && two[1] < one[1] + one[3]
-  end
 end

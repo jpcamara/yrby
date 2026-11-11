@@ -6,19 +6,22 @@ require "securerandom"
 # cursor on it. BoardAgent includes it; BoardTools and the canned plan call
 # it. Every write keeps what the ask's Undo needs (see BoardAgent).
 module BoardWrites
-  MAX_CHANGES = 150 # per ask
   MAX_PER_CALL = 60 # items or changes in one tool call
 
-  def board_listing = board.listing(@ask).tap { @acted = true }
+  def board_listing
+    doing("Looking at the board")
+    board.listing(@ask).tap { @acted = true }
+  end
 
   # Adds each item and returns one line per item: its new id, or why it was
   # skipped. A connector may name an earlier item of the same call by its ref.
   def add_items(specs)
+    doing("Adding #{count(specs.size, "item")}")
     refs = {}
     lines = specs.first(MAX_PER_CALL).each_with_index.map do |spec, i|
       spec = spec.to_h.transform_keys(&:to_s)
       name = spec["ref"].presence || "item #{i + 1}"
-      add_spec(spec, refs).then { |key| "#{name}: added as #{key}#{board.overlap_note(key)}" }
+      add_spec(spec, refs).then { |key| "#{name}: added as #{key}#{collisions(key)}" }
     rescue BoardSpec::Invalid => e
       "#{name}: skipped, #{e.message}"
     end
@@ -41,27 +44,35 @@ module BoardWrites
     step(board.center(fields)) do
       board.create(key, fields, text, "z" => z, "ask" => @ask, "by" => "agent:#{@owner.id}")
     end
+    select_too(key)
     key
   end
 
   def update_items(changes)
-    changes.first(MAX_PER_CALL).map do |change|
-      change = change.to_h.transform_keys(&:to_s)
-      key = change["id"].to_s
-      item = board.item(key) or next "#{key}: no such item; look at the board again"
-      fields, text = BoardSpec.update(item["type"], change, was: item["text"])
-      next "#{key}: nothing to change" if fields.empty? && text.nil?
-
-      step(board.center(item.merge(fields))) do
-        keeping(key) { board.change(key, fields, text) }
-      end
-      "#{key}: changed#{board.overlap_note(key)}"
-    rescue BoardSpec::Invalid => e
-      "#{key}: skipped, #{e.message}"
-    end.join("\n")
+    changes = changes.first(MAX_PER_CALL).map { |change| change.to_h.transform_keys(&:to_s) }
+    ids = changes.map { |change| change["id"].to_s }
+    doing("#{moves_only?(changes) ? "Moving" : "Changing"} #{count(ids.size, "item")}",
+          ids.select { |id| board.exists?(id) })
+    changes.map { |change| update_one(change["id"].to_s, change) }.join("\n")
   end
 
+  def moves_only?(changes) = changes.flat_map(&:keys).uniq.difference(%w[id x y]).empty?
+
+  def update_one(key, change)
+    item = board.item(key) or return "#{key}: no such item; look at the board again"
+    fields, text = BoardSpec.update(item["type"], change, was: item["text"])
+    return "#{key}: nothing to change" if fields.empty? && text.nil?
+
+    step(board.center(item.merge(fields))) { keeping(key) { board.change(key, fields, text) } }
+    "#{key}: changed#{collisions(key)}"
+  rescue BoardSpec::Invalid => e
+    "#{key}: skipped, #{e.message}"
+  end
+
+  def collisions(key) = board.overlap_note(key, view_of(asks.get_map(@ask)))
+
   def delete_items(ids)
+    doing("Removing #{count(ids.size, "item")}", ids.map(&:to_s).select { |id| board.exists?(id) })
     ids.first(MAX_PER_CALL).map do |key|
       key = key.to_s
       item = board.item(key) or next "#{key}: no such item"
@@ -74,10 +85,10 @@ module BoardWrites
   end
 
   def set_title(title, subtitle = "")
-    title = title.to_s.gsub(/\s+/, " ").strip[0, 80]
-    subtitle = subtitle.to_s.gsub(/\s+/, " ").strip[0, 140]
+    title, subtitle = [[title, 80], [subtitle, 140]].map { |words, max| words.to_s.gsub(/\s+/, " ").strip[0, max] }
     return "The title can't be empty." if title.empty?
 
+    doing("Titling the board")
     view = view_of(asks.get_map(@ask))
     step([view[0] + 120, view[1] + 40]) do
       ask = asks.get_map(@ask)
@@ -100,38 +111,4 @@ module BoardWrites
   private
 
   def board = BoardContents.new(doc)
-
-  # One change: the cursor goes to `at`, the change happens in one edit, and
-  # the agent waits so people see it. Raises Stopped once people stopped or
-  # undid the ask.
-  def step(at)
-    @acted = true
-    raise AgentModel::Stopped unless working?(@ask)
-    if @changes >= MAX_CHANGES
-      raise BoardSpec::Invalid, "this ask has made #{MAX_CHANGES} changes, the most it can; stop and reply"
-    end
-
-    point(at, @ask)
-    edit do
-      yield
-      ask = asks.get_map(@ask)
-      ask["drawn"] = ask["drawn"].to_i + 1
-    end
-    @changes += 1
-    sleep @pace
-  end
-
-  # Around one change to `key`: keeps the item as it was before this ask
-  # first touched it, and as the ask left it, for Undo. An item the ask added
-  # needs neither; Undo removes it.
-  def keeping(key)
-    ask = asks.get_map(@ask)
-    item = board.item(key)
-    ask.get_map("before")[key] ||= JSON.generate(item) if item && item["ask"] != @ask
-    yield
-    return unless ask.get_map("before")[key]
-
-    now = board.item(key)
-    ask.get_map("after")[key] = now ? JSON.generate(now) : ""
-  end
 end

@@ -74,6 +74,9 @@ const itemFrom = (json) => {
   return item
 }
 
+// The card shows the start of what the agent said; the ask keeps all of it.
+const firstSentence = (text) => text?.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? text
+
 const replaceText = (text, words) => {
   text.delete(0, text.length)
   if (words) text.insert(0, words)
@@ -337,8 +340,11 @@ class Board {
     const right = Math.max(...boxes.map((b) => b.x + b.w))
     const bottom = Math.max(...boxes.map((b) => b.y + b.h))
     const box = canvas.getBoundingClientRect()
-    const s = Math.min(1.2, Math.max(MIN_ZOOM, Math.min((box.width - 120) / (right - left), (box.height - 260) / (bottom - top))))
-    this.view = { s, x: (box.width - (right - left) * s) / 2 - left * s, y: 120 + (box.height - 260 - (bottom - top) * s) / 2 - top * s }
+    // Leave the asks panel on the right clear when it has cards.
+    const panel = $("#asks").childElementCount ? Math.min(360, box.width / 3) : 0
+    const width = box.width - 120 - panel
+    const s = Math.min(1.2, Math.max(MIN_ZOOM, Math.min(width / (right - left), (box.height - 260) / (bottom - top))))
+    this.view = { s, x: 60 + (width - (right - left) * s) / 2 - left * s, y: 120 + (box.height - 260 - (bottom - top) * s) / 2 - top * s }
     this.applyView()
   }
 
@@ -770,7 +776,7 @@ class Board {
     const drawn = Number(ask.get("drawn")) || 0
     const started = Number(ask.get("startedAt")) || 0
     const seconds = started ? Math.max(0, Math.floor((Date.now() - started) / 1000)) : 0
-    const key = [status, drawn, ask.get("error"), ask.get("plan"), !!agent, status === "working" ? seconds : ""].join("\u0000")
+    const key = [status, drawn, ask.get("error"), ask.get("plan"), ask.get("activity"), !!agent, status === "working" ? seconds : ""].join("\u0000")
     if (card.dataset.key === key) return
     card.dataset.key = key
     card.dataset.status = status
@@ -778,8 +784,8 @@ class Board {
 
     const line = {
       asked: agent ? "Reading the board…" : "Waiting for the agent to join…",
-      working: `Working · ${drawn} ${drawn === 1 ? "change" : "changes"} · ${seconds}s`,
-      done: ask.get("plan") || `Made ${drawn} ${drawn === 1 ? "change" : "changes"}`,
+      working: `${ask.get("activity") || "Working"} · ${drawn} ${drawn === 1 ? "change" : "changes"} · ${seconds}s`,
+      done: firstSentence(ask.get("plan")) || `Made ${drawn} ${drawn === 1 ? "change" : "changes"}`,
       stopped: `Stopped after ${drawn} ${drawn === 1 ? "change" : "changes"}`,
       failed: `Couldn't draw it: ${ask.get("error") ?? "something went wrong"}.`,
     }[status]
