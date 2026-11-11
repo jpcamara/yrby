@@ -38,13 +38,20 @@ auto-fix most issues.
 
 ```
 lib/                     # Ruby: Y::ActionCable::Sync (the ActionCable concern)
-ext/yrby/src/        # Rust: lib.rs (magnus bindings) + protocol.rs (pure protocol helpers)
+ext/yrby/src/        # Rust: lib.rs (magnus bindings)
+ext/yrby/crates/yrby-core/   # Rust: the pure protocol and storage rules, shared with crates/
 test/                    # Ruby unit tests
 examples/actioncable-demo/   # a separate, deliberately thorough demo app (see below)
+crates/                  # Rust server side via AnyCable: anycable-rpc, yrby-anycable, loco-yrby
+examples/loco-demo/      # a Loco app using loco-yrby
+packages/client/e2e/     # the client end to end against the Rust backends
 ```
 
+`crates/` is its own Cargo workspace. [`crates/README.md`](crates/README.md)
+covers its tests, including Postgres.
+
 The native code keeps the binding (magnus/`RString`/GVL) separate from pure
-logic (e.g. `classify_message`, `merged_doc_update`) so the logic is
+logic (e.g. `classify_message`, `merged_doc_update`, in `yrby-core`) so the logic is
 unit-tested directly in Rust.
 
 ## The demo
@@ -99,5 +106,6 @@ it locally.
 
 - Keep the binding layer thin; put testable logic in pure functions.
 - Add/adjust tests (Ruby, and Rust for pure logic).
-- Make sure `rake test`, `cargo test`, rubocop, clippy, and rustfmt all pass.
+- Make sure `rake test`, `cargo test`, rubocop, clippy, and rustfmt all pass,
+  in `crates/` and `examples/loco-demo` too when you change them.
 - Update `CHANGELOG.md` under **[Unreleased]**.
