@@ -1,3 +1,8 @@
+<%# The same room's agent board, a bigger whiteboard where each person can
+    bring an agent that draws. %>
+<p class="mb-3 text-sm text-zinc-400">
+  <%= link_to "Open this room's agent board →", board_path(@room), class: "text-accent hover:underline" %>
+</p>
 <%= collaborative_document_tag @room, @demo.slug, channel: "RoomChannel" do %>
   <div id="canvas"></div>
 <% end %>
