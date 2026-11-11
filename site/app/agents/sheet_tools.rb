@@ -32,6 +32,24 @@ module SheetTools
       super()
       @agent = agent
     end
+
+    # Some models send an array or object argument as a JSON string, or a
+    # list of JSON strings. Decode those so the tool gets what it declared.
+    def call(tool_call: nil, **arguments)
+      super(tool_call:, **arguments.transform_values { |value| decode(value) })
+    end
+
+    private
+
+    def decode(value)
+      case value
+      when Array then value.map { |each| decode(each) }
+      when /\A\s*[\[{]/ then decode(JSON.parse(value))
+      else value
+      end
+    rescue JSON::ParserError
+      value
+    end
   end
 
   class ReadSheet < Tool

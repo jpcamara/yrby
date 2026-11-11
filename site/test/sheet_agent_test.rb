@@ -115,6 +115,17 @@ class SheetAgentTest < ActiveSupport::TestCase
     assert_equal cells["A1"], JSON.parse(saved("a1", "after")["preorders!A1"])
   end
 
+  test "cells sent as a JSON string, or as JSON strings, are read like objects" do
+    person_asks("a1")
+    run_with(ScriptModel.new do
+      tool = SheetTools::WriteCells.new(@agent)
+      tool.call(cells: JSON.generate([{ ref: "B2", input: "5" }]))
+      tool.call(cells: [JSON.generate({ ref: "B3", input: "6" })])
+    end)
+
+    assert_equal(%w[5 6], cells.values_at("B2", "B3").map { |cell| cell["input"] })
+  end
+
   test "it says which cells it skipped and why, and which formulas the sheet can't compute" do
     person_asks("a1")
     model = run_with(ScriptModel.new do |tool|
