@@ -67,8 +67,8 @@ mod readme_examples {}
 pub use yjs_html_core::*;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, GetString, Map, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
-    XmlOut, XmlTextRef,
+    Any, GetString, Map, Number, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment,
+    XmlFragmentRef, XmlOut, XmlTextRef,
 };
 
 // Lexical text format bitmask (lexical 0.44).
@@ -391,13 +391,11 @@ fn open_block<T: ReadTxn>(
             push_block_children(txn, t, depth, "</tr>", false, stack);
         }
         "tablecell" => {
-            let header = matches!(
-                t.get_attribute(txn, "__headerState"),
-                Some(Out::Any(Any::Number(n))) if n > 0.0
-            ) || matches!(
-                t.get_attribute(txn, "__headerState"),
-                Some(Out::Any(Any::BigInt(n))) if n > 0
-            );
+            let header = match t.get_attribute(txn, "__headerState") {
+                Some(Out::Any(Any::Number(Number::Int(n)))) => n > 0,
+                Some(Out::Any(Any::Number(Number::Float(n)))) => n > 0.0,
+                _ => false,
+            };
             let close = if header {
                 em.push_str("<th>");
                 "</th>"
@@ -562,8 +560,8 @@ fn open_listitem<T: ReadTxn>(
     rules: &Rules,
 ) {
     let value = match t.get_attribute(txn, "__value") {
-        Some(Out::Any(Any::Number(n))) => n as i64,
-        Some(Out::Any(Any::BigInt(n))) => n,
+        Some(Out::Any(Any::Number(Number::Int(n)))) => n,
+        Some(Out::Any(Any::Number(Number::Float(n)))) => n as i64,
         _ => 1,
     };
     let checked = match t.get_attribute(txn, "__checked") {
@@ -669,8 +667,8 @@ fn render_inline<T: ReadTxn>(
                     _ => {
                         is_tab = false;
                         format = match m.get(txn, "__format") {
-                            Some(Out::Any(Any::Number(n))) => n as u32,
-                            Some(Out::Any(Any::BigInt(n))) => n as u32,
+                            Some(Out::Any(Any::Number(Number::Int(n)))) => n as u32,
+                            Some(Out::Any(Any::Number(Number::Float(n)))) => n as u32,
                             _ => 0,
                         };
                         style = match m.get(txn, "__style") {
@@ -796,13 +794,24 @@ fn lexxy_style(style: &str) -> Option<String> {
     if css.is_empty() { None } else { Some(css) }
 }
 
+/// The schemes a link may use, and what an editor shows for any other, as
+/// Lexical's `LinkNode` does: a `javascript:` link would run in the page.
+const LINK_SCHEMES: [&str; 5] = ["http", "https", "mailto", "sms", "tel"];
+
+fn safe_href(url: String) -> String {
+    match url_scheme(&url) {
+        Some(scheme) if !LINK_SCHEMES.contains(&scheme.as_str()) => "about:blank".to_string(),
+        _ => url,
+    }
+}
+
 /// `link` / `autolink`: Lexxy's sanitize keeps only `href` and `title`
 /// (`target`/`rel` are stored in the doc but stripped from exported HTML).
 fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize, em: &mut Emitter, rules: &Rules) {
     em.push_str("<a");
     if let Some(url) = str_attr(txn, t, "__url") {
         em.push_str(" href=\"");
-        em.push_str(&escape_attr(&url));
+        em.push_str(&escape_attr(&safe_href(url)));
         em.push('"');
     }
     if let Some(title) = str_attr(txn, t, "__title").filter(|s| !s.is_empty()) {
@@ -981,6 +990,21 @@ pub fn escape_attr(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_to_an_unsafe_scheme_goes_nowhere() {
+        assert_eq!(
+            safe_href("https://example.com".into()),
+            "https://example.com"
+        );
+        assert_eq!(safe_href("/docs".into()), "/docs");
+        assert_eq!(
+            safe_href("mailto:a@example.com".into()),
+            "mailto:a@example.com"
+        );
+        assert_eq!(safe_href("javascript:alert(1)".into()), "about:blank");
+        assert_eq!(safe_href(" JAVA\tSCRIPT:alert(1)".into()), "about:blank");
+    }
     use yrs::updates::decoder::Decode;
     use yrs::{Doc, Transact, Update};
 
@@ -1167,8 +1191,14 @@ mod tests {
         let frag = txn.get_xml_fragment("root").unwrap();
         let html = render(&txn, &frag).unwrap();
 
-        assert!(html.contains("rocks"), "marked text survives without a rule: {html}");
-        assert!(!html.contains("<mark"), "no wrapper is invented for it: {html}");
+        assert!(
+            html.contains("rocks"),
+            "marked text survives without a rule: {html}"
+        );
+        assert!(
+            !html.contains("<mark"),
+            "no wrapper is invented for it: {html}"
+        );
         assert!(html.contains("#ruby"), "hashtag text survives: {html}");
     }
 

@@ -22,6 +22,43 @@ module Y
       # this to return before it acknowledges or broadcasts the change.
       def append(update) = document_row.append(update)
 
+      # A signed grant for this document, what a page, a Ruby client, or a
+      # Y::Collaborator subscribes with. It's a signed GlobalID scoped to this
+      # attribute, and Y::Collaborative.locate turns it back into the record.
+      # Pass expires_in: to limit how long it lasts. Without it GlobalID's own
+      # default applies, which is one month under Rails. The option goes
+      # through only when it's given, because an explicit nil would mean
+      # "never expire".
+      def grant(expires_in: nil)
+        options = { for: Y::Collaborative.sgid_purpose(name) }
+        options[:expires_in] = expires_in if expires_in
+        record.to_sgid(**options).to_s
+      end
+
+      # The channel that accepts this document's grant: the one the model
+      # declared with has_collaborative_document, or Y::DocumentChannel. A
+      # gem with its own grants and channel, such as lexxy-realtime, returns
+      # its own document with both.
+      def channel = record.class.collaborative_document_options.dig(name, :channel) || "Y::DocumentChannel"
+
+      # Edits the document from Ruby the way a browser does: yields the
+      # current document, records what the block changed, and broadcasts it so
+      # open editors apply it. Returns the update, or nil when the block
+      # wrote nothing.
+      #
+      #   post.collaborative_document(:body).edit do |doc|
+      #     Y::Lexxy.append_paragraph(doc, "Reviewed by ops.")
+      #   end
+      def edit
+        doc = y_doc
+        update = doc.edit { yield doc }
+        return unless update
+
+        append(update)
+        Y::ActionCable.broadcast(key, update)
+        update
+      end
+
       # Builds a new Y::Doc from storage on every call.
       def y_doc
         Y::Doc.new.tap do |doc|

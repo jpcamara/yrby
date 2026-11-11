@@ -7,6 +7,75 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-09
+
+Requires yrby 0.9.0 or later.
+
+### Security
+
+- `Y::ActionCable::Sync`'s methods and `Y::DocumentChannel`'s
+  `authorized_document_key` accessors are private. Action Cable treats a
+  channel's public methods as actions a client can call, so a client could call
+  `sync_subscribed` directly and skip the channel's own `subscribed` and
+  `receive`. Channels that call these from `subscribed` and `receive` keep
+  working. Code that calls them on a channel from outside, such as a test, now
+  needs `send`.
+
+### Added
+
+- `bin/rails generate yrby:install` pins `yrby-client`, `yrby-client/element`,
+  `yjs`, and `@rails/actioncable` when the app has `config/importmap.rb`. The
+  gem ships `yrby/yrby-client.js` and `yrby/yjs.js` for those pins, so an
+  import-map app needs no npm packages. Each shared module has one pin, so the
+  page and its editor binding load one copy of yjs. Pins the app already has
+  are left alone.
+- `has_collaborative_document :body, channel: "PostDocumentChannel"` names
+  an app's own `Y::DocumentChannel` subclass for an attribute.
+  `collaborative_document(:body).channel` returns it, so
+  `collaborative_document_tag` and Ruby clients subscribe there without
+  passing `channel:` each time.
+
+## [0.8.0] - 2026-11-03
+
+Requires yrby 0.9.0 or later.
+
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
+
+- `collaborative_document(:body).edit { |doc| ... }` edits a record's
+  document from Ruby. It records the change in the document's rows, encrypted
+  ones included, and broadcasts it to open editors.
+  `Y::ActionCable.broadcast(key, update)` sends an already recorded update.
+
+### Added
+
+- `collaborative_document(name)` answers `grant(expires_in:)` and `channel`:
+  the grant a page or client subscribes with, and the channel that accepts
+  it. A gem with its own grants and channel, such as lexxy-realtime, returns
+  its own document with both.
+
+### Changed
+
+- `collaborative_document_tag` renders the document's grant and channel, so
+  it works for a gem that returns its own document. `channel:` still
+  overrides the channel.
+
+### Deprecated
+
+- `collaborative_sgid(name, expires_in:)`. Use
+  `collaborative_document(name).grant(expires_in:)`. It logs through
+  `Y.deprecator`, which the engine adds to `Rails.application.deprecators`,
+  and goes away in yrby-rails 0.9.
+
+### Fixed
+
+- The channel relays a client's SyncStep2 to peers as a plain update.
+  Relayed as is, a peer that was still joining could take it for the answer
+  to its own handshake and report itself loaded before it had the server's
+  state.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added

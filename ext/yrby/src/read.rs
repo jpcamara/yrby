@@ -51,7 +51,7 @@ pub fn xml_blocks_text<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> String
 /// Lexical node `__type`s whose text belongs on the surrounding line rather than
 /// a new block (e.g. a link inside a paragraph). Everything else with embedded
 /// child `Y.XmlText`s is treated as a block and recursed.
-fn is_inline_lexical_type(ty: &str) -> bool {
+pub(crate) fn is_inline_lexical_type(ty: &str) -> bool {
     matches!(
         ty,
         "text" | "link" | "autolink" | "linebreak" | "tab" | "hashtag" | "mark" | "overflow"
@@ -59,7 +59,7 @@ fn is_inline_lexical_type(ty: &str) -> bool {
 }
 
 /// A Lexical node's `__type` (stored as an XML attribute on its `Y.XmlText`).
-fn lexical_type<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
+pub(crate) fn lexical_type<T: ReadTxn>(txn: &T, t: &XmlTextRef) -> String {
     match t.get_attribute(txn, "__type") {
         Some(Out::Any(Any::String(s))) => s.to_string(),
         _ => String::new(),
@@ -229,7 +229,7 @@ fn scalar_json(a: &Any) -> String {
 
 /// Convert a yrs output value to an `Any` (which knows how to JSON-serialize),
 /// recursing through nested shared collections.
-fn out_to_any<T: ReadTxn>(txn: &T, out: &Out) -> Any {
+pub(crate) fn out_to_any<T: ReadTxn>(txn: &T, out: &Out) -> Any {
     match out {
         Out::Any(a) => a.clone(),
         Out::YText(v) => Any::from(v.get_string(txn)),

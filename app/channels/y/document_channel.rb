@@ -6,7 +6,7 @@ module Y
   # doesn't write a channel of its own.
   #
   # The client never picks its own document. It sends the signed grant the
-  # page rendered (record.collaborative_sgid(name)), and the channel opens
+  # page rendered (record.collaborative_document(name).grant), and the channel opens
   # whatever document that grant verifies to. Your controller authorized the
   # request when it rendered the tag, and the grant is how that decision gets
   # to the socket. You can also register an authorize_document block to check
@@ -43,6 +43,8 @@ module Y
     else
       attr_accessor :authorized_document_key
     end
+    # Private, so a client can't call the accessors as channel actions.
+    private :authorized_document_key, :authorized_document_key=
 
     # Sets the shipped channel's authorized? check as a block. Configure it in
     # Rails.application.config.to_prepare. The block receives the located
