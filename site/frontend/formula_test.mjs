@@ -200,6 +200,11 @@ test("display formats", () => {
   assert.equal(display(2 / 3), "0.67")
   assert.equal(display("Website", "number"), "Website")
   assert.equal(display(null), "")
+  assert.equal(display(4200, "+number"), "+4,200")
+  assert.equal(display(-10000, "+number"), "-10,000")
+  assert.equal(display(0.1, "+percent"), "+10%")
+  assert.equal(display(0, "+percent"), "0%")
+  assert.equal(display(0.0001, "+number"), "0")
 })
 
 test("parse rejects junk", () => {

@@ -9,11 +9,12 @@
 //
 // - Selection, editing, the formula bar, copy and paste, and formatting work
 //   on the active tab. Undo and redo cover this browser's own edits.
-// - Each person's selected cell, and each agent's, is outlined in their color
-//   with a name tag, through awareness.
+// - Each person's selected cell and range, and each agent's, is outlined in
+//   their color with a name tag, through awareness. An agent outlines the
+//   block it's writing.
 // - An ask goes into the "asks" map, so everyone sees it in the side panel.
-//   The asker's agent claims it and writes cells; its card can undo every
-//   cell the ask wrote.
+//   The asker's agent claims it and works the sheet; its card shows what
+//   it's doing, and can undo everything the ask changed.
 import "./sheet.css"
 import * as Y from "yjs"
 import { YrbyDocumentElement } from "yrby-client/element"
@@ -38,7 +39,8 @@ const me = (() => {
 YrbyDocumentElement.consumer = roomConsumer
 setupRoomPage()
 
-const FILLS = [["", "No fill"], ["#ececec", "Gray"], ["#dbe7fb", "Blue"], ["#d7f0dd", "Green"], ["#fbe8c4", "Amber"], ["#f9dbe0", "Rose"]]
+// The header colors SheetSpec (app/agents/sheet_spec.rb) names for agents.
+const FILLS = [["", "No fill"], ["#ececec", "Gray"], ["#dbe7fb", "Blue"], ["#d7f0dd", "Green"], ["#fbe8c4", "Yellow"], ["#f9dbe0", "Pink"], ["#e9e0f7", "Purple"]]
 const CELL_FIELDS = ["input", "format", "bold", "fill", "color", "by", "ask"]
 const MIN_ROWS = 30
 const MIN_COLS = 10
@@ -231,7 +233,13 @@ class Sheet {
     this.lease.setPresence({ user: { name: me.name, color: me.color }, person: me.id, cell: this.presenceCell() })
   }
 
-  presenceCell() { return this.active ? { tab: this.active, ref: cellName(this.focus.col, this.focus.row) } : null }
+  // The selected cell, and the selected range when it's more than one cell.
+  presenceCell() {
+    if (!this.active) return null
+    const ref = cellName(this.focus.col, this.focus.row)
+    const single = this.anchor.col === this.focus.col && this.anchor.row === this.focus.row
+    return single ? { tab: this.active, ref } : { tab: this.active, ref, range: `${cellName(this.anchor.col, this.anchor.row)}:${ref}` }
+  }
 
   peers() {
     return [...this.provider.awareness.getStates().entries()]
@@ -411,16 +419,25 @@ class Sheet {
   }
 
   // Each other person's and agent's selected cell on this tab, outlined in
-  // their color with their name.
+  // their color with their name, and their selected range, shaded.
   renderPeers() {
-    this.overlays.querySelectorAll(".peer").forEach((n) => n.remove())
+    this.overlays.querySelectorAll(".peer, .peer-range").forEach((n) => n.remove())
     for (const peer of this.peers()) {
       const p = peer.cell?.tab === this.active && parseCell(peer.cell.ref ?? "")
       const box = p && this.box(p)
       if (!box) continue
       const working = peer.agent?.status === "working"
+      const [from, to] = String(peer.cell.range ?? "").split(":").map((ref) => parseCell(ref))
+      const area = from && this.box(from, to ?? from)
+      if (area) {
+        const range = el("div", { className: `peer-range${peer.agent ? " is-agent" : ""}` })
+        range.style.setProperty("--peer", peer.user.color)
+        place(range, area)
+        this.overlays.append(range)
+      }
       const tag = el("span", { className: "peer-tag" }, [peer.user.name])
-      const node = el("div", { className: `peer${peer.agent ? " is-agent" : ""}${working ? " is-working" : ""}` }, [tag])
+      // On the first row the tag would sit under the column letters, so it goes below.
+      const node = el("div", { className: `peer${peer.agent ? " is-agent" : ""}${working ? " is-working" : ""}${p.row === 0 ? " is-top" : ""}` }, [tag])
       node.style.setProperty("--peer", peer.user.color)
       node.dataset.name = peer.user.name
       place(node, box)
@@ -494,18 +511,8 @@ class Sheet {
       const to = input.value.trim().replace(/!/g, "")
       input.remove()
       const taken = this.tabIds().some((other) => other !== id && this.tabName(other).toLowerCase() === to.toLowerCase())
-      if (save && to && to !== from && !taken) {
-        this.transact(() => {
-          this.sheets.get(id).set("name", to)
-          for (const tab of this.tabIds()) {
-            for (const [, cell] of this.cells(tab)?.entries() ?? []) {
-              const before = cell.get("input")
-              const after = renameTab(before, from, to)
-              if (after !== before) cell.set("input", after)
-            }
-          }
-        })
-      } else if (taken) toast(`There's already a tab named ${to}.`)
+      if (save && to && to !== from && !taken) this.transact(() => this.renameTabTo(id, to))
+      else if (taken) toast(`There's already a tab named ${to}.`)
       this.render()
     }
     input.addEventListener("keydown", (e) => {
@@ -793,31 +800,89 @@ class Sheet {
     }, "ask")
   }
 
-  // Puts back every cell the ask wrote, as it was before the ask, unless
-  // someone has changed the cell since. Not part of anyone's undo history.
+  // Takes the ask back: puts every cell and column width it changed back as
+  // it was before the ask, removes the tabs it added once they're empty, and
+  // renames back the tabs it renamed. Anything someone changed since the
+  // agent did stays as they left it. Not part of anyone's undo history.
   undoAsk(id) {
     const ask = this.asks.get(id)
-    const before = ask?.get("before")
+    const after = ask?.get("after")
     let kept = 0
     this.doc.transact(() => {
-      for (const [key, was] of before?.entries() ?? []) {
+      for (const [key, was] of ask?.get("before")?.entries() ?? []) {
         const at = key.lastIndexOf("!")
         const tab = key.slice(0, at)
         const ref = key.slice(at + 1)
-        const cells = this.cells(tab)
-        const cell = cells?.get(ref)
-        if (!cell || cell.get("ask") !== id) { kept++; continue }
-        const old = was instanceof Y.Map ? was.toJSON() : (was ?? {})
-        if (Object.keys(old).length === 0) { cells.delete(ref); continue }
-        for (const field of CELL_FIELDS) {
-          if (field in old) cell.set(field, old[field])
-          else cell.delete(field)
+        if (!this.sheets.get(tab)) continue
+        if (ref.startsWith("width:")) {
+          const widths = this.sheets.get(tab).get("widths")
+          const column = ref.slice(6)
+          if (String(widths?.get(column) ?? "") !== String(after?.get(key) ?? "")) { kept++; continue }
+          if (was) widths.set(column, Number(was))
+          else widths.delete(column)
+          continue
         }
+        if (typeof was !== "string") { kept += this.undoOldCell(id, tab, ref, was); continue }
+        const left = after?.get(key)
+        const now = this.cell(tab, ref)
+        if (!sameJSON(now ? pick(now.toJSON()) : null, left ? JSON.parse(left) : null)) { kept++; continue }
+        this.restoreCell(tab, ref, was ? JSON.parse(was) : null)
+      }
+      for (const [tab, [from, to]] of Object.entries(JSON.parse(ask?.get("renamedTabs") ?? "{}"))) {
+        if (this.tabName(tab) === to && !this.tabIds().some((other) => other !== tab && this.tabName(other) === from)) this.renameTabTo(tab, from)
+        else if (this.sheets.get(tab)) kept++
+      }
+      for (const tab of JSON.parse(ask?.get("addedTabs") ?? "[]")) {
+        if (!this.sheets.get(tab)) continue
+        if (this.cells(tab)?.size) { kept++; continue }
+        const at = this.tabs.toArray().indexOf(tab)
+        if (at >= 0) this.tabs.delete(at, 1)
+        this.sheets.delete(tab)
       }
       ask.set("status", "undone")
       ask.set("decidedBy", me.name)
       if (kept) ask.set("kept", kept)
     }, "undo-ask")
+    if (!this.sheets.get(this.active)) this.switchTab(this.tabIds()[0])
+  }
+
+  // Sets a cell to `fields` (a cell's JSON), or removes it for null.
+  restoreCell(tab, ref, fields) {
+    const cells = this.cells(tab)
+    if (!fields) { cells.delete(ref); return }
+    let cell = cells.get(ref)
+    if (!cell) {
+      cell = new Y.Map()
+      cells.set(ref, cell)
+    }
+    for (const field of CELL_FIELDS) {
+      if (field in fields) cell.set(field, fields[field])
+      else cell.delete(field)
+    }
+  }
+
+  // An ask from before asks kept `after`: its `before` holds each cell as a
+  // map, and a cell counts as unchanged while it still carries the ask.
+  undoOldCell(id, tab, ref, was) {
+    const cell = this.cell(tab, ref)
+    if (!cell || cell.get("ask") !== id) return 1
+    const old = was instanceof Y.Map ? was.toJSON() : (was ?? {})
+    this.restoreCell(tab, ref, Object.keys(old).length ? old : null)
+    return 0
+  }
+
+  // Renames a tab and rewrites every formula that names it, so they keep
+  // pointing at it.
+  renameTabTo(id, to) {
+    const from = this.tabName(id)
+    this.sheets.get(id).set("name", to)
+    for (const tab of this.tabIds()) {
+      for (const [, cell] of this.cells(tab)?.entries() ?? []) {
+        const before = cell.get("input")
+        const after = renameTab(before, from, to)
+        if (after !== before) cell.set("input", after)
+      }
+    }
   }
 
   renderAsks() {
@@ -847,7 +912,8 @@ class Sheet {
     const color = agent?.user?.color ?? "#b8bfd3"
     const say = ask.get("say") ?? ""
     const written = ask.get("written")
-    const key = [status, say, written, ask.get("error"), ask.get("prompt"), !!agent, ask.get("kept"), card.classList.contains("revising")].join("\u0000")
+    const doing = ask.get("doing") ?? ""
+    const key = [status, say, written, doing, ask.get("error"), ask.get("prompt"), !!agent, ask.get("kept"), card.classList.contains("revising")].join("\u0000")
     if (card.dataset.key === key) return
     card.dataset.key = key
     card.dataset.status = status
@@ -861,15 +927,19 @@ class Sheet {
     parts.push(reply)
 
     if (OPEN.has(status)) {
-      const label = el("span", { className: "working-label" })
+      // What the model said so far, then what it's doing now, from its last
+      // tool call, and for how long.
+      if (say && status === "working") parts.push(el("p", { className: "ask-say" }, [say]))
+      const label = el("p", { className: "working-label" })
       label.dataset.started = String((status === "working" && ask.get("startedAt")) || "")
       label.dataset.waiting = agent ? "" : "true"
+      label.dataset.doing = status === "working" ? doing : ""
       label.textContent = workingText(label)
-      reply.append(label)
+      parts.push(label)
       parts.push(el("div", { className: "ask-bar" }, [button("Stop", () => this.update(id, { status: "stopped" }))]))
     } else if (status === "done") {
       if (say) parts.push(el("p", { className: "ask-say" }, [say]))
-      reply.append(el("span", { className: "ask-meta" }, [`wrote ${written ?? 0} cell${written === 1 ? "" : "s"}`]))
+      reply.append(el("span", { className: "ask-meta" }, [`changed ${written ?? 0} cell${written === 1 ? "" : "s"}`]))
       parts.push(el("div", { className: "ask-bar" }, [
         button("Undo", () => this.undoAsk(id)),
         button("Ask for a change", () => this.revise(card, id, ask)),
@@ -905,7 +975,7 @@ class Sheet {
       const prompt = input.value.trim()
       if (!prompt) return
       card.classList.remove("revising")
-      this.update(id, { prompt, previous: ask.get("prompt"), status: "asked", say: undefined, written: undefined })
+      this.update(id, { prompt, previous: ask.get("prompt"), said: ask.get("say"), status: "asked", say: undefined, written: undefined })
       this.summonAgent(id)
     })
     input.addEventListener("keydown", (e) => {
@@ -944,8 +1014,21 @@ function tabMap(name, cells, widths) {
 
 function workingText(label) {
   const started = Number(label.dataset.started)
-  if (!started) return label.dataset.waiting ? "waiting for the agent to join…" : "starting…"
-  return `working for ${Math.max(0, Math.floor((Date.now() - started) / 1000))}s`
+  if (!started) return label.dataset.waiting ? "Waiting for the agent to join…" : "Starting…"
+  return `${label.dataset.doing || "Thinking"}… ${Math.max(0, Math.floor((Date.now() - started) / 1000))}s`
+}
+
+// A cell's JSON as the agent keeps it.
+function pick(json) {
+  return Object.fromEntries(Object.entries(json).filter(([key]) => CELL_FIELDS.includes(key)))
+}
+
+// Whether two JSON values are the same, ignoring key order.
+function sameJSON(a, b) {
+  if (a === b) return true
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b || Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => sameJSON(a[key], b[key]))
 }
 
 function place(node, box) {

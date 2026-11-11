@@ -505,13 +505,18 @@ export const FUNCTION_NAMES = Object.keys(FUNCTIONS)
 // --- display -----------------------------------------------------------------
 
 // How a value shows in its cell, in one of the formats: number (21,000),
-// percent (10%), currency ($21,000), or text (as typed). Numbers with no
-// format show up to two decimals.
+// percent (10%), currency ($21,000), or text (as typed). +number and
+// +percent are for changes: a gain shows its sign (+4,200, +10%). Numbers
+// with no format show up to two decimals.
 export function display(value, format) {
   if (value === null || value === undefined) return ""
   if (isError(value)) return value.code
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
   if (typeof value !== "number" || format === "text") return String(value)
+  if (format?.startsWith("+")) {
+    const shown = display(value, format.slice(1))
+    return value > 0 && shown !== display(0, format.slice(1)) ? `+${shown}` : shown
+  }
   const fixed = (n, digits) => n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: 0 })
   switch (format) {
     case "percent": return `${fixed(value * 100, 1)}%`
