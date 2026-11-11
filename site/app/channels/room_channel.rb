@@ -7,5 +7,7 @@ class RoomChannel < Y::DocumentChannel
   # The rooms are public. A valid grant shows this site rendered the page,
   # and for an anonymous demo that's enough. The block replaces the
   # example-only block that config/initializers/record_channels.rb sets.
-  authorize_document { |record, name| record.is_a?(Room) && Demos.shape_slugs.include?(name) }
+  authorize_document do |record, name|
+    record.is_a?(Room) && (Demos.shape_slugs.include?(name) || name == "sheet")
+  end
 end

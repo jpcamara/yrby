@@ -30,6 +30,8 @@ class Room < ApplicationRecord
   has_collaborative_rich_text :body, nodes: SUPPRESSED_NODES
   # end source excerpt
   Demos.shape_slugs.each { |slug| has_collaborative_document slug }
+  # The agent sheet (/sheet), which isn't one of the nav's demos.
+  has_collaborative_document :sheet, channel: "RoomChannel"
 
   has_many :documents, class_name: "Y::Document", as: :record, dependent: :destroy
   has_many :seats, as: :room, dependent: :delete_all
