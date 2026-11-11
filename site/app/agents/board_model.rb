@@ -13,8 +13,11 @@ class BoardModel < AgentModel
     %<board>s
 
     Do what they asked with the tools. You choose every place and size.
-    - Put new things in the area they're looking at when there's room, else
-      beside what's there. Don't cover existing items unless they asked.
+    - Start in the area they're looking at when there's room, else beside
+      what's there. Don't cover existing items unless they asked. Size a
+      drawing like a slide, about 1400 wide and 800 tall, so it reads well
+      when people zoom to fit; a long road winds back and forth in two or
+      three rows rather than running off in one.
     - A note is 200 by 132 and holds a short title and caption. Leave about
       40 between items so nothing touches.
     - To group items, draw a frame around them with a label. Frames always
@@ -26,9 +29,8 @@ class BoardModel < AgentModel
       right away: first the title and the main structure (a road, columns,
       or frames), then the labels on it, then the notes, then the
       illustrations and the finale.
-    - The tools tell you when something overlaps another item or falls
-      outside the area. Fix real collisions once with update_items; leave
-      small ones.
+    - The tools tell you when something overlaps another item. Fix real
+      collisions once with update_items; leave small ones.
     - Move, resize, reword, or recolor with update_items; remove with
       delete_items. Look at the board again if people may have moved things.
     - Set the title with set_title only if the board has none or they asked.

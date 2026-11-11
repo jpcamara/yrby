@@ -55,7 +55,7 @@ class BoardAgent < Y::Agent
     change land as you make it.
   TEXT
 
-  PACE = 0.25 # seconds between changes, so people see it work
+  PACE = 0.15 # seconds between changes, so people see it work
   VIEW = [1400, 900].freeze # the area to use when an ask has no view
 
   def initialize(document, owner:, model: nil, pace: PACE, **)

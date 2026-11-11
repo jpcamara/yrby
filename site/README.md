@@ -853,8 +853,7 @@ through tools (`BoardTools`), choosing every place and size itself:
 agent's cursor on it, so everyone watches it work. The agent selects every
 item a call changes, in its color, and its ask's card says what it's doing
 ("Moving 3 items"). A tool's result tells the model when what it placed
-overlaps something, crosses a frame's edge, or falls outside the area the
-person can see, so it can fix its layout. `BoardModel`'s instructions carry
+overlaps something or crosses a frame's edge, so it can fix its layout. `BoardModel`'s instructions carry
 general drawing guidance (timelines as a road with milestone pills,
 illustrations, a finale), not layouts. When it's done, what it says goes on
 the ask's card.

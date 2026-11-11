@@ -4,18 +4,14 @@ module BoardOverlaps
   SOLID = %w[note text shape sticker].freeze # frames hold things; lines cross them
 
   # ", but it overlaps a, b" when the item `key` covers another solid item,
-  # so the model can move one of them. Empty otherwise.
-  # Frames count when an item crosses their edge, not when it sits inside.
-  # With `view` ([x, y, w, h]), it also says when the item is outside it.
-  def overlap_note(key, view = nil) # rubocop:disable Metrics -- a few short checks
+  # so the model can move one of them. Empty otherwise. Frames count when an
+  # item crosses their edge, not when it sits inside.
+  def overlap_note(key)
     all = items.to_h.select { |_id, thing| thing.is_a?(Hash) && (SOLID + ["frame"]).include?(thing["type"]) }
     mine = all.delete(key) or return ""
     box = box_of(mine)
     hits = all.filter_map { |other, thing| other if collide?(mine, box, thing, box_of(thing)) }
-    notes = []
-    notes << "it overlaps #{hits.first(5).join(", ")}" if hits.any?
-    notes << "it's outside the area they can see" if view && !inside?(box, view)
-    notes.empty? ? "" : ", but #{notes.join(", and ")}"
+    hits.empty? ? "" : ", but it overlaps #{hits.first(5).join(", ")}"
   end
 
   def collide?(mine, box, other, other_box)
