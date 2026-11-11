@@ -1,111 +1,247 @@
-# Reads the sheet agent's model reply as it streams in: cell writes, as JSON
-# objects, ideally one per line. Code fences, a wrapping array, or several
-# objects on one line are fine too, because the reader takes each balanced
-# {...} as soon as its closing brace arrives. Anything that isn't a valid
-# write is dropped.
+require "json"
+
+# What a sheet agent's tools do, for the ask it's answering (@ask, asked on
+# the tab @tab): read the sheet, and write, format, and clear cells, size
+# columns, and add and rename tabs. SheetAgent includes it; SheetTools and
+# the canned forecast call it.
 #
-#   reader = SheetWrites.new
-#   reader << '{"cell":"B4","input":"=SUM(B1:B3)",'  # => []
-#   reader << '"format":"number"}'                    # => [#<data Write cell="B4" ...>]
-class SheetWrites
-  FORMATS = %w[number percent currency text].freeze
-  # The fills the model can name. The page offers the same colors.
-  FILLS = { "gray" => "#ececec", "blue" => "#dbe7fb", "green" => "#d7f0dd", "amber" => "#fbe8c4",
-            "rose" => "#f9dbe0" }.freeze
-  CELL = /\A\$?([A-Z]{1,2})\$?([1-9]\d{0,2})\z/ # A1 to ZZ999
-  MAX_INPUT = 500
+# Before it writes a block of cells it selects the block, so people see its
+# range outlined in its color, then writes each cell in its own edit with its
+# cursor there, a moment apart. Every change keeps what the ask's Undo needs
+# (see SheetAgent), and each tool call sets the ask's `doing`, the line its
+# card shows while it works.
+module SheetWrites # rubocop:disable Metrics/ModuleLength -- one method per tool, and the change they share
+  MAX_CHANGES = 400 # cells per ask
+  MAX_PER_CALL = 200 # cells in one write_cells call
+  MAX_WIDTH = 600
 
-  Write = Data.define(:tab, :cell, :input, :format, :bold, :fill)
-  Say = Data.define(:text)
-
-  # One object from the reply as a Write or a Say, or nil.
-  def self.parse(json)
-    data = JSON.parse(json)
-    return unless data.is_a?(Hash)
-
-    data.key?("cell") ? write(data) : say(data)
-  rescue JSON::ParserError
-    nil
-  end
-
-  def self.say(data) = (Say.new(data["say"].strip[0, 400]) if data["say"].is_a?(String))
-
-  def self.write(data)
-    cell = CELL.match(data["cell"].to_s.upcase.strip) or return
-    input = data["input"]
-    return unless input.nil? || input.is_a?(String) || input.is_a?(Numeric)
-
-    Write.new(cell: "#{cell[1]}#{cell[2]}", input: input.to_s[0, MAX_INPUT], **optional(data))
-  end
-
-  # The fields a write can leave out, as nil when they're missing or wrong.
-  def self.optional(data)
-    { tab: (data["tab"].strip[0, 40] if data["tab"].is_a?(String)),
-      format: (data["format"] if FORMATS.include?(data["format"])),
-      bold: (data["bold"] if [true, false].include?(data["bold"])),
-      fill: fill(data["fill"]) }
-  end
-
-  # A named fill or a #rrggbb color.
-  def self.fill(value) = FILLS[value.to_s.downcase] || value.to_s[/\A#\h{6}\z/]
-
-  def initialize
-    @buffer = +""
-    @at = 0          # how far into the buffer it has read
-    @depth = 0       # brace depth
-    @start = nil     # where the current top-level object starts
-    @in_string = false
-    @escaped = false
-  end
-
-  # Feeds a chunk of the reply and returns the complete writes and Says in it.
-  def <<(chunk)
-    @buffer << chunk
-    found = []
-    while @at < @buffer.size
-      read(@buffer[@at], found)
-      @at += 1
+  def read_sheet(tab: nil, range: nil)
+    @acted = true
+    if tab.to_s.strip.empty?
+      doing("Reading the sheet")
+      return sheet.tab_ids.map { |id| sheet.listing(id, mine: @ask) }.join("\n\n")
     end
-    forget_read_text
-    found.filter_map { |json| self.class.parse(json) }
+
+    id = tab_id(tab)
+    doing("Reading #{sheet.tab_name(id)}#{" #{range}" if range.present?}")
+    sheet.listing(id, range: range.presence, mine: @ask)
+  rescue SheetSpec::Invalid => e
+    "Couldn't read: #{e.message}"
+  end
+
+  # Writes each cell in order, and returns what it wrote, what it skipped
+  # and why, and any formula the sheet can't compute.
+  def write_cells(cells, tab: nil)
+    id = tab_id(tab)
+    writes, notes = prepare(Array(cells).first(MAX_PER_CALL))
+    notes << "Only the first #{MAX_PER_CALL} cells were used." if Array(cells).size > MAX_PER_CALL
+    return ["Wrote nothing.", *notes].join("\n") if writes.empty?
+
+    range = SheetSpec.bounds(writes.map(&:first))
+    doing("Writing #{where(id, range)}")
+    writes.each do |ref, fields|
+      step(id, ref, range:) { keeping(id, ref) { sheet.set_cell(id, ref, stamped(fields)) } }
+    end
+    ["Wrote #{writes.size} cell#{"s" unless writes.size == 1} on #{sheet.tab_name(id)}, in #{range}.",
+     *formula_notes(id, writes), *notes].join("\n")
+  rescue SheetSpec::Invalid => e
+    "Wrote nothing: #{e.message}"
+  end
+
+  # Sets format, bold, or fill on every cell in `range`, in one change.
+  def format_range(range, tab: nil, **style)
+    id = tab_id(tab)
+    fields = SheetSpec.style(style)
+    return "Nothing to change: give format, bold, or fill." if fields.empty?
+
+    refs = SheetSpec.cells_in(range)
+    doing("Formatting #{where(id, range)}")
+    step(id, refs.first, range:, count: refs.size) do
+      refs.each { |ref| keeping(id, ref) { sheet.set_cell(id, ref, fields) } }
+    end
+    "Formatted #{range} on #{sheet.tab_name(id)}."
+  rescue SheetSpec::Invalid => e
+    "Formatted nothing: #{e.message}"
+  end
+
+  # Empties every cell in `range`, inputs and formatting, in one change.
+  def clear_range(range, tab: nil)
+    id = tab_id(tab)
+    refs = SheetSpec.cells_in(range).select { |ref| sheet.cell(id, ref) }
+    return "#{range} on #{sheet.tab_name(id)} is already empty." if refs.empty?
+
+    doing("Clearing #{where(id, range)}")
+    step(id, refs.first, range:, count: refs.size) do
+      refs.each { |ref| keeping(id, ref) { sheet.clear_cell(id, ref) } }
+    end
+    "Cleared #{refs.size} cell#{"s" unless refs.size == 1} in #{range} on #{sheet.tab_name(id)}."
+  rescue SheetSpec::Invalid => e
+    "Cleared nothing: #{e.message}"
+  end
+
+  # Sets column widths, from [{ column, width }], in one change.
+  def resize_columns(columns, tab: nil)
+    id = tab_id(tab)
+    widths = Array(columns).filter_map { |each| width_of(each) }
+    return "Resized nothing: give each column as a letter and a width in pixels." if widths.empty?
+
+    doing("Sizing columns on #{sheet.tab_name(id)}")
+    step(id, "#{widths.first.first}1") do
+      widths.each { |column, width| keeping(id, "width:#{column}") { sheet.set_width(id, column, width) } }
+    end
+    "Set #{widths.map { |column, width| "#{column} to #{width}px" }.join(", ")}."
+  rescue SheetSpec::Invalid => e
+    "Resized nothing: #{e.message}"
+  end
+
+  def add_tab(name)
+    name = tab_title(name)
+    raise SheetSpec::Invalid, "there's already a tab named #{name}" if sheet.tab_named(name)
+
+    doing("Adding the tab #{name}")
+    id = nil
+    step(nil, "A1") do
+      id = sheet.add_tab(name)
+      ask = sheet.ask(@ask)
+      ask["addedTabs"] = JSON.generate([*JSON.parse(ask["addedTabs"] || "[]"), id])
+    end
+    "Added the tab #{name}."
+  rescue SheetSpec::Invalid => e
+    "Added no tab: #{e.message}"
+  end
+
+  def rename_tab(tab, name)
+    id = tab_id(tab)
+    from = sheet.tab_name(id)
+    name = tab_title(name)
+    other = sheet.tab_named(name)
+    raise SheetSpec::Invalid, "there's already a tab named #{name}" if other && other != id
+
+    doing("Renaming #{from} to #{name}")
+    step(id, "A1") { renaming(id, from, name) }
+    "Renamed #{from} to #{name}, and the formulas that named it."
+  rescue SheetSpec::Invalid => e
+    "Renamed nothing: #{e.message}"
+  end
+
+  # For the canned forecast: the first row clear of what's on the ask's tab,
+  # a row apart from it.
+  def free_row
+    used = sheet.listing(@tab).lines.drop(1).filter_map { |line| line[/\A[A-Z]+(\d+):/, 1]&.to_i }.max
+    used ? used + 2 : 1
   end
 
   private
 
-  def read(char, found)
-    return read_string(char) if @in_string
+  def sheet = SheetDocument.new(doc)
 
-    case char
-    when '"' then @in_string = @depth.positive?
-    when "{" then open
-    when "}" then close(found)
+  # The tab named `name`, or the ask's tab when it's blank.
+  def tab_id(name)
+    return @tab if name.to_s.strip.empty?
+
+    sheet.tab_named(name) or raise SheetSpec::Invalid,
+                                   "there's no tab named #{name}; the tabs are #{sheet.tab_names.join(", ")}"
+  end
+
+  def tab_title(name)
+    name = name.to_s.gsub(/[!\s]+/, " ").strip[0, 40]
+    raise SheetSpec::Invalid, "a tab needs a name" if name.empty?
+
+    name
+  end
+
+  def where(id, range) = id == @tab ? range : "#{range} on #{sheet.tab_name(id)}"
+
+  # [[ref, fields]] for the cells the model gave, and why any were skipped.
+  def prepare(cells)
+    notes = []
+    writes = cells.each_with_index.filter_map do |spec, i|
+      spec = spec.to_h.transform_keys(&:to_s)
+      [SheetSpec.name(*SheetSpec.ref(spec["ref"])), SheetSpec.fields(spec)]
+    rescue SheetSpec::Invalid => e
+      notes << "#{spec["ref"].presence || "cell #{i + 1}"}: skipped, #{e.message}"
+      nil
     end
+    [writes, notes]
   end
 
-  def read_string(char)
-    if @escaped then @escaped = false
-    elsif char == "\\" then @escaped = true
-    elsif char == '"' then @in_string = false
+  # [column, pixels] from the model's { column, width }, or nil.
+  def width_of(spec)
+    spec = spec.to_h.transform_keys(&:to_s)
+    column = spec["column"].to_s.strip.upcase
+    [column, spec["width"].to_i.clamp(40, MAX_WIDTH)] if column.match?(/\A[A-Z]{1,2}\z/) && spec["width"]
+  end
+
+  # A new input is the agent's, marked with the ask.
+  def stamped(fields) = fields.key?("input") ? fields.merge("by" => name, "ask" => @ask) : fields
+
+  def formula_notes(id, writes)
+    tabs = sheet.tab_names
+    notes = writes.flat_map do |ref, fields|
+      SheetSpec.problems(fields["input"], tabs).map { |problem| "#{ref}: #{problem}" }
     end
+    notes.empty? ? [] : ["Check these formulas on #{sheet.tab_name(id)}:", *notes]
   end
 
-  def open
-    @start = @at if @depth.zero?
-    @depth += 1
+  def renaming(id, from, to)
+    ask = sheet.ask(@ask)
+    renamed = JSON.parse(ask["renamedTabs"] || "{}")
+    renamed[id] = [renamed.dig(id, 0) || from, to]
+    after = sheet.child_map(ask, "after")
+    sheet.rename_tab(id, to) do |tab, ref|
+      key = "#{tab}!#{ref}"
+      after[key] = JSON.generate(sheet.cell(tab, ref)) if after[key].present?
+    end
+    ask["renamedTabs"] = JSON.generate(renamed)
   end
 
-  def close(found)
-    return if @depth.zero?
+  # What the agent is doing, on the ask's card. It also puts there what the
+  # model has said so far, such as "You got it." before its first tool call.
+  def doing(text)
+    raise AgentModel::Stopped unless working?(@ask)
 
-    @depth -= 1
-    found << @buffer[@start..@at] if @depth.zero?
+    edit { sheet.update(@ask, "doing" => text, **said) }
   end
 
-  # Between objects, nothing read so far is needed again.
-  def forget_read_text
-    return unless @depth.zero?
+  # One change to the cell `ref` on tab `id`: the agent's cursor goes there,
+  # with `range` outlined, the change happens in one edit, and the agent
+  # waits so people see it. Raises Stopped once people stopped or undid the
+  # ask.
+  def step(id, ref, range: nil, count: 1)
+    @acted = true
+    raise AgentModel::Stopped unless working?(@ask)
+    if @changes + count > MAX_CHANGES
+      raise SheetSpec::Invalid, "this ask has changed #{@changes} cells and can change #{MAX_CHANGES}; stop and reply"
+    end
 
-    @buffer = +""
-    @at = 0
+    point(id, ref, range) if id
+    edit do
+      yield
+      ask = sheet.ask(@ask)
+      ask["written"] = ask["written"].to_i + count
+    end
+    @changes += count
+    sleep @pace
+  end
+
+  # Around one change to a cell (or "width:B", a column's width) on tab
+  # `id`: keeps it as it was before this ask first changed it, and as the ask
+  # left it, as JSON ("" for empty), so Undo can put it back unless someone
+  # changed it since.
+  def keeping(id, ref)
+    ask = sheet.ask(@ask)
+    key = "#{id}!#{ref}"
+    before = sheet.child_map(ask, "before")
+    before[key] = snapshot(id, ref) unless before.key?(key)
+    yield
+    sheet.child_map(ask, "after")[key] = snapshot(id, ref)
+  end
+
+  def snapshot(id, ref)
+    if ref.start_with?("width:")
+      sheet.width(id, ref.delete_prefix("width:")).to_s
+    else
+      (cell = sheet.cell(id, ref)) ? JSON.generate(cell) : ""
+    end
   end
 end

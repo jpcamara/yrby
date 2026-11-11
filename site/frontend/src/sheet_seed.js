@@ -2,26 +2,26 @@
 // "Historical" tab of last year's holiday pie orders by channel and month, so
 // an ask like "draft a forecast from last year's numbers" has something to
 // reference. SheetModel::Canned (app/agents/sheet_model.rb) reads this layout:
-// orders in column C, kitchen capacity in C16, gift boxes in stock in C17.
+// orders in column C, the full line's capacity in C16, pie boxes in stock in C17.
 //
 // The tab ids are fixed, so two browsers that seed the same new room at once
 // write the same tabs and the same cells.
 
-export const TITLE = "Holiday pies"
+export const TITLE = "Holiday Pie: Pre-orders"
 
 const HISTORICAL_ROWS = [
   ["Website", "Oct", 3200, 89600],
   ["Website", "Nov", 7900, 221200],
   ["Website", "Dec", 9900, 277200],
-  ["Email list", "Oct", 1400, 36400],
-  ["Email list", "Nov", 3600, 93600],
-  ["Email list", "Dec", 4500, 117000],
-  ["Gift boxes", "Oct", 600, 25200],
-  ["Gift boxes", "Nov", 2100, 88200],
-  ["Gift boxes", "Dec", 3800, 159600],
-  ["Grocery partners", "Oct", 2500, 47500],
-  ["Grocery partners", "Nov", 4800, 91200],
-  ["Grocery partners", "Dec", 5200, 98800],
+  ["Email list", "Oct", 2000, 52000],
+  ["Email list", "Nov", 5000, 130000],
+  ["Email list", "Dec", 7000, 182000],
+  ["Gift boxes", "Oct", 1000, 42000],
+  ["Gift boxes", "Nov", 3000, 126000],
+  ["Gift boxes", "Dec", 5000, 210000],
+  ["Grocery partners", "Oct", 1500, 28500],
+  ["Grocery partners", "Nov", 2000, 38000],
+  ["Grocery partners", "Dec", 2500, 47500],
 ]
 
 // { A1: { input, format?, bold?, fill? } } for the Historical tab.
@@ -40,10 +40,10 @@ export function historicalCells() {
     cells[`D${row}`] = { input: String(revenue), format: "currency" }
   })
   cells.A15 = { input: "Kitchen and stock", bold: true }
-  cells.A16 = { input: "Kitchen capacity (pies per day)" }
-  cells.C16 = { input: "1500", format: "number" }
-  cells.A17 = { input: "Gift boxes in stock" }
-  cells.C17 = { input: "9000", format: "number" }
+  cells.A16 = { input: "Full line capacity (pies per day)" }
+  cells.C16 = { input: "10000", format: "number" }
+  cells.A17 = { input: "Pie boxes in stock" }
+  cells.C17 = { input: "65000", format: "number" }
   return cells
 }
 

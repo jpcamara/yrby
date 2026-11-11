@@ -353,6 +353,17 @@ html, body.sheet-body {
 
 @keyframes peer-pulse { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--peer) 30%, transparent); } }
 
+/* Someone's selected range, or the block an agent is writing. */
+.peer-range {
+  --peer: #888;
+  margin: -1px 0 0 -1px;
+  border: 1px solid var(--peer);
+  background: color-mix(in srgb, var(--peer) 9%, transparent);
+  transition: left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+
+.peer-range.is-agent { border-width: 2px; }
+
 .peer-tag {
   position: absolute;
   top: -19px;
@@ -366,6 +377,8 @@ html, body.sheet-body {
   line-height: 15px;
   white-space: nowrap;
 }
+
+.peer.is-top .peer-tag { top: auto; bottom: -19px; border-radius: 0 0 4px 4px; }
 
 .cell-editor {
   z-index: 5;
@@ -475,6 +488,7 @@ html, body.sheet-body {
 .ask-reply .agent-dot { width: 14px; height: 14px; border-width: 4px; }
 .working-label, .ask-meta { color: var(--muted); }
 .ask-say { margin: 6px 0 0; color: var(--ink); line-height: 1.45; }
+p.working-label { margin: 6px 0 0; font-size: 13px; }
 .ask-error { margin: 6px 0 0; color: #b03030; }
 
 .ask-bar { display: flex; gap: 6px; margin-top: 10px; }
