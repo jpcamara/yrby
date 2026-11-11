@@ -54,4 +54,72 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_match("t.boolean :pending, null: false, default: false", migration)
     end
   end
+
+  def test_adds_no_pins_without_an_importmap
+    run_generator
+
+    assert_no_file "config/importmap.rb"
+  end
+
+  def test_pins_the_shipped_javascript_in_an_importmap_app
+    write_importmap %(pin "application"\n)
+
+    run_generator
+
+    assert_file "config/importmap.rb" do |importmap|
+      assert_match 'pin "application"', importmap
+      assert_match 'pin "yrby-client", to: "yrby/yrby-client.js"', importmap
+      assert_match 'pin "yrby-client/element", to: "yrby/yrby-client.js"', importmap
+      assert_match 'pin "yjs", to: "yrby/yjs.js"', importmap
+      assert_match 'pin "@rails/actioncable", to: "actioncable.esm.js"', importmap
+    end
+  end
+
+  # Every file the generator pins into the gem exists, and the gemspec ships it.
+  def test_pinned_assets_ship_in_the_gem
+    write_importmap ""
+
+    run_generator
+
+    root = File.expand_path("..", __dir__)
+    importmap = File.read(File.join(destination_root, "config/importmap.rb"))
+    pinned = importmap.scan(%r{to: "(yrby/[^"]+)"}).flatten.uniq.sort
+    shipped = Gem::Specification.load(File.join(root, "yrby-rails.gemspec")).files
+
+    assert_equal %w[yrby/yjs.js yrby/yrby-client.js], pinned
+    pinned.each { |path| assert_includes shipped, "app/assets/javascript/#{path}" }
+  end
+
+  def test_running_it_twice_adds_each_pin_once
+    write_importmap ""
+
+    run_generator
+    run_generator
+
+    assert_file "config/importmap.rb" do |importmap|
+      assert_equal 1, importmap.scan('pin "yjs"').length
+      assert_equal 2, importmap.scan("yrby/yrby-client.js").length
+    end
+  end
+
+  # An app that already pins yjs keeps its own pin, and the page still loads
+  # one copy of it.
+  def test_keeps_a_pin_the_app_already_has
+    write_importmap %(pin "yjs", to: "https://cdn.example/yjs.js"\n)
+
+    run_generator
+
+    assert_file "config/importmap.rb" do |importmap|
+      assert_equal 1, importmap.scan('pin "yjs"').length
+      assert_match 'pin "yjs", to: "https://cdn.example/yjs.js"', importmap
+      assert_match 'pin "yrby-client", to: "yrby/yrby-client.js"', importmap
+    end
+  end
+
+  private
+
+  def write_importmap(content)
+    FileUtils.mkdir_p(File.join(destination_root, "config"))
+    File.write(File.join(destination_root, "config/importmap.rb"), content)
+  end
 end

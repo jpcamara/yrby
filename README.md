@@ -76,13 +76,19 @@ doc = post.collaborative_document(:body).y_doc
 doc.read_text("content")  # or Y::Lexxy.new(doc).to_html for rich text
 ```
 
-Install the gem and the npm package:
+Install the gem and run its generator:
 
 ```
-gem install yrby-rails # depends on yrby
-npm install yrby-client yjs y-protocols @rails/actioncable
-
+bundle add yrby-rails # depends on yrby
 bin/rails generate yrby:install && bin/rails db:migrate
+```
+
+In an app that uses import maps, the generator pins `yrby-client`, `yjs`, and
+`@rails/actioncable` to JavaScript the gem ships. With a bundler, install the
+npm packages instead:
+
+```
+npm install yrby-client yjs y-protocols @rails/actioncable
 ```
 
 ## Contents
@@ -101,6 +107,7 @@ bin/rails generate yrby:install && bin/rails db:migrate
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
+- [Experimental: writing from Ruby, and collaborators](#experimental-writing-from-ruby-and-collaborators)
 - [Thread Safety](#thread-safety)
   - [Parallelism (GVL release)](#parallelism-gvl-release)
 - [Message Type Constants](#message-type-constants)
@@ -117,7 +124,9 @@ primitives. By default the Ruby side treats a document as opaque CRDT state. It
 applies updates, answers sync handshakes, and records deltas without reading
 the contents, and the browser editor decides what shape the document has. When
 you do need to look inside, `Doc#read_text` and `Doc#read_map` rebuild it in
-Ruby.
+Ruby, and live handles (`Doc#get_map`, `get_array`, `get_text`,
+`get_xml_text`) write to it. The handles are
+[experimental](docs/experimental.md).
 
 ## Durability and delivery
 
@@ -665,6 +674,16 @@ the `authorize_document` block with the record and the attribute name, or to
 accept any valid grant when there's no block. A subclass can override
 `authorized?` directly and read the located record from `record`.
 
+A page subscribes to the channel its document names, `Y::DocumentChannel`
+unless the model says otherwise. Name a subclass where you declare the
+attribute, and the tag, a Ruby client, and a collaborator all use it:
+
+```ruby
+class Post < ApplicationRecord
+  has_collaborative_document :body, channel: "PostDocumentChannel"
+end
+```
+
 ### Grant lifetime and refresh
 
 A grant lasts as long as GlobalID's signed-id default, which is one month under
@@ -684,7 +703,7 @@ gets blocked at the next reconnect. To avoid that, pair `expires_in:` with
 # app/controllers/posts_controller.rb
 def grant
   @post = current_user.posts.find(params[:id])   # your own authorization, again
-  render json: { grant: @post.collaborative_sgid(:body, expires_in: 10.minutes) }
+  render json: { grant: @post.collaborative_document(:body).grant(expires_in: 10.minutes) }
 end
 ```
 
@@ -748,7 +767,7 @@ up the record from it, so the page decides which document the client gets.
 
 ```erb
 <%# the view picks the document and signs it %>
-<%= tag.div data: { grant: post.collaborative_sgid(:body) } %>
+<%= tag.div data: { grant: post.collaborative_document(:body).grant } %>
 ```
 
 ```ruby
@@ -1077,6 +1096,24 @@ server acks it again. Awareness is ephemeral and isn't acked.
 The browser clients manage presence (cursors, selections). The server doesn't
 set or hold presence state, and it relays awareness frames without reading
 them. See `yrby-client` for the client-side awareness API.
+
+## Experimental: writing from Ruby, and collaborators
+
+These APIs are new. They may change in any minor release, and they aren't
+covered by yrby's usual compatibility promise.
+[docs/experimental.md](docs/experimental.md) documents them:
+
+- Live `Y::Map`, `Y::Array`, and `Y::Text` handles that write to a document
+- Writing Lexical rich text from Ruby, with `Y::Lexical` and `Y::Lexxy`
+- Anchors: a block's identity as a value
+- Streaming into a document with `Doc#edit`
+- Editing a record's document from Ruby
+- From the `yrby-agent` gem: joining a document from a Ruby process with
+  `Y::ActionCable::Client`, collaborators with `Y::Collaborator`, and agents
+  with `Y::Agent`
+
+`require "y/action_cable/client"`, `require "y/collaborator"`, and
+`require "y/agent"` print a warning in Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
 
 ## Thread Safety
 

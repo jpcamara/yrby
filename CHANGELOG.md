@@ -13,13 +13,100 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   crates. yrby's Rust servers use the same crate, so the rules exist once. No
   behavior changes.
 
+## [0.9.1] - 2026-11-08
+
+### Changed
+
+- yrby builds against yrs 0.28.1. An insert into a text no longer recounts
+  the UTF-16 length of each string before it, so appending to a long text
+  costs about the same at any length: 80k one-character appends took 2.5 s
+  and now take 48 ms.
+
+### Experimental
+
+- `Y::Doc#edit` returns the document's own writes and never a peer's. The
+  document keeps the update of every local transaction until an edit returns
+  it, merged into one, so a write made outside an edit, from another thread
+  or fiber, or in a block that raised comes with the next edit. Before this,
+  the edit returned everything the document gained while the block ran, so
+  an update applied from a peer meanwhile was sent again as the edit's own,
+  and a caller had to lock the document to keep them apart. Each edit takes
+  everything unsent at once, so the updates edits return have no gaps
+  between them. A peer's update doesn't wait for an edit.
+
+- `Y::Map#set_text(key, content = "")` stores a new `Y.Text` at a key and
+  returns its live `Y::Text`. `Y::Array#push_text(content = "")` and
+  `#insert_text(index, content = "")` do the same in a list. Before this,
+  Ruby could edit a nested `Y.Text` a browser made but couldn't make one,
+  so a server couldn't set up a form whose fields merge typing.
+
+## yrby-client 0.7.1 - 2026-11-03
+
 ### Fixed
 
 - yrby-client: `connect()` restores the presence that `disconnect()` removed,
-  unless the app set or cleared presence in between. Before this, a `renew()` (which
-  document sessions call with a renewed grant) or a manual reconnect left the
-  local awareness state `null`, and y-protocols ignores `setLocalStateField`
-  while it is `null`, so the user stayed invisible to peers until reload.
+  unless the app set or cleared presence in between. Before this, a `renew()`
+  (which document sessions call with a renewed grant) or a manual reconnect
+  left the local awareness state `null`, and y-protocols ignores
+  `setLocalStateField` while it is `null`, so the user stayed invisible to
+  peers until reload.
+
+## [0.9.0] - 2026-11-03
+
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
+
+- Live handles that write to a document from Ruby: `Doc#get_map`,
+  `get_array`, `get_text`, and `get_xml_text` return `Y::Map`, `Y::Array`,
+  `Y::Text`, and `Y::XmlText`. A write is a CRDT edit, so a person editing the
+  same document keeps their change. A handle stays on the shared type it was
+  made for while others edit around it, and releases the GVL like `Doc`.
+  Indexes are Ruby characters, and negative indexes count from the end as in
+  Ruby. `push`, `<<`, and `insert` return the receiver, and `each`
+  without a block an Enumerator, as Ruby's own do.
+- `Doc#edit { }` runs a block that writes to the document and returns the
+  update its writes produced, or nil when it wrote nothing. It is the unit a
+  process saves and sends as it writes.
+- `Y::Lexical` and `Y::Lexxy` write Lexical's node shape: `append_paragraph`,
+  `append_heading`, `append_list`, `append_quote`, `append_code`,
+  `append_markdown`, `insert_paragraph`, `append_text`, `replace_runs`, and
+  `delete_block`.
+  Text takes formatted runs (`bold:`, `italic:`, `code:`, `link:`, and so on).
+  What Ruby writes renders the same as what a person typed. Each helper
+  writes its block in one transaction. `XmlText#push_xml_text` and
+  `insert_xml_text` take the new block's content, and `append` and
+  `replace` write content into a block.
+- `append_markdown` writes a link to a script as plain text.
+- `Y::Anchor`, from `XmlText#anchor`, is a block's identity as a value to
+  store or send. `Doc#block_at` and `Doc#find` resolve it.
+  `relative_position(index)` builds the Yjs caret shape editors put in
+  awareness, and `Text#index_at(position)` resolves one.
+- `Doc#apply_update_changes(update, root)` applies an update and returns the
+  ordinals of the top-level blocks it touched. It reads the blocks and
+  applies the update in one transaction, so another thread's write doesn't
+  show up in the result.
+- `Y::Awareness` builds and reads presence frames, and `Doc#client_id` returns
+  the id a document writes under.
+
+### Changed
+
+- yrby and the renderer crates are on yrs 0.28. yrs 0.28 replaced the number
+  variants of `Any` with `Any::Number(Number::Int | Number::Float)`. Because
+  the crates take yrs types, this is a breaking release for them:
+  `lexical-yjs-html` 0.2.0, `prosemirror-yjs-html` 0.2.0, and
+  `yjs-html-core` 0.2.0 need yrs 0.28.
+
+### Fixed
+
+- The Lexical and ProseMirror renderers (and the `lexical-yjs-html` and
+  `prosemirror-yjs-html` 0.2.1 crates) refuse a link to a script: Lexical
+  sends it to `about:blank` and ProseMirror empties its `href`, as each
+  editor does.
+- A `Timeout`, `Thread#raise`, or `Thread#kill` that arrives during a
+  native call raises once the call returns. Before, Ruby could jump over
+  the extension's Rust frames without running their cleanup.
 
 ## yrby-client 0.7.0 - 2026-10-08
 

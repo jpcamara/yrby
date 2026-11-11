@@ -80,8 +80,8 @@ class SyncTest < Minitest::Test
     sync.singleton_class.alias_method(:real_default_hook, :default_hook)
     sync.define_singleton_method(:default_hook) { |_name| nil }
     begin
-      assert_match(/on_load/, assert_raises(Y::Error) { no_loader.new.sync_subscribed("doc") }.message)
-      assert_match(/on_change/, assert_raises(Y::Error) { no_recorder.new.sync_subscribed("doc") }.message)
+      assert_match(/on_load/, assert_raises(Y::Error) { no_loader.new.send(:sync_subscribed, "doc") }.message)
+      assert_match(/on_change/, assert_raises(Y::Error) { no_recorder.new.send(:sync_subscribed, "doc") }.message)
     ensure
       sync.singleton_class.alias_method(:default_hook, :real_default_hook)
       sync.singleton_class.remove_method(:real_default_hook)
@@ -104,7 +104,7 @@ class SyncTest < Minitest::Test
   def test_subscription_is_refused_until_the_channel_defines_authorized
     helper = helper_for(authorized: false)
 
-    refute helper.sync_subscribed("doc")
+    refute helper.send(:sync_subscribed, "doc")
     assert helper.rejected, "the default authorized? must reject"
     assert_empty helper.streams, "no stream may open before authorization"
     assert_empty helper.transmits, "no state may be served before authorization"
@@ -115,7 +115,7 @@ class SyncTest < Minitest::Test
     helper = helper_for(authorized: false)
     helper.logger = Logger.new(log)
 
-    helper.sync_subscribed("doc")
+    helper.send(:sync_subscribed, "doc")
 
     assert_match(/authorized\?/, log.string)
     assert_match(/public documents/, log.string)
@@ -131,7 +131,7 @@ class SyncTest < Minitest::Test
     log = StringIO.new
     helper.logger = Logger.new(log)
 
-    refute helper.sync_subscribed("doc-7")
+    refute helper.send(:sync_subscribed, "doc-7")
 
     assert_equal "doc-7", seen
     assert helper.rejected
@@ -143,7 +143,7 @@ class SyncTest < Minitest::Test
   def test_an_authorized_subscription_proceeds
     helper = helper_for
     helper.define_singleton_method(:authorized?) { |_key| true }
-    helper.sync_subscribed("doc")
+    helper.send(:sync_subscribed, "doc")
 
     refute helper.rejected
     assert_equal 1, helper.transmits.length, "expected the opening handshake"
@@ -164,7 +164,7 @@ class SyncTest < Minitest::Test
   def test_sync_subscribed_uses_stateless_streams_and_answers_from_store
     store = [YjsFixtures::TwoDocsMerged::DOC1_UPDATE]
     helper = helper_for(store: store)
-    helper.sync_subscribed("doc")
+    helper.send(:sync_subscribed, "doc")
 
     assert_equal [["yrby:doc", {}, true]], helper.streams
     assert_equal 1, helper.transmits.length
@@ -178,7 +178,7 @@ class SyncTest < Minitest::Test
   def test_anycable_whisper_is_scoped_to_awareness_stream
     helper = helper_for
     helper.define_singleton_method(:whispers_to) { |_broadcasting| nil }
-    helper.sync_subscribed("doc")
+    helper.send(:sync_subscribed, "doc")
 
     assert_includes helper.streams, ["yrby:doc", {}, true],
                     "document stream has no whisper option"
@@ -192,7 +192,7 @@ class SyncTest < Minitest::Test
     transmits = []
     helper = helper_for(store: [YjsFixtures::TwoDocsMerged::DOC1_UPDATE], transmits: transmits)
 
-    helper.sync_receive({ "update" => Base64.strict_encode64(Y::Doc.new.sync_step1) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(Y::Doc.new.sync_step1) }, "doc-key")
 
     assert_equal 1, transmits.length
     response = Base64.strict_decode64(transmits.first["update"])
@@ -212,7 +212,7 @@ class SyncTest < Minitest::Test
     helper = helper_for(store: [YjsFixtures::Gap::DEPENDENT], transmits: transmits)
 
     client = Y::Doc.new
-    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     assert_equal 1, transmits.length, "the SyncStep2 reply"
     reply = Base64.strict_decode64(transmits.first["update"])
@@ -235,17 +235,36 @@ class SyncTest < Minitest::Test
     },
                         transmits: transmits, broadcasts: broadcasts)
 
-    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 7), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 7), "doc-key")
 
     assert_equal [["doc-key", YjsFixtures::TwoDocsMerged::DOC1_UPDATE]], recorded
     assert_equal 1, broadcasts.length
     assert_equal [7], acks_in(transmits)
   end
 
+  # A client's Step2 answers the server's Step1. Relayed as is, a peer would
+  # read it as the answer to its own handshake and think it had loaded.
+  def test_a_clients_sync_step2_is_relayed_as_an_update
+    store = []
+    broadcasts = []
+    helper = helper_for(store: store, broadcasts: broadcasts)
+    client = Y::Doc.new
+    client.apply_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+    step2 = client.handle_sync_message(Y::Doc.new.sync_step1)[2]
+
+    assert_equal Y::MSG_SYNC_STEP2, step2.getbyte(1)
+
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(step2) }, "doc-key")
+    relayed = Base64.strict_decode64(broadcasts.sole)
+
+    assert_equal Y::MSG_SYNC_UPDATE, relayed.getbyte(1)
+    assert_equal store.sole, Y.update_from_message(relayed)
+  end
+
   def test_no_ack_without_id
     helper = helper_for
 
-    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE), "doc-key")
 
     assert_empty acks_in(helper.transmits)
   end
@@ -261,7 +280,7 @@ class SyncTest < Minitest::Test
     },
                         transmits: transmits, broadcasts: broadcasts)
 
-    helper.sync_receive(update_message(YjsFixtures::EmptyDoc::UPDATE, id: 9), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::EmptyDoc::UPDATE, id: 9), "doc-key")
 
     assert_empty recorded
     assert_empty broadcasts
@@ -272,8 +291,8 @@ class SyncTest < Minitest::Test
     store = []
     helper = helper_for(store: store)
 
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1), "doc-key")
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U1), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3), "doc-key")
 
     client = Y::Doc.new
     [YjsFixtures::CausalChain::U1, YjsFixtures::CausalChain::U2,
@@ -282,7 +301,7 @@ class SyncTest < Minitest::Test
     store.each { |u| server.apply_update(u) }
     resync = client.encode_state_as_update(server.encode_state_vector)
 
-    helper.sync_receive(update_message(resync), "doc-key")
+    helper.send(:sync_receive, update_message(resync), "doc-key")
 
     replay = Y::Doc.new
     store.each { |u| replay.apply_update(u) }
@@ -297,7 +316,7 @@ class SyncTest < Minitest::Test
     helper = helper_for(recorder: ->(_key, _update) { raise "store unavailable" }, broadcasts: broadcasts)
 
     assert_raises(RuntimeError) do
-      helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 5), "doc-key")
+      helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 5), "doc-key")
     end
 
     assert_empty broadcasts
@@ -322,7 +341,7 @@ class SyncTest < Minitest::Test
     helper.transmits = []
     helper.broadcasts = []
 
-    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE), "doc-key")
 
     assert_equal "user-42", seen
   end
@@ -352,7 +371,7 @@ class SyncTest < Minitest::Test
     # is served: a SyncStep1 rebuilds via sync_load_doc, proving the loader
     # runs in the channel's context.
     client = Y::Doc.new
-    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     assert_equal "loader-42", seen
   end
@@ -362,7 +381,7 @@ class SyncTest < Minitest::Test
     broadcasts = []
     helper = helper_for(recorder: ->(_key, update) { recorded << update }, broadcasts: broadcasts)
 
-    helper.sync_receive({ "update" => Base64.strict_encode64(YjsFixtures::Presence::FRAME) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(YjsFixtures::Presence::FRAME) }, "doc-key")
 
     assert_empty recorded
     assert_equal 1, broadcasts.length
@@ -372,8 +391,8 @@ class SyncTest < Minitest::Test
     helper = helper_for
     helper.class.max_frame_bytes 4
 
-    helper.sync_receive({ "update" => "not-base64", "id" => 1 }, "doc-key")
-    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 2), "doc-key")
+    helper.send(:sync_receive, { "update" => "not-base64", "id" => 1 }, "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 2), "doc-key")
 
     assert_empty helper.broadcasts
     assert_empty acks_in(helper.transmits)
@@ -396,7 +415,7 @@ class SyncTest < Minitest::Test
     # Oversized: logged at warn, naming the cap, the document key, and the
     # reliable-delivery id so the drop is traceable to a specific stuck update.
     helper.class.max_frame_bytes 4
-    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 2), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 2), "doc-key")
 
     warned = logged.any? do |lvl, msg|
       lvl == :warn && msg.include?("max_frame_bytes") && msg.include?("doc-key") && msg.include?("id=2")
@@ -409,7 +428,7 @@ class SyncTest < Minitest::Test
     # debug, still naming the document.
     logged.clear
     helper.class.max_frame_bytes nil
-    helper.sync_receive({ "update" => "@@@bad", "id" => 3 }, "doc-key")
+    helper.send(:sync_receive, { "update" => "@@@bad", "id" => 3 }, "doc-key")
 
     assert(logged.any? { |lvl, msg| lvl == :debug && msg.include?("doc-key") },
            "an invalid-base64 frame is logged at debug, naming the document")
@@ -422,7 +441,7 @@ class SyncTest < Minitest::Test
     helper.define_singleton_method(:sync_log_context) { "user=42" }
 
     helper.class.max_frame_bytes 4
-    helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 1), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 1), "doc-key")
 
     assert(logged.any? { |_lvl, msg| msg.include?("user=42") },
            "sync_log_context is appended to the drop log")
@@ -436,7 +455,7 @@ class SyncTest < Minitest::Test
 
     helper.class.max_frame_bytes 4
     # A broken context hook must not take down frame handling.
-    assert_nil helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 1), "doc-key")
+    assert_nil helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 1), "doc-key")
     assert(logged.any? { |_lvl, msg| msg.include?("log-context-error=RuntimeError") },
            "a raising context hook surfaces in the log instead of breaking the drop")
   end
@@ -448,8 +467,8 @@ class SyncTest < Minitest::Test
     helper = helper_for(store: store, transmits: transmits, broadcasts: broadcasts)
     msg = update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 5)
 
-    helper.sync_receive(msg, "doc-key")
-    helper.sync_receive(msg, "doc-key")
+    helper.send(:sync_receive, msg, "doc-key")
+    helper.send(:sync_receive, msg, "doc-key")
 
     # The write path records without rebuilding, so a lost-ack retry records
     # again; replaying the log converges anyway, because applying a CRDT
@@ -499,7 +518,7 @@ class SyncTest < Minitest::Test
                         transmits: transmits, broadcasts: broadcasts)
 
     # U3 depends on U2 -> U1, neither of which the store has: a genuine gap.
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
 
     assert_equal [YjsFixtures::CausalChain::U3], store, "the gapped update is recorded"
     assert_equal 1, broadcasts.length, "and relayed to peers (they park it as pending too)"
@@ -512,9 +531,9 @@ class SyncTest < Minitest::Test
     helper = helper_for(store: store, recorder: ->(_k, u) { store << u })
 
     # Arrive fully out of causal order: C, then B, then A.
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key")
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U2), "doc-key")
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U2), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U1), "doc-key")
 
     replay = Y::Doc.new
     store.each { |u| replay.apply_update(u) }
@@ -533,13 +552,13 @@ class SyncTest < Minitest::Test
     store = []
     transmits = []
     helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
     transmits.clear
 
     # A joining client receives full state, the pending U3 included: it parks
     # it exactly as the server did.
     client = Y::Doc.new
-    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
@@ -548,8 +567,8 @@ class SyncTest < Minitest::Test
 
     # The missing dependencies arrive (their sender retransmits until acked);
     # the server relays them, and the joiner's copy heals in place.
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U1, id: 2), "doc-key")
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U2, id: 3), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U1, id: 2), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U2, id: 3), "doc-key")
     client.apply_update(YjsFixtures::CausalChain::U1)
     client.apply_update(YjsFixtures::CausalChain::U2)
 
@@ -568,8 +587,8 @@ class SyncTest < Minitest::Test
     helper.class.on_change { |k, u| store.append(k, u) }
     msg = update_message(YjsFixtures::CausalChain::U3, id: 5)
 
-    helper.sync_receive(msg, "doc-key")
-    helper.sync_receive(msg, "doc-key") # lost-ack retry
+    helper.send(:sync_receive, msg, "doc-key")
+    helper.send(:sync_receive, msg, "doc-key") # lost-ack retry
 
     assert_equal 1, store.count("doc-key"), "the store deduped the retry by content hash"
     assert_equal [5, 5], acks_in(transmits), "both are acked (ack-on-durable, idempotent)"
@@ -581,14 +600,14 @@ class SyncTest < Minitest::Test
     transmits = []
     helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
     helper.class.on_gap { |key| gaps << key }
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3), "doc-key") # open a gap
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3), "doc-key") # open a gap
     transmits.clear
 
     # A client sends SyncStep1. The server answers it and surfaces the gap
     # through on_gap; nothing else is transmitted. Healing rides the ack loop
     # and the join/reconnect handshakes.
     client = Y::Doc.new
-    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     assert_equal 1, transmits.length, "the SyncStep2 reply is the only frame"
     assert_equal ["doc-key"], gaps, "on_gap fired for the open gap"
@@ -603,13 +622,13 @@ class SyncTest < Minitest::Test
     helper.class.on_gap { |key| gaps << key }
 
     # The write path records without observing: the gap is durable, quiet.
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
 
     assert_empty gaps, "recording a gap does not observe it"
 
     # Serving rebuilds the doc; an open gap surfaces there.
     client = Y::Doc.new
-    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     assert(logged.any? { |lvl, msg| lvl == :info && msg.include?("causal gap") && msg.include?("doc-key") },
            "the open gap is logged at info so it is findable")
@@ -623,12 +642,12 @@ class SyncTest < Minitest::Test
     helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
     helper.logger = capturing_logger(logged)
     helper.class.on_gap { |_key| raise "metrics backend down" }
-    helper.sync_receive(update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
+    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
     transmits.clear
 
     # Serving observes the open gap; the raising hook must not break the serve.
     client = Y::Doc.new
-    helper.sync_receive({ "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
 
     refute_empty transmits, "the handshake was still answered"
     assert_equal [YjsFixtures::CausalChain::U3], store, "the gap stayed recorded"
@@ -641,7 +660,7 @@ class SyncTest < Minitest::Test
     # No sync_subscribed, no key argument: recording under a nil key and acking
     # would silently misfile the update, so the frame must raise instead.
     error = assert_raises(Y::Error) do
-      helper.sync_receive(update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 1))
+      helper.send(:sync_receive, update_message(YjsFixtures::TwoDocsMerged::DOC1_UPDATE, id: 1))
     end
 
     assert_match(/document key/, error.message)
@@ -665,7 +684,7 @@ class SyncTest < Minitest::Test
     recorder = appending_recorder(store)
     msg = update_message(YjsFixtures::ConcurrentClients::FIVE.first)
 
-    threads = 32.times.map { Thread.new { helper_for(store: store, recorder: recorder).sync_receive(msg, key) } }
+    threads = 32.times.map { Thread.new { helper_for(store: store, recorder: recorder).send(:sync_receive, msg, key) } }
     threads.each(&:join)
 
     refute_empty store, "at-least-once: the update is recorded"
@@ -688,7 +707,7 @@ class SyncTest < Minitest::Test
     # 5 distinct updates, each delivered by 5 threads (25 total) -> 20 retries.
     25.times.map do |i|
       msg = update_message(five[i % five.length])
-      Thread.new { helper_for(store: store, recorder: recorder).sync_receive(msg, key) }
+      Thread.new { helper_for(store: store, recorder: recorder).send(:sync_receive, msg, key) }
     end.each(&:join)
 
     rebuilt = Y::Doc.new

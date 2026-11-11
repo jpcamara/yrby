@@ -317,6 +317,15 @@ try {
   await wait('document.querySelector("#body-doc")?.provider?.synced');
   check("restoring permission admits the user on the next subscription", await evaluate(
     'document.querySelector("#body-doc").doc.getText("content").toString() === "peer edit after revocation"'));
+
+  // The JavaScript yrby:install pins in an import-map app, with no bundler.
+  await browser(session, "open", `${base}/importmap`);
+  await wait('window.importmapDoc && document.querySelector("#pinned-doc").provider?.synced');
+  check("the pinned element and the app's yjs pin share one copy of yjs", await evaluate("sameYjs"));
+  await evaluate('importmapDoc.getText("content").insert(0, "from the import map")');
+  await wait('!document.querySelector("#pinned-doc").provider.hasPending');
+  check("an edit through the pinned assets reaches the Ruby accessor", (await state("pinned")).text === "from the import map");
+
   const errors = await browser(session, "errors");
   check("no browser exceptions", (errors.errors ?? []).length === 0);
   console.log("PASS element browser regression (real Rails, ActionCable, Turbo and agent-browser)");

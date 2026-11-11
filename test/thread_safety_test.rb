@@ -20,6 +20,76 @@ class ThreadSafetyTest < Minitest::Test
   THREADS = 8
   ITERATIONS = 50
 
+  # A handle to a nested value is taken inside the transaction that finds the
+  # value. Another thread can delete the value and free it the moment that
+  # transaction ends.
+  def test_getting_a_handle_while_another_thread_deletes_the_value
+    map = Y::Doc.new.get_map("m")
+    list = Y::Doc.new.get_array("a")
+    stop = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
+    alive = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) < stop }
+    threads = [
+      Thread.new do
+        while alive.call
+          map["child"] = { "n" => 1 }
+          map.delete("child")
+        end
+      end,
+      Thread.new { map.get_map("child") while alive.call },
+      Thread.new do
+        while alive.call
+          list.push({ "n" => 1 })
+          list.delete_at(0)
+        end
+      end,
+      Thread.new { list.get_map(0) while alive.call }
+    ]
+    threads.each(&:join)
+
+    assert_nil map.get_map("child")
+    assert_equal 0, list.size
+  end
+
+  class Interrupted < StandardError
+  end
+
+  # An interrupt raises after the native call, never in the middle of it, so
+  # the call finishes its write first.
+  def test_an_interrupt_raises_after_the_call_finishes
+    map = Y::Doc.new.get_map("m")
+
+    assert_raises(Interrupted) do
+      Thread.handle_interrupt(Interrupted => :on_blocking) do
+        Thread.current.raise(Interrupted)
+        map["n"] = 1
+      end
+    end
+    assert_equal({ "n" => 1 }, map.to_h)
+  end
+
+  # Ruby delivers one interrupt per check. A thread that only calls into yrby
+  # still gets the ones queued behind it, here a kill after many raises.
+  def test_queued_interrupts_reach_a_thread_that_only_calls_yrby
+    map = Y::Doc.new.get_map("m")
+    looping = Queue.new
+    worker = Thread.new do
+      loop do
+        map["n"] = 1
+        looping << true if looping.empty?
+      end
+    rescue Interrupted
+      retry
+    end
+    looping.pop
+    2_000.times do
+      worker.raise(Interrupted)
+      Thread.pass
+    end
+    worker.kill
+
+    assert worker.join(5), "the kill never reached the worker"
+  end
+
   def test_concurrent_writes_and_reads_on_shared_doc
     doc = Y::Doc.new
     updates = [

@@ -18,7 +18,7 @@
 //! every binding and caller.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use yrs::{Any, Out, ReadTxn, Xml};
+use yrs::{Any, Number, Out, ReadTxn, Xml};
 
 /// One piece of renderer output. `Html` is finished markup; `Deferred` is a
 /// callback node whose markup the caller supplies after the render, carrying
@@ -216,12 +216,12 @@ pub fn xml_ref_attr<T: ReadTxn, N: Xml>(txn: &T, node: &N, name: &str) -> Option
 pub fn any_attr_string(any: &Any) -> Option<String> {
     match any {
         Any::String(s) => Some(s.to_string()),
-        Any::Number(n) => Some(if n.fract() == 0.0 {
+        Any::Number(Number::Int(n)) => Some(format!("{n}")),
+        Any::Number(Number::Float(n)) => Some(if n.fract() == 0.0 {
             format!("{}", *n as i64)
         } else {
             format!("{n}")
         }),
-        Any::BigInt(n) => Some(format!("{n}")),
         Any::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
         _ => None,
     }
@@ -458,9 +458,40 @@ fn parse_parts(name: &str, parts: &[serde_json::Value]) -> Result<Vec<AttrPart>,
         .collect()
 }
 
+/// The scheme a URL names, lowercased, or `None` for a URL without one (a
+/// path). Browsers ignore whitespace and control characters in a scheme, so
+/// they don't count here either: `java\tscript:` is `javascript`.
+pub fn url_scheme(url: &str) -> Option<String> {
+    let url: String = url
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    let (scheme, _) = url.split_once(':')?;
+    let mut chars = scheme.chars();
+    let starts_with_letter = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
+    let valid = chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'));
+    (starts_with_letter && valid).then(|| scheme.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn url_scheme_reads_a_scheme_as_a_browser_does() {
+        assert_eq!(url_scheme("https://example.com").as_deref(), Some("https"));
+        assert_eq!(
+            url_scheme("JavaScript:alert(1)").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(
+            url_scheme(" java\tscript:alert(1)").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(url_scheme("/docs/a:b"), None);
+        assert_eq!(url_scheme("#top"), None);
+        assert_eq!(url_scheme("example.com"), None);
+    }
 
     #[test]
     fn parses_the_compiled_rule_shape() {
