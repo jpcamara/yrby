@@ -109,6 +109,29 @@ class CollaboratorTest < Minitest::Test
     run.kill
   end
 
+  # Deleting a block hands changed nothing for it. Before, the deleted block's
+  # old position named the block after it, so "three" showed up though nobody
+  # touched it.
+  def test_a_deleted_block_does_not_hand_changed_the_block_after_it
+    ada = person
+    names = roster(ada)
+    seen = Queue.new
+    texts = Class.new(Reviewer) { define_method(:changed) { |blocks| seen << blocks.map(&:text) if blocks.any? } }
+    run = collaborator(texts)
+    wait_until { names.call.include?("Reviewer") }
+    ada.edit { |doc| %w[one two three].each { |text| Y::Lexxy.append_paragraph(doc, text) } }
+    seen.pop(timeout: 10)
+
+    ada.edit do |doc|
+      root = doc.get_xml_text("root")
+      root.delete_xml_text(1)
+      root.xml_text(0).insert(-1, "!")
+    end
+
+    assert_equal ["one!"], seen.pop(timeout: 10)
+    run.kill
+  end
+
   # Someone who never pauses still gets an answer: changed runs after
   # SETTLE_AT_MOST seconds of steady typing.
   def test_steady_typing_reaches_changed_before_it_stops

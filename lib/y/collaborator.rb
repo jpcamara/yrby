@@ -112,7 +112,8 @@ module Y
     # stays on its block while people edit around it, and writing to one
     # whose block was deleted raises Y::Error. A change outside the root,
     # such as to a map, comes right away with an empty list: it's a click,
-    # not typing. The collaborator's own edits never show up here.
+    # not typing. So does an update that only deleted blocks, since a deleted
+    # block has no handle to give. The collaborator's own edits never show up here.
     def changed(blocks); end
 
     # Edit the document. Returns the update, or nil when nothing changed.

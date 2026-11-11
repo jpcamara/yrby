@@ -6,6 +6,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Experimental
+
+- `Doc#apply_update_changes` no longer lists a removed block. It listed the
+  ordinal the block had, which after the update names the block that took
+  its place, one nobody touched. Every ordinal it returns now names a block
+  the document has.
+
 ## [0.9.1] - 2026-11-08
 
 ### Changed
