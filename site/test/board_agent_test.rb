@@ -160,8 +160,7 @@ class BoardAgentTest < ActiveSupport::TestCase
       tool.call(:add_items, items: [NOTE.merge("x" => 550, "y" => 550), NOTE.merge("x" => 2000)])
     end)
 
-    assert_match(/item 1: added as \w+, but it overlaps mill\n/, model.results.first)
-    assert_match(/item 2: added as \w+, but it's outside the area they can see\z/, model.results.first)
+    assert_match(/item 1: added as \w+, but it overlaps mill\nitem 2: added as \w+\z/, model.results.first)
   end
 
   test "its reply is what it said after its last tool call" do

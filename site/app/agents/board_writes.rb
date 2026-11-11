@@ -69,7 +69,7 @@ module BoardWrites
     "#{key}: skipped, #{e.message}"
   end
 
-  def collisions(key) = board.overlap_note(key, view_of(asks.get_map(@ask)))
+  def collisions(key) = board.overlap_note(key)
 
   def delete_items(ids)
     doing("Removing #{count(ids.size, "item")}", ids.map(&:to_s).select { |id| board.exists?(id) })
