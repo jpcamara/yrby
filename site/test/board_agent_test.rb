@@ -103,6 +103,17 @@ class BoardAgentTest < ActiveSupport::TestCase
     assert_match(/item 1: added as \w+\nitem 2: added as \w+/, model.results.first)
   end
 
+  test "items sent as a JSON string, or as JSON strings, are read like objects" do
+    person_asks("a1")
+    run_with(ScriptModel.new do
+      tool = BoardTools::AddItems.new(@agent)
+      tool.call(items: JSON.generate([NOTE]))
+      tool.call(items: [JSON.generate(NOTE.merge("x" => 400))])
+    end)
+
+    assert_equal [100, 400], added("a1").values.map { |item| item["x"] }.sort
+  end
+
   test "connectors join items by id or by a ref from the same call, and bad ones are skipped with a reason" do
     person_note("mill", "Call the mill")
     person_asks("a1")

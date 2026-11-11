@@ -50,7 +50,21 @@ module BoardTools
 
     def call(tool_call: nil, **arguments)
       Rails.logger.info("#{self.class.tool_name} #{arguments.to_json[0, 4000]}")
-      super
+      super(tool_call:, **arguments.transform_values { |value| decode(value) })
+    end
+
+    private
+
+    # Some models send an array or object argument as a JSON string, or a
+    # list of JSON strings. Decode those so the tool gets what it declared.
+    def decode(value)
+      case value
+      when Array then value.map { |each| decode(each) }
+      when /\A\s*[\[{]/ then decode(JSON.parse(value))
+      else value
+      end
+    rescue JSON::ParserError
+      value
     end
   end
 
