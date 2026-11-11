@@ -56,6 +56,28 @@ const PRESENCE_EVERY = 70  // ms between cursor updates
 const OPEN_ASKS = new Set(["asked", "working", "done", "failed", "stopped"])
 
 const $ = (selector) => document.querySelector(selector)
+
+// Whether two JSON values are the same, ignoring key order.
+const sameJSON = (a, b) => {
+  if (a === b) return true
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b || Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => sameJSON(a[key], b[key]))
+}
+
+// A board item's Y.Map from its JSON, with its words as a Y.Text.
+const itemFrom = (json) => {
+  const item = new Y.Map()
+  for (const [key, value] of Object.entries(json)) {
+    item.set(key, key === "text" ? new Y.Text(String(value)) : value)
+  }
+  return item
+}
+
+const replaceText = (text, words) => {
+  text.delete(0, text.length)
+  if (words) text.insert(0, words)
+}
 const canvas = $("#board")
 const world = canvas.querySelector(".board-world")
 const statusLine = $("#status")
@@ -630,12 +652,19 @@ class Board {
     const id = uid()
     const box = canvas.getBoundingClientRect()
     const at = this.toWorld(box.left + 80, box.top + 150)
+    // What they can see, in board units, less the title, the toolbar, and
+    // the asks panel on the right, where this ask's card is about to appear.
+    const panel = Math.min(360, box.width / 3)
+    const topLeft = this.toWorld(box.left + 40, box.top + 110)
+    const bottomRight = this.toWorld(box.right - panel, box.bottom - 100)
     this.doc.transact(() => {
       const ask = new Y.Map()
       this.asks.set(id, ask)
       for (const [key, value] of Object.entries({
         owner: me.id, askedBy: me.name, color: me.color, prompt, status: "asked", createdAt: Date.now(),
         at: { x: Math.round(at.x), y: Math.round(at.y) },
+        view: { x: Math.round(topLeft.x), y: Math.round(topLeft.y),
+                w: Math.round(bottomRight.x - topLeft.x), h: Math.round(bottomRight.y - topLeft.y) },
       })) ask.set(key, value)
     }, ASKING)
     this.summon(id)
@@ -672,17 +701,35 @@ class Board {
     return ids
   }
 
-  // Removes what the ask drew, and the title if it set it. Anyone can.
+  // Takes the ask back: removes what it added, and puts back what it changed
+  // or deleted, and the title it set. Anything someone changed since the
+  // agent did stays as they left it. Anyone can.
   undoAsk(id) {
     const ask = this.asks.get(id)
+    let kept = 0
     this.doc.transact(() => {
       for (const key of this.askItems(id)) this.items.delete(key)
-      if (ask?.get("titled")) {
+      const after = ask?.get("after")
+      ask?.get("before")?.forEach((was, key) => {
+        const left = after?.get(key)
+        const now = this.items.get(key)
+        if (!sameJSON(now ? now.toJSON() : null, left ? JSON.parse(left) : null)) { kept++; return }
+        this.items.set(key, itemFrom(JSON.parse(was)))
+      })
+      const titleBefore = ask?.get("titleBefore")
+      if (titleBefore) {
+        if (sameJSON([this.title.toString(), this.subtitle.toString()], JSON.parse(ask.get("titleAfter") ?? "null"))) {
+          const [title, subtitle] = JSON.parse(titleBefore)
+          replaceText(this.title, title)
+          replaceText(this.subtitle, subtitle)
+        } else kept++
+      } else if (ask?.get("titled")) {
         this.title.delete(0, this.title.length)
         this.subtitle.delete(0, this.subtitle.length)
       }
       ask?.set("status", "undone")
       ask?.set("decidedBy", me.name)
+      if (kept) ask?.set("kept", kept)
     }, ASKING)
   }
 
@@ -714,6 +761,8 @@ class Board {
   }
 
   fillCard(card, id, ask) {
+    // Leave the card alone while someone types a change into it.
+    if (card.classList.contains("is-revising")) return
     const status = ask.get("status")
     const owner = ask.get("owner")
     const agent = this.peers().find((peer) => peer.agent?.owner === owner)
@@ -721,8 +770,7 @@ class Board {
     const drawn = Number(ask.get("drawn")) || 0
     const started = Number(ask.get("startedAt")) || 0
     const seconds = started ? Math.max(0, Math.floor((Date.now() - started) / 1000)) : 0
-    const revising = card.classList.contains("is-revising")
-    const key = [status, drawn, ask.get("error"), !!agent, revising, status === "working" ? seconds : ""].join("\u0000")
+    const key = [status, drawn, ask.get("error"), ask.get("plan"), !!agent, status === "working" ? seconds : ""].join("\u0000")
     if (card.dataset.key === key) return
     card.dataset.key = key
     card.dataset.status = status
@@ -730,9 +778,9 @@ class Board {
 
     const line = {
       asked: agent ? "Reading the board…" : "Waiting for the agent to join…",
-      working: `Drawing · ${drawn} ${drawn === 1 ? "item" : "items"} · ${seconds}s`,
-      done: `Drew ${drawn} ${drawn === 1 ? "item" : "items"}`,
-      stopped: `Stopped after ${drawn} ${drawn === 1 ? "item" : "items"}`,
+      working: `Working · ${drawn} ${drawn === 1 ? "change" : "changes"} · ${seconds}s`,
+      done: ask.get("plan") || `Made ${drawn} ${drawn === 1 ? "change" : "changes"}`,
+      stopped: `Stopped after ${drawn} ${drawn === 1 ? "change" : "changes"}`,
       failed: `Couldn't draw it: ${ask.get("error") ?? "something went wrong"}.`,
     }[status]
 

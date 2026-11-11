@@ -3,7 +3,7 @@ require "test_helper"
 # How one person's agent answers asks on a board, on a real Y::Doc without
 # joining a room. test/boards_test.rb covers the page and the invitation.
 class BoardAgentTest < ActiveSupport::TestCase
-  # A BoardAgent that edits `doc` directly, records its presence, and draws
+  # A BoardAgent that edits `doc` directly, records its presence, and works
   # without pausing.
   class OfflineBoardAgent < BoardAgent
     Document = Data.define(:key, :name, :channel)
@@ -25,114 +25,208 @@ class BoardAgentTest < ActiveSupport::TestCase
     end
   end
 
-  # Streams a plan in uneven chunks, as a model does, and records what it
-  # was asked. `during` runs before each chunk.
-  class FakeModel
-    attr_reader :calls
+  # Stands in for the model: runs `script` with the agent's real tools, as
+  # the model's tool calls would, records what it was asked, and replies.
+  class ScriptModel
+    attr_reader :calls, :results
 
-    PLAN = [
-      { kind: "title", text: "Pie launch", subtitle: "Twelve days" },
-      { kind: "group", text: "Recipe" },
-      { kind: "step", label: "Day 1", title: "Lock flavor", caption: "Pick it", icon: "🥧" },
-      { kind: "step", label: "Day 2", title: "Lock pricing", caption: "Per pie", icon: "🏷️" },
-      { kind: "finale", label: "Day 12", title: "Holiday delivery", caption: "At every door", icon: "🎁" }
-    ].map { |line| JSON.generate(line) }.join("\n")
-
-    def initialize(plan = PLAN, &during)
-      @plan = plan
-      @during = during
+    def initialize(reply = "Drew it.", &script)
+      @reply = reply
+      @script = script
       @calls = []
+      @results = []
+      @tools = nil
     end
 
-    def plan(prompt, board:, previous: nil, earlier: nil)
-      @calls << { prompt:, board:, previous:, earlier: }
-      @plan.scan(/.{1,17}/m).each_with_index do |chunk, i|
-        @during&.call(i)
-        yield chunk
-      end
+    attr_writer :agent
+
+    def draw(**asked)
+      @calls << asked
+      tools = BoardTools.all(@agent).to_h { |tool| [tool.class.tool_name.to_sym, tool] }
+      call = ->(name, **args) { (@results << tools.fetch(name).execute(**args)).last }
+      @script&.call(call)
+      yield @reply
     end
   end
 
   class DownModel
-    def plan(...) = raise(AgentModel::Error, "the model timed out")
+    def draw(**) = raise(AgentModel::Error, "the model timed out")
   end
 
   ADA = PageAgent::Owner.new(id: "ada-0001", name: "Ada", color: "#f87171")
+  NOTE = { "type" => "note", "x" => 100, "y" => 100, "title" => "Lock flavor", "caption" => "Pick it",
+           "icon" => "🥧" }.freeze
 
   setup { @doc = Y::Doc.new }
 
   def asks = @doc.get_map("asks")
   def ask(id) = asks.get_map(id)
   def items = JSON.parse(@doc.read_map("items"))
-  def drawn(id) = items.values.select { |item| item["ask"] == id }
+  def added(id) = items.select { |_key, item| item["ask"] == id }
 
   def person_asks(id, owner: ADA.id, status: "asked", **fields)
-    asks[id] = { "owner" => owner, "askedBy" => "Ada", "prompt" => "Lay out a timeline for the pie launch",
-                 "at" => { "x" => 40, "y" => 60 }, "status" => status, "createdAt" => 1 }.merge(fields)
+    asks[id] = { "owner" => owner, "askedBy" => "Ada", "prompt" => "Plan the pie launch",
+                 "at" => { "x" => 40, "y" => 60 }, "view" => { "x" => 0, "y" => 50, "w" => 1200, "h" => 700 },
+                 "status" => status, "createdAt" => 1 }.merge(fields)
   end
 
-  def agent_with(model) = @agent = OfflineBoardAgent.new(@doc, owner: ADA, model:)
+  def person_note(key, text, **fields)
+    @doc.get_map("items")[key] = { "type" => "note", "x" => 500, "y" => 500, "w" => 200, "h" => 132, "z" => 3,
+                                   "color" => "#bfdbfe", "by" => "someone" }.merge(fields)
+    @doc.get_map("items").get_map(key).set_text("text", text)
+  end
 
-  test "it draws the plan on the board, every item marked with the ask" do
+  def run_with(model)
+    @agent = OfflineBoardAgent.new(@doc, owner: ADA, model:)
+    model.agent = @agent if model.respond_to?(:agent=)
+    @agent.answer_asks
+    model
+  end
+
+  test "it adds what the model asks for, where it says, marked with the ask" do
     person_asks("a1")
-    agent_with(FakeModel.new).answer_asks
+    model = run_with(ScriptModel.new("Added a note and a frame.") do |tool|
+      tool.call(:add_items, items: [NOTE, { "type" => "frame", "x" => 60, "y" => 40, "w" => 300, "h" => 240,
+                                            "text" => "Recipe", "color" => "green" }])
+    end)
 
     assert_equal "done", ask("a1")["status"]
-    kinds = drawn("a1").map { |item| item["type"] }.tally
+    assert_equal "Added a note and a frame.", ask("a1")["plan"]
+    assert_equal 2, ask("a1")["drawn"]
+    note, frame = added("a1").values.partition { |item| item["type"] == "note" }.map(&:first)
 
-    assert_equal({ "shape" => 3, "note" => 2, "path" => 2, "frame" => 2, "sticker" => 1, "text" => 1 }, kinds)
-    assert_equal drawn("a1").size, ask("a1")["drawn"]
-    assert(drawn("a1").all? { |item| item["by"] == "agent:ada-0001" })
-    assert_includes drawn("a1").map { |item| item["text"] }, "Lock flavor\nPick it"
+    assert_equal [100, 100, 200, 132, "#fde68a", "🥧"], note.values_at("x", "y", "w", "h", "color", "icon")
+    assert_equal "Lock flavor\nPick it", note["text"]
+    assert_equal "#bbf7d0", frame["color"]
+    assert_operator frame["z"], :<, note["z"], "frames go under"
+    assert(added("a1").values.all? { |item| item["by"] == "agent:ada-0001" })
+    assert_match(/item 1: added as \w+\nitem 2: added as \w+/, model.results.first)
   end
 
-  test "an empty board gets the plan's title, and the ask remembers it set it" do
+  test "connectors join items by id or by a ref from the same call, and bad ones are skipped with a reason" do
+    person_note("mill", "Call the mill")
     person_asks("a1")
-    agent_with(FakeModel.new).answer_asks
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [NOTE.merge("ref" => "flavor"),
+                                    { "type" => "connector", "from" => "flavor", "to" => "mill" },
+                                    { "type" => "connector", "from" => "flavor", "to" => "nowhere" },
+                                    { "type" => "sticker", "x" => 0, "y" => 0 }])
+    end)
 
-    assert_equal "Pie launch", @doc.read_text("title")
-    assert_equal "Twelve days", @doc.read_text("subtitle")
-    assert ask("a1")["titled"]
+    connector = added("a1").values.find { |item| item["type"] == "connector" }
+    flavor = added("a1").find { |_key, item| item["type"] == "note" }.first
+
+    assert_equal [flavor, "mill"], connector.values_at("from", "to")
+    assert_match(/item 3: skipped, a connector's to must be the id of an item/, model.results.first)
+    assert_match(/item 4: skipped, a sticker needs an emoji icon/, model.results.first)
   end
 
-  test "a board with a title keeps it, and the drawing gets a heading" do
-    @doc.get_text("title").push("Our board")
+  test "it moves and rewords people's items, and keeps what they were for Undo" do
+    person_note("mill", "Call the mill")
     person_asks("a1")
-    agent_with(FakeModel.new).answer_asks
+    run_with(ScriptModel.new do |tool|
+      tool.call(:update_items,
+                changes: [{ "id" => "mill", "x" => 40, "color" => "pink", "title" => "Call the mill today" }])
+    end)
 
-    assert_equal "Our board", @doc.read_text("title")
-    assert_includes drawn("a1").map { |item| item["text"] }, "Pie launch"
-    refute ask("a1")["titled"]
+    mill = items["mill"]
+
+    assert_equal [40, 500, "#fbcfe8", "Call the mill today", "someone"], mill.values_at("x", "y", "color", "text", "by")
+    before = JSON.parse(ask("a1").to_h["before"]["mill"])
+    after = JSON.parse(ask("a1").to_h["after"]["mill"])
+
+    assert_equal [500, "Call the mill", "#bfdbfe"], before.values_at("x", "text", "color")
+    assert_equal mill, after
   end
 
-  test "it draws where the person was looking, from the top left of the plan" do
+  test "changing a note's caption keeps its title, and a shape takes a title as its label" do
+    person_note("mill", "Call the mill\nBy Friday")
+    @doc.get_map("items")["head"] = { "type" => "shape", "x" => 0, "y" => 0, "w" => 300, "h" => 60 }
     person_asks("a1")
-    agent_with(FakeModel.new).answer_asks
+    run_with(ScriptModel.new do |tool|
+      tool.call(:update_items, changes: [{ "id" => "mill", "caption" => "By Monday" },
+                                         { "id" => "head", "title" => "To do" }])
+    end)
 
-    assert_equal({ "x" => 40, "y" => 60 }, ask("a1")["origin"])
-    assert(drawn("a1").all? { |item| item["x"] >= 0 && item["y"] >= 60 })
+    texts = items.values_at("mill", "head").map { |item| item["text"] }
+
+    assert_equal ["Call the mill\nBy Monday", "To do"], texts
   end
 
-  test "it keeps clear of what's on the board already" do
-    @doc.get_map("items")["mine"] = { "type" => "note", "x" => 100, "y" => 100, "w" => 200, "h" => 900, "z" => 4 }
+  test "it tells the model when what it added overlaps something" do
+    person_note("mill", "Call the mill")
     person_asks("a1")
-    agent_with(FakeModel.new).answer_asks
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [NOTE.merge("x" => 550, "y" => 550), NOTE.merge("x" => 2000)])
+    end)
 
-    assert_equal({ "x" => 100, "y" => 1160 }, ask("a1")["origin"])
-    assert(drawn("a1").all? { |item| item["z"] > 4 || item["type"].in?(%w[path frame]) })
+    assert_match(/item 1: added as \w+, but it overlaps mill\nitem 2: added as \w+\z/, model.results.first)
   end
 
-  test "its cursor goes to each item as it draws it" do
+  test "its reply is what it said after its last tool call" do
     person_asks("a1")
-    agent_with(FakeModel.new).answer_asks
+    model = Class.new(ScriptModel) do
+      def draw(**asked)
+        @calls << asked
+        yield "Let me fix that:"
+        BoardTools::LookAtBoard.new(@agent).execute
+        yield "Drew a kanban board."
+      end
+    end
+    run_with(model.new)
+
+    assert_equal "Drew a kanban board.", ask("a1")["plan"]
+  end
+
+  test "deleting an item takes its connectors with it, and Undo can bring both back" do
+    person_note("mill", "Call the mill")
+    person_note("farm", "Call the farm", x: 900)
+    @doc.get_map("items")["link"] = { "type" => "connector", "from" => "farm", "to" => "mill", "z" => 4 }
+    person_asks("a1")
+    model = run_with(ScriptModel.new { |tool| tool.call(:delete_items, ids: ["mill"]) })
+
+    assert_equal ["farm"], items.keys
+    assert_equal "mill: deleted with 1 connector(s)", model.results.first
+    saved = ask("a1").to_h
+
+    assert_equal %w[link mill], saved["before"].keys.sort
+    assert_equal({ "link" => "", "mill" => "" }, saved["after"])
+  end
+
+  test "it sets the title, keeping the old one for Undo" do
+    @doc.get_text("title").push("Bakery")
+    person_asks("a1")
+    run_with(ScriptModel.new { |tool| tool.call(:set_title, title: "Pie launch", subtitle: "Twelve days") })
+
+    assert_equal ["Pie launch", "Twelve days"], [@doc.read_text("title"), @doc.read_text("subtitle")]
+    assert_equal ["Bakery", ""], JSON.parse(ask("a1")["titleBefore"])
+    assert_equal ["Pie launch", "Twelve days"], JSON.parse(ask("a1")["titleAfter"])
+  end
+
+  test "the model reads the board with ids and places, and the area the person could see" do
+    @doc.get_text("title").push("Bakery")
+    person_note("mill", "Call the mill")
+    person_asks("a1")
+    model = run_with(ScriptModel.new { |tool| tool.call(:look_at_board) })
+
+    asked = model.calls.first
+
+    assert_equal [0, 50, 1200, 700], asked[:view]
+    assert_equal "Plan the pie launch", asked[:prompt]
+    assert_equal "Title: Bakery\nItems (1):\nmill note x=500 y=500 w=200 h=132 blue \"Call the mill\"", asked[:board]
+    assert_equal asked[:board], model.results.first
+  end
+
+  test "its cursor goes to each change, and its presence says it's working on the ask" do
+    person_asks("a1")
+    run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE, NOTE.merge("x" => 400)]) })
 
     cursors = @agent.presences.filter_map { |p| p["cursor"] }.uniq
 
-    assert_operator cursors.size, :>=, drawn("a1").size - 2
+    assert_equal [{ "x" => 200, "y" => 166 }, { "x" => 500, "y" => 166 }], cursors
     working = @agent.presences.find { |p| p.dig("agent", "status") == "working" }
 
     assert_equal "a1", working.dig("agent", "ask")
-    assert_equal "Ada's agent", working.dig("user", "name")
     assert_equal "idle", @agent.presences.last.dig("agent", "status")
   end
 
@@ -140,84 +234,86 @@ class BoardAgentTest < ActiveSupport::TestCase
     person_asks("mine")
     person_asks("theirs", owner: "linus-0002")
     person_asks("undone", status: "undone")
-    agent_with(FakeModel.new).answer_asks
+    run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE]) })
 
     assert_equal(%w[done asked undone], %w[mine theirs undone].map { |id| ask(id)["status"] })
-    assert_empty drawn("theirs")
+    assert_empty added("theirs")
   end
 
-  test "stopping it mid-plan keeps what it drew and draws no more" do
+  test "stopping it mid-call keeps what it did and does no more" do
     person_asks("a1")
-    model = FakeModel.new { |i| asks.get_map("a1")["status"] = "stopped" if i == 14 }
-    agent_with(model).answer_asks
+    run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [NOTE])
+      asks.get_map("a1")["status"] = "stopped"
+      tool.call(:add_items, items: [NOTE, NOTE])
+    end)
 
     assert_equal "stopped", ask("a1")["status"]
-    assert_operator drawn("a1").size, :>, 0
-    assert_operator drawn("a1").size, :<, 11
+    assert_equal 1, added("a1").size
     assert_equal "idle", @agent.presences.last.dig("agent", "status")
   end
 
-  test "an ask for a change redraws in the same place, with the old plan for the model" do
-    person_asks("a1")
-    agent_with(FakeModel.new).answer_asks
-    first = drawn("a1").map { |item| item.values_at("x", "y") }
-    plan = ask("a1")["plan"]
+  test "an ask for a change gives the model what it said and was asked before" do
+    person_asks("a1", prompt: "Fewer steps", earlier: "Plan the pie launch", previous: "Drew nine steps.")
+    model = run_with(ScriptModel.new)
 
-    ask("a1").then do |a|
-      a["earlier"] = a["prompt"]
-      a["previous"] = plan
-      a["prompt"] = "Fewer steps"
-      a["status"] = "asked"
-    end
-    model = FakeModel.new
-    agent_with(model).answer_asks
-
-    assert_equal "Fewer steps", model.calls.first[:prompt]
-    assert_equal plan, model.calls.first[:previous]
-    assert_includes plan, "Lock flavor"
-    assert_equal first.sort, drawn("a1").map { |item| item.values_at("x", "y") }.sort
+    assert_equal ["Fewer steps", "Plan the pie launch", "Drew nine steps."],
+                 model.calls.first.values_at(:prompt, :earlier, :previous)
   end
 
-  test "the model sees what's on the board, but not this ask's own drawing" do
-    @doc.get_text("title").push("Bakery")
-    @doc.get_map("items")["n1"] = { "type" => "note", "x" => 0, "y" => 0, "w" => 10, "h" => 10, "ask" => "a1" }
-    @doc.get_map("items").get_map("n1").set_text("text", "old drawing")
-    @doc.get_map("items")["n2"] = { "type" => "note", "x" => 0, "y" => 0, "w" => 10, "h" => 10 }
-    @doc.get_map("items").get_map("n2").set_text("text", "Call the mill")
+  test "an ask stops changing the board after its limit" do
     person_asks("a1")
-    model = FakeModel.new
-    agent_with(model).answer_asks
+    stub_const(BoardWrites, :MAX_CHANGES, 2) do
+      model = run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE] * 3) })
 
-    assert_equal "Title: Bakery\n- note: Call the mill", model.calls.first[:board]
+      assert_equal 2, added("a1").size
+      assert_match(/item 3: skipped, this ask has made 2 changes/, model.results.first)
+    end
   end
 
   test "a model failure shows on the ask" do
     person_asks("a1")
-    agent_with(DownModel.new).answer_asks
+    run_with(DownModel.new)
 
     assert_equal "failed", ask("a1")["status"]
     assert_equal "the model timed out", ask("a1")["error"]
   end
 
-  test "the canned plan draws a full timeline without a key" do
+  test "the canned plan draws a full timeline through the same writes, without a key" do
     person_asks("a1", prompt: "Lay out an illustrated timeline for the Huckleberry Pie launch, " \
                               "from locking the flavor to holiday delivery")
-    agent_with(BoardModel::Canned.new).answer_asks
+    @agent = OfflineBoardAgent.new(@doc, owner: ADA, model: nil)
+    @agent.instance_variable_set(:@model, BoardModel::Canned.new(@agent))
+    @agent.answer_asks
 
-    notes = drawn("a1").select { |item| item["type"] == "note" }
+    notes = added("a1").values.select { |item| item["type"] == "note" }
 
+    assert_equal "done", ask("a1")["status"]
     assert_equal 9, notes.size
     assert_equal "Lock flavor", notes.min_by { |n| n["z"] }["text"].lines.first.chomp
-    assert_equal(3, drawn("a1").count { |item| item["type"] == "frame" && item["text"] != "Holiday delivery" })
+    assert_equal "Huckleberry Pie launch", @doc.read_text("title")
+    assert_match(/canned plan/, ask("a1")["plan"])
   end
 
   test "other agents don't count as people" do
-    agent = agent_with(FakeModel.new)
+    agent = OfflineBoardAgent.new(@doc, owner: ADA, model: DownModel.new)
     person = Y::Awareness.new(101)
     other_agent = Y::Awareness.new(102)
     agent.send(:see, person.set_local_state(%({"user":{"name":"Ada","color":"#f87171"}})))
     agent.send(:see, other_agent.set_local_state(%({"user":{"name":"Bo's agent"},"agent":{"owner":"bo"}})))
 
     assert_equal [101], agent.people.keys
+  end
+
+  private
+
+  def stub_const(owner, name, value)
+    old = owner.const_get(name)
+    owner.send(:remove_const, name)
+    owner.const_set(name, value)
+    yield
+  ensure
+    owner.send(:remove_const, name)
+    owner.const_set(name, old)
   end
 end

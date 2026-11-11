@@ -59,6 +59,86 @@ class BoardContents
     items.to_h.each { |key, item| items.delete(key) if item.is_a?(Hash) && item["ask"] == id }
   end
 
+  # --- the agent's tools ---
+
+  LISTED = 200 # items the model reads in one look
+
+  # Everything on the board as the model reads it: the title, then one line
+  # per item, top to bottom. Items the ask `id` added say so.
+  def listing(id) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity -- a header and lines
+    title = @doc.get_text("title").to_s
+    subtitle = @doc.get_text("subtitle").to_s
+    all = items.to_h.select { |_key, item| item.is_a?(Hash) && item["type"] }
+    lines = all.sort_by { |_key, item| [item["y"].to_f, item["x"].to_f] }.first(LISTED).map do |key, item|
+      BoardSpec.describe(key, item, mine: item["ask"] == id)
+    end
+    head = title.empty? ? "The board has no title." : "Title: #{title}#{" / #{subtitle}" unless subtitle.empty?}"
+    more = all.size > LISTED ? ["(#{all.size - LISTED} more items not listed)"] : []
+    [head, lines.empty? ? "The board is empty." : "Items (#{all.size}):", *lines, *more].join("\n")
+  end
+
+  def item(key) = (map = items.get_map(key)) && map.to_h
+
+  def exists?(key) = !item(key).nil?
+
+  # Items stack by z; frames go under the rest.
+  # `stamp` holds its z, the ask that added it, and who did ("by").
+  def create(key, fields, text, stamp)
+    items[key] = fields.merge(stamp)
+    items.get_map(key).set_text("text", text) if text
+  end
+
+  def change(key, fields, text)
+    map = items.get_map(key)
+    fields.each { |field, value| map[field] = value }
+    map.set_text("text", text) if text
+  end
+
+  def delete(key) = items.delete(key)
+
+  # The connectors that join `key` to anything.
+  def attached(key)
+    items.to_h.filter_map do |other, item|
+      other if item.is_a?(Hash) && item["type"] == "connector" && [item["from"], item["to"]].include?(key)
+    end
+  end
+
+  # Where the cursor goes for an item: its middle, a connector's middle, or a
+  # path's start.
+  def center(item)
+    if item["type"] == "connector"
+      ends = [item["from"], item["to"]].filter_map { |key| item(key) }.map { |end_| center(end_) }
+      return ends.transpose.map { |values| values.sum / values.size } if ends.any?
+    end
+    [item["x"].to_f + (item["w"].to_f / 2), item["y"].to_f + (item["h"].to_f / 2)].map(&:round)
+  end
+
+  SOLID = %w[note text shape sticker].freeze # frames hold things; lines cross them
+
+  # ", but it overlaps a, b" when the item `key` covers another solid item,
+  # so the model can move one of them. Empty otherwise.
+  def overlap_note(key)
+    solid = items.to_h.select { |_id, thing| thing.is_a?(Hash) && SOLID.include?(thing["type"]) }
+    mine = solid.delete(key) or return ""
+    box = box_of(mine)
+    hits = solid.filter_map { |other, thing| other if overlap?(box, box_of(thing)) }
+    hits.empty? ? "" : ", but it overlaps #{hits.first(5).join(", ")}"
+  end
+
+  def box_of(thing) = thing.values_at("x", "y", "w", "h").map(&:to_f)
+
+  # The ids of what the ask `id` added.
+  def added_by(id) = items.to_h.filter_map { |key, item| key if item.is_a?(Hash) && item["ask"] == id }
+
+  def title_words = [@doc.get_text("title").to_s, @doc.get_text("subtitle").to_s]
+
+  def retitle(title, subtitle)
+    [[@doc.get_text("title"), title], [@doc.get_text("subtitle"), subtitle]].each do |text, words|
+      text.delete(0, text.length) unless text.empty?
+      text.push(words) unless words.empty?
+    end
+  end
+
   private
 
   def others(id) = items.to_h.values.select { |item| item.is_a?(Hash) && item["ask"] != id }

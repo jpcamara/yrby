@@ -834,22 +834,36 @@ a box, a z order, a color, and a `Y.Text` for its words, plus `title` and
 `subtitle` as `Y.Text`. `frontend/src/board.js` lists every field. Presence
 carries each person's name, color, cursor in board units, and selection.
 
-To ask, choose "Ask agent" and say what to draw. The ask goes into the
-`asks` map, as on the shared page, and the person's agent claims it:
+To ask, choose "Ask agent" and say what you want. The ask goes into the
+`asks` map, as on the shared page, with the part of the board the person
+can see, and the person's agent claims it. The model then works the board
+through tools (`BoardTools`), choosing every place and size itself:
 
-1. `BoardModel` asks the model for a plan, one JSON line per thing to draw
-   (a title, a group, a step, a note, a finale), with no coordinates.
-2. `BoardLayout` places each line as it streams in: steps along a winding
-   dashed path with a pill for each label and a note under it, a frame
-   around each group, notes in a grid, and a larger area for the finale.
-3. `BoardAgent` writes each item to the board itself and moves its cursor
-   to it a moment apart, so everyone watches it draw. Every item carries the
-   ask's id. The ask's card offers Undo, which removes them, and "Ask for a
-   change", which has the agent redraw in the same place with its earlier
-   plan as context.
+- `look_at_board` lists every item with its id, type, box, color, icon, and
+  words.
+- `add_items` adds notes, text, shapes, frames, stickers, pen paths, and
+  connectors. A connector can join an item added earlier in the same call
+  by a `ref` the model gives it.
+- `update_items` moves, resizes, rewords, or recolors any item, including
+  people's.
+- `delete_items` removes items and the connectors attached to them.
+- `set_title` sets the board's title and subtitle.
 
-Without `FIREWORKS_API_KEY`, `BoardModel::Canned` streams a twelve-day
-launch timeline built from the ask's words, so the demo draws without a key.
+`BoardWrites` makes each change in its own edit, a moment apart, with the
+agent's cursor on it, so everyone watches it work. A tool's result tells the
+model when what it placed overlaps something, so it can fix its layout.
+When it's done, what it says goes on the ask's card.
+
+Undo puts the board back. Items the ask added carry its id and are
+removed. For anything it changed or deleted, the ask keeps the item as it
+was before and as the agent left it; Undo restores the item only if it
+still looks the way the agent left it, so later edits by people stay. The
+title works the same way. "Ask for a change" sends the agent its earlier
+ask and reply, and it edits the board from there.
+
+Without `FIREWORKS_API_KEY`, `BoardModel::Canned` draws a twelve-day launch
+timeline through the same writes, placed by `BoardLayout`, so the demo runs
+without a key.
 The board reuses the shared page's seats, budget, and limits. A person's
 board agent takes its own seat (`board:<room>`), and the invitation is a
 POST with no body on `/demos/board/:room/agent`.
