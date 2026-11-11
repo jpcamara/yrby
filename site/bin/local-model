@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Serves a small model for the demo agents, on loopback, with llama.cpp's
+# llama-server. Set LOCAL_MODEL_URL=http://127.0.0.1:8081/v1 for the app.
+#
+# One thread at low priority, so the site keeps the CPU it needs, and one ask
+# at a time. On yrby.dev (a t3.medium), Qwen2.5-0.5B-Instruct Q4_K_M takes
+# about 500 MB and 1.5 to 3 seconds per rewrite.
+#
+#   LLAMA_SERVER  path to the llama-server binary
+#   LOCAL_MODEL   path to the GGUF file
+#   LOCAL_MODEL_PORT  defaults to 8081
+set -euo pipefail
+
+exec nice -n 10 "${LLAMA_SERVER:?set LLAMA_SERVER}" \
+  -m "${LOCAL_MODEL:?set LOCAL_MODEL}" \
+  --host 127.0.0.1 --port "${LOCAL_MODEL_PORT:-8081}" \
+  -t 1 -c 2048 --parallel 1 --jinja

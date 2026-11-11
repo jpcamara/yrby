@@ -74,4 +74,40 @@ class AgentModelTest < ActiveSupport::TestCase
     assert_equal "the model call failed", error.message
     assert_equal 1, model.calls
   end
+
+  class RecordingLocal < AgentModel::Local
+    attr_reader :prompts
+
+    def initialize
+      super(nil, seats: AgentSeats.new)
+      @prompts = []
+    end
+
+    private
+
+    def chat = RecordingChat.new(@prompts)
+  end
+
+  class RecordingChat
+    def initialize(prompts) = @prompts = prompts
+
+    def ask(prompt)
+      @prompts << prompt
+      yield Chunk.new("Launch.")
+    end
+  end
+
+  test "the local model gets only the selection and the ask" do
+    model = RecordingLocal.new
+
+    assert_equal "Launch.", rewrite(model)
+    assert_equal ["Shorter:\n\nOur launch"], model.prompts
+  end
+
+  test "the local model changes its last proposal when asked" do
+    model = RecordingLocal.new
+    model.rewrite("[[Our launch]] is soon.", "Shorter", previous: "Our big launch") { nil }
+
+    assert_equal ["Shorter:\n\nOur big launch"], model.prompts
+  end
 end
