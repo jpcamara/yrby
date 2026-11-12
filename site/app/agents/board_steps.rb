@@ -32,8 +32,8 @@ module BoardSteps
 
   def count(number, noun) = "#{number} #{noun}#{"s" unless number == 1}"
 
-  # One change: the cursor goes to `at`, the change happens in one edit, and
-  # the agent waits so people see it. Raises Stopped once people stopped or
+  # One change: the cursor glides to `at` and settles, the change happens in
+  # one edit, and the agent waits so people see it land. Raises Stopped once people stopped or
   # undid the ask.
   def step(at)
     @acted = true
@@ -43,6 +43,7 @@ module BoardSteps
     end
 
     point(at, @ask)
+    sleep @pace / 2
     edit do
       yield
       ask = asks.get_map(@ask)
