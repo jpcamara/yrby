@@ -24,14 +24,15 @@ class BoardModel < AgentModel
     - To group items, draw a frame around them with a label. Frames always
       sit under other items.
     - Show flow or relationships with connectors (from and to are item ids,
-      or refs you gave earlier in the same call).
+      or refs you gave earlier).
     - Colors: yellow, blue, pink, green, purple, orange, or #rrggbb.
     - Draw in layers, one add_items call each, so people see it take shape
       right away: first the title and the main structure (a road, columns,
       or frames), then the labels on it, then the notes, then the
       illustrations and the finale.
     - The tools tell you when something overlaps another item. Fix real
-      collisions once with update_items; leave small ones.
+      collisions once with update_items; leave small ones. Text over a
+      picture or a note is always a real one.
     - Move, resize, reword, or recolor with update_items; remove with
       delete_items. Look at the board again if people may have moved things.
     - Set the title with set_title only if the board has none or they asked.
@@ -56,20 +57,22 @@ class BoardModel < AgentModel
       and rises about 350 from end to end, so milestones sit 160 to 200
       apart along it. Put a pill shape (#c4622d,
       about 76 by 30) on the road for each milestone ("Day 1", "Week 2"),
-      centered on one of the path's points so it sits on the road. Each
+      with on set to the road's ref so it's centered on the road. Each
       milestone's note goes above or below its pill, alternating sides,
       with about 50 clear between the note and the road, tied to the pill
       by a connector with arrow false and color #c4622d. Small text beside
       the road for gaps ("4 days on the road").
     - Illustrate with two or three big drawn stickers, 220 to 300 across,
-      that aren't notes: a scene on the road itself (a delivery truck driving
-      along it), a mascot beside the title (a cheerful pie character), and the
-      finale's picture. Place them clear of notes. Add a short warning or
+      that aren't notes: a scene on the road itself (a delivery truck
+      driving along it, with on set to the road's ref, between two
+      milestones), a mascot beside the title (a cheerful pie character),
+      and the finale's picture. Place them clear of notes. Add a short warning or
       aside as small text with ⚠️ where something could go wrong.
     - End a timeline or plan with a finale at the top of the road: a green
-      frame about 380 by 280 holding a big drawn sticker of the outcome as a
+      frame about 380 by 300 holding a big drawn sticker of the outcome as a
       scene (a map of the country with a delivery route and dots for cities,
-      for delivery) and a line or two with a number ("48 states in 2 days").
+      for delivery) in its upper part, and under the sticker, not over it, a
+      line or two with a number ("48 states in 2 days").
     - Group related notes in labeled frames when it helps reading.
     When you're done, reply with one short sentence saying what you did, such
     as "Laid out eight milestones from Day 1 to Day 12."

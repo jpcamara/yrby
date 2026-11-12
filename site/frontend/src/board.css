@@ -47,7 +47,8 @@ yrby-document { display: block; position: absolute; inset: 0; }
   user-select: none;
 }
 .board-canvas[data-tool="pen"] { cursor: crosshair; }
-.board-canvas[data-tool="note"], .board-canvas[data-tool="text"], .board-canvas[data-tool="shape"] { cursor: copy; }
+.board-canvas[data-tool="note"], .board-canvas[data-tool="text"], .board-canvas[data-tool="shape"],
+.board-canvas[data-tool="sticker"] { cursor: copy; }
 .board-canvas[data-tool="connector"] { cursor: alias; }
 
 .board-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -310,6 +311,24 @@ svg.connector .line, svg.connector .arrow { stroke: var(--stroke); stroke-width:
 .board-tools button.is-active { background: #ece8ff; color: var(--accent); }
 .board-tools svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tool-sep { width: 1px; height: 24px; margin: 0 6px; background: var(--line); }
+.sticker-tray {
+  position: absolute;
+  left: 50%;
+  bottom: 76px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+}
+.sticker-tray[hidden] { display: none; }
+.sticker-tray button { width: 40px; height: 40px; border: none; border-radius: 10px; background: transparent; font-size: 22px; }
+.sticker-tray button:hover { background: #f1efe9; }
+.sticker-tray button.is-active { background: #ece8ff; }
 .board-tools .tool-ask {
   display: flex;
   gap: 6px;

@@ -37,9 +37,16 @@
     <button type="button" data-tool="note" title="Sticky note (N)"><svg viewBox="0 0 24 24"><path d="M4 4h16v10l-6 6H4zM14 20v-6h6"/></svg></button>
     <button type="button" data-tool="shape" title="Shape (S)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/></svg></button>
     <button type="button" data-tool="connector" title="Connector (C)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5M12 5h7v7"/></svg></button>
+    <button type="button" data-tool="sticker" title="Sticker (E)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8.5 14a4 4 0 007 0M9 10h.01M15 10h.01"/></svg></button>
     <span class="tool-sep"></span>
     <button type="button" id="ask-agent" class="tool-ask" title="Ask your agent (A)"><span class="agent-spark">✦</span><span>Ask agent</span></button>
   </nav>
+
+  <div class="sticker-tray" id="sticker-tray" aria-label="Stickers" hidden>
+    <% %w[🎉 👍 ❤️ 😍 🔥 ⭐ 🤔 👀].each_with_index do |emoji, i| %>
+      <button type="button" data-sticker="<%= emoji %>" class="<%= "is-active" if i.zero? %>"><%= emoji %></button>
+    <% end %>
+  </div>
 
   <div class="board-zoom" aria-label="Zoom">
     <button type="button" data-zoom="out" title="Zoom out">−</button>

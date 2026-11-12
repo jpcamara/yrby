@@ -55,6 +55,7 @@ setupRoomPage()
 const LOCAL = { local: true } // the origin of this window's own edits, which undo tracks
 const ASKING = "ask"          // the origin of ask bookkeeping and an ask's Undo
 const NOTE_COLORS = ["#fde68a", "#bfdbfe", "#fbcfe8", "#bbf7d0", "#ddd6fe", "#fed7aa"]
+const STICKER = 72 // a sticker a person drops, to react
 const MIN_ZOOM = 0.15
 const MAX_ZOOM = 3
 const WRITE_EVERY = 40     // ms between writes while dragging or drawing
@@ -330,6 +331,7 @@ class Board {
 
     this.view = { x: 0, y: 0, s: 1 }
     this.tool = "select"
+    this.sticker = "🎉"
     this.selection = new Set()
     this.els = new Map()       // item id -> element
     this.cursors = new Map()   // client id -> cursor element
@@ -968,6 +970,7 @@ class Board {
     this.tool = tool
     canvas.dataset.tool = tool
     for (const button of document.querySelectorAll("[data-tool]")) button.classList.toggle("is-active", button.dataset.tool === tool)
+    $("#sticker-tray").hidden = tool !== "sticker"
   }
 
   // --- editing text ---
@@ -1036,6 +1039,12 @@ class Board {
 
     for (const button of document.querySelectorAll("[data-tool]")) {
       on(button, "click", () => this.setTool(button.dataset.tool))
+    }
+    for (const button of document.querySelectorAll("[data-sticker]")) {
+      on(button, "click", () => {
+        this.sticker = button.dataset.sticker
+        for (const each of document.querySelectorAll("[data-sticker]")) each.classList.toggle("is-active", each === button)
+      })
     }
     for (const button of document.querySelectorAll("[data-zoom]")) {
       on(button, "click", () => {
@@ -1123,6 +1132,15 @@ class Board {
         this.select([created])
         this.render()
         if (tool !== "shape") this.startEditing(created)
+        return
+      }
+      case "sticker": {
+        this.undo.stopCapturing()
+        const half = STICKER / 2
+        const created = this.add({ type: "sticker", icon: this.sticker, w: STICKER, h: STICKER, x: Math.round(at.x - half), y: Math.round(at.y - half) })
+        this.setTool("select")
+        this.select([created])
+        this.render()
         return
       }
       case "connector":
@@ -1323,7 +1341,7 @@ class Board {
       return this.startEditing([...this.selection][0])
     }
     if (mod || event.altKey) return
-    const tool = { v: "select", p: "pen", t: "text", n: "note", s: "shape", c: "connector" }[event.key.toLowerCase()]
+    const tool = { v: "select", p: "pen", t: "text", n: "note", s: "shape", c: "connector", e: "sticker" }[event.key.toLowerCase()]
     if (tool) return this.setTool(tool)
     if (event.key.toLowerCase() === "a") {
       event.preventDefault()

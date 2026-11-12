@@ -197,6 +197,67 @@ class BoardAgentTest < ActiveSupport::TestCase
     assert_match(/item 4: skipped, a sticker needs an emoji icon/, model.results.first)
   end
 
+  test "a sticker or pill with on sits centered on the road, at its point nearest where it was put, by any ref" do
+    person_asks("a1")
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [{ "ref" => "road", "type" => "path", "stroke" => 24,
+                                      "points" => [[100, 400], [500, 400], [900, 200]] },
+                                    { "type" => "sticker", "icon" => "🚚", "w" => 100, "h" => 100,
+                                      "x" => 250, "y" => 100, "on" => "road" },
+                                    { "type" => "sticker", "icon" => "🚚", "x" => 0, "y" => 0, "on" => "nowhere" }])
+      tool.call(:add_items, items: [{ "type" => "shape", "shape" => "pill", "w" => 80, "h" => 30,
+                                      "x" => 860, "y" => 100, "on" => "road" }])
+    end)
+
+    truck, pill = %w[sticker shape].map { |type| added("a1").values.find { |item| item["type"] == type } }
+
+    assert_equal [250, 350], truck.values_at("x", "y")
+    assert_equal [860, 185], pill.values_at("x", "y")
+    assert_match(/item 3: skipped, on must be the id or ref of a path/, model.results.first)
+  end
+
+  test "a sticker on the road moves along it to clear space rather than cover a pill" do
+    person_asks("a1")
+    run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [{ "ref" => "road", "type" => "path", "stroke" => 24,
+                                      "points" => [[0, 400], [1000, 400]] },
+                                    { "type" => "shape", "shape" => "pill", "w" => 80, "h" => 30,
+                                      "x" => 460, "y" => 385, "on" => "road" },
+                                    { "type" => "sticker", "icon" => "🚚", "w" => 100, "h" => 100,
+                                      "x" => 450, "y" => 350, "on" => "road" }])
+    end)
+
+    truck = added("a1").values.find { |item| item["type"] == "sticker" }
+
+    assert_equal 350, truck["y"]
+    assert truck["x"] >= 540 || truck["x"] <= 360, "the truck covers the pill at x=#{truck["x"]}"
+  end
+
+  test "a sticker on a crowded road gets smaller to fit on it" do
+    person_note("banner", "Launch week", "x" => -500, "y" => 130, "w" => 1300, "h" => 200)
+    person_asks("a1")
+    run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [{ "ref" => "road", "type" => "path", "stroke" => 24,
+                                      "points" => [[0, 400], [300, 400]] },
+                                    { "type" => "sticker", "icon" => "🚚", "w" => 200, "h" => 200,
+                                      "x" => 50, "y" => 300, "on" => "road" }])
+    end)
+
+    truck = added("a1").values.find { |item| item["type"] == "sticker" }
+
+    assert_equal [120, 120, 340], truck.values_at("w", "h", "y")
+  end
+
+  test "text over another item is called out as unreadable" do
+    person_note("map", "Route map", "x" => 0, "y" => 0)
+    person_asks("a1")
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [{ "type" => "text", "text" => "48 states", "x" => 20, "y" => 40 }])
+    end)
+
+    assert_match(/overlaps map; text over another item can't be read/, model.results.first)
+  end
+
   test "it moves and rewords people's items, and keeps what they were for Undo" do
     person_note("mill", "Call the mill")
     person_asks("a1")
