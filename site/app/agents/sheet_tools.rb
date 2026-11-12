@@ -35,19 +35,32 @@ module SheetTools
 
     # Some models send an array or object argument as a JSON string, or a
     # list of JSON strings. Decode those so the tool gets what it declared.
+    # Any failure, including a whole argument that doesn't parse, goes back to
+    # the model as an error it can fix (SheetAgent#tool_failed).
     def call(tool_call: nil, **arguments)
       super(tool_call:, **arguments.transform_values { |value| decode(value) })
+    rescue AgentModel::Stopped, AgentModel::Error
+      raise
+    rescue JSON::ParserError => e
+      @agent.tool_failed("Your arguments weren't valid JSON (#{e.message[0, 120]}). Send them again as plain " \
+                         "JSON, not inside a string.")
+    rescue StandardError => e
+      Rails.logger.warn("#{self.class.tool_name} failed: #{e.class}: #{e.message}")
+      @agent.tool_failed("That call failed (#{e.message[0, 200]}). Fix it and try again, or skip it.")
     end
 
     private
 
-    def decode(value)
+    # A string inside an argument, such as a cell's "[Draft]", stays text.
+    def decode(value, whole: true)
       case value
-      when Array then value.map { |each| decode(each) }
-      when /\A\s*[\[{]/ then decode(JSON.parse(value))
+      when Array then value.map { |each| decode(each, whole: false) }
+      when /\A\s*[\[{]/ then decode(JSON.parse(value), whole: false)
       else value
       end
     rescue JSON::ParserError
+      raise if whole
+
       value
     end
   end
