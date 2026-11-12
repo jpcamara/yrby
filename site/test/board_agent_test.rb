@@ -28,7 +28,7 @@ class BoardAgentTest < ActiveSupport::TestCase
   # Stands in for the model: runs `script` with the agent's real tools, as
   # the model's tool calls would, records what it was asked, and replies.
   class ScriptModel
-    attr_reader :calls, :results
+    attr_reader :calls, :results, :reviews
 
     def initialize(reply = "Drew it.", &script)
       @reply = reply
@@ -46,6 +46,12 @@ class BoardAgentTest < ActiveSupport::TestCase
       call = ->(name, **args) { (@results << tools.fetch(name).execute(**args)).last }
       @script&.call(call)
       yield @reply
+    end
+
+    # What it was told overlapped at the end, if anything.
+    def review(overlaps:)
+      @reviews = [*@reviews, overlaps]
+      nil
     end
   end
 
@@ -175,7 +181,7 @@ class BoardAgentTest < ActiveSupport::TestCase
     road, on, off = model.results.first.lines
 
     assert_no_match(/overlaps/, road)
-    assert_match(/overlaps the road \w+/, on)
+    assert_match(/overlaps \w+ \(path\)/, on)
     assert_no_match(/overlaps/, off)
   end
 
@@ -248,14 +254,60 @@ class BoardAgentTest < ActiveSupport::TestCase
     assert_equal [120, 120, 340], truck.values_at("w", "h", "y")
   end
 
-  test "text over another item is called out as unreadable" do
+  test "a line counts where it crosses an item, but not a rider on it or a connector's own ends" do
+    person_note("left", "Start", "x" => 0, "y" => 0)
+    person_note("right", "End", "x" => 600, "y" => 0)
+    person_asks("a1")
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [{ "type" => "connector", "from" => "left", "to" => "right" },
+                                    NOTE.merge("x" => 300, "y" => 0),
+                                    { "ref" => "road", "type" => "path", "stroke" => 24,
+                                      "points" => [[0, 600], [800, 600]] },
+                                    { "type" => "sticker", "icon" => "🚚", "x" => 100, "y" => 560, "on" => "road" },
+                                    { "type" => "text", "text" => "Holiday pies", "x" => 500, "y" => 590 }])
+    end)
+
+    line, note, road, truck, caption = model.results.first.lines
+
+    assert_no_match(/overlaps/, line)
+    assert_match(/overlaps \w+ \(connector\)/, note)
+    assert_no_match(/overlaps/, road)
+    assert_no_match(/overlaps/, truck)
+    assert_match(/overlaps \w+ \(path\)/, caption)
+  end
+
+  test "it lists what overlaps when it looks, and gets one turn to fix it before it's done" do
+    person_note("mill", "Call the mill")
+    person_asks("a1")
+    listing = nil
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [NOTE.merge("x" => 550, "y" => 550)])
+      listing = tool.call(:look_at_board)
+    end)
+
+    overlap = listing[/Overlapping now:\n(.*)/m, 1]
+
+    assert_match(/\A- .* and .*\z/, overlap)
+    assert_includes overlap, 'mill (note "Call the mill")'
+    assert_includes overlap, '(note "Lock flavor Pick it")'
+    assert_equal [overlap], model.reviews
+  end
+
+  test "an ask whose items overlap nothing gets no review" do
+    person_asks("a1")
+    model = run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE]) })
+
+    assert_nil model.reviews
+  end
+
+  test "an overlap names what's covered, by its type and words" do
     person_note("map", "Route map", "x" => 0, "y" => 0)
     person_asks("a1")
     model = run_with(ScriptModel.new do |tool|
       tool.call(:add_items, items: [{ "type" => "text", "text" => "48 states", "x" => 20, "y" => 40 }])
     end)
 
-    assert_match(/overlaps map; text over another item can't be read/, model.results.first)
+    assert_match(/overlaps map \(note "Route map"\)/, model.results.first)
   end
 
   test "it moves and rewords people's items, and keeps what they were for Undo" do
@@ -297,7 +349,8 @@ class BoardAgentTest < ActiveSupport::TestCase
       tool.call(:add_items, items: [NOTE.merge("x" => 550, "y" => 550), NOTE.merge("x" => 2000)])
     end)
 
-    assert_match(/item 1: added as \w+, but it overlaps mill\nitem 2: added as \w+\z/, model.results.first)
+    assert_match(/item 1: added as \w+, but it overlaps mill \(note "Call the mill"\)\nitem 2: added as \w+\z/,
+                 model.results.first)
   end
 
   test "its reply is what it said after its last tool call" do

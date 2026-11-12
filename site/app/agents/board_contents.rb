@@ -66,7 +66,8 @@ class BoardContents
   LISTED = 200 # items the model reads in one look
 
   # Everything on the board as the model reads it: the title, then one line
-  # per item, top to bottom. Items the ask `id` added say so.
+  # per item, top to bottom, then what overlaps among the ask `id`'s items.
+  # Items the ask added say so.
   def listing(id) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity -- a header and lines
     title = @doc.get_text("title").to_s
     subtitle = @doc.get_text("subtitle").to_s
@@ -76,8 +77,11 @@ class BoardContents
     end
     head = title.empty? ? "The board has no title." : "Title: #{title}#{" / #{subtitle}" unless subtitle.empty?}"
     more = all.size > LISTED ? ["(#{all.size - LISTED} more items not listed)"] : []
-    [head, lines.empty? ? "The board is empty." : "Items (#{all.size}):", *lines, *more].join("\n")
+    body = lines.empty? ? ["The board is empty."] : ["Items (#{all.size}):", *lines, *more]
+    [head, *body, overlapping(id)].compact.join("\n")
   end
+
+  def overlapping(id) = overlaps(id)&.then { |list| "Overlapping now:\n#{list}" }
 
   def item(key) = (map = items.get_map(key)) && map.to_h
 

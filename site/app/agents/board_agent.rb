@@ -119,12 +119,10 @@ class BoardAgent < Y::Agent
 
   def work(id, ask)
     reply = +""
+    hear = hearing(reply)
     @model.draw(prompt: ask["prompt"].to_s, board: board.listing(id), view: view_of(ask),
-                previous: ask["previous"], earlier: ask["earlier"]) do |chunk|
-      reply.clear if @acted # only what it says after its last tool call
-      @acted = false
-      reply << chunk
-    end
+                previous: ask["previous"], earlier: ask["earlier"], &hear)
+    board.overlaps(id)&.then { |overlaps| @model.review(overlaps:, &hear) }
     finish_drawings
     return unless working?(id)
 

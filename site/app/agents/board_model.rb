@@ -30,9 +30,9 @@ class BoardModel < AgentModel
       right away: first the title and the main structure (a road, columns,
       or frames), then the labels on it, then the notes, then the
       illustrations and the finale.
-    - The tools tell you when something overlaps another item. Fix real
-      collisions once with update_items; leave small ones. Text over a
-      picture or a note is always a real one.
+    - The tools tell you what each item you add or change overlaps, and
+      look_at_board lists every overlap among your items. Nothing should
+      cover anything else unless you mean it to: move or resize to fix it.
     - Move, resize, reword, or recolor with update_items; remove with
       delete_items. Look at the board again if people may have moved things.
     - Set the title with set_title only if the board has none or they asked.
@@ -88,7 +88,26 @@ class BoardModel < AgentModel
     room rather than squeezing it in on top of them.
   TEXT
 
+  REVIEW = <<~TEXT.freeze
+    Before you finish, these overlap on the board now:
+    %<overlaps>s
+    Fix the ones you didn't mean, with update_items or delete_items. Then
+    reply with one short sentence saying what you did for the whole ask.
+  TEXT
+
   def self.for(agent) = AgentModel.live? ? new(agent) : Canned.new(agent)
+
+  # One more turn in the same chat, when what it drew overlaps, to fix the
+  # layout. Streams what it says. A failure here keeps what's drawn.
+  def review(overlaps:)
+    return unless @chat && @seats.spend_call
+
+    @chat.ask(format(REVIEW, overlaps:)) { |chunk| yield chunk.content.to_s }
+  rescue Stopped
+    raise
+  rescue StandardError => e
+    Rails.logger.warn("BoardModel review: #{e.class}: #{e.message}")
+  end
 
   # Works the board for `prompt` through the agent's tools, and streams what
   # the model says when it's done. `board` is the agent's listing of the
@@ -120,6 +139,8 @@ class BoardModel < AgentModel
     def initialize(agent)
       @agent = agent
     end
+
+    def review(**) = nil
 
     # Draws the canned timeline through the same writes the tools make. For a
     # change it takes away what it drew and draws it again.
