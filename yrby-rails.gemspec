@@ -24,6 +24,7 @@ Gem::Specification.new do |spec|
     "lib/y/action_cable/**/*.rb",
     "lib/y/collaborative.rb",
     "lib/y/collaborative/**/*.rb",
+    "lib/y/pg_yrby.rb",
     "app/**/*.rb",
     "app/assets/javascript/**/*",
     "lib/generators/**/*",

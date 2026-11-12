@@ -8,6 +8,9 @@ require "y"
 require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 require_relative "../app/models/y/pg_document"
+require "y/pg_yrby"
+require "active_record/connection_adapters/postgresql_adapter"
+Y::PgYrby.register_type(ActiveRecord::ConnectionAdapters::PostgreSQLAdapter)
 
 STORE = ENV.fetch("STORE")
 model = STORE == "pg" ? Y::PgDocument : Y::Document
@@ -58,9 +61,9 @@ text_of = ->(bytes) { d = Y::Doc.new; d.apply_update(bytes); d.read_text("body")
     d = Y::Doc.new; d.apply_update(model.load_state(key)); d.sync_step1
     d2 = Y::Doc.new; d2.apply_update(model.load_state(key)); d2.handle_sync_message(step1)
   end
-  sql_join = STORE == "pg" ? median.(30) { doc.state_vector; doc.diff(half_sv) } : nil
+  sql_join = STORE == "pg" ? median.(30) { doc.sync_state; doc.sync_diff(half_sv) } : nil
   ok = text_of.(model.load_state(key)) == expected
-  ok &&= text_of.(doc.diff) == expected if STORE == "pg"
+  ok &&= text_of.(doc.sync_diff("\x00".b).first) == expected if STORE == "pg"
 
   # Out of order: every update shuffled, compacting as it goes.
   okey = "shuffled/#{kb}"
