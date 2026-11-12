@@ -1,0 +1,22 @@
+# SQLite, one file per environment under storage/. In the deployed container
+# storage/ is a mounted volume, so documents survive restarts and deploys. The
+# sweeper deletes rooms after they've been idle for a day.
+#
+# There's no pragma tuning. Rails 8's sqlite3 adapter defaults (WAL journal,
+# NORMAL synchronous, busy timeout, mmap) suit a single-node app.
+default: &default
+  adapter: sqlite3
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  timeout: 5000
+
+development:
+  <<: *default
+  database: storage/development.sqlite3
+
+test:
+  <<: *default
+  database: storage/test.sqlite3
+
+production:
+  <<: *default
+  database: storage/production.sqlite3
