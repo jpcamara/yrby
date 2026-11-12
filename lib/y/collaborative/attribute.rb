@@ -72,6 +72,18 @@ module Y
       # record, this returns that original key.
       def key = existing_row&.key || Y::Document.key_for(record, name)
 
+      # The sync handshake answered by the store, for stores that can
+      # (Y::PgDocument): [state_vector, pending] for the server's SyncStep1,
+      # and [update, pending] for what a client at state_vector is missing.
+      # nil for the others, which the channel serves through load_state.
+      def sync_state
+        document_class.sync_state_of(existing_row) if document_class.respond_to?(:sync_state_of)
+      end
+
+      def sync_diff(state_vector)
+        document_class.sync_diff_of(existing_row, state_vector) if document_class.respond_to?(:sync_diff_of)
+      end
+
       # Finds or creates the Y::Document or Y::EncryptedDocument row. Writes
       # and maintenance work such as compaction go through it.
       def document_row = document_class.for(record, name)
