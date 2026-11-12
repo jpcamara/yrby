@@ -24,26 +24,34 @@ use magnus::{
 use yrs::branch::{Branch, BranchID, BranchPtr};
 use yrs::types::text::YChange;
 use yrs::{
-    Any, Hook, In, IndexScope, MapPrelim, Number, Out, ReadTxn, SharedRef, StickyIndex, Text, Xml,
-    XmlOut, XmlTextRef,
+    Any, Doc, Hook, In, IndexScope, MapPrelim, Number, Out, ReadTxn, SharedRef, StickyIndex, Text,
+    Transact, TransactionMut, Xml, XmlOut, XmlTextRef,
 };
 
 use crate::{nogvl, yrb_error};
 
-/// The origin of every transaction a handle opens. `Doc#edit` returns only
-/// these, so an update applied from elsewhere while it runs stays out.
+/// The origin of every transaction a handle opens, all through `write`.
 pub const ORIGIN: &str = "yrby";
+
+/// What the origin of every transaction that applies a peer's update starts
+/// with. The document keeps every other transaction's update for `Doc#edit`.
+pub const REMOTE: &str = "yrby-remote";
+
+/// True when `origin` marks a transaction that applied a peer's update.
+pub fn is_remote(origin: Option<&yrs::Origin>) -> bool {
+    origin.is_some_and(|origin| origin.as_ref().starts_with(REMOTE.as_bytes()))
+}
 
 /// The largest integer a double represents exactly (2^53).
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
-/// A key no other observer uses. yrs registers an observer under a key and
-/// removes it by that key, so two observers on one document need different
-/// ones.
-pub fn observer_key() -> yrs::Origin {
+/// An origin for a transaction that applies a peer's update, and a key no
+/// other observer uses: yrs registers an observer under a key and removes it
+/// by that key, so two observers on one document need different ones.
+pub fn remote_key() -> yrs::Origin {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        .into()
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{REMOTE}:{n}").as_str().into()
 }
 
 /// The branch `id` names, if it exists and has not been deleted.
@@ -95,6 +103,17 @@ where
             .unwrap_or_else(|| "the document operation failed".to_string())),
     })?
     .map_err(yrb_error)
+}
+
+/// Run `f` in a write transaction under `ORIGIN`, as `guarded` runs its
+/// closure. The document keeps the transaction's update for `Doc#edit` when
+/// it commits (see `RbDoc::new`).
+pub fn write<F, R>(doc: &Doc, f: F) -> Result<R, Error>
+where
+    F: FnOnce(&mut TransactionMut) -> Result<R, String> + Send,
+    R: Send,
+{
+    guarded(move || f(&mut doc.transact_mut_with(ORIGIN)))
 }
 
 // --- indexes ---

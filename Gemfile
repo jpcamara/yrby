@@ -4,6 +4,7 @@ source "https://rubygems.org"
 
 gemspec name: "yrby"
 gemspec name: "yrby-rails"
+gemspec name: "yrby-agent"
 
 # json 3.0 changed JSON.parse's signature, and ActiveSupport 8.1's
 # JSON.decode still calls it with two arguments, so every signed-message
@@ -23,5 +24,6 @@ gem "puma", require: false # runs the ActionCable server for the element browser
 gem "sqlite3", require: false
 
 gem "rubocop", require: false
+
 gem "rubocop-minitest", require: false
 gem "rubocop-rake", require: false

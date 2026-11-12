@@ -25,11 +25,12 @@ Gem::Specification.new do |spec|
     "lib/y/collaborative.rb",
     "lib/y/collaborative/**/*.rb",
     "app/**/*.rb",
+    "app/assets/javascript/**/*",
     "lib/generators/**/*",
     "LICENSE",
     "README.md",
     "CHANGELOG-rails.md"
-  ]
+  ] - Dir["lib/yrby/agent/**/*", "lib/y/action_cable/client.rb", "lib/y/action_cable/client/**/*"]
   spec.require_paths = ["lib"]
 
   spec.metadata["source_code_uri"] = spec.homepage
@@ -40,9 +41,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency "activerecord", ">= 7.1"
   spec.add_dependency "base64", "~> 0.2"
   spec.add_dependency "railties", ">= 7.1"
-  # 0.7.0's handle_sync_message serves full state, pending included; the
-  # channel's serve path and the store contract both depend on it.
-  spec.add_dependency "yrby", ">= 0.7.0"
+  # Attribute#edit writes through Doc#edit, new in 0.9.0.
+  spec.add_dependency "yrby", ">= 0.9.0"
   # The concern calls ActionCable.server directly, and railties doesn't
   # depend on actioncable, so declare it. activesupport comes along with
   # activerecord either way; listed because the gem uses it directly.

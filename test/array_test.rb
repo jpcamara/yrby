@@ -180,4 +180,33 @@ class ArrayTest < Minitest::Test
     assert_same(list, list.each { |_value| nil })
     assert_equal([2, 4], list.each.map { |v| v * 2 })
   end
+
+  def test_push_text_appends_a_text_and_returns_its_handle
+    @plan << "first"
+    step = @plan.push_text("Find the posts")
+
+    assert_kind_of Y::Text, step
+    step.push(" about yrby")
+
+    assert_equal "Find the posts about yrby", @plan.get_text(1).to_s
+    assert_equal ["first", "Find the posts about yrby"], JSON.parse(@doc.read_array("plan"))
+  end
+
+  def test_insert_text_uses_the_insert_index_rules
+    @plan << 1
+    @plan << 2
+    @plan.insert_text(0, "start")
+    @plan.insert_text(-1, "end")
+
+    assert_equal ["start", 1, 2, "end"], @plan.to_a
+    assert_equal "", @plan.push_text.to_s
+  end
+
+  def test_a_pushed_text_reaches_a_peer
+    @plan.push_text("draft")
+    peer = Y::Doc.new
+    peer.apply_update(@doc.encode_state_as_update)
+
+    assert_equal "draft", peer.get_array("plan").get_text(0).to_s
+  end
 end

@@ -4,6 +4,9 @@ These APIs are new. They may change in any minor release, and they aren't
 covered by yrby's usual compatibility promise. Everything else is in the
 [README](../README.md).
 
+`require "y/action_cable/client"`, `require "y/collaborator"`, and
+`require "y/agent"` print a warning in Ruby's `:experimental` category. `Warning[:experimental] = false` turns it off.
+
 - [Y::Map (live shared maps)](#ymap-live-shared-maps)
 - [Y::Array (live shared lists)](#yarray-live-shared-lists)
 - [Y::Text (live shared text)](#ytext-live-shared-text)
@@ -11,6 +14,9 @@ covered by yrby's usual compatibility promise. Everything else is in the
 - [Anchors: a block's identity as a value](#anchors-a-blocks-identity-as-a-value)
 - [Streaming into a document](#streaming-into-a-document)
 - [Editing a document from Ruby](#editing-a-document-from-ruby)
+- [Joining a document from a Ruby process](#joining-a-document-from-a-ruby-process)
+- [Collaborators](#collaborators)
+- [Agents](#agents)
 
 ## Y::Map (live shared maps)
 
@@ -112,6 +118,23 @@ Every handle can reach any nested shared type: `get_map`, `get_array`, and
 `get_text` exist on both `Y::Map` and `Y::Array`, so a text field inside a
 record inside a list is directly addressable.
 
+To make a nested text, use `set_text` on a map, or `push_text` or
+`insert_text` on an array. Each one stores a new `Y.Text` and returns its
+handle. A field held this way merges typing: two people who type in it at
+once both keep their edit. `map["name"] = "Ada"` stores a plain string,
+and the last write to it wins.
+
+```ruby
+form = doc.get_map("form")
+name = form.set_text("name", "Ada")   # => Y::Text
+name.push(" Lovelace")
+form.get_text("name").to_s            # => "Ada Lovelace"
+
+plan = doc.get_array("plan")
+plan.push_text("Draft an outline")    # => Y::Text
+plan.insert_text(0, "Find the posts") # same index rules as insert
+```
+
 > **Naming note.** Inside `module Y`, `Array` means `Y::Array`. Code in that
 > namespace that means the core class says `::Array`, and `Kernel.Array(...)`
 > for the conversion method, the same way channels in `module Y` say
@@ -212,10 +235,13 @@ rest), what a process keeps to put a block back the way it was.
 A process that types into a document over time, such as a job writing what
 a model produces, keeps one `Y::Doc` for the whole stream and sends each piece
 as its own update. `Doc#edit` runs a block that writes to the document and
-returns the update its writes produced, or nil when the document didn't
-change. The update holds everything the document gained while the block
-ran, so a write another thread or peer made meanwhile is in it too. Applying
-an update twice changes nothing, so that only adds bytes:
+returns an update with every local write no edit has returned yet, or nil
+when there's nothing to send. The document keeps every local write until an
+edit returns it, so a write made outside the block, or in a block that
+raised, comes with the next update. Send every update an edit returns: an
+edit in a thread the block didn't start, such as a pool thread, takes the
+block's earlier writes too. An update applied from a peer is never in it,
+and doesn't wait for the block:
 
 ```ruby
 doc = Y::Doc.new
@@ -235,7 +261,7 @@ caret follows what it writes.
 A job, a console, or a controller edits a record's document with `edit`. It
 loads the current document, yields it, records what the block changed in the
 document's rows, and broadcasts the update so open editors apply it. It
-returns the update, or nil when the block changed nothing.
+returns the update, or nil when the block wrote nothing.
 
 ```ruby
 post.collaborative_document(:body).edit do |doc|
@@ -249,3 +275,206 @@ edited through its encrypted rows.
 
 `Y::ActionCable.broadcast(key, update)` sends an update you already recorded
 to a document's subscribers, for code that records updates itself.
+
+## Joining a document from a Ruby process
+
+`Y::ActionCable::Client`, in the `yrby-agent` gem, joins a document the way a browser does: over the
+cable's websocket, as a subscriber of the document channel, with a grant. The
+server records, acks, and relays its edits like anyone else's, and it applies
+everyone else's edits to its own `Y::Doc`. An agent, a worker, or a script
+runs as one, outside the web process.
+
+```rb
+# Gemfile: gem "yrby-agent"
+require "y/action_cable/client"
+
+client = Y::ActionCable::Client.new(
+  "wss://example.com/cable",
+  params: { grant: post.collaborative_document(:body).grant, name: "body" }
+)
+client.on_update { |update, doc, changed| } # changed: ordinals of the blocks it touched
+client.subscribe                               # returns once the document has loaded
+client.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
+client.edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewed.") }
+client.unsubscribe                             # waits for acks, clears presence, closes; raises if one never came
+```
+
+The grant gets the client into the document. Before that,
+`ApplicationCable::Connection` has to accept the socket. The client sends the
+URL's own origin as its `Origin`, which Action Cable accepts as same-origin.
+Pass `headers:` when the connection needs more:
+
+- An `"Origin"` when the process reaches the cable at another address than
+  the site's, such as an internal URL.
+- A token that `connect` checks, when it rejects sockets without a
+  logged-in user. The process has no cookie, and `current_user` in the
+  channel is whoever `connect` says it is.
+
+A connection the server refuses, or a subscription it rejects, raises
+`Y::Error` from `subscribe`.
+
+`edit` sends what its block changed, and only that: a remote update applied
+while the block runs stays out of it. Every update carries an
+id and is resent until the server acks it, and a dropped socket reconnects
+with backoff. `presence=` shows the client in the editor's roster and is
+renewed every 15 seconds, since peers drop presence they haven't heard from in
+30.
+
+The client runs as a task of the caller's reactor when there is one (Falcon,
+an `Async` block) and in a thread of its own otherwise (Puma, a job, a
+script). Callbacks run on that reactor, so keep them short.
+
+`Y::Awareness` is the presence state underneath: `set_local_state(json)`
+returns the frame to send, `apply_update(frame)` reads another client's, and
+`states` returns every client's state by client id. `Doc#client_id` is the id
+a document writes its edits under, and a presence for the same writer uses it
+so editors tie a caret to its author.
+
+## Collaborators
+
+`Y::Collaborator`, also in the `yrby-agent` gem, takes part in a document the way a person does: it joins
+with a grant, shows up among the people editing, hears what they write, and
+leaves when they do. It has no model of its own: an AI agent is a
+collaborator whose `changed` calls one. Subclass it, and run it from a job.
+
+```rb
+require "y/collaborator"
+
+class Reviewer < Y::Collaborator
+  def joined
+    self.presence = { "user" => { "name" => "Reviewer", "color" => "#7c3aed" } }
+    edit { |doc| Y::Lexxy.append_paragraph(doc, "Reviewing.") }
+  end
+
+  def changed(blocks) # live handles to the top-level blocks people changed
+    return if blocks.empty?
+
+    reply = ReviewModel.call(blocks.map(&:text).join("\n"))
+    edit { |doc| Y::Lexxy.append_paragraph(doc, reply) }
+    leave if reply.include?("Looks good")
+  end
+end
+
+class ReviewJob < ApplicationJob
+  def perform(post)
+    Reviewer.run(post.collaborative_document(:body), url: "wss://example.com/cable")
+  end
+end
+```
+
+A collaborator overrides two methods, and each has a default that does nothing:
+
+- `joined` runs once the document has loaded, and can write right away.
+- `changed(blocks)` gets live handles (`Y::XmlText`) to the blocks people
+  changed, in document order, once their typing has paused for a moment or
+  after five seconds of steady typing, and never the collaborator's own edits. A
+  handle stays on its block while people keep editing around it, so a slow
+  model call still writes where it meant to. Writing to one whose block was
+  deleted raises `Y::Error`. A change outside the root, such as to a map,
+  comes right away with an empty list.
+
+Inside them, `doc` is the collaborator's copy of the document, `edit` changes
+it and sends the change, `people` lists who else is present, `document` is
+what `run` was given, and `leave` ends the collaborator once the method
+returns. `self.presence =` is how the collaborator shows up in the editor's
+roster, such as `{ "user" => { "name" => "Reviewer" } }`. Without it, it
+doesn't. Set it in `joined`, or in `initialize` to show up as it joins, and
+set it again to show what it's working on or put its caret somewhere.
+
+The collaborator signs its own grant for the document, good for `max_stay:`
+plus a minute. `url:` and `headers:` work as they do for
+`Y::ActionCable::Client` above. Enqueue the job from code that has already
+checked the person may edit the post, since the collaborator gets the same
+access.
+
+`run` returns when the collaborator leaves. In a job it holds the job's thread
+for that long, with the collaborator's connection on a reactor in that thread.
+Inside a reactor (Falcon, an `Async` block) it runs as a task of that one. A
+job that runs a collaborator holds a worker for as long as the collaborator
+stays, so give collaborators their own queue.
+
+The collaborator leaves when nobody else has been present for `idle:` seconds
+(120 by default), after `max_stay:` (two hours), or when it calls `leave`.
+People already in the document show up only when their editor next renews its
+presence, so the collaborator waits one renewal window, 15 seconds, before it
+decides it is alone. It always clears its presence and unsubscribes on the way
+out.
+
+An error in `joined` or `changed` ends the collaborator. It leaves, and the
+error raises out of `run`, so a job retries it as it would any other error.
+Rescue in the method to carry on instead.
+
+One collaborator works on a document at a time. Pass `as:` to allow one per
+person instead, such as `as: person` when each person can bring their own
+agent. A record is named by its GlobalID. The lock is in `Rails.cache` by
+default, so it holds across processes when the cache is shared. Pass `lock:`
+for another `ActiveSupport::Cache` store. A task on the collaborator's reactor
+renews it while the collaborator stays, so a slow model call doesn't let it
+lapse. `run` returns
+`:busy` without joining when another collaborator holds the document, and
+`:left` otherwise. Cache stores can't compare and set in one step, so a
+process that stalls for over a minute can lose the lock and briefly overlap
+the collaborator that took over. Its writes raise `Y::Error` from then on.
+
+The first argument is usually `record.collaborative_document(:name)`, which
+names its own grant and channel. Any object that responds to `key`, `name`,
+`grant(expires_in:)`, and `channel` works.
+
+## Agents
+
+`Y::Agent`, in the `yrby-agent` gem, is a collaborator with a model. When
+people's typing settles, it hands the blocks they changed to a model through
+[RubyLLM](https://rubyllm.com), with tools that read the document and edit
+its blocks. Add `gem "yrby-agent"` to the Gemfile.
+
+```rb
+require "y/agent"
+
+class Proofreader < Y::Agent
+  model "gpt-5.6-luna"
+  instructions "Fix spelling mistakes in the blocks people change, using the tools. Change nothing else."
+end
+
+class ProofreadJob < ApplicationJob
+  def perform(post)
+    Proofreader.run(post.collaborative_document(:body), url: "wss://example.com/cable")
+  end
+end
+```
+
+`model`, `instructions`, `tools`, `thinking`, and `temperature` are
+RubyLLM::Agent's settings, and take what it takes, such as `provider:`.
+`llm` is the RubyLLM::Agent itself, for any other setting. `run` and
+everything else work as they do for `Y::Collaborator`.
+
+`changed(blocks)` asks the model about the changed blocks, listed by id:
+
+```text
+People changed these blocks:
+
+b2 (paragraph): We ship on Fridya after the reveiw.
+```
+
+The model gets four tools:
+
+- `read_document` lists every block, one per line, as `b1 (heading h2): Launch plan`.
+- `rewrite_block(id, text)` replaces a block's text, as plain text, so its
+  formatting is lost. What a person types into the block at the same time
+  is kept.
+- `insert_paragraph(text, after:)` adds a paragraph after a block, or at the
+  end without `after`.
+- `delete_block(id)` deletes a block.
+
+An id stays on its block for the whole stay, wherever people move it, so the
+model can name a block it read a moment ago while people keep typing. A tool
+given an id that's gone tells the model to read the document again. Every
+write goes through `edit`, so people see each one as the model makes it.
+
+Each ask is a fresh chat. The tools read the document as it is now, so the
+model needs no history, and a stay of hours never grows one. Override
+`changed` to ask something else, and call `ask(message)` for any other
+question. It returns the model's reply, and a block gets each chunk as it
+streams in. `chat` is the fresh chat `ask` uses, to set more on first, such as
+`chat.with_temperature(0).ask(message)`. Override `document_tools` to give the
+model fewer tools, such as `[Y::Agent::Tools::ReadDocument.new(self)]` for an agent that
+only answers.

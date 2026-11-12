@@ -1,0 +1,5 @@
+# Built by `npm run build:importmap` in packages/client. The yrby-rails gem
+# ships these files, and CI checks that they match the source. Marking them
+# generated leaves them out of GitHub's language stats and collapses them in
+# pull request diffs.
+app/assets/javascript/** linguist-generated=true

@@ -17,7 +17,7 @@ use yrs::{Assoc, Doc, GetString, IndexedSequence, StickyIndex, Text, TextRef, Tr
 use crate::nogvl;
 use crate::shared::{
     char_len, delete_span, end_or_units, guarded, identity, insert_index, resolve, to_chars,
-    to_units, Position, ORIGIN,
+    to_units, write, Position,
 };
 use crate::yrb_error;
 
@@ -84,11 +84,10 @@ impl RbText {
     /// appends). Clamped into range.
     fn insert_at(&self, index: i64, text: String) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
-            let at = end_or_units(&txn, &t, index);
-            t.insert(&mut txn, at, &text);
+        write(doc, move |txn| {
+            let t = resolve::<TextRef, _>(txn, id).ok_or("text no longer exists")?;
+            let at = end_or_units(txn, &t, index);
+            t.insert(txn, at, &text);
             Ok(())
         })
     }
@@ -137,13 +136,12 @@ impl RbText {
     /// negative index counts from the end, and the length stops at the end.
     fn delete(&self, index: i64, length: i64) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let t = resolve::<TextRef, _>(&txn, id).ok_or("text no longer exists")?;
-            if let Some((from, to)) = delete_span(index, length, char_len(&txn, &t)) {
-                let (from, to) = (to_units(&txn, &t, from), to_units(&txn, &t, to));
+        write(doc, move |txn| {
+            let t = resolve::<TextRef, _>(txn, id).ok_or("text no longer exists")?;
+            if let Some((from, to)) = delete_span(index, length, char_len(txn, &t)) {
+                let (from, to) = (to_units(txn, &t, from), to_units(txn, &t, to));
                 if to > from {
-                    t.remove_range(&mut txn, from, to - from);
+                    t.remove_range(txn, from, to - from);
                 }
             }
             Ok(())
@@ -152,12 +150,11 @@ impl RbText {
 
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            if let Some(t) = resolve::<TextRef, _>(&txn, id) {
-                let len = t.len(&txn);
+        write(doc, move |txn| {
+            if let Some(t) = resolve::<TextRef, _>(txn, id) {
+                let len = t.len(txn);
                 if len > 0 {
-                    t.remove_range(&mut txn, 0, len);
+                    t.remove_range(txn, 0, len);
                 }
             }
             Ok(())

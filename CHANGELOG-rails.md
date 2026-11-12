@@ -7,6 +7,38 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-09
+
+Requires yrby 0.9.0 or later.
+
+### Security
+
+- `Y::ActionCable::Sync`'s methods and `Y::DocumentChannel`'s
+  `authorized_document_key` accessors are private. Action Cable treats a
+  channel's public methods as actions a client can call, so a client could call
+  `sync_subscribed` directly and skip the channel's own `subscribed` and
+  `receive`. Channels that call these from `subscribed` and `receive` keep
+  working. Code that calls them on a channel from outside, such as a test, now
+  needs `send`.
+
+### Added
+
+- `bin/rails generate yrby:install` pins `yrby-client`, `yrby-client/element`,
+  `yjs`, and `@rails/actioncable` when the app has `config/importmap.rb`. The
+  gem ships `yrby/yrby-client.js` and `yrby/yjs.js` for those pins, so an
+  import-map app needs no npm packages. Each shared module has one pin, so the
+  page and its editor binding load one copy of yjs. Pins the app already has
+  are left alone.
+- `has_collaborative_document :body, channel: "PostDocumentChannel"` names
+  an app's own `Y::DocumentChannel` subclass for an attribute.
+  `collaborative_document(:body).channel` returns it, so
+  `collaborative_document_tag` and Ruby clients subscribe there without
+  passing `channel:` each time.
+
+## [0.8.0] - 2026-11-03
+
+Requires yrby 0.9.0 or later.
+
 ### Experimental
 
 These are new, and they may change in a minor release. See
