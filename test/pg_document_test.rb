@@ -4,8 +4,9 @@ require_relative "document_channel_test"
 require "y/pg_yrby"
 require_relative "../app/models/y/pg_document"
 
-# Y::PgDocument against a real Postgres with the pg_yrby extension. Skipped
-# unless YRBY_PG_URL points at one, e.g.
+# Y::PgDocument against a real Postgres with the pg_yrby extension (see
+# pg_yrby/README.md to build it). Skipped unless YRBY_PG_URL points at one,
+# e.g.
 #
 #   YRBY_PG_URL=postgres://localhost:28817/postgres bundle exec rake test
 #
