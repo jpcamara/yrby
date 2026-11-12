@@ -229,6 +229,43 @@ class MapTest < Minitest::Test
     assert_equal({ "name" => "Ada" }, peer_map["user"])
   end
 
+  # --- nested text ---
+
+  def test_set_text_stores_a_text_and_returns_its_handle
+    name = @map.set_text("name", "Ada")
+
+    assert_kind_of Y::Text, name
+    assert_equal "Ada", name.to_s
+    assert_equal "Ada", @map.get_text("name").to_s
+    assert_equal({ "name" => "Ada" }, JSON.parse(@doc.read_map("state")))
+  end
+
+  def test_set_text_starts_empty_without_content
+    assert_equal "", @map.set_text("notes").to_s
+  end
+
+  def test_set_text_replaces_a_plain_value
+    @map["name"] = "Ada"
+    @map.set_text("name", "Grace")
+
+    assert_equal "Grace", @map.get_text("name").to_s
+  end
+
+  def test_edits_to_a_set_text_from_two_peers_both_survive
+    @map.set_text("name", "Ada")
+    peer = Y::Doc.new
+    peer.apply_update(@doc.encode_state_as_update)
+
+    @map.get_text("name").push(" Lovelace")
+    peer.get_map("state").get_text("name").insert(0, "Dr. ")
+    ours = @doc.encode_state_as_update
+    @doc.apply_update(peer.encode_state_as_update)
+    peer.apply_update(ours)
+
+    assert_equal "Dr. Ada Lovelace", @map.get_text("name").to_s
+    assert_equal "Dr. Ada Lovelace", peer.get_map("state").get_text("name").to_s
+  end
+
   # --- thread safety ---
 
   def test_concurrent_writes_and_reads_on_shared_map

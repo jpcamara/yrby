@@ -33,7 +33,49 @@ pub(crate) use yjs_html_core as render_rules;
 /// interior-mutability wrapper (RefCell and friends): every method opens and
 /// closes its transaction within a single call.
 #[magnus::wrap(class = "Y::Doc", free_immediately, size)]
-struct RbDoc(Doc);
+struct RbDoc(Doc, Unsent);
+
+/// The updates of this document's own transactions that no `Doc#edit` has
+/// returned yet. Every transaction but a peer's lands here when it commits,
+/// after yrs is done changing the document, whichever thread or fiber made
+/// it and whether or not an edit was running. So no local write is left out.
+/// They're merged only when an edit takes them, so until then the document
+/// holds the bytes of every local write.
+type Unsent = std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
+
+/// `Unsent`'s list. A push or a take holds it only briefly, so taking it
+/// with the GVL held never waits long.
+fn lock(unsent: &Unsent) -> std::sync::MutexGuard<'_, Vec<Vec<u8>>> {
+    unsent
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// How many updates `merge_unsent` merges at once.
+const MERGE_FAN_IN: usize = 16;
+
+/// The updates merged into one, a few at a time and then the results again.
+/// One merge of them all costs time quadratic in how many there are.
+fn merge_unsent(updates: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+    let mut level: Vec<Vec<u8>> = match updates {
+        [update] => return Ok(update.clone()),
+        _ => merge_chunks(updates)?,
+    };
+    while level.len() > 1 {
+        level = merge_chunks(&level)?;
+    }
+    Ok(level.pop().unwrap_or_default())
+}
+
+fn merge_chunks(updates: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+    updates
+        .chunks(MERGE_FAN_IN)
+        .map(|chunk| match chunk {
+            [update] => Ok(update.clone()),
+            _ => yrs::merge_updates_v1(chunk).map_err(|e| e.to_string()),
+        })
+        .collect()
+}
 
 /// Compile-time proof that the wrapped Doc is thread-safe. If a future yrs
 /// upgrade makes Doc lose Send/Sync, this fails the build instead of silently
@@ -171,7 +213,17 @@ impl RbDoc {
             yrs::Options::with_client_id(yrs::block::ClientID::new(client_id))
         };
         options.offset_kind = yrs::OffsetKind::Utf16;
-        Ok(RbDoc(Doc::with_options(options)))
+        let doc = Doc::with_options(options);
+        let unsent = Unsent::default();
+        let sink = unsent.clone();
+        doc.observe_update_v1("yrby-unsent", move |txn, event| {
+            if shared::is_remote(txn.origin()) {
+                return;
+            }
+            lock(&sink).push(event.update.clone());
+        })
+        .map_err(|e| yrb_error(e.to_string()))?;
+        Ok(RbDoc(doc, unsent))
     }
 
     /// The id this document writes its own edits under. Presence for the same
@@ -312,7 +364,7 @@ impl RbDoc {
             // One transaction from the snapshot of the blocks to the commit,
             // under an origin of its own: another write can't change the
             // blocks in between, and its events don't count.
-            let key = shared::observer_key();
+            let key = shared::remote_key();
             let mut txn = doc.transact_mut_with(key.clone());
             let fragment = yrs::WriteTxn::get_or_insert_xml_fragment(&mut txn, root.as_str());
             let branch: &yrs::branch::Branch = fragment.as_ref();
@@ -398,30 +450,31 @@ impl RbDoc {
         Ok(id.map(|id| xml_text::handle(&self.0, id, root)))
     }
 
-    /// The document's state vector and delete set, encoded: where `Doc#edit`
-    /// starts.
-    fn snapshot(&self) -> Result<RString, Error> {
-        let doc = &self.0;
-        let snapshot = nogvl(move || doc.transact().snapshot().encode_v1())?;
-        Ok(binary_string(&snapshot))
+    /// Every update in `Unsent`, merged into one, or nil for none. Taking them
+    /// empties it, and writes made meanwhile wait for the next take. The
+    /// merge runs without the GVL. If it fails, or an interrupt comes back
+    /// with it (a signal trap can raise even where `Thread.handle_interrupt`
+    /// masks), the updates go back ahead of those writes.
+    fn take_unsent(&self) -> Result<Option<RString>, Error> {
+        let taken = std::mem::take(&mut *lock(&self.1));
+        if taken.is_empty() {
+            return Ok(None);
+        }
+        match nogvl(|| merge_unsent(&taken)).and_then(|merged| merged.map_err(yrb_error)) {
+            Ok(merged) => Ok(Some(binary_string(&merged))),
+            Err(error) => {
+                let mut unsent = lock(&self.1);
+                let since = std::mem::replace(&mut *unsent, taken);
+                unsent.extend(since);
+                Err(error)
+            }
+        }
     }
 
-    /// The update holding what the document gained since `snapshot`, or nil
-    /// when it is unchanged: what `Doc#edit` returns.
-    fn update_since(&self, snapshot: RString) -> Result<Option<RString>, Error> {
-        let bytes = copy_bytes(snapshot);
-        let doc = &self.0;
-        let update = nogvl(move || -> Result<Option<Vec<u8>>, String> {
-            let before = yrs::Snapshot::decode_v1(&bytes).map_err(|e| e.to_string())?;
-            let txn = doc.transact();
-            let now = txn.snapshot();
-            if now == before {
-                return Ok(None);
-            }
-            Ok(Some(changes_since(&txn, &before, &now)))
-        })?
-        .map_err(yrb_error)?;
-        Ok(update.map(|update| binary_string(&update)))
+    /// Put a taken update back ahead of anything written since, for the next
+    /// take to return again.
+    fn keep_unsent(&self, update: RString) {
+        lock(&self.1).insert(0, copy_bytes(update));
     }
 
     /// Encode state as update (optionally diffed against a state vector)
@@ -450,7 +503,7 @@ impl RbDoc {
         let doc = &self.0;
         nogvl(move || -> Result<(), String> {
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-            let mut txn = doc.transact_mut();
+            let mut txn = doc.transact_mut_with(shared::REMOTE);
             txn.apply_update(update).map_err(|e| e.to_string())
         })?
         .map_err(yrb_error)
@@ -513,7 +566,7 @@ impl RbDoc {
                             // Apply the update
                             let update =
                                 yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-                            let mut txn = doc.transact_mut();
+                            let mut txn = doc.transact_mut_with(shared::REMOTE);
                             txn.apply_update(update).map_err(|e| e.to_string())?;
                             Ok((0, 1, Vec::new()))
                         }
@@ -521,7 +574,7 @@ impl RbDoc {
                             // Apply the update
                             let update =
                                 yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
-                            let mut txn = doc.transact_mut();
+                            let mut txn = doc.transact_mut_with(shared::REMOTE);
                             txn.apply_update(update).map_err(|e| e.to_string())?;
                             Ok((0, 2, Vec::new()))
                         }
@@ -804,27 +857,6 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
 // ============================================================================
 // Module Initialization
 // ============================================================================
-
-/// The blocks added since `before`, and the deletions made since it.
-///
-/// An update since a state vector carries the whole delete set, every
-/// deletion the document has ever had, so a chunk streamed into a long-lived
-/// document would grow with its history. A v1 update is its blocks followed
-/// by its delete set, so this swaps that delete set for only the new
-/// deletions. If the bytes ever don't end with the delete set as expected, it
-/// keeps the whole update, which is bigger but still right.
-fn changes_since<T: ReadTxn>(txn: &T, before: &yrs::Snapshot, now: &yrs::Snapshot) -> Vec<u8> {
-    let full = txn.encode_state_as_update_v1(&before.state_map);
-    let all = now.delete_set.encode_v1();
-    match full.strip_suffix(all.as_slice()) {
-        Some(blocks) => {
-            let mut update = blocks.to_vec();
-            update.extend(now.delete_set.diff(&before.delete_set).encode_v1());
-            update
-        }
-        None => full,
-    }
-}
 
 /// A root's children in order: the document index each starts at and
 /// whether it is an `XmlText` block. Ordinals count only those, as
@@ -1182,8 +1214,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     )?;
     doc_class.define_private_method("native_block_at", method!(RbDoc::block_at, 2))?;
     doc_class.define_private_method("native_find", method!(RbDoc::find, 2))?;
-    doc_class.define_private_method("native_snapshot", method!(RbDoc::snapshot, 0))?;
-    doc_class.define_private_method("native_update_since", method!(RbDoc::update_since, 1))?;
+    doc_class.define_private_method("native_take_unsent", method!(RbDoc::take_unsent, 0))?;
+    doc_class.define_private_method("native_keep_unsent", method!(RbDoc::keep_unsent, 1))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
@@ -1360,6 +1392,69 @@ mod tests {
         );
     }
 
+    fn take(doc: &RbDoc) -> Option<RString> {
+        doc.take_unsent().unwrap()
+    }
+
+    #[ruby_test]
+    fn local_writes_wait_to_be_taken_and_a_peers_never_do() {
+        let doc = new_doc();
+        push(&doc, "t", "mine");
+        let mine = take(&doc).expect("a local write waits");
+        assert!(take(&doc).is_none(), "taking empties it");
+
+        let peer = new_doc();
+        peer.apply_update(mine).unwrap();
+        peer.handle_sync_message(wrap_update(mine)).unwrap();
+        peer.apply_update_changes(mine, "root".into()).unwrap();
+        assert!(take(&peer).is_none(), "applied updates are a peer's");
+        assert_eq!(peer.read_text("t".into()).unwrap().as_deref(), Some("mine"));
+    }
+
+    #[ruby_test]
+    fn unsent_updates_merge_into_one_that_carries_them_all() {
+        let doc = new_doc();
+        for n in 0..300 {
+            push(&doc, "t", &n.to_string());
+        }
+        let fresh = new_doc();
+        fresh.apply_update(take(&doc).unwrap()).unwrap();
+        assert_eq!(
+            fresh.read_text("t".into()).unwrap(),
+            doc.read_text("t".into()).unwrap()
+        );
+        assert!(!fresh.pending().unwrap());
+    }
+
+    #[ruby_test]
+    fn a_kept_update_is_taken_again_with_what_came_after() {
+        let doc = new_doc();
+        push(&doc, "t", "inner");
+        doc.keep_unsent(take(&doc).unwrap());
+        push(&doc, "t", " outer");
+        let fresh = new_doc();
+        fresh.apply_update(take(&doc).unwrap()).unwrap();
+        assert_eq!(
+            fresh.read_text("t".into()).unwrap().as_deref(),
+            Some("inner outer")
+        );
+    }
+
+    #[ruby_test]
+    fn unsent_updates_stay_when_the_merge_fails() {
+        let doc = new_doc();
+        push(&doc, "t", "kept");
+        doc.1.lock().unwrap().push(vec![255]);
+        assert!(doc.take_unsent().is_err());
+        doc.1.lock().unwrap().pop();
+        let fresh = new_doc();
+        fresh.apply_update(take(&doc).unwrap()).unwrap();
+        assert_eq!(
+            fresh.read_text("t".into()).unwrap().as_deref(),
+            Some("kept")
+        );
+    }
+
     #[ruby_test]
     fn a_malformed_update_raises() {
         assert!(new_doc()
@@ -1437,54 +1532,6 @@ mod tests {
         );
         assert_eq!(peer.read_text("t".into()).unwrap().as_deref(), Some("hi"));
         assert!(peer.handle_sync_message(binary_string(&[9, 9])).is_err());
-    }
-
-    #[ruby_test]
-    fn an_update_since_a_snapshot_holds_what_changed_after_it() {
-        let doc = new_doc();
-        push(&doc, "t", "before");
-        let snapshot = doc.snapshot().unwrap();
-        assert!(doc.update_since(snapshot).unwrap().is_none());
-        push(&doc, "t", " after");
-        let peer = new_doc();
-        peer.apply_update(doc.update_since(snapshot).unwrap().unwrap())
-            .unwrap();
-        assert!(
-            peer.pending().unwrap(),
-            "the update leaves out what came before"
-        );
-        peer.apply_update(update(&doc)).unwrap();
-        assert_eq!(
-            peer.read_text("t".into()).unwrap().as_deref(),
-            Some("before after")
-        );
-    }
-
-    #[ruby_test]
-    fn an_update_since_a_snapshot_carries_only_new_deletions() {
-        let doc = new_doc();
-        let text = doc.0.get_or_insert_text("t");
-        for _ in 0..200 {
-            push(&doc, "t", "xy");
-            let mut txn = doc.0.transact_mut();
-            let at = text.len(&txn) - 1;
-            text.remove_range(&mut txn, at, 1);
-        }
-        let snapshot = doc.snapshot().unwrap();
-        let peer = new_doc();
-        peer.apply_update(update(&doc)).unwrap();
-        text.remove_range(&mut doc.0.transact_mut(), 0, 1);
-        let chunk = doc.update_since(snapshot).unwrap().unwrap();
-        assert!(
-            copy_bytes(chunk).len() < 40,
-            "{} bytes",
-            copy_bytes(chunk).len()
-        );
-        peer.apply_update(chunk).unwrap();
-        assert_eq!(
-            peer.read_text("t".into()).unwrap(),
-            doc.read_text("t".into()).unwrap()
-        );
     }
 
     #[ruby_test]

@@ -11,13 +11,13 @@
 
 use magnus::{prelude::*, typed_data::Obj, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Doc, Map, MapRef, Transact};
+use yrs::{Any, Doc, Map, MapRef, TextPrelim, Transact};
 
 use crate::array::RbArray;
 use crate::nogvl;
 use crate::read::out_to_any;
 use crate::shared::{
-    any_to_ruby, guarded, identity, key_to_string, resolve, ruby_to_invalue, to_in, Child, ORIGIN,
+    any_to_ruby, identity, key_to_string, resolve, ruby_to_invalue, to_in, write, Child,
 };
 use crate::text::RbText;
 
@@ -168,27 +168,38 @@ impl RbMap {
         let key = key_to_string(key)?;
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let m = resolve::<MapRef, _>(&txn, id).ok_or("map no longer exists")?;
-            m.insert(&mut txn, key, to_in(iv));
+        write(doc, move |txn| {
+            let m = resolve::<MapRef, _>(txn, id).ok_or("map no longer exists")?;
+            m.insert(txn, key, to_in(iv));
             Ok(())
         })?;
         Ok(value)
+    }
+
+    /// Store a new `Y.Text` holding `content` at `key`, replacing what was
+    /// there, and return a live handle to it. A text in a map is what lets
+    /// two people type in the same field and both keep their edit.
+    fn set_text(&self, key: Value, content: String) -> Result<RbText, Error> {
+        let key = key_to_string(key)?;
+        let (doc, id) = (&self.doc, &self.id);
+        let text = write(doc, move |txn| {
+            let m = resolve::<MapRef, _>(txn, id).ok_or("map no longer exists")?;
+            Ok(identity(&m.insert(txn, key, TextPrelim::new(content))))
+        })?;
+        Ok(RbText::new(self.doc.clone(), text))
     }
 
     /// Remove `key`, returning its previous snapshot value (or `nil`).
     fn delete(&self, key: Value) -> Result<Value, Error> {
         let key = key_to_string(key)?;
         let (doc, id) = (&self.doc, &self.id);
-        let prev: Option<Any> = guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let Some(m) = resolve::<MapRef, _>(&txn, id) else {
+        let prev: Option<Any> = write(doc, move |txn| {
+            let Some(m) = resolve::<MapRef, _>(txn, id) else {
                 return Ok(None);
             };
             // Convert before removing (a removed shared ref would dangle).
-            let prev = m.get(&txn, &key).map(|v| out_to_any(&txn, &v));
-            m.remove(&mut txn, &key);
+            let prev = m.get(txn, &key).map(|v| out_to_any(txn, &v));
+            m.remove(txn, &key);
             Ok(prev)
         })?;
         let ruby = Ruby::get().unwrap();
@@ -200,10 +211,9 @@ impl RbMap {
 
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            if let Some(m) = resolve::<MapRef, _>(&txn, id) {
-                m.clear(&mut txn);
+        write(doc, move |txn| {
+            if let Some(m) = resolve::<MapRef, _>(txn, id) {
+                m.clear(txn);
             }
             Ok(())
         })
@@ -227,6 +237,7 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("get_text", magnus::method!(RbMap::get_text, 1))?;
     class.define_method("[]=", magnus::method!(RbMap::set, 2))?;
     class.define_method("set", magnus::method!(RbMap::set, 2))?;
+    class.define_method("native_set_text", magnus::method!(RbMap::set_text, 2))?;
     class.define_method("delete", magnus::method!(RbMap::delete, 1))?;
     class.define_method("clear", magnus::method!(RbMap::clear, 0))?;
     class.define_method("key?", magnus::method!(RbMap::has_key, 1))?;

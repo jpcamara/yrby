@@ -14,14 +14,14 @@
 
 use magnus::{prelude::*, typed_data::Obj, Error, Ruby, Value};
 use yrs::branch::BranchID;
-use yrs::{Any, Array, ArrayRef, Doc, Transact};
+use yrs::{Any, Array, ArrayRef, Doc, TextPrelim, Transact};
 
 use crate::map::RbMap;
 use crate::nogvl;
 use crate::read::out_to_any;
 use crate::shared::{
-    any_to_ruby, element_index, guarded, identity, insert_index, resolve, ruby_to_invalue, to_in,
-    Child, ORIGIN,
+    any_to_ruby, element_index, identity, insert_index, resolve, ruby_to_invalue, to_in, write,
+    Child,
 };
 use crate::text::RbText;
 
@@ -162,29 +162,39 @@ impl RbArray {
         let ruby = Ruby::get().unwrap();
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
-            let at = insert_index(index, a.len(&txn));
-            a.insert(&mut txn, at, to_in(iv));
+        write(doc, move |txn| {
+            let a = resolve::<ArrayRef, _>(txn, id).ok_or("array no longer exists")?;
+            let at = insert_index(index, a.len(txn));
+            a.insert(txn, at, to_in(iv));
             Ok(())
         })
+    }
+
+    /// Insert a new `Y.Text` holding `content` at `index` (the same index
+    /// rules as `insert`) and return a live handle to it.
+    fn insert_text(&self, index: i64, content: String) -> Result<RbText, Error> {
+        let (doc, id) = (&self.doc, &self.id);
+        let text = write(doc, move |txn| {
+            let a = resolve::<ArrayRef, _>(txn, id).ok_or("array no longer exists")?;
+            let at = insert_index(index, a.len(txn));
+            Ok(identity(&a.insert(txn, at, TextPrelim::new(content))))
+        })?;
+        Ok(RbText::new(self.doc.clone(), text))
     }
 
     /// Remove the element at `index`, returning its previous snapshot value.
     fn delete_at(&self, index: i64) -> Result<Value, Error> {
         let (doc, id) = (&self.doc, &self.id);
-        let prev: Option<Any> = guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let Some(a) = resolve::<ArrayRef, _>(&txn, id) else {
+        let prev: Option<Any> = write(doc, move |txn| {
+            let Some(a) = resolve::<ArrayRef, _>(txn, id) else {
                 return Ok(None);
             };
-            let Some(i) = element_index(index, a.len(&txn)) else {
+            let Some(i) = element_index(index, a.len(txn)) else {
                 return Ok(None);
             };
             // Convert before removing: a removed shared ref would dangle.
-            let prev = a.get(&txn, i).map(|v| out_to_any(&txn, &v));
-            a.remove(&mut txn, i);
+            let prev = a.get(txn, i).map(|v| out_to_any(txn, &v));
+            a.remove(txn, i);
             Ok(prev)
         })?;
         let ruby = Ruby::get().unwrap();
@@ -196,12 +206,11 @@ impl RbArray {
 
     fn clear(&self) -> Result<(), Error> {
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            if let Some(a) = resolve::<ArrayRef, _>(&txn, id) {
-                let len = a.len(&txn);
+        write(doc, move |txn| {
+            if let Some(a) = resolve::<ArrayRef, _>(txn, id) {
+                let len = a.len(txn);
                 if len > 0 {
-                    a.remove_range(&mut txn, 0, len);
+                    a.remove_range(txn, 0, len);
                 }
             }
             Ok(())
@@ -215,12 +224,11 @@ impl RbArray {
         let ruby = Ruby::get().unwrap();
         let iv = ruby_to_invalue(&ruby, value)?;
         let (doc, id) = (&self.doc, &self.id);
-        guarded(move || {
-            let mut txn = doc.transact_mut_with(ORIGIN);
-            let a = resolve::<ArrayRef, _>(&txn, id).ok_or("array no longer exists")?;
-            let i = element_index(index, a.len(&txn)).ok_or("index out of range")?;
-            a.remove(&mut txn, i);
-            a.insert(&mut txn, i, to_in(iv));
+        write(doc, move |txn| {
+            let a = resolve::<ArrayRef, _>(txn, id).ok_or("array no longer exists")?;
+            let i = element_index(index, a.len(txn)).ok_or("index out of range")?;
+            a.remove(txn, i);
+            a.insert(txn, i, to_in(iv));
             Ok(())
         })?;
         Ok(value)
@@ -246,6 +254,10 @@ pub fn define(ruby: &Ruby, module: magnus::RModule) -> Result<(), Error> {
     class.define_method("push", magnus::method!(RbArray::push, 1))?;
     class.define_method("<<", magnus::method!(RbArray::push, 1))?;
     class.define_method("insert", magnus::method!(RbArray::insert, 2))?;
+    class.define_method(
+        "native_insert_text",
+        magnus::method!(RbArray::insert_text, 2),
+    )?;
     class.define_method("delete_at", magnus::method!(RbArray::delete_at, 1))?;
     class.define_method("clear", magnus::method!(RbArray::clear, 0))?;
     class.define_method("size", magnus::method!(RbArray::size, 0))?;
