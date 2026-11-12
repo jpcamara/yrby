@@ -314,8 +314,8 @@ jobs:
   # npm package, so this job also checks that what the site documents is what a
   # reader can install. No Postgres and no Redis services: the store is the
   # gem's own Y::Document models on SQLite, and the WebSocket server is the
-  # anycable-go embedded in the thrust proxy, which ships inside the
-  # anycable-thruster gem, so there is nothing else to install.
+  # anycable-go embedded in the thrust proxy. The e2e uses the same thrust fork
+  # as production, built from source below.
   site:
     name: Site (docs + demos)
     runs-on: ubuntu-latest
@@ -328,6 +328,22 @@ jobs:
           bundler-cache: true
           working-directory: site
       - uses: oven-sh/setup-bun@v2
+
+      # Production runs a fork of thrust that also serves the binary
+      # y-protocols endpoint /yjs/, which the room demos use. The gem's thrust
+      # doesn't have it, so build the same commit production runs.
+      - uses: actions/checkout@v5
+        with:
+          repository: jpcamara/thruster
+          ref: cac85b017f048c30ed785b74caa77873c7aea36c # yjs branch
+          path: thruster-yjs
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: thruster-yjs/go.mod
+          cache-dependency-path: thruster-yjs/go.sum
+      - name: Build the forked thrust
+        working-directory: thruster-yjs
+        run: go build -o "$RUNNER_TEMP/thrust-yjs" ./cmd/thrust
 
       - name: RuboCop
         working-directory: site
@@ -358,7 +374,8 @@ jobs:
         working-directory: site/frontend
         run: |
           export AGENT_BROWSER_EXECUTABLE_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)"
-          PORT=3888 SERVER_PIDFILE=/tmp/site.pid ./boot_server.sh
+          THRUST="$RUNNER_TEMP/thrust-yjs" ANYCABLE_YJS_WHISPER=false \
+            PORT=3888 SERVER_PIDFILE=/tmp/site.pid ./boot_server.sh
           PORT=3888 node site_e2e.mjs
           PORT=3888 node document_e2e.mjs
           kill "$(cat /tmp/site.pid)" || true
