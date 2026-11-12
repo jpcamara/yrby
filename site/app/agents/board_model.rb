@@ -16,10 +16,11 @@ class BoardModel < AgentModel
     - Start in the area they're looking at when there's room, else beside
       what's there. Don't cover existing items unless they asked. Size a
       drawing like a slide, about 1400 wide and 800 tall, so it reads well
-      when people zoom to fit; a long road winds back and forth in two or
-      three rows rather than running off in one.
-    - A note is 200 by 132 and holds a short title and caption. Leave about
-      40 between items so nothing touches.
+      when people zoom to fit.
+    - A note with an icon is 180 by 200: the icon is drawn as a big
+      illustration filling its top, with the title and caption under it.
+      Without an icon it's 200 by 132. Leave about 40 between items so
+      nothing touches.
     - To group items, draw a frame around them with a label. Frames always
       sit under other items.
     - Show flow or relationships with connectors (from and to are item ids,
@@ -37,19 +38,27 @@ class BoardModel < AgentModel
 
     Make it look designed, the way a good facilitator draws:
     - Notes get a 2 to 4 word title, a caption with one concrete detail (a
-      number, a name, a place), and an emoji icon.
-    - A timeline or process is a road: one thick path (stroke 14, color
-      #f4a261) winding across the area, with dark pill
-      shapes (#1f2937, about 90 by 34) on it for the milestones ("Day 1",
-      "Week 2"). Make the path's points go through the pills' centers, so
-      each pill sits on the road. Each milestone's note goes just above or
-      below its pill, alternating sides, joined to the pill by a connector.
-      Small text beside the road for gaps ("4 days on the road").
-    - Illustrate: stickers (an emoji, 80 to 120 across) beside key moments,
-      such as a truck for shipping, and a short warning or aside as small
-      text with an emoji where something could go wrong.
-    - End a timeline or plan with a finale: a larger colored frame holding a
-      big sticker and a line or two about the outcome.
+      number, a name, a place), and an icon that pictures the step as a
+      concrete object: 🫐 for a flavor, 🏷️ for pricing, 📈 for a forecast,
+      🚚 for shipping, 🏪 for a store. Avoid abstract marks like ✅ or 📌.
+    - Keep to one warm palette: notes in #fcd581 and #f9b872, with a green
+      (#bbe5a7) only for the finale. No rainbow of note colors.
+    - A timeline or process is a road: one thick path (stroke 16, color
+      #f4a261) that climbs in a gentle wave from the lower left to the upper
+      right, with 8 to 12 points and no sharp corners. It spans the whole
+      slide, about 1300 wide, and rises only about 350 from end to end, so
+      milestones sit 180 to 220 apart along it. Put a pill shape (#c4622d,
+      about 76 by 30) on the road for each milestone ("Day 1", "Week 2"),
+      centered on one of the path's points so it sits on the road. Each
+      milestone's note goes above or below its pill, alternating sides,
+      with about 50 clear between the note and the road, tied to the pill
+      by a connector with arrow false and color #c4622d. Small text beside
+      the road for gaps ("4 days on the road").
+    - Illustrate: stickers (an emoji, 100 to 150 across) beside key moments,
+      such as a truck on the road for shipping, and a short warning or aside
+      as small text with ⚠️ where something could go wrong.
+    - End a timeline or plan with a finale at the top of the road: a green
+      frame holding a big sticker and a line or two about the outcome.
     - Group related notes in labeled frames when it helps reading.
     When you're done, reply with one short sentence saying what you did, such
     as "Laid out eight milestones from Day 1 to Day 12."

@@ -95,7 +95,7 @@ class BoardAgentTest < ActiveSupport::TestCase
     assert_equal 2, ask("a1")["drawn"]
     note, frame = added("a1").values.partition { |item| item["type"] == "note" }.map(&:first)
 
-    assert_equal [100, 100, 200, 132, "#fde68a", "🥧"], note.values_at("x", "y", "w", "h", "color", "icon")
+    assert_equal [100, 100, 180, 200, "#fde68a", "🥧"], note.values_at("x", "y", "w", "h", "color", "icon")
     assert_equal "Lock flavor\nPick it", note["text"]
     assert_equal "#bbf7d0", frame["color"]
     assert_operator frame["z"], :<, note["z"], "frames go under"
@@ -112,6 +112,58 @@ class BoardAgentTest < ActiveSupport::TestCase
     end)
 
     assert_equal [100, 400], added("a1").values.map { |item| item["x"] }.sort
+  end
+
+  test "items whose JSON doesn't parse go back to the model as an error, and the ask goes on" do
+    person_asks("a1")
+    results = []
+    run_with(ScriptModel.new do
+      tool = BoardTools::AddItems.new(@agent)
+      results << tool.call(items: '[{"type": "note", "x": 100, "y", "y": 100}]')
+      results << tool.call(items: [NOTE])
+    end)
+
+    assert_match(/weren't valid JSON/, results.first[:error])
+    assert_equal 1, added("a1").size
+    assert_equal "done", ask("a1")["status"]
+  end
+
+  test "answering leaves Y::Collaborator's update queue alone, so the agent keeps following the board" do
+    person_asks("a1")
+    run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE]) })
+
+    assert_kind_of Thread::Queue, @agent.instance_variable_get(:@changes)
+  end
+
+  test "a tool that fails tells the model why, and after a few failures the ask fails" do
+    person_asks("a1")
+    results = []
+    run_with(ScriptModel.new do
+      @agent.define_singleton_method(:board_listing) { raise ArgumentError, "the board is busy" }
+      look = BoardTools::LookAtBoard.new(@agent)
+      results << look.call
+      BoardSteps::MAX_FAILURES.times { results << look.call }
+    end)
+
+    assert_match(/That call failed \(the board is busy\)/, results.first[:error])
+    assert_equal BoardSteps::MAX_FAILURES - 1, results.size
+    assert_equal "failed", ask("a1")["status"]
+    assert_match(/kept failing/, ask("a1")["error"])
+  end
+
+  test "a note that lands on a thick road hears about it, and one beside the road doesn't" do
+    person_asks("a1")
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [{ "type" => "path", "points" => [[0, 300], [800, 300]], "stroke" => 16 },
+                                    NOTE.merge("x" => 100, "y" => 200),
+                                    NOTE.merge("x" => 400, "y" => 20)])
+    end)
+
+    road, on, off = model.results.first.lines
+
+    assert_no_match(/overlaps/, road)
+    assert_match(/overlaps the road \w+/, on)
+    assert_no_match(/overlaps/, off)
   end
 
   test "connectors join items by id or by a ref from the same call, and bad ones are skipped with a reason" do
@@ -234,7 +286,7 @@ class BoardAgentTest < ActiveSupport::TestCase
 
     cursors = @agent.presences.filter_map { |p| p["cursor"] }.uniq
 
-    assert_equal [{ "x" => 200, "y" => 166 }, { "x" => 500, "y" => 166 }], cursors
+    assert_equal [{ "x" => 190, "y" => 200 }, { "x" => 490, "y" => 200 }], cursors
     working = @agent.presences.find { |p| p.dig("agent", "status") == "working" }
 
     assert_equal "a1", working.dig("agent", "ask")

@@ -5,6 +5,16 @@ require "json"
 # ask's Undo needs. BoardAgent includes it, for the ask it's answering (@ask).
 module BoardSteps
   MAX_CHANGES = 150 # per ask
+  MAX_FAILURES = 5 # failed tool calls per ask before it gives up
+
+  # A tool call failed: tells the model why, so it can fix the call. After
+  # MAX_FAILURES in one ask the ask fails, so a stuck model doesn't loop.
+  def tool_failed(reason)
+    @failures = @failures.to_i + 1
+    raise AgentModel::Error, "its tool calls kept failing: #{reason}" if @failures >= MAX_FAILURES
+
+    { error: reason }
+  end
 
   private
 
@@ -28,7 +38,7 @@ module BoardSteps
   def step(at)
     @acted = true
     raise AgentModel::Stopped unless working?(@ask)
-    if @changes >= MAX_CHANGES
+    if @steps >= MAX_CHANGES
       raise BoardSpec::Invalid, "this ask has made #{MAX_CHANGES} changes, the most it can; stop and reply"
     end
 
@@ -38,7 +48,7 @@ module BoardSteps
       ask = asks.get_map(@ask)
       ask["drawn"] = ask["drawn"].to_i + 1
     end
-    @changes += 1
+    @steps += 1
     sleep @pace
   end
 

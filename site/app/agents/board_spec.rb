@@ -16,6 +16,7 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
   NAMES = COLORS.invert.freeze
   SIZES = { "note" => [200, 132], "text" => [360, 40], "shape" => [160, 90], "frame" => [640, 420],
             "sticker" => [80, 80] }.freeze
+  ART_NOTE = [180, 200].freeze # a note with an icon draws it big, over its words
   DEFAULT_COLOR = { "note" => "#fde68a", "shape" => "#ffffff", "frame" => "#fef9c3", "connector" => "#475569",
                     "path" => "#1f2937" }.freeze
   SHAPES = %w[rect ellipse pill].freeze
@@ -58,6 +59,7 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
     fields["size"] = spec["size"].to_i.clamp(12, 72) if spec["size"] && type == "text"
     fields["align"] = align(spec["align"]) if spec["align"] && type == "text"
     fields["dash"] = spec["dash"] == true if spec.key?("dash") && %w[path connector].include?(type)
+    fields["arrow"] = spec["arrow"] != false if spec.key?("arrow") && type == "connector"
     words = %w[text title caption].any? { |key| spec.key?(key) } ? text(type, spec) : nil
     [fields.compact, words]
   end
@@ -78,12 +80,13 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
     words = item["text"].to_s.gsub(/\s*\n\s*/, " / ").gsub(/\s+/, " ").strip
     parts << words[0, 100].inspect unless words.empty?
     parts << "(a pen stroke)" if type == "path"
+    parts << "no arrow" if item["arrow"] == false
     parts << "(yours, from this ask)" if mine
     parts.join(" ")
   end
 
   def box(fields, spec, type) # rubocop:disable Metrics -- one check per field
-    width, height = SIZES.fetch(type)
+    width, height = type == "note" && spec["icon"] ? ART_NOTE : SIZES.fetch(type)
     fields["x"] = number(spec["x"], "x")
     fields["y"] = number(spec["y"], "y")
     fields["w"] = spec["w"] ? number(spec["w"], "w").clamp(20, 4000) : width
@@ -109,6 +112,7 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
     raise Invalid, "a connector can't join an item to itself" if fields["from"] == fields["to"]
 
     fields["dash"] = true if spec["dash"]
+    fields["arrow"] = false if spec["arrow"] == false
   end
 
   # Points arrive as [[x, y], ...] in board units and are stored from the
