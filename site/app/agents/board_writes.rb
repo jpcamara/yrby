@@ -33,6 +33,7 @@ module BoardWrites
     %w[from to].each { |end_| spec[end_] = refs.fetch(spec[end_].to_s, spec[end_]) if spec[end_] }
     fields, text = BoardSpec.create(spec, exists: ->(key) { board.exists?(key) })
     key = add(fields, text)
+    draw_later(key, fields["drawing"])
     refs[spec["ref"].to_s] = key if spec["ref"].present?
     key
   end
@@ -64,6 +65,7 @@ module BoardWrites
     return "#{key}: nothing to change" if fields.empty? && text.nil?
 
     step(board.center(item.merge(fields))) { keeping(key) { board.change(key, fields, text) } }
+    draw_later(key, fields["drawing"])
     "#{key}: changed#{collisions(key)}"
   rescue BoardSpec::Invalid => e
     "#{key}: skipped, #{e.message}"

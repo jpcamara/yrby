@@ -17,9 +17,8 @@ class BoardModel < AgentModel
       what's there. Don't cover existing items unless they asked. Size a
       drawing like a slide, about 1400 wide and 800 tall, so it reads well
       when people zoom to fit.
-    - A note with an icon is 180 by 200: the icon is drawn as a big
-      illustration filling its top, with the title and caption under it.
-      Without an icon it's 200 by 132. Leave about 40 between items so
+    - A note with an icon or drawing is 180 by 200: the picture fills its
+      top, with the title and caption under it. Without one it's 200 by 132. Leave about 40 between items so
       nothing touches.
     - To group items, draw a frame around them with a label. Frames always
       sit under other items.
@@ -41,6 +40,10 @@ class BoardModel < AgentModel
       number, a name, a place), and an icon that pictures the step as a
       concrete object: 🫐 for a flavor, 🏷️ for pricing, 📈 for a forecast,
       🚚 for shipping, 🏪 for a store. Avoid abstract marks like ✅ or 📌.
+    - Give every note and sticker a drawing too: a few words naming one
+      concrete thing to draw for this subject ("a slice of huckleberry pie",
+      "a pie box with a bow", "a delivery truck"), not an idea. An artist
+      draws it in a shared style and it replaces the icon when it's ready.
     - Keep to one warm palette: notes in #fcd581 and #f9b872, with a green
       (#bbe5a7) only for the finale. No rainbow of note colors.
     - A timeline or process is a road: one thick path (stroke 16, color

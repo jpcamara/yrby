@@ -55,6 +55,7 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
     %w[x y w h].each { |key| fields[key] = number(spec[key], key) if spec.key?(key) }
     fields["color"] = color(spec["color"], nil) if spec["color"]
     fields["icon"] = icon(spec["icon"]) if spec.key?("icon")
+    fields["drawing"] = drawing(spec["drawing"]) if spec["drawing"] && %w[note sticker].include?(type)
     fields["shape"] = shape(spec["shape"]) if spec["shape"] && type == "shape"
     fields["size"] = spec["size"].to_i.clamp(12, 72) if spec["size"] && type == "text"
     fields["align"] = align(spec["align"]) if spec["align"] && type == "text"
@@ -77,6 +78,7 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
     parts << item["shape"] if item["shape"] && item["shape"] != "rect"
     parts << "size #{item["size"]}" if item["size"]
     parts << item["icon"] if item["icon"]
+    parts << "drawing of #{item["drawing"]}" if item["drawing"]
     words = item["text"].to_s.gsub(/\s*\n\s*/, " / ").gsub(/\s+/, " ").strip
     parts << words[0, 100].inspect unless words.empty?
     parts << "(a pen stroke)" if type == "path"
@@ -86,14 +88,18 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
   end
 
   def box(fields, spec, type) # rubocop:disable Metrics -- one check per field
-    width, height = type == "note" && spec["icon"] ? ART_NOTE : SIZES.fetch(type)
+    width, height = type == "note" && (spec["icon"] || spec["drawing"]) ? ART_NOTE : SIZES.fetch(type)
     fields["x"] = number(spec["x"], "x")
     fields["y"] = number(spec["y"], "y")
     fields["w"] = spec["w"] ? number(spec["w"], "w").clamp(20, 4000) : width
     fields["h"] = spec["h"] ? number(spec["h"], "h").clamp(20, 4000) : height
     fields["w"] = fields["h"] = [fields["w"], fields["h"]].max if type == "sticker"
-    fields["icon"] = icon(spec["icon"]) if %w[note sticker].include?(type)
-    raise Invalid, "a sticker needs an emoji icon" if type == "sticker" && !fields["icon"]
+    if %w[note sticker].include?(type)
+      fields["icon"] = icon(spec["icon"])
+      fields["drawing"] = drawing(spec["drawing"])
+    end
+    picture = fields["icon"] || fields["drawing"]
+    raise Invalid, "a sticker needs an emoji icon or a drawing" if type == "sticker" && !picture
 
     fields["shape"] = shape(spec["shape"]) if type == "shape"
     return unless type == "text"
@@ -165,4 +171,5 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
   def shape(value) = SHAPES.include?(value.to_s) ? value.to_s : "rect"
   def align(value) = %w[left center right].include?(value.to_s) ? value.to_s : "left"
   def clean(value) = value.to_s.gsub(/\s+/, " ").strip[0, 120]
+  def drawing(value) = clean(value)[0, 80].presence
 end
