@@ -1,6 +1,6 @@
 # What the sheet agent does, from its model. Like AgentModel, which it builds
 # on for the budget, the retry on a stall, and the short error messages, it
-# asks Fireworks when FIREWORKS_API_KEY is set. The model works the sheet
+# asks the agent's chat when a model key is set. The model works the sheet
 # through the agent's tools (SheetTools) and says what it did. Without a key
 # it builds a canned forecast from the seeded Historical tab through the same
 # writes, so the demo runs without a key.
@@ -69,7 +69,7 @@ class SheetModel < AgentModel
     sheet, the way they ask now.
   TEXT
 
-  def self.for(agent) = ENV["FIREWORKS_API_KEY"].to_s.empty? ? Canned.new(agent) : new(agent)
+  def self.for(agent) = AgentModel.live? ? new(agent) : Canned.new(agent)
 
   # Works the sheet for `prompt` through the agent's tools, and streams what
   # the model says. `sheet` is the agent's overview of the tabs, `tab` the
