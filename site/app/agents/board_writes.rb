@@ -14,10 +14,11 @@ module BoardWrites
   end
 
   # Adds each item and returns one line per item: its new id, or why it was
-  # skipped. A connector may name an earlier item of the same call by its ref.
+  # skipped. A connector or a ride on a road may name an earlier item of the
+  # same ask by its ref.
   def add_items(specs)
     doing("Adding #{count(specs.size, "item")}")
-    refs = {}
+    refs = named
     lines = specs.first(MAX_PER_CALL).each_with_index.map do |spec, i|
       spec = spec.to_h.transform_keys(&:to_s)
       name = spec["ref"].presence || "item #{i + 1}"
@@ -30,8 +31,9 @@ module BoardWrites
 
   # Adds one item the model described, remembering its ref for connectors.
   def add_spec(spec, refs)
-    %w[from to].each { |end_| spec[end_] = refs.fetch(spec[end_].to_s, spec[end_]) if spec[end_] }
+    %w[from to on].each { |end_| spec[end_] = refs.fetch(spec[end_].to_s, spec[end_]) if spec[end_] }
     fields, text = BoardSpec.create(spec, exists: ->(key) { board.exists?(key) })
+    fields.merge!(ride(fields, spec["on"])) if spec["on"].present?
     key = add(fields, text)
     draw_later(key, fields["drawing"])
     refs[spec["ref"].to_s] = key if spec["ref"].present?
@@ -63,6 +65,7 @@ module BoardWrites
   def update_one(key, change)
     item = board.item(key) or return "#{key}: no such item; look at the board again"
     fields, text = BoardSpec.update(item["type"], change, was: item["text"])
+    fields.merge!(ride(item.merge(fields), named.fetch(change["on"].to_s, change["on"]), key)) if change["on"].present?
     return "#{key}: nothing to change" if fields.empty? && text.nil?
 
     step(board.center(item.merge(fields))) { keeping(key) { board.change(key, fields, text) } }
@@ -73,6 +76,25 @@ module BoardWrites
   end
 
   def collisions(key) = board.overlap_note(key)
+
+  # The model's names (refs) for what it added in the ask it's answering.
+  def named
+    @named = { @ask => {} } unless @named&.key?(@ask)
+    @named[@ask]
+  end
+
+  # Where an item goes to sit on the road `road`: centered on the road, as
+  # near where the model put it as it fits (BoardOverlaps#onto_road).
+  def ride(fields, road, key = nil)
+    path = board.item(road.to_s)
+    raise BoardSpec::Invalid, "on must be the id or ref of a path" unless path && path["type"] == "path"
+    raise BoardSpec::Invalid, "only a sticker, shape, or text can sit on a road" unless
+      %w[sticker shape text].include?(fields["type"])
+
+    size = fields.values_at("w", "h").map(&:to_i)
+    near = fields.values_at("x", "y").map(&:to_f).zip(size).map { |at, length| at + (length / 2.0) }
+    %w[x y w h].zip(board.onto_road(path, near, size, mine: fields, skip: key)).to_h
+  end
 
   def delete_items(ids)
     doing("Removing #{count(ids.size, "item")}", ids.map(&:to_s).select { |id| board.exists?(id) })

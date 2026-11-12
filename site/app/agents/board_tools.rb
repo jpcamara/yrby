@@ -6,7 +6,7 @@ module BoardTools
     type: "object",
     properties: {
       ref: { type: "string",
-             description: "Your own name for this item, so later items in the same call can connect to it" },
+             description: "Your own name for this item, so later items can connect to it or ride on it" },
       type: { type: "string", enum: BoardSpec::TYPES },
       x: { type: "number", description: "Left edge, board units" },
       y: { type: "number", description: "Top edge, board units" },
@@ -30,10 +30,13 @@ module BoardTools
       shape: { type: "string", enum: BoardSpec::SHAPES },
       size: { type: "number", description: "A text item's font size, 12 to 72" },
       align: { type: "string", enum: %w[left center right] },
-      from: { type: "string", description: "A connector's start: an item id, or a ref from this call" },
-      to: { type: "string", description: "A connector's end: an item id, or a ref from this call" },
+      from: { type: "string", description: "A connector's start: an item id, or a ref you gave" },
+      to: { type: "string", description: "A connector's end: an item id, or a ref you gave" },
       arrow: { type: "boolean", description: "false for a connector with no arrowhead, such as a note's tie " \
                                              "to its milestone" },
+      on: { type: "string", description: "Puts a sticker, pill, or label on a road: the road path's id, or its " \
+                                         "ref. It's centered on the road at the road's point " \
+                                         "nearest the x and y you give" },
       dash: { type: "boolean", description: "Dashed line, for a connector or path" },
       stroke: { type: "number", description: "A path's line width, 1 to 28" },
       points: { type: "array", items: { type: "array", items: { type: "number" } },

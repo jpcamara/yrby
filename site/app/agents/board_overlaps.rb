@@ -6,6 +6,8 @@ module BoardOverlaps
   # Pills, labels, and stickers (a truck driving it) sit on a road on purpose.
   ON_ROADS = %w[note].freeze
   ROAD = 8 # a path this thick or more is a road that notes shouldn't cover
+  SHRINK = [1, 0.8, 0.6].freeze # the sizes a rider on a road tries, to fit
+  UNREADABLE = "; text over another item can't be read, so move one".freeze
 
   # ", but it overlaps a, b" when the item `key` covers another solid item or
   # sits on a road, so the model can move one of them. Empty otherwise.
@@ -16,7 +18,9 @@ module BoardOverlaps
     return "" unless mine && BOXES.include?(mine["type"])
 
     hits = hits(mine, box_of(mine), all)
-    hits.empty? ? "" : ", but it overlaps #{hits.first(5).join(", ")}"
+    return "" if hits.empty?
+
+    ", but it overlaps #{hits.first(5).join(", ")}#{UNREADABLE if words?([mine, *all.values_at(*hits)])}"
   end
 
   # What `mine`, at `box`, covers among `all` the other items.
@@ -44,7 +48,31 @@ module BoardOverlaps
 
   def box_of(thing) = thing.values_at("x", "y", "w", "h").map(&:to_f)
 
+  # The box [x, y, w, h] that centers `mine`, of `size`, on the road `path`,
+  # so a truck or a pill sits on the road: at the road's point nearest
+  # `near` where it covers nothing, smaller if it has to be (down to
+  # SHRINK), else at the nearest point.
+  def onto_road(path, near, size, mine:, skip: nil)
+    others = items.to_h.select { |id, thing| id != skip && thing.is_a?(Hash) }
+    SHRINK.each do |scale|
+      wanted = size.map { |length| (length * scale).round }
+      spot = spots(path, near, wanted).find { |x, y| hits(mine, [x, y, *wanted], others).empty? }
+      return [*spot.first(2), *wanted] if spot
+    end
+    [*spots(path, near, size).first.first(2), *size]
+  end
+
   private
+
+  # The top lefts that center a box of `size` on each point along `path`,
+  # nearest `near` first, with how far each is from it.
+  def spots(path, near, size)
+    half = size.map { |length| length / 2.0 }
+    road_points(path).map { |x, y| [(x - half[0]).round, (y - half[1]).round, Math.hypot(x - near[0], y - near[1])] }
+                     .sort_by(&:last)
+  end
+
+  def words?(things) = things.any? { |thing| thing.is_a?(Hash) && thing["type"] == "text" }
 
   def overlap?(one, two)
     one[0] < two[0] + two[2] && two[0] < one[0] + one[2] && one[1] < two[1] + two[3] && two[1] < one[1] + one[3]
