@@ -1,6 +1,7 @@
 /* The agent board (frontend/src/board.js): a light dotted canvas, the
    board's title top left, people top right, tools at the bottom, and asks
-   down the right side. */
+   at the lower right, above the zoom, where a drawing that climbs to the
+   upper right leaves room. */
 
 :root {
   --paper: #f6f5f1;
@@ -60,7 +61,7 @@ yrby-document { display: block; position: absolute; inset: 0; }
 .item.is-selected { outline: 2px solid var(--accent); outline-offset: 3px; }
 .item.is-peer-selected { outline: 2px solid var(--peer); outline-offset: 3px; }
 .item.is-editing { visibility: hidden; }
-.item.is-agent { animation: appear 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.15); }
+.item.is-agent:not(.path) { animation: appear 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.15); }
 
 @keyframes appear {
   from { opacity: 0; transform: scale(0.85); }
@@ -129,6 +130,7 @@ yrby-document { display: block; position: absolute; inset: 0; }
 
 svg.item { overflow: visible; pointer-events: none; }
 svg.item path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+svg.item .dots { stroke: rgb(255 255 255 / 70%); }
 svg.item .hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
 svg.item.is-selected { outline: none; }
 svg.item.is-selected .line { filter: drop-shadow(0 0 3px var(--accent)); }
@@ -370,13 +372,14 @@ svg.connector .line, svg.connector .arrow { stroke: var(--stroke); stroke-width:
 .board-asks {
   position: absolute;
   right: 16px;
-  top: 64px;
+  bottom: 72px;
   z-index: 5;
   width: 290px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   max-height: calc(100vh - 150px);
+  justify-content: flex-end;
   overflow-y: auto;
 }
 .ask-card {

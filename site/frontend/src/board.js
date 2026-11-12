@@ -221,6 +221,17 @@ function smoothPath(points) {
   return d
 }
 
+// Draws a line on from its start, as if someone were drawing it, about as
+// fast as a hand would; a road's dots fade in once it's down.
+function drawIn(line, dots) {
+  const length = line.getTotalLength()
+  if (!length) return
+  const duration = Math.min(2400, Math.max(700, length * 1.4))
+  line.animate([{ strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
+    { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }], { duration, easing: "ease-in-out" })
+  dots?.animate([{ opacity: 0 }, { opacity: 0 , offset: 0.85 }, { opacity: 1 }], { duration: duration + 400 })
+}
+
 // Where the line from a box's center toward (tx, ty) leaves the box.
 function edgePoint(box, tx, ty) {
   const cx = box.x + box.w / 2
@@ -359,6 +370,7 @@ class Board {
     this.fitOnce()
     this.applyView()
     this.render()
+    this.live = true // items drawn from here on arrived while you watched
   }
 
   stop() {
@@ -404,11 +416,28 @@ class Board {
     const right = Math.max(...boxes.map((b) => b.x + b.w))
     const bottom = Math.max(...boxes.map((b) => b.y + b.h))
     const box = canvas.getBoundingClientRect()
-    // Leave the asks panel on the right clear when it has cards.
-    const panel = $("#asks").childElementCount ? Math.min(360, box.width / 3) : 0
-    const width = box.width - 120 - panel
-    const s = Math.min(1.2, Math.max(MIN_ZOOM, Math.min(width / (right - left), (box.height - 260) / (bottom - top))))
-    this.view = { s, x: 60 + (width - (right - left) * s) / 2 - left * s, y: 120 + (box.height - 260 - (bottom - top) * s) / 2 - top * s }
+    const into = (x, y, width, height) => {
+      const s = Math.min(1.2, Math.max(MIN_ZOOM, Math.min(width / (right - left), height / (bottom - top))))
+      return { s, x: x + (width - (right - left) * s) / 2 - left * s, y: y + (height - (bottom - top) * s) / 2 - top * s }
+    }
+    // Leave the asks panel clear when it has cards: beside it, below it
+    // across the full width, or the full window when nothing would land
+    // under it, whichever shows the boxes biggest.
+    const asks = $("#asks")
+    const whole = into(40, 90, box.width - 80, box.height - 180)
+    const views = [whole]
+    if (asks.childElementCount) {
+      const panel = asks.getBoundingClientRect()
+      const [pl, pt, pr, pb] = [panel.left - box.left, panel.top - box.top, panel.right - box.left, panel.bottom - box.top]
+      const under = (view) => boxes.some((b) => b.x * view.s + view.x < pr && (b.x + b.w) * view.s + view.x > pl &&
+        b.y * view.s + view.y < pb && (b.y + b.h) * view.s + view.y > pt)
+      const below = pb + 12
+      views.length = 0
+      if (!under(whole)) views.push(whole)
+      views.push(into(60, 120, box.width - 120 - Math.min(360, box.width / 3), box.height - 260),
+        into(60, below, box.width - 120, box.height - below - 140))
+    }
+    this.view = views.reduce((best, view) => (view.s > best.s ? view : best))
     this.applyView()
   }
 
@@ -542,6 +571,7 @@ class Board {
         node = svg("svg", { class: `item ${type}` })
         node.append(svg("path", { class: "hit" }), svg("path", { class: "line" }))
         if (type === "connector") node.append(svg("path", { class: "arrow" }))
+        else node.append(svg("path", { class: "dots" }))
         break
       }
       default:
@@ -616,6 +646,18 @@ class Board {
     line.setAttribute("stroke", item.get("color") || "#1f2937")
     line.setAttribute("stroke-width", stroke)
     line.setAttribute("stroke-dasharray", item.get("dash") ? `${stroke * 3} ${stroke * 3}` : "none")
+    // A road (a thick stroke) gets a row of small light dots along its middle.
+    const dots = node.querySelector(".dots")
+    const road = stroke >= 12 && !item.get("dash")
+    dots.hidden = !road
+    if (road) {
+      dots.setAttribute("stroke-width", Math.round(stroke * 0.32))
+      dots.setAttribute("stroke-dasharray", `0 ${stroke * 4}`)
+    }
+    if (!node.seen) {
+      node.seen = true
+      if (this.live && node.classList.contains("is-agent") && !item.get("dash")) drawIn(line, road && dots)
+    }
   }
 
   drawConnector(node, item) {

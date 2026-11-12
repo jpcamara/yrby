@@ -46,6 +46,7 @@ module BoardWrites
       board.create(key, fields, text, "z" => z, "ask" => @ask, "by" => "agent:#{@owner.id}")
     end
     select_too(key)
+    sleep @pace * 3 if fields["type"] == "path" # the page draws a line on; let it finish
     key
   end
 

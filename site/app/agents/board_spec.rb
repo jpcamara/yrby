@@ -134,7 +134,7 @@ module BoardSpec # rubocop:disable Metrics/ModuleLength -- one rule per field re
     top = points.map(&:last).min
     relative = points.map { |x, y| [x - left, y - top] }
     fields.merge!("x" => left, "y" => top, "w" => relative.map(&:first).max, "h" => relative.map(&:last).max,
-                  "points" => relative.flatten, "stroke" => (spec["stroke"] || 3).to_i.clamp(1, 16))
+                  "points" => relative.flatten, "stroke" => (spec["stroke"] || 3).to_i.clamp(1, 28))
     fields["dash"] = true if spec["dash"]
   end
 

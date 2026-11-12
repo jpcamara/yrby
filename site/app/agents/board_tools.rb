@@ -35,7 +35,7 @@ module BoardTools
       arrow: { type: "boolean", description: "false for a connector with no arrowhead, such as a note's tie " \
                                              "to its milestone" },
       dash: { type: "boolean", description: "Dashed line, for a connector or path" },
-      stroke: { type: "number", description: "A path's line width, 1 to 16" },
+      stroke: { type: "number", description: "A path's line width, 1 to 28" },
       points: { type: "array", items: { type: "array", items: { type: "number" } },
                 description: "A path's points, [[x, y], ...] in board units" }
     },
