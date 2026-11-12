@@ -1,0 +1,15 @@
+{
+  "name": "pg-yrby-js-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench:storage": "node storage_bench.mjs",
+    "converge": "node converge.mjs",
+    "concurrency": "node concurrency.mjs",
+    "dump": "node dump.mjs"
+  },
+  "dependencies": {
+    "pg": "8.23.1",
+    "yjs": "13.6.33"
+  }
+}

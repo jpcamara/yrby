@@ -7,7 +7,8 @@
 #
 #   has_collaborative_document :body, store: :pg_yrby
 #
-# It needs the extension and a ydoc state column:
+# It needs the extension (built from pg_yrby/ in this repo) and a ydoc state
+# column:
 #
 #   CREATE EXTENSION pg_yrby;
 #   ALTER TABLE y_documents ALTER COLUMN state TYPE ydoc USING ydoc(state);
