@@ -1,4 +1,5 @@
 require "active_support/core_ext/integer/time"
+require_relative "../grant_redacting_output"
 
 Rails.application.configure do
   config.enable_reloading = false
@@ -27,7 +28,7 @@ Rails.application.configure do
   # Falcon, unlike Puma, leaves stdout block-buffered, and the log would only
   # reach the journal when the buffer filled or the process exited.
   $stdout.sync = true
-  config.logger = ActiveSupport::TaggedLogging.logger($stdout)
+  config.logger = ActiveSupport::TaggedLogging.logger(GrantRedactingOutput.new($stdout))
   config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
   config.silence_healthcheck_path = "/up"
   config.active_support.report_deprecations = false
