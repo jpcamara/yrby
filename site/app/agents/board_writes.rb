@@ -86,14 +86,14 @@ module BoardWrites
   # Where an item goes to sit on the road `road`: centered on the road, as
   # near where the model put it as it fits (BoardOverlaps#onto_road).
   def ride(fields, road, key = nil)
-    path = board.item(road.to_s)
-    raise BoardSpec::Invalid, "on must be the id or ref of a path" unless path && path["type"] == "path"
+    road = road.to_s
+    raise BoardSpec::Invalid, "on must be the id or ref of a path" unless board.item(road)&.dig("type") == "path"
     raise BoardSpec::Invalid, "only a sticker, shape, or text can sit on a road" unless
       %w[sticker shape text].include?(fields["type"])
 
     size = fields.values_at("w", "h").map(&:to_i)
     near = fields.values_at("x", "y").map(&:to_f).zip(size).map { |at, length| at + (length / 2.0) }
-    %w[x y w h].zip(board.onto_road(path, near, size, mine: fields, skip: key)).to_h
+    %w[x y w h].zip(board.onto_road(road, near, size, mine: fields, skip: key)).to_h.merge("on" => road)
   end
 
   def delete_items(ids)

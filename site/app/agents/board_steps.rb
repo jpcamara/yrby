@@ -18,6 +18,16 @@ module BoardSteps
 
   private
 
+  # Collects what the model says into `reply`: only what it says after its
+  # last tool call.
+  def hearing(reply)
+    lambda do |chunk|
+      reply.clear if @acted
+      @acted = false
+      reply << chunk
+    end
+  end
+
   # Says what the agent is doing on its ask's card, and selects the items it's
   # about to change, so people see them all highlighted in its color.
   def doing(activity, ids = [])

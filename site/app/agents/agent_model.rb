@@ -78,7 +78,7 @@ class AgentModel
   # :stalled instead of raising.
   def ask(prompt, again:)
     streamed = false
-    chat.ask(prompt) do |chunk|
+    (@chat = chat).ask(prompt) do |chunk|
       text = chunk.content.to_s
       next if text.empty?
 
