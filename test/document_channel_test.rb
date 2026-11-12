@@ -69,6 +69,35 @@ class DocumentChannelTest < ActionCable::Channel::TestCase
                  subscription.send(:document).document_row
   end
 
+  # Action Cable lets a client call any public method a channel adds. Only
+  # the two callbacks should be reachable, both here and in a channel that
+  # includes the concern itself.
+  def test_clients_can_only_reach_subscribed_and_receive
+    app_channel = Class.new(::ActionCable::Channel::Base) do
+      include Y::ActionCable
+
+      def subscribed = sync_subscribed(params[:id])
+      def receive(data) = sync_receive(data, params[:id])
+    end
+
+    assert_equal Set["subscribed", "receive"], Y::DocumentChannel.action_methods
+    assert_equal Set["subscribed", "receive"], app_channel.action_methods
+  end
+
+  def test_a_client_cannot_call_the_sync_methods_or_set_the_authorized_key
+    subscribe grant: grant, name: "body"
+    key = @page.collaborative_document(:body).key
+    streams = subscription.streams.dup
+
+    perform :sync_subscribed, "key" => "other"
+    perform :sync_receive, update_frame
+    perform :authorized_document_key=, "key" => "other"
+
+    assert_equal streams, subscription.streams
+    assert_equal key, subscription.send(:authorized_document_key)
+    assert_equal 0, Y::DocumentUpdate.count
+  end
+
   def test_a_signed_grant_subscribes_and_gets_the_opening_handshake
     subscribe grant: grant, name: "body"
 

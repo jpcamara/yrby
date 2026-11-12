@@ -1,0 +1,235 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require "action_cable"
+require "y/action_cable"
+require "y/action_cable/client"
+require "puma"
+require "concurrent/timer_task" # Action Cable's heartbeat; a Rails boot loads it
+require "logger"
+
+# The client against a real cable: Puma serving Action Cable in this
+# process, a room-keyed channel that records to a hash, and clients on
+# sockets of their own. What one client sends the server records, acks,
+# and distributes to the other.
+class ActionCableClientServerTest < Minitest::Test
+  STORE = Hash.new { |hash, key| hash[key] = [] }
+  STORE_LOCK = Mutex.new
+
+  class Connection < ActionCable::Connection::Base
+  end
+
+  # The demo's channel: public rooms named by `id`.
+  class RoomChannel < ActionCable::Channel::Base
+    include Y::ActionCable
+
+    on_load do |key|
+      updates = STORE_LOCK.synchronize { STORE[key].dup }
+      next if updates.empty?
+
+      doc = Y::Doc.new
+      updates.each { |update| doc.apply_update(update) }
+      doc.encode_state_as_update
+    end
+    on_change { |key, update| STORE_LOCK.synchronize { STORE[key] << update } }
+
+    def subscribed = sync_subscribed(params[:id])
+    def receive(data) = sync_receive(data, params[:id])
+
+    private
+
+    def authorized?(key) = !key.start_with?("private")
+  end
+
+  # A room that drops the updates a client sends, so none is acked.
+  class UnackedChannel < RoomChannel
+    def receive(data) = (super unless data.key?("id"))
+  end
+
+  # One server for the whole run.
+  def self.port
+    @port ||= begin
+      server = ActionCable.server
+      server.config.cable = { "adapter" => "test" }
+      server.config.logger = Logger.new(File::NULL)
+      server.config.connection_class = -> { Connection }
+      server.config.disable_request_forgery_protection = true
+      puma = Puma::Server.new(server)
+      listener = puma.add_tcp_listener("127.0.0.1", 0)
+      puma.run
+      Minitest.after_run { puma.stop(true) }
+      listener.addr[1]
+    end
+  end
+
+  def setup
+    @key = "room-#{rand(1 << 32)}"
+    @clients = []
+  end
+
+  def teardown
+    @clients.each(&:unsubscribe)
+  end
+
+  def client(key = @key, channel: "ActionCableClientServerTest::RoomChannel", **)
+    client = Y::ActionCable::Client.new("ws://127.0.0.1:#{self.class.port}/cable",
+                                        channel:, params: { id: key }, logger: Logger.new(File::NULL), **)
+    @clients << client
+    client
+  end
+
+  # A client keeps its doc private; a test reads it to check what arrived.
+  def doc_of(client) = client.send(:doc)
+
+  def wait_until(timeout: 5)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    until yield
+      raise "timed out" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+      sleep 0.02
+    end
+  end
+
+  def test_an_update_is_recorded_acked_and_delivered_to_another_client
+    writer = client.subscribe
+    seen = Queue.new
+    reader = client.on_update { |update, doc, changed| seen << [update, doc.read_xml("root"), changed] }.subscribe
+
+    assert_predicate writer, :synced?
+    update = writer.edit { |d| Y::Lexical.append_paragraph(d, "sent over the socket") }
+
+    wait_until { !writer.pending? }
+
+    assert_equal [update], STORE_LOCK.synchronize { STORE[@key].dup }, "the server recorded it before acking"
+    assert_equal [update, "sent over the socket", [0]], seen.pop(timeout: 5)
+    assert_equal "sent over the socket", doc_of(reader).read_xml("root")
+  end
+
+  def test_editing_after_unsubscribe_raises_and_leaves_the_doc_alone
+    writer = client.subscribe
+    writer.unsubscribe
+
+    assert_raises(Y::Error) { writer.edit { |d| Y::Lexical.append_paragraph(d, "too late") } }
+    assert_equal "", doc_of(writer).read_xml("root").to_s
+  end
+
+  def test_unsubscribe_raises_when_an_update_was_never_acked
+    writer = client(channel: "ActionCableClientServerTest::UnackedChannel").subscribe
+    writer.edit { |d| Y::Lexical.append_paragraph(d, "never acked") }
+
+    assert_raises(Y::Error) { writer.unsubscribe(timeout: 0.2) }
+  end
+
+  def test_a_document_already_in_the_store_arrives_with_the_handshake
+    STORE_LOCK.synchronize { STORE[@key] << Y::Doc.new.edit { |d| Y::Lexical.append_paragraph(d, "before") } }
+    joined = client.subscribe
+
+    assert_equal "before", doc_of(joined).read_xml("root")
+  end
+
+  def test_presence_reaches_the_other_client
+    first = client.subscribe
+    seen = Y::Awareness.new
+    client.on_awareness { |frame| seen.apply_update(frame) }.subscribe
+    first.presence = { "name" => "Agent" }
+
+    wait_until { seen.states[doc_of(first).client_id] }
+
+    assert_equal({ "name" => "Agent" }, seen.states[doc_of(first).client_id])
+  end
+
+  # Each reconnect is a new handshake with a new key. The caller's headers
+  # go out again as they were given.
+  def test_a_client_that_sets_its_origin_reconnects_after_a_drop
+    origin = client(headers: { "Origin" => "http://127.0.0.1:#{self.class.port}" }).subscribe
+    ActionCable.server.connections.each(&:close)
+    update = origin.edit { |d| Y::Lexical.append_paragraph(d, "after the drop") }
+
+    wait_until(timeout: 10) { !origin.pending? }
+
+    assert_includes STORE_LOCK.synchronize { STORE[@key].dup }, update
+  end
+
+  # The client closes on the way out, and its reactor ends without an
+  # error of its own, which Async would only log.
+  def test_a_rejected_subscription_raises
+    rejected = client("private-room")
+    error = nil
+    _, logged = capture_io do
+      error = assert_raises(Y::Error) { rejected.subscribe(timeout: 5) }
+      rejected.instance_variable_get(:@runner).join(5)
+    end
+
+    assert_match(/rejected/, error.message)
+    assert_empty logged
+  end
+
+  # A room whose server turns the client away on its next handshake, as one
+  # does when a grant expires.
+  class TurnsAwayChannel < RoomChannel
+    singleton_class.attr_accessor :allow
+    self.allow = true
+
+    private
+
+    def authorized?(_key) = TurnsAwayChannel.allow
+  end
+
+  def test_a_client_turned_away_on_reconnect_is_closed
+    turned_away = client(channel: "ActionCableClientServerTest::TurnsAwayChannel").subscribe
+    TurnsAwayChannel.allow = false
+    ActionCable.server.connections.each(&:close)
+    turned_away.instance_variable_get(:@runner).join(10)
+
+    assert_predicate turned_away, :closed?
+    assert_raises(Y::Error) { turned_away.edit { |d| Y::Lexical.append_paragraph(d, "lost") } }
+    assert_same turned_away, turned_away.unsubscribe
+  ensure
+    TurnsAwayChannel.allow = true
+  end
+
+  # Turned away on a reconnect with an edit the server never acked.
+  class TurnsAwayUnackedChannel < TurnsAwayChannel
+    def receive(data) = (super unless data.key?("id"))
+  end
+
+  def test_unsubscribe_raises_for_an_edit_lost_when_the_server_turned_the_client_away
+    turned_away = client(channel: "ActionCableClientServerTest::TurnsAwayUnackedChannel").subscribe
+    turned_away.edit { |d| Y::Lexical.append_paragraph(d, "never acked") }
+    TurnsAwayChannel.allow = false
+    ActionCable.server.connections.each(&:close)
+    turned_away.instance_variable_get(:@runner).join(10)
+
+    assert_predicate turned_away, :closed?
+    assert_raises(Y::Error) { turned_away.unsubscribe }
+    assert_same turned_away, turned_away.unsubscribe
+  ensure
+    TurnsAwayChannel.allow = true
+  end
+
+  def test_logs_and_errors_leave_the_grant_out
+    log = StringIO.new
+    params = { grant: "SECRET-GRANT", name: "body" }
+    refused = Y::ActionCable::Client.new("ws://127.0.0.1:1/cable", params:, logger: Logger.new(log))
+    error = assert_raises(Y::Error) { refused.subscribe(timeout: 1) }
+
+    assert_match(/"name":"body"/, error.message)
+    refute_match(/SECRET-GRANT/, error.message)
+    refute_match(/SECRET-GRANT/, log.string)
+  end
+
+  # Inside a reactor the client is a task of the caller's, so a Sync block
+  # waits for it: leave before the block ends.
+  def test_the_client_runs_as_a_task_inside_a_reactor
+    text = nil
+    Sync do
+      inside = client.subscribe
+      inside.edit { |d| Y::Lexical.append_paragraph(d, "from a fiber") }
+      wait_until { !inside.pending? }
+      text = Y::Doc.new.tap { |d| STORE[@key].each { |u| d.apply_update(u) } }.read_xml("root")
+      inside.unsubscribe
+    end
+
+    assert_equal "from a fiber", text
+  end
+end
