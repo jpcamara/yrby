@@ -56,7 +56,7 @@ class BoardAgent < Y::Agent
     change land as you make it.
   TEXT
 
-  PACE = 0.15 # seconds between changes, so people see it work
+  PACE = 0.5 # seconds after each change, so people can follow it; the cursor gets half that to arrive first
   VIEW = [1400, 900].freeze # the area to use when an ask has no view
 
   def initialize(document, owner:, model: nil, artist: BoardArt.artist, pace: PACE, **) # rubocop:disable Metrics/ParameterLists -- the agent's own, then the Collaborator's
