@@ -126,6 +126,43 @@ class SheetAgentTest < ActiveSupport::TestCase
     assert_equal(%w[5 6], cells.values_at("B2", "B3").map { |cell| cell["input"] })
   end
 
+  test "cells whose JSON doesn't parse go back to the model as an error, and the ask goes on" do
+    person_asks("a1")
+    results = []
+    run_with(ScriptModel.new do
+      tool = SheetTools::WriteCells.new(@agent)
+      results << tool.call(cells: '[{"ref": "B2", "input", "input": "5"}]')
+      results << tool.call(cells: [{ ref: "B3", input: "[Draft]" }])
+    end)
+
+    assert_match(/weren't valid JSON/, results.first[:error])
+    assert_nil cells["B2"]
+    assert_equal "[Draft]", cells["B3"]["input"]
+    assert_equal "done", ask("a1")["status"]
+  end
+
+  test "answering leaves Y::Collaborator's update queue alone, so the agent keeps following the sheet" do
+    person_asks("a1")
+    run_with(ScriptModel.new { |tool| tool.call(:write_cells, cells: [{ "ref" => "B2", "input" => "5" }]) })
+
+    assert_kind_of Thread::Queue, @agent.instance_variable_get(:@changes)
+  end
+
+  test "a tool that fails tells the model why, and after a few failures the ask fails" do
+    person_asks("a1")
+    results = []
+    run_with(ScriptModel.new do
+      @agent.define_singleton_method(:read_sheet) { |**| raise ArgumentError, "the sheet is busy" }
+      read = SheetTools::ReadSheet.new(@agent)
+      SheetAgent::MAX_FAILURES.times { results << read.call }
+    end)
+
+    assert_match(/That call failed \(the sheet is busy\)/, results.first[:error])
+    assert_equal SheetAgent::MAX_FAILURES - 1, results.size
+    assert_equal "failed", ask("a1")["status"]
+    assert_match(/kept failing/, ask("a1")["error"])
+  end
+
   test "it says which cells it skipped and why, and which formulas the sheet can't compute" do
     person_asks("a1")
     model = run_with(ScriptModel.new do |tool|

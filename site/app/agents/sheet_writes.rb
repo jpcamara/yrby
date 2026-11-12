@@ -210,8 +210,8 @@ module SheetWrites # rubocop:disable Metrics/ModuleLength -- one method per tool
   def step(id, ref, range: nil, count: 1)
     @acted = true
     raise AgentModel::Stopped unless working?(@ask)
-    if @changes + count > MAX_CHANGES
-      raise SheetSpec::Invalid, "this ask has changed #{@changes} cells and can change #{MAX_CHANGES}; stop and reply"
+    if @cells + count > MAX_CHANGES
+      raise SheetSpec::Invalid, "this ask has changed #{@cells} cells and can change #{MAX_CHANGES}; stop and reply"
     end
 
     point(id, ref, range) if id
@@ -220,7 +220,7 @@ module SheetWrites # rubocop:disable Metrics/ModuleLength -- one method per tool
       ask = sheet.ask(@ask)
       ask["written"] = ask["written"].to_i + count
     end
-    @changes += count
+    @cells += count
     sleep @pace
   end
 

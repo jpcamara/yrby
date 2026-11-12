@@ -66,6 +66,7 @@ class SheetAgent < Y::Agent
 
   PACE = 0.12 # seconds between changes, so people can follow the cursor
   SAY_EVERY = 0.4 # seconds between updates of what the model is saying
+  MAX_FAILURES = 5 # failed tool calls per ask before it gives up
 
   def initialize(document, owner:, model: nil, pace: PACE, **)
     super(document, **)
@@ -86,6 +87,15 @@ class SheetAgent < Y::Agent
   def people = super.reject { |_id, state| state["agent"] }
 
   def document_tools = SheetTools.all(self)
+
+  # A tool call failed: tells the model why, so it can fix the call. After
+  # MAX_FAILURES in one ask the ask fails, so a stuck model doesn't loop.
+  def tool_failed(reason)
+    @failures = @failures.to_i + 1
+    raise AgentModel::Error, "its tool calls kept failing: #{reason}" if @failures >= MAX_FAILURES
+
+    { error: reason }
+  end
 
   def answer_asks
     waiting.each { |id, ask| answer(id, ask) }
@@ -108,7 +118,8 @@ class SheetAgent < Y::Agent
     started = epoch_ms
     @ask = id
     @tab = sheet.tab_ids.include?(ask["tab"]) ? ask["tab"] : sheet.tab_ids.first
-    @changes = 0
+    @cells = 0 # not @changes: Y::Collaborator keeps its update queue there
+    @failures = 0
     @acted = false
     @reply = +""
     @shown = ""
