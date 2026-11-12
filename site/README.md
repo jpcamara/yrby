@@ -817,8 +817,81 @@ The agent joins at the origin the inviting browser used. Set
 proxy.
 
 The invitation goes through the method gate like starting a room: a POST
-with no body, only on `/demos/lexxy/:room/agent`. Active Job is loaded for
-it. Active Storage still isn't, and the boot guard checks that separately.
+with no body, only on `/demos/lexxy/:room/agent` and
+`/demos/spreadsheet/:room/agent` (the agent sheet, below). Active Job is
+loaded for it. Active Storage still isn't, and the boot guard checks that
+separately.
+
+### The agent sheet
+
+`/sheet` opens a room's agent sheet (`/demos/spreadsheet/:room/sheet`): a
+spreadsheet with tabs, formulas, and a side panel where each person asks
+their own agent for something. It uses the room's `sheet` document over
+`RoomChannel`, separate from the Spreadsheet demo's document.
+
+- **The document.** `tabs` is a Y.Array of tab ids. `sheets` maps each tab id
+  to a Y.Map with its `name`, its `cells` (`"B4"` to a Y.Map of `input`,
+  `format`, `bold`, `fill`, `by`, and `ask`), and its column `widths`. Only
+  what people type is shared. `asks` holds the asks, as on the shared page.
+  `app/agents/sheet_agent.rb` documents every field.
+- **Formulas.** Each browser computes values with `frontend/src/formula.js`,
+  a small engine written for this page: arithmetic, comparisons, `&`, `%`,
+  cell, range, whole-column, absolute, and cross-tab references
+  (`Historical!C:C`, `'Last year'!A1`), and SUM, AVERAGE, MIN, MAX, COUNT,
+  ROUND, ABS, IF, SUMIF, and SUMIFS. It caches values and recomputes only what
+  depends on a changed cell. Errors are values: `#REF!`, `#DIV/0!`, `#CIRC!`,
+  `#VALUE!`, `#NAME?`, and `#ERROR!`. Renaming a tab rewrites the formulas
+  that name it. A cell shows its value as a number, percent, currency, text,
+  or `+number` and `+percent`, which sign a gain (+4,200, +10%).
+  `node --test formula_test.mjs` in `frontend/` runs its tests.
+- **Editing.** Arrow keys and clicks select, typing replaces, F2 or a double
+  click edits, Enter and Tab commit, and the formula bar edits the selected
+  cell. Copy and paste carry plain values. Undo and redo use a
+  `Y.UndoManager` that tracks only this browser's own edits.
+- **Presence.** Each person's selected cell, and each agent's, is outlined in
+  their color with a name tag, and a selected range is shaded in their
+  color. An agent's cell outline is dashed, and its range is the block it's
+  writing.
+- **A new room** starts with an empty "Pre-orders" tab and a "Historical" tab
+  of last year's orders (`frontend/src/sheet_seed.js`), so an ask such as
+  "Draft a forecast for pre-orders from last year's numbers" has something to
+  read.
+- **Asks.** `SheetAgentJob` runs `SheetAgent`, with the same seats, budget,
+  and limits as `PageAgent`. The model's prompt names the tabs and the range
+  each uses, and the model works the sheet through tools
+  (`app/agents/sheet_tools.rb`):
+  - `read_sheet` lists a tab's non-empty cells, or every tab's, as
+    `B4: input (format, bold, fill)`, optionally only a range. The model
+    sees inputs, not values: only the browsers compute formulas.
+  - `write_cells` writes a block of cells on one tab, each with its input,
+    format, bold, and fill. Its result names the range written, the cells it
+    skipped and why, and any formula that uses a function or a tab the sheet
+    doesn't have.
+  - `format_range` and `clear_range` format or empty every cell in a range.
+  - `resize_columns` sets column widths.
+  - `add_tab` and `rename_tab` add a tab and rename one; formulas follow a
+    rename.
+
+  The model decides everything itself; its instructions
+  (`app/agents/sheet_model.rb`) give general advice on building a sheet:
+  header fills and light column bands, formulas over typed numbers, totals,
+  a conservative and an optimistic case for a forecast, and a short "What it
+  means" section. Before each block the agent selects it, so everyone sees
+  the range outlined in its color, then writes each cell in its own edit
+  with its cursor there, 120 ms apart. Each tool call sets the ask's
+  `doing` ("Reading Historical", "Writing A1:G6"), which its card shows
+  under what the model said so far ("You got it."), with a timer. Once done,
+  the card shows only what the model said after its last tool call. An ask
+  changes at most 400 cells, and Stop ends it before the next change.
+
+  The agent writes the document itself, but the ask keeps every cell, column
+  width, and tab it changed as it was before and as it left it. The card
+  offers Undo, which puts back everything the ask changed that nobody has
+  changed since, removes the tabs it added once they're empty, and renames
+  back the tabs it renamed, and Ask for a change, which sends the same ask
+  back with a new prompt. `SheetModel` asks Fireworks when
+  `FIREWORKS_API_KEY` is set and otherwise builds a canned forecast from
+  formulas over the Historical tab, through the same writes.
 
 ### Building the bundles and the stylesheet
 

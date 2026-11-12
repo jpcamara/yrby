@@ -1,4 +1,4 @@
-# What the demo agent says, from its model. With FIREWORKS_API_KEY set it asks
+# What the demo agent says, from its model. With a model key set it asks
 # the agent's own chat (see PageAgent). Without it (development, tests) it
 # streams a fixed reply, so the demo runs without a key and without cost.
 #
@@ -8,6 +8,9 @@
 # answer.
 class AgentModel
   class Error < StandardError; end
+  # Raised from a tool when people stopped or undid the ask mid-call. It ends
+  # the call without counting as a model failure.
+  class Stopped < StandardError; end
 
   TIMEOUT = /timeout|timed out/i
 
@@ -35,7 +38,11 @@ class AgentModel
     Change that proposal the way they asked.
   TEXT
 
-  def self.for(agent) = ENV["FIREWORKS_API_KEY"].to_s.empty? ? Canned.new : new(agent)
+  # Whether there's a model key, for Fireworks or OpenAI (see
+  # config/initializers/ruby_llm.rb).
+  def self.live? = %w[FIREWORKS_API_KEY OPENAI_API_KEY].any? { |key| ENV[key].present? }
+
+  def self.for(agent) = live? ? new(agent) : Canned.new
 
   def initialize(agent, seats: AgentSeats.current)
     @agent = agent
@@ -60,7 +67,7 @@ class AgentModel
 
     stalled = ask(prompt, again: true, &) == :stalled
     ask(prompt, again: false, &) if stalled
-  rescue Error
+  rescue Error, Stopped
     raise
   rescue StandardError => e
     Rails.logger.warn("AgentModel: #{e.class}: #{e.message}")

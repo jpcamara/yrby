@@ -8,7 +8,7 @@ class DemosController < ApplicationController
   skip_forgery_protection only: %i[start agent]
   before_action :no_store
   before_action :load_demo, only: %i[new_room show start stored]
-  before_action :load_slug, only: %i[show start body stored space agent]
+  before_action :load_slug, only: %i[show start body stored space agent sheet]
 
   def index
     @demos = Demos::ALL
@@ -47,6 +47,21 @@ class DemosController < ApplicationController
   # /space picks a new room id for the shared page.
   def new_space = redirect_to(demo_space_path(Demos.new_room))
 
+  # The room's agent sheet: a spreadsheet with tabs and formulas, where each
+  # person can invite their own agent and ask it to fill cells.
+  def sheet
+    @demo = Demos.find("spreadsheet")
+    @sheet = true
+    @room = Room.find_by(slug: @slug)
+    return render :start, status: :not_found unless @room
+
+    @document = @room.collaborative_document(:sheet)
+    render layout: "sheet"
+  end
+
+  # /sheet picks a new room id for the agent sheet.
+  def new_sheet = redirect_to(demo_sheet_path(Demos.new_room))
+
   # Starts a room: creates its row, within the room cap, and redirects to it.
   # A POST to /demos/:demo/start has no room, so it starts a new one.
   # The pages never create a room, because a GET is anonymous and a crawler
@@ -60,7 +75,7 @@ class DemosController < ApplicationController
                     status: :service_unavailable
     end
 
-    redirect_to params[:space] ? demo_space_path(@slug) : demo_room_path(@demo.slug, @slug), status: :see_other
+    redirect_to start_path, status: :see_other
   end
 
   # The HTML stored in room.body, an Action Text field, as JSON. LexxyChannel
@@ -73,8 +88,9 @@ class DemosController < ApplicationController
     render json: { body: rich_text&.body&.to_html }
   end
 
-  # Invites one person's agent into a room's Lexxy document. The agent runs as
-  # a PageAgentJob in a job process and leaves when the room empties. The
+  # Invites one person's agent into a room's Lexxy document, or into its
+  # agent sheet from the sheet's route. The agent runs as a PageAgentJob (or
+  # SheetAgentJob) in a job process and leaves when the room empties. The
   # person's id, name, and color come in the query string, because the method
   # gate only lets this POST through with no body.
   def agent
@@ -84,7 +100,7 @@ class DemosController < ApplicationController
     owner = agent_owner or return head(:unprocessable_content)
     case AgentSeats.current.take(@slug, owner[:id])
     when :ok
-      PageAgentJob.perform_later(@slug, request.base_url, owner)
+      agent_job.perform_later(@slug, request.base_url, owner)
       render json: { status: "joining" }, status: :accepted
     when :here then render json: { status: "here" }
     else render json: { status: "busy" }, status: :service_unavailable
@@ -102,6 +118,18 @@ class DemosController < ApplicationController
   end
 
   private
+
+  # The sheet's route sets :sheet. A query string can't, so a POST to the
+  # Lexxy route always gets a PageAgent.
+  def agent_job = request.path_parameters[:sheet] ? SheetAgentJob : PageAgentJob
+
+  # Where #start goes: the shared page, the agent sheet, or the demo.
+  def start_path
+    return demo_space_path(@slug) if params[:space]
+    return demo_sheet_path(@slug) if params[:sheet]
+
+    demo_room_path(@demo.slug, @slug)
+  end
 
   def load_demo
     @demo = Demos.find(params[:demo])

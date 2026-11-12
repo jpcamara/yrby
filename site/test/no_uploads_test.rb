@@ -352,7 +352,7 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     # agent are POSTs with no body, which the method gate lets through only on
     # those paths.
     exceptions = ["/_anycable", "/demos/:demo/start(.:format)", "/demos/:demo/:room/start(.:format)",
-                  "/demos/lexxy/:room/agent(.:format)"]
+                  "/demos/lexxy/:room/agent(.:format)", "/demos/spreadsheet/:room/agent(.:format)"]
     routes = Rails.application.routes.routes.reject { |route| exceptions.include?(route.path.spec.to_s) }
 
     assert_equal ["GET"], routes.map(&:verb).uniq, "found a write endpoint, but this site only reads over HTTP"

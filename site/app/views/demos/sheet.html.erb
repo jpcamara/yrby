@@ -1,0 +1,72 @@
+<%# A room's agent sheet: a spreadsheet with tabs and formulas, where each
+    person can invite their own agent and ask it to fill cells. The document is
+    the room's "sheet" document, separate from the Spreadsheet demo's.
+    frontend/src/sheet.js builds the grid and the agent panel. %>
+<div class="sheet-app">
+  <header class="sheet-top">
+    <div class="sheet-crumbs">
+      <%= link_to root_path, class: "sheet-mark", title: "yrby home" do %>y<% end %>
+      <input id="sheet-title" class="sheet-title" aria-label="Sheet title" maxlength="60" value="" placeholder="Untitled sheet">
+      <span id="status" class="sheet-status">Connecting…</span>
+    </div>
+    <div class="sheet-actions">
+      <div id="avatars" class="avatars" aria-label="People and agents on this sheet"></div>
+      <button id="invite-agent" type="button" class="pill pill-outline" data-url="<%= demo_sheet_agent_path(@room) %>" hidden>
+        <i class="agent-dot" aria-hidden="true"></i><span>Invite your agent</span>
+      </button>
+      <button id="share" type="button" class="pill pill-outline"><span>Share</span></button>
+    </div>
+  </header>
+
+  <div class="sheet-toolbar" role="toolbar" aria-label="Formatting">
+    <button type="button" class="tool" id="undo" title="Undo (⌘Z)" aria-label="Undo">↶</button>
+    <button type="button" class="tool" id="redo" title="Redo (⇧⌘Z)" aria-label="Redo">↷</button>
+    <span class="tool-sep"></span>
+    <button type="button" class="tool tool-bold" id="bold" title="Bold (⌘B)" aria-label="Bold">B</button>
+    <span class="fills" id="fills" aria-label="Fill"></span>
+    <span class="tool-sep"></span>
+    <select id="format" class="tool-select" aria-label="Number format">
+      <option value="">Auto</option>
+      <option value="number">Number</option>
+      <option value="percent">Percent</option>
+      <option value="currency">Currency</option>
+      <option value="+number">+Number</option>
+      <option value="+percent">+Percent</option>
+      <option value="text">Text</option>
+    </select>
+  </div>
+
+  <div class="formula-bar">
+    <span id="name-box" class="name-box">A1</span>
+    <span class="fx" aria-hidden="true">fx</span>
+    <input id="formula" class="formula-input" aria-label="Formula" spellcheck="false" autocomplete="off">
+  </div>
+
+  <div class="sheet-body-split">
+    <%= collaborative_document_tag @room, :sheet, class: "sheet-doc" do %>
+      <div id="grid-scroll" class="grid-scroll" tabindex="0" aria-label="Sheet grid">
+        <div id="grid-inner" class="grid-inner">
+          <table id="grid" class="grid"><colgroup></colgroup><thead></thead><tbody></tbody></table>
+          <div id="overlays" class="overlays"></div>
+        </div>
+      </div>
+      <nav id="tabs" class="sheet-tabs" aria-label="Tabs"></nav>
+    <% end %>
+
+    <aside class="agent-panel" aria-label="Agent chat">
+      <div class="panel-head">
+        <strong>Agents</strong>
+        <span class="panel-hint">Ask your agent to build or change part of the sheet. Everyone here sees it work.</span>
+      </div>
+      <ol id="asks" class="asks"></ol>
+      <form id="ask-form" class="ask-form">
+        <textarea id="ask-input" rows="3" maxlength="400"
+                  placeholder="Draft a forecast for pre-orders. Reference last year's numbers from the Historical tab."></textarea>
+        <button type="submit" class="pill pill-dark">Ask your agent</button>
+      </form>
+    </aside>
+  </div>
+</div>
+
+<p id="toast" class="sheet-toast" role="status" hidden></p>
+<p id="notice" class="sheet-toast is-notice" role="alert" hidden></p>

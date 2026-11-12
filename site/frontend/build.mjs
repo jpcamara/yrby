@@ -61,6 +61,8 @@ const ENTRIES = [
   { entry: "src/lexxy.js", external: ["@rails/activestorage"] },
   // The Lexxy room as a shared page with agents (demos/space.html.erb).
   { entry: "src/space.js", external: ["@rails/activestorage"] },
+  // A room's agent sheet (demos/sheet.html.erb): tabs of cell Y.Maps.
+  "src/sheet.js",
   "src/tiptap.js",       // Y.XmlFragment via Tiptap's Collaboration extension
   "src/spreadsheet.js",  // Y.Array of row Y.Maps, cells nested as Y.Maps
   "src/whiteboard.js",   // Y.Map of shape records
