@@ -13,7 +13,7 @@ require "y/agent"
 # The board document:
 #
 #   items     Y.Map of id -> Y.Map { type, x, y, w, h, z, color, text (Y.Text),
-#             icon, points, from, to, by, ask }. frontend/src/board.js draws
+#             icon, drawing, art, points, from, to, by, ask }. frontend/src/board.js draws
 #             them and has the full list of fields.
 #   title     Y.Text, and subtitle, a Y.Text
 #   asks      Y.Map of id -> Y.Map, below
@@ -45,9 +45,10 @@ require "y/agent"
 class BoardAgent < Y::Agent
   include BoardWrites
   include BoardSteps
+  include BoardDrawings
 
-  model ENV.fetch("AGENT_MODEL", "accounts/fireworks/routers/glm-5p3-fast"), provider: :openai,
-                                                                             assume_model_exists: true
+  MODEL = ENV.fetch("AGENT_MODEL", "accounts/fireworks/routers/glm-5p3-fast")
+  model MODEL, provider: :openai, assume_model_exists: true
   thinking effort: :low
   instructions <<~TEXT
     You work on a shared whiteboard that people are editing live, through
@@ -58,10 +59,11 @@ class BoardAgent < Y::Agent
   PACE = 0.15 # seconds between changes, so people see it work
   VIEW = [1400, 900].freeze # the area to use when an ask has no view
 
-  def initialize(document, owner:, model: nil, pace: PACE, **)
+  def initialize(document, owner:, model: nil, artist: BoardArt.artist, pace: PACE, **) # rubocop:disable Metrics/ParameterLists -- the agent's own, then the Collaborator's
     super(document, **)
     @owner = owner
     @model = model || BoardModel.for(self)
+    @artist = artist
     @pace = pace
     self.presence = status("idle")
   end
@@ -95,6 +97,7 @@ class BoardAgent < Y::Agent
     @ask = id
     @steps = 0 # not @changes: Y::Collaborator keeps its update queue there
     @failures = 0
+    no_drawings
     @acted = false
     zs = board.items.to_h.values.filter_map { |item| item["z"] if item.is_a?(Hash) }
     @high = zs.max.to_i
@@ -122,6 +125,7 @@ class BoardAgent < Y::Agent
       @acted = false
       reply << chunk
     end
+    finish_drawings
     return unless working?(id)
 
     said = reply.gsub(/\s+/, " ").strip[0, 600]

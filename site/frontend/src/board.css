@@ -81,8 +81,8 @@ yrby-document { display: block; position: absolute; inset: 0; }
 /* A note with an illustration: the picture fills the top, the words sit
    centered under it. */
 .note.has-art { align-items: center; text-align: center; padding: 10px 12px 14px; gap: 2px; }
-.note.has-art .note-icon { flex: 1 1 0; min-height: 0; height: auto; width: 100%; display: grid; place-items: center; margin: 0 0 6px; }
-.note.has-art .note-icon .art { height: 100%; max-width: 100%; object-fit: contain; filter: drop-shadow(0 2px 2px rgb(60 40 0 / 18%)); }
+.note.has-art .note-icon { flex: 1 1 0; min-height: 0; height: auto; width: 100%; position: relative; margin: 0 0 6px; }
+.note.has-art .note-icon .art { position: absolute; inset: 0; height: 100%; width: 100%; object-fit: contain; filter: drop-shadow(0 2px 2px rgb(60 40 0 / 18%)); }
 .note.has-art .note-title { font-size: 15px; }
 .note.has-art .note-caption { font-size: 12.5px; }
 .note-title { font-weight: 650; font-size: 17px; line-height: 1.2; letter-spacing: -0.01em; }

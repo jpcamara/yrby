@@ -11,9 +11,11 @@ module BoardTools
       x: { type: "number", description: "Left edge, board units" },
       y: { type: "number", description: "Top edge, board units" },
       w: { type: "number",
-           description: "Width. Defaults: note 200 (180 with an icon), text 360, shape 160, frame 640, sticker 80" },
+           description: "Width. Defaults: note 200 (180 with an icon or drawing), text 360, shape 160, " \
+                        "frame 640, sticker 80" },
       h: { type: "number",
-           description: "Height. Defaults: note 132 (200 with an icon), text 40, shape 90, frame 420, sticker 80" },
+           description: "Height. Defaults: note 132 (200 with an icon or drawing), text 40, shape 90, " \
+                        "frame 420, sticker 80" },
       title: { type: "string", description: "A note's first line" },
       caption: { type: "string", description: "A note's smaller second line" },
       text: { type: "string", description: "A text item's words, or a shape's or frame's label" },
@@ -21,6 +23,10 @@ module BoardTools
                                             "Paths default to dark ink; give a road a warm color like #f4a261" },
       icon: { type: "string", description: "One emoji, drawn as a full-color illustration. On a note it fills " \
                                            "the top, above the words; a sticker is just the picture" },
+      drawing: { type: "string", description: "A note's or sticker's custom illustration: what to draw, in a few " \
+                                              "words (\"a huckleberry pie\", \"a delivery truck on a road\"). It's " \
+                                              "drawn in the background and replaces the icon when ready, so give " \
+                                              "an icon too" },
       shape: { type: "string", enum: BoardSpec::SHAPES },
       size: { type: "number", description: "A text item's font size, 12 to 72" },
       align: { type: "string", enum: %w[left center right] },
@@ -57,6 +63,7 @@ module BoardTools
     # (BoardSteps#tool_failed). Stopping and giving up still end the ask.
     def call(tool_call: nil, **arguments)
       Rails.logger.info("#{self.class.tool_name} #{arguments.to_json[0, 4000]}")
+      @agent.place_drawings
       super(tool_call:, **arguments.transform_values { |value| decode(value) })
     rescue AgentModel::Stopped, AgentModel::Error
       raise
@@ -104,7 +111,7 @@ module BoardTools
 
   class UpdateItems < Tool
     description "Changes existing items: move or resize them (x, y, w, h), or change their words, color, icon, " \
-                "shape, size, or dash. Give only the fields to change."
+                "drawing, shape, size, or dash. Give only the fields to change."
     parameters(type: "object", properties: { changes: { type: "array", items: CHANGE } }, required: %w[changes])
 
     def execute(changes:) = @agent.update_items(Array(changes))

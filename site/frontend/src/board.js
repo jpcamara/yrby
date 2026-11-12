@@ -9,6 +9,10 @@
 //                     frame's label, a text item's words
 //             icon    an emoji on a note, or a sticker's emoji, drawn as its
 //                     illustration from /emoji/ when there is one
+//             drawing what the agent asked its artist to draw for the item
+//             art     that drawing once it's done, drawn in place of the icon,
+//                     as JSON: { box: [x, y, w, h], shapes: [[tag, attrs, children]] }
+//                     (app/agents/board_art.rb)
 //             shape   rect | ellipse | pill, for a shape
 //             points  a path's points, flat [x0, y0, x1, y1, ...] from (x, y):
 //                     a Y.Array when someone draws it here, a plain array
@@ -115,10 +119,13 @@ function toast(text) {
 // build copies to /emoji/<codepoints>.svg. The files name each emoji by its
 // full codepoints, with or without the U+FE0F variation selector, and a model
 // may send either, so this tries both. An emoji with no art stays a character.
-function setArt(node, icon) {
-  if (node.dataset.icon === icon) return
-  node.dataset.icon = icon
+function setArt(node, icon, art) {
+  const key = typeof art === "string" && art ? art : icon
+  if (node.artKey === key) return
+  node.artKey = key
   node.replaceChildren()
+  const drawn = art && drawArt(art)
+  if (drawn) return node.append(drawn)
   if (!icon) return
   const codes = [...icon].map((c) => c.codePointAt(0).toString(16))
   const bare = codes.filter((c) => c !== "fe0f")
@@ -133,6 +140,37 @@ function setArt(node, icon) {
   })
   img.src = `/emoji/${names.shift()}.svg`
   node.append(img)
+}
+
+// A custom drawing, from shapes the server already checked. Anyone in the room
+// can write an item's fields, so this builds only the same plain shapes and
+// attributes again, and drops any value that could point somewhere.
+const ART_TAGS = new Set(["g", "path", "circle", "ellipse", "rect", "polygon", "polyline", "line"])
+const ART_ATTRS = new Set(["d", "cx", "cy", "r", "rx", "ry", "x", "y", "width", "height", "points", "x1", "y1",
+  "x2", "y2", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "fill-rule", "opacity",
+  "fill-opacity", "stroke-opacity", "transform"])
+
+function drawArt(json) {
+  let art
+  try { art = JSON.parse(json) } catch { return null }
+  if (!art || typeof art !== "object") return null
+  const box = Array.isArray(art.box) && art.box.length === 4 && art.box.every(Number.isFinite) ? art.box : [0, 0, 100, 100]
+  const root = svg("svg", { class: "art", viewBox: box.join(" "), "aria-hidden": "true" })
+  let room = 200
+  const add = (parent, shapes) => {
+    for (const shape of Array.isArray(shapes) ? shapes : []) {
+      const [tag, attrs, children] = Array.isArray(shape) ? shape : []
+      if (!ART_TAGS.has(tag) || room-- <= 0) continue
+      const node = svg(tag)
+      for (const [key, value] of Object.entries(attrs || {})) {
+        if (ART_ATTRS.has(key) && typeof value === "string" && !/url|[:;<>&\\]/i.test(value)) node.setAttribute(key, value)
+      }
+      if (tag === "g") add(node, children)
+      parent.append(node)
+    }
+  }
+  add(root, art.shapes)
+  return root.childElementCount ? root : null
 }
 
 function isDark(hex) {
@@ -534,9 +572,10 @@ class Board {
     if (type === "note") {
       node.style.background = color || NOTE_COLORS[0]
       const [first, ...rest] = words.split("\n")
-      setArt(node.children[0], item.get("icon") ?? "")
-      node.children[0].hidden = !item.get("icon")
-      node.classList.toggle("has-art", Boolean(item.get("icon")))
+      const art = item.get("art")
+      setArt(node.children[0], item.get("icon") ?? "", art)
+      node.children[0].hidden = !item.get("icon") && !art
+      node.classList.toggle("has-art", Boolean(item.get("icon") || art))
       node.children[1].textContent = first
       node.children[2].textContent = rest.join("\n")
     } else if (type === "text") {
@@ -553,7 +592,7 @@ class Board {
       node.style.setProperty("--frame", color || "#e5e7eb")
       node.children[0].textContent = words || "Frame"
     } else if (type === "sticker") {
-      setArt(node, item.get("icon") || "⭐")
+      setArt(node, item.get("icon") || "⭐", item.get("art"))
       node.style.fontSize = `${Math.round(h * 0.8)}px`
     }
   }

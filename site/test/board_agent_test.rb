@@ -76,8 +76,21 @@ class BoardAgentTest < ActiveSupport::TestCase
     @doc.get_map("items").get_map(key).set_text("text", text)
   end
 
-  def run_with(model)
-    @agent = OfflineBoardAgent.new(@doc, owner: ADA, model:)
+  # Draws every subject at once as one circle, or fails (nil) for "nothing".
+  class InstantArtist
+    attr_reader :subjects
+
+    def initialize = @subjects = []
+
+    def start(subject)
+      @subjects << subject
+      art = subject == "nothing" ? nil : { "box" => [0, 0, 100, 100], "shapes" => [["circle", { "r" => "40" }, []]] }
+      Thread.new { art }.tap(&:join)
+    end
+  end
+
+  def run_with(model, artist: nil)
+    @agent = OfflineBoardAgent.new(@doc, owner: ADA, model:, artist:)
     model.agent = @agent if model.respond_to?(:agent=)
     @agent.answer_asks
     model
@@ -393,6 +406,48 @@ class BoardAgentTest < ActiveSupport::TestCase
     agent.send(:see, other_agent.set_local_state(%({"user":{"name":"Bo's agent"},"agent":{"owner":"bo"}})))
 
     assert_equal [101], agent.people.keys
+  end
+
+  test "a note's drawing lands on it as art, and its emoji shows until then" do
+    person_asks("a1")
+    artist = InstantArtist.new
+    model = run_with(ScriptModel.new do |tool|
+      tool.call(:add_items, items: [NOTE.merge("drawing" => "a slice of pie"),
+                                    { "type" => "sticker", "x" => 400, "y" => 100, "drawing" => "a truck" }])
+      tool.call(:look_at_board)
+    end, artist:)
+
+    assert_equal "done", ask("a1")["status"]
+    assert_equal ["a slice of pie", "a truck"], artist.subjects
+    note, sticker = added("a1").values.sort_by { |item| item["x"] }
+
+    assert_equal "🥧", note["icon"]
+    assert_equal [["circle", { "r" => "40" }, []]], JSON.parse(note["art"])["shapes"]
+    assert sticker["art"], "a sticker can be just a drawing"
+    assert_equal 4, ask("a1")["drawn"], "each drawing lands as its own change"
+    assert_includes model.results.last, "drawing of a slice of pie"
+  end
+
+  test "a finished drawing lands before the model's next tool call" do
+    person_asks("a1")
+    seen = nil
+    run_with(ScriptModel.new do
+      BoardTools::AddItems.new(@agent).call(items: [NOTE.merge("drawing" => "a pie")])
+      seen = BoardTools::LookAtBoard.new(@agent).call
+    end, artist: InstantArtist.new)
+
+    assert_equal(1, items.values.count { |item| item["art"] })
+    assert_match(/drawing of a pie/, seen)
+  end
+
+  test "a drawing that fails leaves the emoji" do
+    person_asks("a1")
+    run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE.merge("drawing" => "nothing")]) },
+             artist: InstantArtist.new)
+
+    assert_equal "done", ask("a1")["status"]
+    assert_nil added("a1").values.first["art"]
+    assert_equal "🥧", added("a1").values.first["icon"]
   end
 
   private
