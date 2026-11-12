@@ -88,7 +88,12 @@ fi
 # Create or migrate the SQLite database before the stack boots.
 bin/rails db:prepare >> "$LOG" 2>&1
 
-bundle exec thrust bin/serve > "$LOG" 2>&1 &
+# Production runs a fork of thrust that also serves the binary y-protocols
+# endpoint /yjs/, which the room demos connect to. THRUST points at that build.
+# The default is the gem's thrust, which has no /yjs/.
+THRUST="${THRUST:-thrust}"
+
+bundle exec "$THRUST" bin/serve > "$LOG" 2>&1 &
 echo $! > "$PIDFILE"
 
 for _ in $(seq 1 60); do
