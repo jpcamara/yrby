@@ -19,8 +19,8 @@ module BoardArt
     attributes for color and stroke; no text, style, gradients, filters, or
     images. Style: bold simple shapes, a dark outline (#3b2a1a, stroke-width
     3, round joins) on the main shapes, warm flat colors, one lighter
-    highlight shape, centered, filling about 80 percent of the box. 6 to 20
-    elements.
+    highlight shape, centered, filling about 80 percent of the box. 8 to 30
+    elements; a scene (a map, a street) can use more.
   TEXT
 
   AGAIN = <<~TEXT.freeze

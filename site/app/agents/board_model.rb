@@ -16,7 +16,8 @@ class BoardModel < AgentModel
     - Start in the area they're looking at when there's room, else beside
       what's there. Don't cover existing items unless they asked. Size a
       drawing like a slide, about 1400 wide and 800 tall, so it reads well
-      when people zoom to fit.
+      when people zoom to fit. Keep its lower right corner (about 400 by 250)
+      empty: the asks panel sits there on people's screens.
     - A note with an icon or drawing is 180 by 200: the picture fills its
       top, with the title and caption under it. Without one it's 200 by 132. Leave about 40 between items so
       nothing touches.
@@ -46,22 +47,29 @@ class BoardModel < AgentModel
       draws it in a shared style and it replaces the icon when it's ready.
     - Keep to one warm palette: notes in #fcd581 and #f9b872, with a green
       (#bbe5a7) only for the finale. No rainbow of note colors.
-    - A timeline or process is a road: one thick path (stroke 16, color
-      #f4a261) that climbs in a gentle wave from the lower left to the upper
-      right, with 8 to 12 points and no sharp corners. It spans the whole
-      slide, about 1300 wide, and rises only about 350 from end to end, so
-      milestones sit 180 to 220 apart along it. Put a pill shape (#c4622d,
+    - A timeline or process is a road: one thick path (stroke 24, color
+      #f4a261) from the lower left to the upper right, as one smooth S, the
+      way a road winds up a hill: nearly level for the first third with a
+      shallow dip, then a steady climb, leveling off at the end. Use 7 to 9
+      points, evenly spaced across, each a small change in height from the
+      last, so it never wiggles. It spans the whole slide, about 1300 wide,
+      and rises about 350 from end to end, so milestones sit 160 to 200
+      apart along it. Put a pill shape (#c4622d,
       about 76 by 30) on the road for each milestone ("Day 1", "Week 2"),
       centered on one of the path's points so it sits on the road. Each
       milestone's note goes above or below its pill, alternating sides,
       with about 50 clear between the note and the road, tied to the pill
       by a connector with arrow false and color #c4622d. Small text beside
       the road for gaps ("4 days on the road").
-    - Illustrate: stickers (an emoji, 100 to 150 across) beside key moments,
-      such as a truck on the road for shipping, and a short warning or aside
-      as small text with ⚠️ where something could go wrong.
+    - Illustrate with two or three big drawn stickers, 220 to 300 across,
+      that aren't notes: a scene on the road itself (a delivery truck driving
+      along it), a mascot beside the title (a cheerful pie character), and the
+      finale's picture. Place them clear of notes. Add a short warning or
+      aside as small text with ⚠️ where something could go wrong.
     - End a timeline or plan with a finale at the top of the road: a green
-      frame holding a big sticker and a line or two about the outcome.
+      frame about 380 by 280 holding a big drawn sticker of the outcome as a
+      scene (a map of the country with a delivery route and dots for cities,
+      for delivery) and a line or two with a number ("48 states in 2 days").
     - Group related notes in labeled frames when it helps reading.
     When you're done, reply with one short sentence saying what you did, such
     as "Laid out eight milestones from Day 1 to Day 12."
@@ -72,7 +80,9 @@ class BoardModel < AgentModel
     This is a change to an earlier ask of theirs, "%<earlier>s". Then you said:
     %<plan>s
     The items you added for it are marked "yours, from this ask". Change
-    them, or the board, the way they ask now.
+    them, or the board, the way they ask now. Anything new goes in clear
+    space: look at where things are, and move your own items aside to make
+    room rather than squeezing it in on top of them.
   TEXT
 
   def self.for(agent) = AgentModel.live? ? new(agent) : Canned.new(agent)

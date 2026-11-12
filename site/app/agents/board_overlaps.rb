@@ -3,7 +3,8 @@
 module BoardOverlaps
   SOLID = %w[note text shape sticker].freeze # frames hold things; lines cross them
   BOXES = (SOLID + ["frame"]).freeze
-  ON_ROADS = %w[note sticker].freeze # pills and labels sit on a road on purpose
+  # Pills, labels, and stickers (a truck driving it) sit on a road on purpose.
+  ON_ROADS = %w[note].freeze
   ROAD = 8 # a path this thick or more is a road that notes shouldn't cover
 
   # ", but it overlaps a, b" when the item `key` covers another solid item or
