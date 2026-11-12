@@ -52,13 +52,13 @@ class DefaultStorageTest < Minitest::Test
       channel = bare_channel
       channel.class.public_send(hook) { |*| nil }
 
-      error = assert_raises(Y::Error) { channel.sync_subscribed("partial") }
+      error = assert_raises(Y::Error) { channel.send(:sync_subscribed, "partial") }
       assert_match(hook == :on_load ? /on_change/ : /on_load/, error.message)
       assert_empty channel.streams
       assert_empty channel.transmits
 
       frame = Base64.strict_encode64(Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE))
-      assert_raises(Y::Error) { channel.sync_receive({ "update" => frame, "id" => 1 }, "partial") }
+      assert_raises(Y::Error) { channel.send(:sync_receive, { "update" => frame, "id" => 1 }, "partial") }
       assert_empty channel.transmits
       assert_equal 0, Y::DocumentUpdate.count
     end
@@ -99,10 +99,10 @@ class DefaultStorageTest < Minitest::Test
 
   def test_a_hookless_channel_records_and_serves_through_y_document
     channel = bare_channel
-    channel.sync_subscribed("defaults/doc-1")
+    channel.send(:sync_subscribed, "defaults/doc-1")
 
     frame = Y.wrap_update(YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
-    channel.sync_receive({ "update" => Base64.strict_encode64(frame), "id" => 5 }, "defaults/doc-1")
+    channel.send(:sync_receive, { "update" => Base64.strict_encode64(frame), "id" => 5 }, "defaults/doc-1")
 
     assert_includes channel.transmits, { "ack" => 5 }, "the default store recorded the update before the ack"
     doc = Y::Doc.new
