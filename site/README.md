@@ -820,6 +820,58 @@ The invitation goes through the method gate like starting a room: a POST
 with no body, only on `/demos/lexxy/:room/agent`. Active Job is loaded for
 it. Active Storage still isn't, and the boot guard checks that separately.
 
+### The agent board
+
+`/board` opens a whiteboard where each person's agent draws
+(`/demos/board/:room`, `BoardsController`). It's the room's `board`
+document, on its own `BoardChannel`, so it doesn't change the Whiteboard
+demo. People pan and zoom their own view and add sticky notes, text,
+shapes, pen strokes, and connectors. Undo and redo take back only your own
+changes (a `Y.UndoManager` that tracks this window's origin).
+
+The document is a `Y.Map` of items keyed by id, each a `Y.Map` with a type,
+a box, a z order, a color, and a `Y.Text` for its words, plus `title` and
+`subtitle` as `Y.Text`. `frontend/src/board.js` lists every field. Presence
+carries each person's name, color, cursor in board units, and selection.
+
+To ask, choose "Ask agent" and say what you want. The ask goes into the
+`asks` map, as on the shared page, with the part of the board the person
+can see, and the person's agent claims it. The model then works the board
+through tools (`BoardTools`), choosing every place and size itself:
+
+- `look_at_board` lists every item with its id, type, box, color, icon, and
+  words.
+- `add_items` adds notes, text, shapes, frames, stickers, pen paths, and
+  connectors. A connector can join an item added earlier in the same call
+  by a `ref` the model gives it.
+- `update_items` moves, resizes, rewords, or recolors any item, including
+  people's.
+- `delete_items` removes items and the connectors attached to them.
+- `set_title` sets the board's title and subtitle.
+
+`BoardSteps` makes each change in its own edit, a moment apart, with the
+agent's cursor on it, so everyone watches it work. The agent selects every
+item a call changes, in its color, and its ask's card says what it's doing
+("Moving 3 items"). A tool's result tells the model when what it placed
+overlaps something or crosses a frame's edge, so it can fix its layout. `BoardModel`'s instructions carry
+general drawing guidance (timelines as a road with milestone pills,
+illustrations, a finale), not layouts. When it's done, what it says goes on
+the ask's card.
+
+Undo puts the board back. Items the ask added carry its id and are
+removed. For anything it changed or deleted, the ask keeps the item as it
+was before and as the agent left it; Undo restores the item only if it
+still looks the way the agent left it, so later edits by people stay. The
+title works the same way. "Ask for a change" sends the agent its earlier
+ask and reply, and it edits the board from there.
+
+Without `FIREWORKS_API_KEY`, `BoardModel::Canned` draws a twelve-day launch
+timeline through the same writes, placed by `BoardLayout`, so the demo runs
+without a key.
+The board reuses the shared page's seats, budget, and limits. A person's
+board agent takes its own seat (`board:<room>`), and the invitation is a
+POST with no body on `/demos/board/:room/agent`.
+
 ### Building the bundles and the stylesheet
 
 ```bash

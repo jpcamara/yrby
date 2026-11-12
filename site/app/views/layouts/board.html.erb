@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title><%= content_for(:title).presence || "Agent board · yrby" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%# Each room belongs to whoever opened it and is deleted later. %>
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#f6f5f1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= action_cable_meta_tag %>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <%# bun builds board.css with board.js, from frontend/src/board.css. %>
+    <link rel="stylesheet" href="<%= busted "/board.css" %>">
+    <%= javascript_include_tag busted("/board.js"), defer: true, skip_pipeline: true %>
+  </head>
+  <body class="board-page">
+    <%= yield %>
+  </body>
+</html>

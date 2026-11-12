@@ -64,6 +64,7 @@ const ENTRIES = [
   "src/tiptap.js",       // Y.XmlFragment via Tiptap's Collaboration extension
   "src/spreadsheet.js",  // Y.Array of row Y.Maps, cells nested as Y.Maps
   "src/whiteboard.js",   // Y.Map of shape records
+  "src/board.js",        // the agent board (boards/show.html.erb), with board.css
   "src/kanban.js",       // Y.Array of card Y.Maps
   "src/chat.js",         // Y.Array of message Y.Maps, drafts in awareness
   "src/form.js",         // Y.Map of field Y.Texts and a plain choice

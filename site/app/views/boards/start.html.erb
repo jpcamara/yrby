@@ -1,0 +1,18 @@
+<% content_for :title, "Agent board · yrby demos" %>
+<%# A board nobody has started. Starting it creates the Room row its
+    document belongs to, which a GET never does. %>
+<% content_for :canonical, canonical_url("/demos") %>
+<% content_for :head do %>
+  <meta name="robots" content="noindex, nofollow">
+<% end %>
+
+<section class="mx-auto max-w-3xl">
+  <h1 class="font-serif text-4xl font-normal tracking-tight text-zinc-100 sm:text-5xl">Agent board</h1>
+  <p class="mt-4 leading-7 text-zinc-400">
+    This board hasn't started yet. Starting it creates the room's record,
+    which holds the board's document. Anyone with the link can then join.
+  </p>
+  <%= button_to "Start the board", board_start_path(@slug), authenticity_token: false,
+                form_class: "mt-6",
+                class: "cursor-pointer rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500" %>
+</section>
