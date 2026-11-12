@@ -73,7 +73,7 @@ module BoardArt
 
   # Draws in the background with the agent's model. Without a model key there
   # is no artist, and notes and stickers keep their emoji.
-  def self.artist = ENV["FIREWORKS_API_KEY"].to_s.empty? ? nil : Artist.new
+  def self.artist = AgentModel.live? ? Artist.new : nil
 
   class Artist
     def initialize(model: BoardAgent::MODEL, seats: AgentSeats.current)

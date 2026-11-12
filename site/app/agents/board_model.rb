@@ -1,6 +1,6 @@
 # What the board agent draws, from its model, as a plan BoardLayout reads.
 # Like AgentModel, which it extends for the budget and the stall handling, it
-# asks the agent's chat when FIREWORKS_API_KEY is set and streams a canned
+# asks the agent's chat when a model key is set and streams a canned
 # plan otherwise, so the demo draws something real without a key.
 class BoardModel < AgentModel
   PROMPT = <<~TEXT.freeze
@@ -75,7 +75,7 @@ class BoardModel < AgentModel
     them, or the board, the way they ask now.
   TEXT
 
-  def self.for(agent) = ENV["FIREWORKS_API_KEY"].to_s.empty? ? Canned.new(agent) : new(agent)
+  def self.for(agent) = AgentModel.live? ? new(agent) : Canned.new(agent)
 
   # Works the board for `prompt` through the agent's tools, and streams what
   # the model says when it's done. `board` is the agent's listing of the
