@@ -293,6 +293,18 @@ class BoardAgentTest < ActiveSupport::TestCase
     assert_equal [overlap], model.reviews
   end
 
+  test "a reaction someone puts on top of the agent's note isn't an overlap to fix" do
+    person_asks("a1")
+    model = run_with(ScriptModel.new do |tool|
+      key = tool.call(:add_items, items: [NOTE])[/added as (\w+)/, 1]
+      @doc.get_map("items")["wow"] = { "type" => "sticker", "icon" => "😍", "x" => 150, "y" => 90, "w" => 72,
+                                       "h" => 72, "z" => 99, "by" => "someone" }
+      tool.call(:update_items, changes: [{ "id" => key, "caption" => "Pick it today" }])
+    end)
+
+    assert_nil model.reviews
+  end
+
   test "an ask whose items overlap nothing gets no review" do
     person_asks("a1")
     model = run_with(ScriptModel.new { |tool| tool.call(:add_items, items: [NOTE]) })
