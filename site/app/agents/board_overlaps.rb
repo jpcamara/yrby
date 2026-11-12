@@ -8,7 +8,9 @@
 # - an item sitting inside a frame (crossing its edge counts),
 # - an item riding a road it was put `on`,
 # - a connector touching the items it joins,
-# - two lines crossing, or a line crossing a frame.
+# - two lines crossing, or a line crossing a frame,
+# - and, for an ask, something someone else put on top of its items (a
+#   reaction sticker on a note): they put it there on purpose.
 module BoardOverlaps
   LINES = %w[path connector].freeze
   SHRINK = [1, 0.8, 0.6].freeze # the sizes a rider on a road tries, to fit
@@ -20,16 +22,17 @@ module BoardOverlaps
   def overlap_note(key)
     all = solid_items
     mine = all.delete(key) or return ""
-    hits = hits(key, mine, all)
+    hits = to_fix(key, mine, all)
     hits.empty? ? "" : ", but it overlaps #{hits.first(5).map { |id| label(id, all[id]) }.join(", ")}"
   end
 
   # Every overlap on the board that involves an item the ask `id` added, one
-  # per line, or nil when there are none.
+  # per line, or nil when there are none. Leaves out what someone else put
+  # on top of the ask's items.
   def overlaps(id)
     all = solid_items
     pairs = all.select { |_key, thing| thing["ask"] == id }.flat_map do |key, thing|
-      hits(key, thing, all.except(key)).map { |other| [key, other].sort }
+      to_fix(key, thing, all.except(key)).map { |other| [key, other].sort }
     end.uniq
     return if pairs.empty?
 
@@ -68,6 +71,12 @@ module BoardOverlaps
   end
 
   private
+
+  # What the item `key`, `mine`, overlaps among `all`, less what someone
+  # else put on top of it.
+  def to_fix(key, mine, all)
+    hits(key, mine, all).reject { |other| all[other]["ask"] != mine["ask"] && all[other]["z"].to_f > mine["z"].to_f }
+  end
 
   def solid_items = items.to_h.select { |_key, thing| thing.is_a?(Hash) && thing["type"] }
 
