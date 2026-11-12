@@ -10,19 +10,24 @@ module BoardTools
       type: { type: "string", enum: BoardSpec::TYPES },
       x: { type: "number", description: "Left edge, board units" },
       y: { type: "number", description: "Top edge, board units" },
-      w: { type: "number", description: "Width. Defaults: note 200, text 360, shape 160, frame 640, sticker 80" },
-      h: { type: "number", description: "Height. Defaults: note 132, text 40, shape 90, frame 420, sticker 80" },
+      w: { type: "number",
+           description: "Width. Defaults: note 200 (180 with an icon), text 360, shape 160, frame 640, sticker 80" },
+      h: { type: "number",
+           description: "Height. Defaults: note 132 (200 with an icon), text 40, shape 90, frame 420, sticker 80" },
       title: { type: "string", description: "A note's first line" },
       caption: { type: "string", description: "A note's smaller second line" },
       text: { type: "string", description: "A text item's words, or a shape's or frame's label" },
       color: { type: "string", description: "yellow, blue, pink, green, purple, orange, or #rrggbb. " \
                                             "Paths default to dark ink; give a road a warm color like #f4a261" },
-      icon: { type: "string", description: "One emoji, on a note or as a sticker" },
+      icon: { type: "string", description: "One emoji, drawn as a full-color illustration. On a note it fills " \
+                                           "the top, above the words; a sticker is just the picture" },
       shape: { type: "string", enum: BoardSpec::SHAPES },
       size: { type: "number", description: "A text item's font size, 12 to 72" },
       align: { type: "string", enum: %w[left center right] },
       from: { type: "string", description: "A connector's start: an item id, or a ref from this call" },
       to: { type: "string", description: "A connector's end: an item id, or a ref from this call" },
+      arrow: { type: "boolean", description: "false for a connector with no arrowhead, such as a note's tie " \
+                                             "to its milestone" },
       dash: { type: "boolean", description: "Dashed line, for a connector or path" },
       stroke: { type: "number", description: "A path's line width, 1 to 16" },
       points: { type: "array", items: { type: "array", items: { type: "number" } },
@@ -48,22 +53,36 @@ module BoardTools
       @agent = agent
     end
 
+    # Any failure goes back to the model as an error it can fix
+    # (BoardSteps#tool_failed). Stopping and giving up still end the ask.
     def call(tool_call: nil, **arguments)
       Rails.logger.info("#{self.class.tool_name} #{arguments.to_json[0, 4000]}")
       super(tool_call:, **arguments.transform_values { |value| decode(value) })
+    rescue AgentModel::Stopped, AgentModel::Error
+      raise
+    rescue JSON::ParserError => e
+      @agent.tool_failed("Your arguments weren't valid JSON (#{e.message[0, 120]}). Send them again as plain " \
+                         "JSON, not inside a string.")
+    rescue StandardError => e
+      Rails.logger.warn("#{self.class.tool_name} failed: #{e.class}: #{e.message}")
+      @agent.tool_failed("That call failed (#{e.message[0, 200]}). Fix it and try again, or skip it.")
     end
 
     private
 
     # Some models send an array or object argument as a JSON string, or a
     # list of JSON strings. Decode those so the tool gets what it declared.
-    def decode(value)
+    # A whole argument that doesn't parse raises, and Tool#call sends it back;
+    # a string inside one, such as a note titled "[Draft]", stays text.
+    def decode(value, whole: true)
       case value
-      when Array then value.map { |each| decode(each) }
-      when /\A\s*[\[{]/ then decode(JSON.parse(value))
+      when Array then value.map { |each| decode(each, whole: false) }
+      when /\A\s*[\[{]/ then decode(JSON.parse(value), whole: false)
       else value
       end
     rescue JSON::ParserError
+      raise if whole
+
       value
     end
   end

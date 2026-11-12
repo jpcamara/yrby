@@ -93,7 +93,8 @@ class BoardAgent < Y::Agent
   def answer(id, ask)
     started = epoch_ms
     @ask = id
-    @changes = 0
+    @steps = 0 # not @changes: Y::Collaborator keeps its update queue there
+    @failures = 0
     @acted = false
     zs = board.items.to_h.values.filter_map { |item| item["z"] if item.is_a?(Hash) }
     @high = zs.max.to_i

@@ -25,6 +25,9 @@
 /public/board.css
 /public/*.js.map
 
+# Microsoft Fluent emoji art for the board (bun run build:emoji)
+/public/emoji/
+
 # Built stylesheet (Tailwind via `bun run build:css`)
 /public/site.css
 /public/fonts/

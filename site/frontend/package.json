@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build.mjs && bun run build:fonts && bun run build:css",
+    "build": "bun build.mjs && bun run build:fonts && bun run build:emoji && bun run build:css",
+    "build:emoji": "mkdir -p ../public/emoji && cp -R node_modules/@lobehub/fluent-emoji-flat/assets/. ../public/emoji/",
     "build:fonts": "mkdir -p ../public/fonts && cp node_modules/@fontsource-variable/newsreader/files/newsreader-latin-opsz-normal.woff2 node_modules/@fontsource-variable/newsreader/files/newsreader-latin-opsz-italic.woff2 node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-{400,500,600}-normal.woff2 node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-{400,500}-normal.woff2 ../public/fonts/",
     "watch": "bun build.mjs --watch",
     "lint": "eslint .",
@@ -41,6 +42,7 @@
     "@fontsource-variable/newsreader": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@lobehub/fluent-emoji-flat": "1.1.0",
     "@tailwindcss/cli": "^4.1",
     "agent-browser": "^0.28.0",
     "eslint": "^10.5.0",

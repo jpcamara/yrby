@@ -7,13 +7,15 @@
 //             color   fill (a note, shape, or frame) or stroke (a path)
 //             text    Y.Text: a note's title line and caption, a shape's or
 //                     frame's label, a text item's words
-//             icon    an emoji on a note, or a sticker's emoji
+//             icon    an emoji on a note, or a sticker's emoji, drawn as its
+//                     illustration from /emoji/ when there is one
 //             shape   rect | ellipse | pill, for a shape
 //             points  a path's points, flat [x0, y0, x1, y1, ...] from (x, y):
 //                     a Y.Array when someone draws it here, a plain array
 //                     when the agent writes it
 //             dash, stroke   a path's dashes and width
 //             from, to       a connector's item ids
+//             arrow          false for a connector with no arrowhead
 //             by      who added it: a person's id, or "agent:<their id>"
 //             ask     the ask that added it, for the ask's Undo
 //   title, subtitle   Y.Text
@@ -107,6 +109,30 @@ function toast(text) {
   node.hidden = false
   clearTimeout(toast.timer)
   toast.timer = setTimeout(() => { node.hidden = true }, 4000)
+}
+
+// Draws an emoji as its illustration: Microsoft's Fluent flat art, which the
+// build copies to /emoji/<codepoints>.svg. The files name each emoji by its
+// full codepoints, with or without the U+FE0F variation selector, and a model
+// may send either, so this tries both. An emoji with no art stays a character.
+function setArt(node, icon) {
+  if (node.dataset.icon === icon) return
+  node.dataset.icon = icon
+  node.replaceChildren()
+  if (!icon) return
+  const codes = [...icon].map((c) => c.codePointAt(0).toString(16))
+  const bare = codes.filter((c) => c !== "fe0f")
+  const names = [...new Set([codes, bare, [bare[0], "fe0f", ...bare.slice(1)]].map((c) => c.join("-")))]
+  const img = el("img", "art")
+  img.alt = icon
+  img.draggable = false
+  img.addEventListener("error", () => {
+    const next = names.shift()
+    if (next) img.src = `/emoji/${next}.svg`
+    else img.replaceWith(el("span", "art-glyph", icon))
+  })
+  img.src = `/emoji/${names.shift()}.svg`
+  node.append(img)
 }
 
 function isDark(hex) {
@@ -314,7 +340,7 @@ class Board {
   applyView() {
     const { x, y, s } = this.view
     world.style.transform = `translate(${x}px, ${y}px) scale(${s})`
-    canvas.style.backgroundSize = `${24 * s}px ${24 * s}px`
+    canvas.style.backgroundSize = `${32 * s}px ${32 * s}px`
     canvas.style.backgroundPosition = `${x}px ${y}px`
     canvas.style.setProperty("--zoom", s)
     $("#zoom-level").textContent = `${Math.round(s * 100)}%`
@@ -508,8 +534,9 @@ class Board {
     if (type === "note") {
       node.style.background = color || NOTE_COLORS[0]
       const [first, ...rest] = words.split("\n")
-      node.children[0].textContent = item.get("icon") ?? ""
+      setArt(node.children[0], item.get("icon") ?? "")
       node.children[0].hidden = !item.get("icon")
+      node.classList.toggle("has-art", Boolean(item.get("icon")))
       node.children[1].textContent = first
       node.children[2].textContent = rest.join("\n")
     } else if (type === "text") {
@@ -526,7 +553,7 @@ class Board {
       node.style.setProperty("--frame", color || "#e5e7eb")
       node.children[0].textContent = words || "Frame"
     } else if (type === "sticker") {
-      node.textContent = item.get("icon") || "⭐"
+      setArt(node, item.get("icon") || "⭐")
       node.style.fontSize = `${Math.round(h * 0.8)}px`
     }
   }
@@ -569,7 +596,8 @@ class Board {
     node.querySelector(".line").setAttribute("d", d)
     const angle = Math.atan2(y2 - y1, x2 - x1)
     const tip = (da) => `${x2 - 12 * Math.cos(angle + da)} ${y2 - 12 * Math.sin(angle + da)}`
-    node.querySelector(".arrow").setAttribute("d", `M${tip(0.45)}L${x2} ${y2}L${tip(-0.45)}`)
+    const arrow = item.get("arrow") !== false
+    node.querySelector(".arrow").setAttribute("d", arrow ? `M${tip(0.45)}L${x2} ${y2}L${tip(-0.45)}` : "")
     node.style.setProperty("--stroke", item.get("color") || "#475569")
   }
 
