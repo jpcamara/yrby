@@ -222,7 +222,7 @@ GEM
     language_server-protocol (3.17.0.6)
     lexxy (1.0.4)
       railties (>= 8.0.2)
-    lexxy-realtime (0.9.0)
+    lexxy-realtime (0.9.1)
       lexxy (>= 0.9.29, < 2.0)
       rails (>= 8.0.2)
       yrby (~> 0.8, >= 0.8.1)
@@ -520,7 +520,7 @@ CHECKSUMS
   json (3.0.2) sha256=8e6d7e7b11384c21230430cef90b71f14849a34a1f4452796670f7c981bd19df
   language_server-protocol (3.17.0.6) sha256=5ef2c0c138f8267e1bc631d3328347d354f96724b0af22f2c79516120443b7f0
   lexxy (1.0.4) sha256=66f9453cf574095bab1e2020961e586821bf2861df0dac88e1c49b2f0efc939a
-  lexxy-realtime (0.9.0) sha256=41504976260df76507c75b26e782d1147d5e94bcf9c40c7df90953e68606f3c9
+  lexxy-realtime (0.9.1) sha256=ee22278d83f35c1dc094b086c6a33b77f9ab0dd2adc8f455e699defccc672290
   lint_roller (1.1.0) sha256=2c0c845b632a7d172cb849cc90c1bce937a28c5c8ccccb50dfd46a485003cc87
   localhost (1.8.0) sha256=df7ea825b4f64949c588c17efac86bc47ddc4460d723778abe933b71759b2701
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
