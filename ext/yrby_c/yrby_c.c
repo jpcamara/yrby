@@ -178,7 +178,8 @@ static VALUE doc_s_new(int argc, VALUE *argv, VALUE klass) {
   struct YrbyArgs args = {NULL, NULL, 0, 0, 0};
   if (argc == 1) {
     if ((FIXNUM_P(client_id) && FIX2LONG(client_id) < 0) ||
-        (RB_TYPE_P(client_id, T_BIGNUM) && !rb_big_sign(client_id)))
+        (RB_TYPE_P(client_id, T_BIGNUM) && !rb_big_sign(client_id)) ||
+        (RB_FLOAT_TYPE_P(client_id) && RFLOAT_VALUE(client_id) <= -1.0))
       rb_raise(rb_eRangeError, "can't convert negative integer to unsigned");
     args.a = (int64_t)NUM2ULL(client_id);
     args.b = 1;
@@ -187,7 +188,7 @@ static VALUE doc_s_new(int argc, VALUE *argv, VALUE klass) {
   VALUE self = TypedData_Wrap_Struct(klass, &doc_type, NULL);
   struct YrbyResult r = yrby_doc_new(&args);
   check(r);
-  DATA_PTR(self) = (void *)(uintptr_t)r.value;
+  RTYPEDDATA_DATA(self) = (void *)(uintptr_t)r.value;
   return self;
 }
 
@@ -330,21 +331,34 @@ static const rb_data_type_t text_type = {
   .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
+/* Never NULL today (get_text wraps a finished handle); checked anyway, as
+ * doc_of does, because a NULL here would be a segfault, not an error. */
 static struct YrbyArgs on_text(VALUE self) {
-  struct YrbyArgs args = {rb_check_typeddata(self, &text_type), NULL, 0, 0, 0};
+  void *text = rb_check_typeddata(self, &text_type);
+  if (!text) rb_raise(eError, "uninitialized Y::Text");
+  struct YrbyArgs args = {text, NULL, 0, 0, 0};
   return args;
+}
+
+static VALUE wrap_text(VALUE handle) {
+  return TypedData_Wrap_Struct(cText, &text_type, (void *)handle);
 }
 
 static VALUE doc_get_text(VALUE self, VALUE name) {
   INPUT_BUF;
   struct YrbyArgs args = on(self);
   VALUE view = frozen_utf8(name, &args);
-  /* The wrapper first, so nothing can raise once Rust hands over the Text. */
-  VALUE text = TypedData_Wrap_Struct(cText, &text_type, NULL);
   struct YrbyResult r = call(yrby_doc_get_text, args);
   RB_GC_GUARD(view);
   check(r);
-  DATA_PTR(text) = (void *)(uintptr_t)r.value;
+  /* Wrap after the call, so no half-built Text is ever reachable, and free
+   * the Rust handle if the allocation itself raises. */
+  int state = 0;
+  VALUE text = rb_protect(wrap_text, (VALUE)(uintptr_t)r.value, &state);
+  if (state) {
+    yrby_text_free((void *)(uintptr_t)r.value);
+    rb_jump_tag(state);
+  }
   rb_thread_check_ints();
   return text;
 }

@@ -12,7 +12,7 @@ noise, and so is memory. The case for moving is robustness. The C build
 drops bindgen and libclang, which broke yrby's build twice this year. It
 also cross-builds for 32-bit ARM Linux, which magnus can't, and for both
 Windows targets (linked, not yet loaded there). And no Ruby exception ever jumps over a Rust frame. The cost
-is about two-thirds more binding code, written by hand, and some of it in C.
+is about 70% more binding code, written by hand, and some of it in C.
 
 ## How Marco Roth binds Rust into Ruby
 
@@ -128,7 +128,9 @@ It keeps the magnus build's runtime contract:
   and if that fails it raises `EncodingError` with magnus's messages.
 - **Construction.** `Y::Doc.new` is a singleton method with no allocator, as
   in the magnus build, so there is no `allocate`, `dup` or re-`initialize`
-  of an empty Doc. The client id converts as magnus's `u64` does.
+  of an empty Doc. The client id converts as magnus's `u64` does
+  (`TypeError` for non-numbers, `RangeError` for negatives, Floats
+  truncated).
 
 ## Tests
 
@@ -170,9 +172,10 @@ didn't port them.
 
 A separate review of the C build looked for memory-safety, GVL and idiom
 problems, by reading and by running stress tests. It found nothing critical
-or high. These held up on reading and under 4-thread stress with
-`GC.compact` running alongside, and under `GC.stress` with large and
-transcoded inputs:
+or high. A second, independent review found one more memory-safety bug, which the
+first fix below had introduced (see `get_text`). These held up on reading
+and under 4-thread stress with `GC.compact` and an `ObjectSpace` walk
+running alongside, and under `GC.stress` with large and transcoded inputs:
 
 - input strings while the GVL is released (stack copy or frozen view);
 - each result buffer freed once, by Rust's allocator;
@@ -195,13 +198,25 @@ Fixed after the review:
   `NoMethodError`; `allocate` and `dup` gave an empty Doc; re-entering
   `initialize` could leak one. Now it matches magnus (see Strings and
   Construction above).
-- **`get_text` leak on allocation failure (low).** The Ruby wrapper is now
-  made before Rust hands over the Text.
+- **`get_text` leak on allocation failure (low), then a segfault
+  (medium).** The first fix made the Ruby wrapper before the Rust call, with
+  a NULL pointer, and released the GVL. Another thread could reach that
+  half-built `Y::Text` through `ObjectSpace` and Rust dereferenced NULL.
+  Now the wrapper is made after the call under `rb_protect`, which frees the
+  Rust handle if allocation raises, and `Y::Text` methods check for NULL as
+  `Y::Doc`'s do. `thread_stress.rb` walks `ObjectSpace` to cover it.
+- **Negative Float client ids (low).** `Y::Doc.new(-1.5)` wrapped to a huge
+  id; magnus raises `RangeError`. Now it does too.
 
 `bench/no_magnus/behavior_diff.rb` prints these edge cases for both builds
-to diff. Two differences remain, both deliberate: `Y::Text.new` raises in
-C (magnus returns an empty handle) and `encode_state_as_update` with two
-arguments raises `ArgumentError` (magnus ignores the second).
+to diff. The remaining differences are all C being stricter, or wording:
+
+- `Y::Text.new` raises in C; magnus returns an empty handle.
+- Extra arguments to `encode_state_as_update` and `Y::Doc.new` raise
+  `ArgumentError` in C; magnus ignores them.
+- A non-integer `Text` index raises `TypeError` in both, but C's message is
+  "no implicit conversion from nil" where magnus says "of nil into
+  Integer".
 
 Still open, to fix before the C build ships:
 
@@ -217,18 +232,31 @@ Still open, to fix before the C build ships:
   abort profile can't silently change this.
 - **extconf and packaging.** The `cargo --version > /dev/null` check fails
   under Windows `cmd.exe`. `make` doesn't rebuild when the Rust changes. The
-  gemspec glob would not ship `yrby_c.c`, `yrby_ffi.h` or `Cargo.lock`.
-- **Header drift.** Nothing checks the checked-in header against the Rust
-  signatures; a mismatch is silent undefined behaviour. CI should regenerate
-  it and `git diff --exit-code`.
+  gemspec glob ships `ext/yrby_c`'s `.rb`, `.rs` and `.toml` files but not
+  `yrby_c.c`, `yrby_ffi.h` or `Cargo.lock`, so a gem built from this branch
+  carries half of it. `lib/y.rb`'s `YRBY_NATIVE_PATH` switch loads any native
+  library an environment variable names, and must not ship. Exclude
+  `ext/yrby_c/**` and drop that switch until step 6. The mingw system
+  libraries are hard-coded; derive them from `cargo rustc -- --print
+  native-static-libs`.
+- **Header drift and untyped handles.** Every function shares one signature
+  (`YrbyArgs` in, `YrbyResult` out) with the handle as `void *`, so passing a
+  Text handle to a Doc function compiles, and a CI check that regenerates
+  the header and runs `git diff --exit-code` would catch almost nothing.
+  Before porting Map, Array and Awareness, give each function its own
+  signature with a typed opaque handle (`struct YrbyDoc *`), and keep one
+  trampoline by wrapping each call in a small closure struct. Then the
+  header check is worth adding.
 - **Tests.** `gc_stress.rb` only sends inputs under 1 KB, and the
   "replaced input" interrupt test writes identical bytes, so neither covers
   what it's meant to. `gc_stress_large.rb`, `thread_stress.rb` and
   `mutate_input.rb` cover those paths; fold them into the suite when the C
   build becomes the main one.
-- **Nits.** Mark both types `RUBY_TYPED_WB_PROTECTED`, typed opaque handles
-  in the header, `rust-version` in `Cargo.toml`, and the copied `shared.rs`
-  that can drift from the original.
+- **Nits.** Mark both types `RUBY_TYPED_WB_PROTECTED`; `rust-version` in
+  `Cargo.toml`; the copied `shared.rs` can drift from the original;
+  `keep_unsent` and `wrap_update` make a frozen view they don't need (they
+  hold the GVL); `client_id` and `keep_unsent` ignore their result status;
+  `-std=c99` may be too strict for Ruby headers elsewhere (use `gnu99`).
 
 ## Numbers
 
@@ -382,8 +410,9 @@ What magnus gives that the C build has to do by hand:
 ## What gets harder
 
 - **Two languages and a header.** Every method is a Rust `extern "C"`
-  function, a C wrapper and a registration line. The slice took 804 lines of
-  binding code (350 C, 454 Rust) against 481 with magnus (code lines, no comments or blanks).
+  function, a C wrapper and a registration line. The slice took 814 lines of
+  binding code (360 C, 454 Rust) against 481 with magnus (code lines, no comments or blanks;
+  not counting the header, the extconf, or the 75 lines of `shared.rs` copied from the magnus build).
   The generic trampoline keeps the C wrappers to a few lines each, but
   conversions are by hand.
 - **Unsafe on both sides.** C has no borrow checker: freeing a result twice,
@@ -415,12 +444,13 @@ Speed doesn't justify it: build and binary gains are real but modest, and
 call cost is a wash. Robustness does. Twice this year magnus or rb-sys broke
 yrby's build for reasons outside yrby, and each time a source install on a
 new system would have broken the same way. The C-ABI design has no bindgen
-and needs only a C compiler and cargo. It cross-built for every platform the
-spike tried, including both Windows targets and 32-bit ARM Linux (linked; not
-yet loaded on those platforms). It also removes a class of bug (Ruby raising across Rust
+and needs only a C compiler and cargo. It cross-built for the three
+platforms the spike tried, both Windows targets and 32-bit ARM Linux, and
+linked; it has only been loaded on arm64 macOS. x86_64 and aarch64 Linux and
+the musl targets weren't built. It also removes a class of bug (Ruby raising across Rust
 frames) that yrby has already paid for once.
 
-The price is roughly two-thirds more binding code, two languages per method, and
+The price is roughly 70% more binding code, two languages per method, and
 unsafe C that review has to watch. The spike keeps that contained: one GVL
 trampoline, one result conversion, one error path, no GC marking. But the
 structured-value handles (`Map`, `Array`, `XmlText`, `Awareness`) and the
@@ -431,9 +461,11 @@ Not a permanent hybrid. Two bindings means two sets of glue, and magnus's
 build costs stay. A hybrid only makes sense while migrating, behind
 `YRBY_NATIVE`, as the plan below does.
 
-If the C isn't worth taking on: stay on magnus, and cut the risk it
-brings by pinning rb-sys in `Cargo.lock` and testing new Ruby and libclang
-releases in a scheduled CI job.
+If the C isn't worth taking on: stay on magnus, and test new Ruby and
+libclang releases in a scheduled CI job so breakage shows up before users
+hit it. Pinning doesn't help: rb-sys is already pinned in the shipped
+`Cargo.lock`, and both breakages came from Ruby headers and libclang moving
+under it.
 
 ## Migration plan
 
@@ -445,8 +477,11 @@ Each step lands on its own, with both builds loadable side by side
    (`bench/no_magnus/cross.sh`). Add a CI job that builds the slice for every
    platform yrby ships plus `arm-linux` and `arm-linux-musl`, and loads it
    and runs the slice's tests on `windows-latest`, `ubuntu-latest` (x86_64
-   and arm64), macOS, and an armv7 container under qemu. Windows loading is
-   the gate: if it fails, stop here.
+   and arm64), macOS, an Alpine (musl) container, and an armv7 container
+   under qemu. musl matters because Rust's musl targets link the C runtime
+   statically by default, which rb-sys turns off for you and this extconf
+   doesn't yet. Windows and musl loading are the gate: if either fails,
+   stop here.
 2. **Make the pure Rust code magnus-free.** Split `shared.rs` into the pure
    half (origins, identity, index maths, value types) and the conversion half.
    Move the remaining logic out of the `impl Rb*` blocks into plain functions
@@ -477,9 +512,11 @@ Each step lands on its own, with both builds loadable side by side
 
 Rough size: the magnus binding is 2,228 code lines (no tests, comments or
 blank lines, not counting `protocol.rs` and `read.rs`). The slice took 481 of
-them, which leaves about 1,750. At the spike's ratio (804 for 481) that is
-about 2,900 lines of C and `extern "C"` Rust, less what step 2 moves into
-shared plain functions.
+them, which leaves about 1,750. At the spike's ratio (814 for 481) that is
+about 3,000 lines of C and `extern "C"` Rust, less what step 2 moves into
+shared plain functions. Treat that as a floor: the slice was the easy part,
+strings and integers only. The rest converts Hashes and Arrays, yields to
+blocks and calls back into Ruby, which take more C per method.
 
 ## Reproducing
 
