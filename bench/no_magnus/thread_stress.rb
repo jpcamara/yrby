@@ -1,7 +1,8 @@
 # frozen_string_literal: false
 
 # Four threads on one Doc/Text with large unfrozen inputs, one thread mutating
-# a string it also pushes, one thread compacting. SECS=20 by default.
+# a string it also pushes, one thread compacting, and one walking every live
+# Y::Text through ObjectSpace. SECS=20 by default.
 # Expect errors: 0 and converged: true.
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "y"
@@ -37,9 +38,15 @@ threads = []
 end
 mut = Thread.new { s = +("a" * 5000); until stop; s.replace("b" * 5000); text << s; s << "c"; end }
 gc = Thread.new { until stop; GC.compact; GC.start; Thread.pass; end }
+# Every live Y::Text, including one get_text is still building.
+probe = Thread.new do
+  until stop
+    ObjectSpace.each_object(Y::Text) { |t| t.length rescue Y::Error }
+  end
+end
 sleep(Integer(ENV.fetch("SECS", "20")))
 stop = true
-(threads + [mut, gc]).each(&:join)
+(threads + [mut, gc, probe]).each(&:join)
 puts "errors: #{errors.size}"
 puts errors.pop.full_message unless errors.empty?
 peer = Y::Doc.new; peer.apply_update(doc.encode_state_as_update)

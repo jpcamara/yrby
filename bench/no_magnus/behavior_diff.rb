@@ -4,8 +4,10 @@
 #   bundle exec ruby bench/no_magnus/behavior_diff.rb > m.txt
 #   YRBY_NATIVE=c bundle exec ruby bench/no_magnus/behavior_diff.rb > c.txt
 #   diff m.txt c.txt
-# Expected differences: Y::Text.new (magnus returns an empty handle) and
-# encode_state_as_update with two arguments (C raises ArgumentError).
+# Expected differences, all C being stricter or wording: Y::Text.new (magnus
+# returns an empty handle), extra arguments to encode_state_as_update and
+# Y::Doc.new (C raises ArgumentError, magnus ignores them), and the TypeError
+# message for a non-integer Text index.
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "y"
 def t(label)
@@ -47,3 +49,9 @@ t("root_names") { d.root_names }
 t("wrap nil") { Y.wrap_update(nil) }
 t("esau nil") { d.encode_state_as_update(nil) }
 t("esau 2 args") { d.encode_state_as_update("a", "b") }
+t("new(-1.5)") { Y::Doc.new(-1.5).client_id }
+t("new(-0.5)") { Y::Doc.new(-0.5).client_id }
+t("new(1, 2)") { Y::Doc.new(1, 2).client_id }
+t("insert nil idx") { tx.insert(nil, "x") }
+t("insert string idx") { tx.insert("1", "x") }
+t("delete nil idx") { tx.delete(nil, 1) }
