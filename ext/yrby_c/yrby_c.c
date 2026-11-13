@@ -48,11 +48,15 @@ static struct YrbyResult call(yrby_fn fn, struct YrbyArgs args) {
   return c.result;
 }
 
-/* Raise for an error result, or return. Frees the message first. */
+/*
+ * Raise for an error result, or return. Frees the message first, and lets a
+ * pending interrupt go before the error, as the magnus build's nogvl does.
+ */
 static void check(struct YrbyResult r) {
   if (r.status != YRBY_STATUS_ERROR && r.status != YRBY_STATUS_PANIC) return;
   VALUE message = rb_utf8_str_new((const char *)r.ptr, (long)r.len);
   yrby_free(r.ptr, r.len);
+  rb_thread_check_ints();
   rb_exc_raise(rb_exc_new_str(eError, message));
 }
 
@@ -111,15 +115,29 @@ static VALUE frozen_bytes_into(VALUE str, struct YrbyArgs *args, uint8_t *buf) {
 }
 #define frozen_bytes(str, args) frozen_bytes_into((str), (args), buf)
 
-/* As frozen_bytes, with the text in UTF-8 first (as magnus's String does). */
+/* Whether `str`'s bytes are valid UTF-8 as they stand (magnus's test_as_str). */
+static int utf8_as_is(VALUE str) {
+  int idx = ENCODING_GET(str);
+  int cr = rb_enc_str_coderange(str);
+  if (idx == rb_utf8_encindex() || idx == rb_usascii_encindex())
+    return cr == ENC_CODERANGE_7BIT || cr == ENC_CODERANGE_VALID;
+  return idx == rb_ascii8bit_encindex() && cr == ENC_CODERANGE_7BIT;
+}
+
+/*
+ * As frozen_bytes, with the text in UTF-8 first. Same rules and errors as
+ * magnus's RString#to_string: transcode if needed, else EncodingError.
+ */
 static VALUE frozen_utf8_into(VALUE str, struct YrbyArgs *args, uint8_t *buf) {
   StringValue(str);
-  int idx = ENCODING_GET(str);
-  if (idx != rb_utf8_encindex() &&
-      !(idx == rb_usascii_encindex()) &&
-      !(rb_enc_asciicompat(rb_enc_from_index(idx)) &&
-        rb_enc_str_coderange(str) == ENC_CODERANGE_7BIT)) {
-    str = rb_str_export_to_enc(str, rb_utf8_encoding());
+  if (!utf8_as_is(str)) {
+    str = rb_str_conv_enc(str, NULL, rb_utf8_encoding());
+    if (!utf8_as_is(str)) {
+      int idx = ENCODING_GET(str);
+      if (idx == rb_utf8_encindex() || idx == rb_usascii_encindex())
+        rb_raise(rb_eEncodingError, "invalid byte sequence in UTF-8");
+      rb_raise(rb_eEncodingError, "expected utf-8, got %s", rb_enc_name(rb_enc_from_index(idx)));
+    }
   }
   return frozen_bytes_into(str, args, buf);
 }
@@ -138,10 +156,6 @@ static const rb_data_type_t doc_type = {
   .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
-static VALUE doc_alloc(VALUE klass) {
-  return TypedData_Wrap_Struct(klass, &doc_type, NULL);
-}
-
 static void *doc_of(VALUE self) {
   void *doc = rb_check_typeddata(self, &doc_type);
   if (!doc) rb_raise(eError, "uninitialized Y::Doc");
@@ -153,17 +167,24 @@ static struct YrbyArgs on(VALUE self) {
   return args;
 }
 
-static VALUE doc_initialize(int argc, VALUE *argv, VALUE self) {
+/*
+ * Y::Doc.new(client_id = random). A singleton `new` with no allocator, like
+ * the magnus build: no allocate/dup of an empty Doc, no initialize to re-run.
+ * The client id converts as magnus's u64 does (TypeError, RangeError).
+ */
+static VALUE doc_s_new(int argc, VALUE *argv, VALUE klass) {
   VALUE client_id;
   rb_scan_args(argc, argv, "01", &client_id);
-  if (DATA_PTR(self)) rb_raise(eError, "Y::Doc already initialized");
   struct YrbyArgs args = {NULL, NULL, 0, 0, 0};
-  if (!NIL_P(client_id)) {
-    if (RTEST(rb_funcall(client_id, rb_intern("negative?"), 0)))
-      rb_raise(rb_eRangeError, "client_id must not be negative");
+  if (argc == 1) {
+    if ((FIXNUM_P(client_id) && FIX2LONG(client_id) < 0) ||
+        (RB_TYPE_P(client_id, T_BIGNUM) && !rb_big_sign(client_id)))
+      rb_raise(rb_eRangeError, "can't convert negative integer to unsigned");
     args.a = (int64_t)NUM2ULL(client_id);
     args.b = 1;
   }
+  /* The wrapper first, so a raise here can't leak the Rust doc. */
+  VALUE self = TypedData_Wrap_Struct(klass, &doc_type, NULL);
   struct YrbyResult r = yrby_doc_new(&args);
   check(r);
   DATA_PTR(self) = (void *)(uintptr_t)r.value;
@@ -318,10 +339,12 @@ static VALUE doc_get_text(VALUE self, VALUE name) {
   INPUT_BUF;
   struct YrbyArgs args = on(self);
   VALUE view = frozen_utf8(name, &args);
+  /* The wrapper first, so nothing can raise once Rust hands over the Text. */
+  VALUE text = TypedData_Wrap_Struct(cText, &text_type, NULL);
   struct YrbyResult r = call(yrby_doc_get_text, args);
   RB_GC_GUARD(view);
   check(r);
-  VALUE text = TypedData_Wrap_Struct(cText, &text_type, (void *)(uintptr_t)r.value);
+  DATA_PTR(text) = (void *)(uintptr_t)r.value;
   rb_thread_check_ints();
   return text;
 }
@@ -388,8 +411,8 @@ void Init_yrby_c(void) {
   eError = rb_define_class_under(mY, "Error", rb_eStandardError);
 
   cDoc = rb_define_class_under(mY, "Doc", rb_cObject);
-  rb_define_alloc_func(cDoc, doc_alloc);
-  rb_define_method(cDoc, "initialize", doc_initialize, -1);
+  rb_undef_alloc_func(cDoc);
+  rb_define_singleton_method(cDoc, "new", doc_s_new, -1);
   rb_define_method(cDoc, "client_id", doc_client_id, 0);
   rb_define_method(cDoc, "encode_state_vector", doc_encode_state_vector, 0);
   rb_define_method(cDoc, "encode_state_as_update", doc_encode_state_as_update, -1);
