@@ -141,7 +141,7 @@ in full on the magnus build with the spike's loader change.
 | build | pass | fail or error |
 |---|---|---|
 | magnus, whole extension | 509 | 0 |
-| magnus, cut to the spike's slice (`make_magnus_slice.rb`) | 298 | 211 |
+| magnus, cut to the spike's slice | 298 | 211 |
 | C ABI, the spike's slice | 298 | 211 |
 
 The two slice builds match file by file. Every one of the 211 fails on API
@@ -237,12 +237,12 @@ yrs 0.28.1, release builds. The registry was fetched first, so no build
 includes downloads. Every benchmark prints the path, size and SHA-256 of the
 binary it loaded.
 
-"magnus slice" is yrby's magnus extension cut to the same slice by
-`bench/no_magnus/make_magnus_slice.rb`, so it is the same Rust code with the
-same dependencies, minus the renderer crates. Comparing it with the C slice
+"magnus slice" is yrby's magnus extension cut to the same slice by a
+generator script, so it is the same Rust code with the same dependencies,
+minus the renderer crates. Comparing it with the C slice
 isolates the binding layer. "magnus full" is today's extension.
 
-**Clean build** (`build_times.sh`, 3 runs each, seconds, median):
+**Clean build** (3 runs each, seconds, median):
 
 | profile, jobs | magnus full | magnus slice | C slice | C vs slice |
 |---|---|---|---|---|
@@ -266,7 +266,7 @@ machine or CI runner, where the critical path matters more.
 Editing Rust costs the same either way. Editing only the C glue skips cargo
 work entirely. The full extension's 2.6s is its size, not magnus.
 
-**Binary size** (`sizes.sh`, bytes after `strip -x`):
+**Binary size** (bytes after `strip -x`):
 
 | profile | magnus full | magnus slice | C slice |
 |---|---|---|---|
@@ -278,7 +278,7 @@ The first arm-linux build exported 2,647 symbols and was 2.46 MB. The
 extconf now exports only `Init_yrby_c` and garbage-collects sections, as
 rustc does for a cdylib. The same arm build is then 1.10 MB with one export.
 
-**Call overhead** (`call_overhead.rb`, LTO builds, best of 7, ns per call,
+**Call overhead** (LTO builds, best of 7, ns per call,
 two runs agreed within 2%):
 
 | case | magnus full | magnus slice | C slice |
@@ -486,14 +486,10 @@ shared plain functions.
 ```sh
 bundle exec rake compile                    # magnus build -> lib/y/yrby.bundle
 bundle exec rake spike:compile_c            # C build      -> lib/y/yrby_c.bundle
-ruby bench/no_magnus/make_magnus_slice.rb   # magnus build of the same slice -> tmp/magnus_slice
 
 bench/no_magnus/run_tests.sh OUT            # each test file, magnus build
 YRBY_NATIVE=c bench/no_magnus/run_tests.sh OUT
 YRBY_NATIVE=c bundle exec ruby -Ilib -Itest bench/no_magnus/slice_interrupt_test.rb
-bench/no_magnus/build_times.sh 2            # clean and incremental build times (TSV)
-bench/no_magnus/sizes.sh                    # after building all three
-bench/no_magnus/call_overhead_all.sh        # all three builds
 YRBY_NATIVE=c bundle exec ruby bench/no_magnus/gc_stress.rb
 YRBY_NATIVE=c bundle exec ruby bench/no_magnus/gc_stress_large.rb
 YRBY_NATIVE=c bundle exec ruby bench/no_magnus/thread_stress.rb      # SECS=20
@@ -502,6 +498,10 @@ YRBY_NATIVE=c bundle exec ruby bench/no_magnus/interrupt_order.rb
 bundle exec ruby bench/no_magnus/behavior_diff.rb > m.txt           # then YRBY_NATIVE=c, and diff
 bench/no_magnus/cross.sh x64-mingw-ucrt x86_64-pc-windows-gnu   # needs Docker
 ```
+
+The one-off measurement scripts (build times, sizes, call overhead, and the
+magnus-slice generator) were removed once the numbers were in. They are in
+this branch's history at `6097aea`.
 
 On this Mac, build the magnus extension with
 `CARGO_PROFILE_RELEASE_STRIP=none` or it may not load (see Numbers).
