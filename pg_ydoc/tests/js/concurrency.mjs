@@ -45,7 +45,10 @@ const READ = `
   select ydoc_merge_agg(x)::bytea b from (
     select body::bytea x from cc_snap where id = $1
     union all select u from cc_log where doc_id = $1) t`
-const clockSum = (bytes) => [...Y.decodeStateVector(Y.encodeStateVectorFromUpdate(bytes)).values()].reduce((a, b) => a + b, 0)
+// Measured on a Doc, not with Y.encodeStateVectorFromUpdate: that counts a
+// leading Skip as content when it is the update's first struct (Yjs 13.6), so
+// a gapped read looks further along than it is.
+const clockSum = (bytes) => [...Y.decodeStateVector(Y.encodeStateVector(docFrom(bytes))).values()].reduce((a, b) => a + b, 0)
 
 async function write (c, id, mine, batched) {
   for (let i = 0; i < mine.length;) {
