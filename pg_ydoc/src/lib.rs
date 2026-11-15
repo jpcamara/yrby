@@ -1,4 +1,4 @@
-//! pg_yrby: Yjs documents as a Postgres column type.
+//! pg_ydoc: Yjs documents as a Postgres column type.
 //!
 //! `ydoc` is a varlena holding a v1-encoded Yjs update (the merged document).
 //! Functions take raw updates and state vectors as `bytea`, which is what Yjs
@@ -16,7 +16,7 @@ use std::ffi::{CStr, CString};
 pub mod ycore;
 
 fn raise(e: ycore::Error) -> ! {
-    pgrx::error!("pg_yrby: {e}")
+    pgrx::error!("pg_ydoc: {e}")
 }
 
 fn ok<T>(r: Result<T, ycore::Error>) -> T {
@@ -81,11 +81,11 @@ extension_sql!(
 /// Text input: bytea hex (`\x...`). Validated as a v1 update.
 #[pg_extern(immutable, parallel_safe, requires = ["ydoc_shell"])]
 fn ydoc_in(input: &CStr) -> Ydoc {
-    let s = input.to_str().unwrap_or_else(|_| pgrx::error!("pg_yrby: ydoc input is not UTF-8"));
+    let s = input.to_str().unwrap_or_else(|_| pgrx::error!("pg_ydoc: ydoc input is not UTF-8"));
     let hex = s
         .strip_prefix("\\x")
-        .unwrap_or_else(|| pgrx::error!("pg_yrby: ydoc input must be bytea hex (\\x...)"));
-    let bytes = decode_hex(hex).unwrap_or_else(|| pgrx::error!("pg_yrby: invalid hex in ydoc input"));
+        .unwrap_or_else(|| pgrx::error!("pg_ydoc: ydoc input must be bytea hex (\\x...)"));
+    let bytes = decode_hex(hex).unwrap_or_else(|| pgrx::error!("pg_ydoc: invalid hex in ydoc input"));
     ok(ycore::validate(&bytes));
     Ydoc(bytes)
 }
@@ -263,7 +263,7 @@ fn ydoc_json(doc: Ydoc) -> JsonB {
 }
 
 fn jsonb(s: String) -> JsonB {
-    JsonB(serde_json::from_str(&s).unwrap_or_else(|e| pgrx::error!("pg_yrby: bad JSON from yrs: {e}")))
+    JsonB(serde_json::from_str(&s).unwrap_or_else(|e| pgrx::error!("pg_ydoc: bad JSON from yrs: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ unsafe fn agg_state<'a>(state: Option<Internal>, fcinfo: pg_sys::FunctionCallInf
     }
     let mut ctx = std::ptr::null_mut();
     if unsafe { pg_sys::AggCheckCallContext(fcinfo, &mut ctx) } == 0 {
-        pgrx::error!("pg_yrby: ydoc_merge_agg transition called outside an aggregate");
+        pgrx::error!("pg_ydoc: ydoc_merge_agg transition called outside an aggregate");
     }
     let ptr = PgMemoryContexts::For(ctx).leak_and_drop_on_delete(AggState::new());
     (Internal::from(Some(pg_sys::Datum::from(ptr))), unsafe { &mut *ptr })

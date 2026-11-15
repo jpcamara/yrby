@@ -1,4 +1,4 @@
-//! The Yjs operations pg_yrby exposes, as plain Rust over v1-encoded bytes.
+//! The Yjs operations pg_ydoc exposes, as plain Rust over v1-encoded bytes.
 //! Nothing here touches Postgres.
 //!
 //! A stored document is a v1 update: the integrated state plus anything still

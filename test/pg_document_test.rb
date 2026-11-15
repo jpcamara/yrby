@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "document_channel_test"
-require "y/pg_yrby"
+require "y/pg_ydoc"
 require_relative "../app/models/y/pg_document"
 
-# Y::PgDocument against a real Postgres with the pg_yrby extension (see
-# pg_yrby/README.md to build it). Skipped unless YRBY_PG_URL points at one,
+# Y::PgDocument against a real Postgres with the pg_ydoc extension (see
+# pg_ydoc/README.md to build it). Skipped unless YRBY_PG_URL points at one,
 # e.g.
 #
 #   YRBY_PG_URL=postgres://localhost:28817/postgres bundle exec rake test
@@ -15,10 +15,10 @@ PG_DOCUMENT_URL = ENV.fetch("YRBY_PG_URL", nil)
 
 if PG_DOCUMENT_URL
   require "active_record/connection_adapters/postgresql_adapter"
-  Y::PgYrby.register_type(ActiveRecord::ConnectionAdapters::PostgreSQLAdapter)
+  Y::PgYdoc.register_type(ActiveRecord::ConnectionAdapters::PostgreSQLAdapter)
   Y::PgDocument.establish_connection(url: PG_DOCUMENT_URL, pool: 12)
   Y::PgDocument.connection.execute(<<~SQL)
-    CREATE EXTENSION IF NOT EXISTS pg_yrby;
+    CREATE EXTENSION IF NOT EXISTS pg_ydoc;
     DROP TABLE IF EXISTS y_document_updates, y_documents;
     CREATE TABLE y_documents (
       id bigserial PRIMARY KEY,
@@ -46,11 +46,11 @@ class PgDocumentTest < ActionCable::Channel::TestCase
   tests Y::DocumentChannel
 
   class PgPage < DocumentChannelTest::Page
-    has_collaborative_document :body, store: :pg_yrby
+    has_collaborative_document :body, store: :pg_ydoc
   end
 
   def setup
-    skip "set YRBY_PG_URL to a Postgres with pg_yrby" unless PG_DOCUMENT_URL
+    skip "set YRBY_PG_URL to a Postgres with pg_ydoc" unless PG_DOCUMENT_URL
     Y::PgDocument.connection.execute("TRUNCATE y_document_updates, y_documents")
     @original_authorizer = Y::DocumentChannel.document_authorizer
     stub_connection
@@ -184,7 +184,7 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     assert_equal 0, log_rows("doc")
   end
 
-  def test_the_shipped_channel_serves_a_pg_yrby_document_without_loading_it
+  def test_the_shipped_channel_serves_a_pg_ydoc_document_without_loading_it
     page = PgPage.create!(title: "pg")
     updates, expected = typing(80, seed: 8)
     attribute = page.collaborative_document(:body)
@@ -213,9 +213,9 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     assert_kind_of Y::PgDocument, attribute.document_row
   end
 
-  def test_pg_yrby_store_rejects_encryption_and_unknown_stores
+  def test_pg_ydoc_store_rejects_encryption_and_unknown_stores
     assert_raises(ArgumentError) do
-      Class.new(PgPage) { has_collaborative_document :x, store: :pg_yrby, encrypted: true }
+      Class.new(PgPage) { has_collaborative_document :x, store: :pg_ydoc, encrypted: true }
     end
     assert_raises(ArgumentError) { Class.new(PgPage) { has_collaborative_document :x, store: :redis } }
   end

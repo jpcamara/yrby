@@ -27,7 +27,7 @@ const connect = async () => {
   return c
 }
 const admin = await connect()
-await admin.query('create extension if not exists pg_yrby')
+await admin.query('create extension if not exists pg_ydoc')
 await admin.query('drop table if exists cc_doc, cc_log, cc_snap')
 await admin.query('create table cc_doc (id int primary key, body ydoc)')
 await admin.query('create table cc_snap (id int primary key, body ydoc not null)')

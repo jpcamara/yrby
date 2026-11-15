@@ -26,7 +26,7 @@ const { rand, shuffle } = r
 
 const c = new pg.Client({ host: 'localhost', port: Number(process.env.PGPORT ?? 28817), database: 'postgres' })
 await c.connect()
-await c.query('create extension if not exists pg_yrby')
+await c.query('create extension if not exists pg_ydoc')
 await c.query('drop table if exists conv_doc, conv_log, conv_snap')
 await c.query('create table conv_doc (id int primary key, body ydoc)')
 await c.query('create table conv_snap (id int primary key, body ydoc)')

@@ -133,7 +133,7 @@ async function logged (c, w) {
 const kb = (n) => (n / 1024).toFixed(0) + ' KB'
 const c = new pg.Client({ host: 'localhost', port: Number(process.env.PGPORT ?? 28817), database: process.env.PGDATABASE ?? 'postgres' })
 await c.connect()
-await c.query('create extension if not exists pg_yrby')
+await c.query('create extension if not exists pg_ydoc')
 console.log(`${EDITS} edits, one statement each; log compacts every ${COMPACT_EVERY}\n`)
 console.log('base    strategy  write ms  per edit  WAL        size→vacuum      read ms  doc     ok')
 for (const base of bases) {

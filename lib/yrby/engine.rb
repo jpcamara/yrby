@@ -3,7 +3,7 @@
 require "rails/engine"
 require "action_dispatch" # Engine::Configuration references it at subclass definition
 require "global_id/railtie" # so signed grants work even when the app doesn't load Active Job
-require "y/pg_yrby"
+require "y/pg_ydoc"
 
 module Yrby
   # The Rails engine. Autoloads the gem's models (Y::Document,
@@ -15,9 +15,9 @@ module Yrby
       ActiveSupport.on_load(:action_view) { include Y::Collaborative::Helper }
     end
 
-    # ydoc columns (store: :pg_yrby) read as binary, like bytea.
-    initializer "yrby.pg_yrby" do
-      ActiveSupport.on_load(:active_record_postgresqladapter) { Y::PgYrby.register_type(self) }
+    # ydoc columns (store: :pg_ydoc) read as binary, like bytea.
+    initializer "yrby.pg_ydoc" do
+      ActiveSupport.on_load(:active_record_postgresqladapter) { Y::PgYdoc.register_type(self) }
     end
 
     initializer "yrby.deprecator" do |app|

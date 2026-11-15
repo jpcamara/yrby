@@ -1,6 +1,6 @@
 comment = 'Yjs documents as a column type'
 default_version = '@CARGO_VERSION@'
-module_pathname = 'pg_yrby'
+module_pathname = 'pg_ydoc'
 relocatable = false
 superuser = true
 trusted = false

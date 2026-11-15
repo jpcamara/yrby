@@ -3,7 +3,7 @@
 // (which uses ydoc_send/ydoc_recv). Binary input must also reject bytes that
 // are not a v1 update, as text input does.
 //
-// Creates and drops databases pg_yrby_dump_* on the test server.
+// Creates and drops databases pg_ydoc_dump_* on the test server.
 // Usage: node dump.mjs   Env: PGPORT (28817), PGBIN (Homebrew postgresql@17)
 import pg from 'pg'
 import * as Y from 'yjs'
@@ -18,9 +18,9 @@ const BIN = process.env.PGBIN ?? '/opt/homebrew/opt/postgresql@17/bin'
 const conn = ['-h', 'localhost', '-p', PORT]
 const run = (tool, ...args) => execFileSync(path.join(BIN, tool), [...conn, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }).toString()
 const psql = (db, ...args) => run('psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-d', db, ...args)
-const DBS = ['src', 'plain', 'custom', 'bin'].map((n) => `pg_yrby_dump_${n}`)
+const DBS = ['src', 'plain', 'custom', 'bin'].map((n) => `pg_ydoc_dump_${n}`)
 const [SRC, PLAIN, CUSTOM, BINARY] = DBS
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pg_yrby_dump-'))
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pg_ydoc_dump-'))
 
 for (const db of DBS) run('dropdb', '--if-exists', db)
 for (const db of DBS) run('createdb', db)
@@ -63,7 +63,7 @@ const docs = [
 
 const src = new pg.Client({ host: 'localhost', port: Number(PORT), database: SRC })
 await src.connect()
-await src.query('create extension pg_yrby')
+await src.query('create extension pg_ydoc')
 await src.query('create table docs (id int primary key, name text, body ydoc)')
 for (const [id, name, bytes, sql] of docs) {
   if (bytes) await src.query('insert into docs values ($1, $2, ydoc_apply(null, $3))', [id, name, bytes])
@@ -99,7 +99,7 @@ check('pg_dump custom', CUSTOM)
 // Binary COPY out and back in.
 const binFile = path.join(tmp, 'docs.bin')
 psql(SRC, '-c', `\\copy docs to '${binFile}' with (format binary)`)
-psql(BINARY, '-c', 'create extension pg_yrby', '-c', 'create table docs (id int primary key, name text, body ydoc)')
+psql(BINARY, '-c', 'create extension pg_ydoc', '-c', 'create table docs (id int primary key, name text, body ydoc)')
 psql(BINARY, '-c', `\\copy docs from '${binFile}' with (format binary)`)
 check('binary copy', BINARY)
 
@@ -111,7 +111,7 @@ const rejects = (label, hex) => {
     psql(BINARY, '-c', `\\copy docs from '${f}' with (format binary)`)
     return false
   } catch (e) {
-    return /pg_yrby/.test(e.stderr.toString())
+    return /pg_ydoc/.test(e.stderr.toString())
   }
 }
 results['binary rejects garbage'] = rejects('garbage', 'deadbeef')

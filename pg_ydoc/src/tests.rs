@@ -56,7 +56,7 @@ mod tests {
         assert!(flag("select $1::ydoc::text::ydoc::bytea = $1", &[arg(u)]));
     }
 
-    #[pg_test(error = "pg_yrby: ydoc input must be bytea hex (\\x...)")]
+    #[pg_test(error = "pg_ydoc: ydoc input must be bytea hex (\\x...)")]
     fn text_input_must_be_hex() {
         Spi::run("select 'hello'::ydoc").unwrap();
     }
