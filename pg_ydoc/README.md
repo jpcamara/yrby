@@ -1,4 +1,4 @@
-# pg_yrby
+# pg_ydoc
 
 A Postgres extension, in Rust with [pgrx](https://github.com/pgcentralfoundation/pgrx),
 that stores [Yjs](https://yjs.dev) documents in a `ydoc` column and runs the
@@ -6,7 +6,7 @@ sync operations a Yjs server needs in SQL. Built on
 [yrs](https://github.com/y-crdt/y-crdt) 0.28.
 
 ```sql
-CREATE EXTENSION pg_yrby;
+CREATE EXTENSION pg_ydoc;
 CREATE TABLE notes (id bigint PRIMARY KEY, body ydoc);
 
 -- A client sends a v1 update.
@@ -51,7 +51,7 @@ the stored value, and folds in when the missing update comes. It is never
 dropped, and `ydoc_has_pending` reports it. `ydoc_diff` leaves it out by
 default; `include_pending => true` sends it along, as Yjs servers do.
 
-To make that hold, pg_yrby combines updates with `merge_updates_v1` whenever
+To make that hold, pg_ydoc combines updates with `merge_updates_v1` whenever
 anything is pending, never by applying them one after another to a yrs `Doc`.
 The convergence test found that re-encoding a `Doc` that holds pending
 content can lose some, and that in yrs 0.27 out-of-order delivery through a

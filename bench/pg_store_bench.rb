@@ -1,6 +1,6 @@
-# Y::Document vs Y::PgDocument (same model API, Yjs work in the pg_yrby
+# Y::Document vs Y::PgDocument (same model API, Yjs work in the pg_ydoc
 # extension), called as the channel calls them. STORE=yrby|pg, needs a
-# Postgres with pg_yrby on :28817 and WORKLOAD_DIR with w2/w50/w500.txt.
+# Postgres with pg_ydoc on :28817 and WORKLOAD_DIR with w2/w50/w500.txt.
 require "active_record"
 require "pg"
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
@@ -8,9 +8,9 @@ require "y"
 require_relative "../app/models/y/document"
 require_relative "../app/models/y/document_update"
 require_relative "../app/models/y/pg_document"
-require "y/pg_yrby"
+require "y/pg_ydoc"
 require "active_record/connection_adapters/postgresql_adapter"
-Y::PgYrby.register_type(ActiveRecord::ConnectionAdapters::PostgreSQLAdapter)
+Y::PgYdoc.register_type(ActiveRecord::ConnectionAdapters::PostgreSQLAdapter)
 
 STORE = ENV.fetch("STORE")
 model = STORE == "pg" ? Y::PgDocument : Y::Document
@@ -18,7 +18,7 @@ ActiveRecord::Base.establish_connection(adapter: "postgresql", host: "localhost"
 ActiveRecord::Base.logger = nil
 ActiveRecord::Schema.verbose = false
 conn = ActiveRecord::Base.connection
-conn.execute("create extension if not exists pg_yrby")
+conn.execute("create extension if not exists pg_ydoc")
 conn.execute("drop table if exists y_document_updates, y_documents")
 ActiveRecord::Schema.define do
   create_table :y_documents do |t|

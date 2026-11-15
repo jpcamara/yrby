@@ -3,7 +3,7 @@
 [workspace]
 
 [package]
-name = "pg_yrby"
+name = "pg_ydoc"
 version = "0.0.0"
 edition = "2021"
 

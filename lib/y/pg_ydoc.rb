@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module Y
-  # Support for the pg_yrby Postgres extension, which stores documents in a
+  # Support for the pg_ydoc Postgres extension, which stores documents in a
   # ydoc column. See Y::PgDocument.
-  module PgYrby
+  module PgYdoc
     # Teaches a PostgreSQL adapter class that ydoc reads and writes like
     # bytea (it is the same bytes), so Active Record doesn't warn about an
     # unknown type and returns binary strings. Connections made after this

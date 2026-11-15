@@ -59,7 +59,7 @@ module Y
 
     on_load { |_key| document.load_state }
     on_change { |_key, update| document.append(update) }
-    # Stores that answer sync in the database (store: :pg_yrby) skip loading
+    # Stores that answer sync in the database (store: :pg_ydoc) skip loading
     # the document here; the others return nil and fall back to on_load.
     on_sync_state { |_key| document.sync_state }
     on_sync_diff { |_key, state_vector| document.sync_diff(state_vector) }

@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-# Y::Document with the Yjs work done inside Postgres by the pg_yrby
+# Y::Document with the Yjs work done inside Postgres by the pg_ydoc
 # extension. Same tables and the same load_state/append/compact! interface,
 # plus the sync handshake answered in SQL, so serving a client never loads
 # the document into Ruby. Choose it per attribute:
 #
-#   has_collaborative_document :body, store: :pg_yrby
+#   has_collaborative_document :body, store: :pg_ydoc
 #
-# It needs the extension (built from pg_yrby/ in this repo) and a ydoc state
+# It needs the extension (built from pg_ydoc/ in this repo) and a ydoc state
 # column:
 #
-#   CREATE EXTENSION pg_yrby;
+#   CREATE EXTENSION pg_ydoc;
 #   ALTER TABLE y_documents ALTER COLUMN state TYPE ydoc USING ydoc(state);
 #
 # The pending column goes unused. A gapped update waits inside the snapshot,
