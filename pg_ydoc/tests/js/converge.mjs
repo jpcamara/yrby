@@ -63,18 +63,49 @@ for (let round = 0; round < ROUNDS; round++) {
   // (include_pending), and then receives only the updates after that point.
   const joinAt = Math.floor(rand() * order.length)
   let joiner
+  let pendingDisagrees = 0
   for (const [i, u] of order.entries()) {
     await c.query('update conv_doc set body = ydoc_apply(body, $2) where id = $1', [id, Buffer.from(u)])
     const st = (await c.query('select ydoc_has_pending(body) p, case when $2 then ydoc_diff(body, null, true) end j from conv_doc where id = $1', [id, i === joinAt])).rows[0]
     if (st.p) maxPending++
+    const yd = docFrom((await c.query('select body::bytea b from conv_doc where id = $1', [id])).rows[0].b)
+    if (st.p !== Boolean(yd.store.pendingStructs || yd.store.pendingDs)) pendingDisagrees++
     if (i === joinAt) joiner = docFrom(st.j)
   }
   for (const u of order.slice(joinAt + 1)) Y.applyUpdate(joiner, u)
-  // 3. snapshot + log, compacted at random points.
+  // 3. snapshot + log, compacted at random points. At some of them a client
+  // that has a prefix of the session joins the way Y::PgDocument serves it
+  // when the snapshot has no gap: the state vector extended from the
+  // snapshot's stored one, and the snapshot's part and the log's part sent
+  // separately instead of merged, snapshot first.
   await c.query('insert into conv_snap values ($1, ydoc())', [id])
+  let splitJoins = 0
   for (const u of shuffle(updates.concat(updates.filter(() => rand() < 0.1)))) {
     await c.query('insert into conv_log (doc_id, u) values ($1, $2)', [id, Buffer.from(u)])
     if (rand() < 0.1) await compact(id)
+    if (rand() < 0.15 && (await c.query('select ydoc_state_vector(body, gapless => true) is not null g from conv_snap where id = $1', [id])).rows[0].g) {
+      const client = new Y.Doc()
+      for (const p of updates.slice(0, Math.floor(rand() * updates.length))) Y.applyUpdate(client, p)
+      const s = (await c.query(`
+        select ydoc_extend_state_vector(ydoc_state_vector(s.body, gapless => true), lg.l) ext,
+               ydoc_state_vector(m.doc) full, ydoc_diff(s.body, $2, true) snap_part,
+               ydoc_diff(lg.l, $2, true) log_part, m.doc::bytea merged
+          from conv_snap s,
+               (select ydoc_merge_agg(u) l from conv_log where doc_id = $1) lg,
+               (select ydoc_merge_agg(x) doc from (select body::bytea x from conv_snap where id = $1
+                                                   union all select u from conv_log where doc_id = $1) t) m
+         where s.id = $1`, [id, Buffer.from(Y.encodeStateVector(client))])).rows[0]
+      const ext = Y.decodeStateVector(s.ext)
+      const full = Y.decodeStateVector(s.full)
+      const svOk = ext.size === full.size && [...full].every(([k, v]) => ext.get(k) === v)
+      const ref = new Y.Doc()
+      Y.applyUpdate(ref, Y.encodeStateAsUpdate(client))
+      Y.applyUpdate(ref, s.merged)
+      Y.applyUpdate(client, s.snap_part)
+      if (s.log_part) Y.applyUpdate(client, s.log_part)
+      if (svOk && canon(snapshotOf(client)) === canon(snapshotOf(ref))) splitJoins++
+      else splitJoins = -Infinity
+    }
   }
 
   const row = (await c.query(`
@@ -95,7 +126,9 @@ for (let round = 0; round < ROUNDS; round++) {
     staleDiff: (() => { Y.applyUpdate(stale, row.stale_diff); return canon(snapshotOf(stale)) === canon(expected) })(),
     mergeAgg: canon(snapshotOf(docFrom(row.merged))) === canon(expected),
     snapshotLog: canon(snapshotOf(docFrom(row.logged))) === canon(expected),
-    midJoinWithPending: canon(snapshotOf(joiner)) === canon(expected)
+    midJoinWithPending: canon(snapshotOf(joiner)) === canon(expected),
+    splitJoins: splitJoins >= 0,
+    pendingAgreesWithYjs: pendingDisagrees === 0
   }
   // Fold the rest of the log; a complete log must leave nothing behind.
   await compact(id)

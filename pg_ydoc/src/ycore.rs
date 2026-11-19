@@ -64,7 +64,11 @@ fn settle(merged: Vec<u8>) -> Result<Vec<u8>, Error> {
     let encoded = encode(&doc);
     // Belt and braces: never trade the merged form for one that lost a struct
     // or a deletion.
-    Ok(if contains(&encoded, &merged)? { encoded } else { merged })
+    Ok(if contains(&encoded, &merged)? {
+        encoded
+    } else {
+        merged
+    })
 }
 
 /// Apply `update` to `doc`. Returns `None` when the stored bytes would not
@@ -104,7 +108,11 @@ pub fn adds(doc: &[u8], update: &[u8]) -> Result<bool, Error> {
 /// comparing loaded documents can (yrs caps a state vector at its first hole).
 pub fn contains(doc: &[u8], update: &[u8]) -> Result<bool, Error> {
     let update = Update::decode_v1(update)?;
-    let doc = if doc.is_empty() { Update::decode_v1(&EMPTY)? } else { Update::decode_v1(doc)? };
+    let doc = if doc.is_empty() {
+        Update::decode_v1(&EMPTY)?
+    } else {
+        Update::decode_v1(doc)?
+    };
     Ok(covered(&update.insertions(true), &doc.insertions(true))
         && covered(update.delete_set(), doc.delete_set()))
 }
@@ -140,6 +148,60 @@ pub fn merge<B: AsRef<[u8]>>(updates: &[B]) -> Result<Vec<u8>, Error> {
 pub fn state_vector(doc: &[u8]) -> Result<Vec<u8>, Error> {
     let doc = if doc.is_empty() { &EMPTY[..] } else { doc };
     Ok(Update::decode_v1(doc)?.state_vector().encode_v1())
+}
+
+/// The state vector, or `None` when the encoding holds content past a gap.
+/// Stored next to a snapshot, it lets sync skip decoding the snapshot; a
+/// snapshot with a gap is served merged instead.
+pub fn gapless_state_vector(doc: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+    let doc = if doc.is_empty() { &EMPTY[..] } else { doc };
+    let update = Update::decode_v1(doc)?;
+    Ok((!has_gap(&update)).then(|| update.state_vector().encode_v1()))
+}
+
+/// True if, for some client, the update holds structs or deletions past the
+/// first clock it is missing. A gap that is only across clients (an item
+/// whose origin is another client's missing item) doesn't show here.
+fn has_gap(update: &Update) -> bool {
+    let sv = update.state_vector();
+    let past = |set: &IdSet| {
+        set.iter()
+            .any(|(client, ranges)| ranges.iter().any(|r| r.end > sv.get(client)))
+    };
+    past(&update.insertions(true)) || past(update.delete_set())
+}
+
+/// `sv` advanced by what `update` adds contiguously after it, per client.
+/// With `sv` the state vector of a stored snapshot and `update` the merged
+/// log, this is the state vector of snapshot plus log without decoding the
+/// snapshot. Where the snapshot itself holds content past a gap that the log
+/// fills, the result stops at the gap: it can be lower than the merged
+/// document's, never higher, so a peer at worst sends something twice.
+pub fn extend_state_vector(sv: &[u8], update: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut out = if sv.is_empty() {
+        StateVector::default()
+    } else {
+        StateVector::decode_v1(sv)?
+    };
+    if update.is_empty() {
+        return Ok(out.encode_v1());
+    }
+    let inserted = Update::decode_v1(update)?.insertions(true);
+    for (&client, ranges) in inserted.iter() {
+        let mut ranges: Vec<_> = ranges.iter().cloned().collect();
+        ranges.sort_by_key(|r| r.start);
+        let mut clock = out.get(&client);
+        for r in ranges {
+            if r.start > clock {
+                break;
+            }
+            clock = clock.max(r.end);
+        }
+        if clock > out.get(&client) {
+            out.set_max(client, clock);
+        }
+    }
+    Ok(out.encode_v1())
 }
 
 /// True if the document holds structs or deletions waiting on a missing
@@ -188,18 +250,21 @@ pub fn diff(doc: &[u8], sv: &[u8]) -> Result<Vec<u8>, Error> {
 /// and heals when the missing update reaches it. Diffed from the stored
 /// update directly, without loading a `Doc`, so nothing can be dropped.
 pub fn diff_with_pending(doc: &[u8], sv: &[u8]) -> Result<Vec<u8>, Error> {
-    let sv = if sv.is_empty() {
-        StateVector::default().encode_v1()
-    } else {
-        sv.to_vec()
-    };
     let doc = if doc.is_empty() { &EMPTY[..] } else { doc };
-    Ok(yrs::diff_updates_v1(doc, &sv)?)
+    // A peer with nothing gets the stored bytes as they are, without
+    // decoding them: the common join, and the one where decoding costs most.
+    if sv.is_empty() || StateVector::decode_v1(sv)?.is_empty() {
+        return Ok(doc.to_vec());
+    }
+    Ok(yrs::diff_updates_v1(doc, sv)?)
 }
 
 /// True if the document holds content waiting on a missing dependency.
+/// Checks the encoding as well as a loaded `Doc`: yrs keeps a client's
+/// structs past a gap in its block store without reporting them as pending.
 pub fn pending(doc: &[u8]) -> Result<bool, Error> {
-    Ok(has_pending(&load(doc)?))
+    let bytes = if doc.is_empty() { &EMPTY[..] } else { doc };
+    Ok(has_gap(&Update::decode_v1(bytes)?) || has_pending(&load(doc)?))
 }
 
 /// Document equality: same integrated content and deletions (a Yjs snapshot).
