@@ -804,6 +804,25 @@ class SyncTest < Minitest::Test
     refute_predicate client, :pending?
   end
 
+  def test_a_store_can_answer_sync_with_several_updates
+    first = YjsFixtures::Gap::FIRST
+    second = YjsFixtures::Gap::DEPENDENT
+    transmits = []
+    helper = store_sync_helper([first, second], transmits, [])
+    helper.class.on_sync_diff { |_key, _sv| [first, second] }
+
+    client = Y::Doc.new
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    frames = transmits.map { |t| Base64.strict_decode64(t["update"]) }
+
+    assert_equal [[0, 1], [0, 2]], frames.map { |f| f.bytes.first(2) }, "SyncStep2, then an update"
+    frames.each { |f| client.handle_sync_message(f) }
+    reference = Y::Doc.new
+    [first, second].each { |u| reference.apply_update(u) }
+
+    assert_equal reference.encode_state_vector, client.encode_state_vector
+  end
+
   def test_sync_frames_round_trip_long_payloads
     helper = helper_for
     payload = "x".b * 70_000 # a three-byte length prefix

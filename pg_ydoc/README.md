@@ -30,8 +30,9 @@ Updates and state vectors are `bytea` in the v1 encoding Yjs clients use.
 | `ydoc(bytea)`, `bytea::ydoc` | `ydoc` | A document from a v1 update, validated. `ydoc::bytea` is free. |
 | `ydoc_apply(ydoc, bytea)` | `ydoc` | Apply an update. A NULL document counts as empty. Gives back the same value when the update changes nothing. |
 | `ydoc_adds(ydoc, bytea)` | `bool` | Would the update change anything (new content, a new deletion, or a gap to wait on)? Read from the encodings, so it is cheap. |
-| `ydoc_state_vector(ydoc)` | `bytea` | Sync step 1: per client, the clocks stored contiguously from zero. Read without loading the document, so content waiting on another client's missing update still counts. |
-| `ydoc_diff(ydoc, sv bytea = NULL, include_pending bool = false)` | `bytea` | Sync step 2: what a peer with `sv` is missing; the whole document without `sv`. Leaves out pending content unless `include_pending`, which serves it as Yjs's `encodeStateAsUpdate` does, so the peer holds the gap and heals when the missing update reaches it. |
+| `ydoc_state_vector(ydoc, gapless bool = false)` | `bytea` | Sync step 1: per client, the clocks stored contiguously from zero. Read without loading the document, so content waiting on another client's missing update still counts. With `gapless`, NULL when the document holds content past a gap, for the stored column below. |
+| `ydoc_extend_state_vector(sv bytea, ydoc)` | `bytea` | `sv` advanced by what the update adds contiguously after it: a snapshot's stored state vector plus its log, without decoding the snapshot. |
+| `ydoc_diff(ydoc, sv bytea = NULL, include_pending bool = false)` | `bytea` | Sync step 2: what a peer with `sv` is missing; the whole document without `sv`. Leaves out pending content unless `include_pending`, which serves it as Yjs's `encodeStateAsUpdate` does, so the peer holds the gap and heals when the missing update reaches it. With `include_pending` and an empty `sv`, the stored bytes as they are, without decoding. NULL for a NULL document. |
 | `ydoc_has_pending(ydoc)` | `bool` | Does the document hold updates waiting on a missing dependency? |
 | `ydoc_merge(ydoc, ydoc)` | `ydoc` | Merge two documents without loading them. |
 | `ydoc_merge_agg(bytea)`, `ydoc_merge_agg(ydoc)` | `ydoc` | Aggregate: merge any number of updates in any order. NULL when there are none. |
@@ -62,27 +63,46 @@ handles the same update orders fine. The failing orders are kept as fixtures in 
 
 A `ydoc` column rewrites the whole document on every change: a new row
 version, a new copy in TOAST, and all of it in the WAL. For a document edited
-often, keep a snapshot and append updates to a log, and fold the log into the
-snapshot now and then. Measured on a Mac mini (PG 17, 640 one-character
-edits, one statement each, compaction every 64 log rows and counted in the
-log's numbers, autovacuum off; `tests/js/storage_bench.mjs`):
+often, keep a snapshot, append updates to a log, and fold the log into the
+snapshot once the log's bytes reach a share of the snapshot's (10% here, at
+least 4 KB). A large document is then rewritten rarely, and the cost of a
+compaction per edit stays about the same at any size.
 
-| Starting doc | Storage | WAL per edit | Dead tuples | Table growth | Per edit | Serve a joining client |
+Serve a client without decoding the snapshot. Keep its state vector in a
+generated column and extend it by the log for sync step 1. For step 2 send
+the snapshot's part and the log's part as two updates, snapshot first; a
+client with nothing gets the snapshot's bytes as stored. A snapshot holding
+content past a gap has no stored state vector (`gapless => true` gives NULL)
+and is served merged instead.
+
+Measured on a Mac mini (PG 17, one-character edits, one statement each,
+compactions counted, autovacuum off; joins timed with the log halfway to its
+next compaction; `tests/js/storage_bench.mjs`). "64 rows" is the same
+snapshot + log compacted every 64 rows and served merged:
+
+| Starting doc | Storage | WAL per edit | Dead tuples per edit | Per edit | New client joins | Returning client joins |
 |---|---|---|---|---|---|---|
-| 2 KB | merged `ydoc` | 1.9 KB | 163 | 1.3 MB | 0.18 ms | 0.10 ms |
-| 2 KB | snapshot + log | 0.4 KB | 644 | 0.1 MB | 0.09 ms | 0.12 ms |
-| 50 KB | merged `ydoc` | 29.5 KB | 9,036 | 17.7 MB | 1.63 ms | 0.41 ms |
-| 50 KB | snapshot + log | 0.8 KB | 790 | 0.4 MB | 0.13 ms | 0.63 ms |
-| 500 KB | merged `ydoc` | 296 KB | 88,396 | 174 MB | 18.2 ms | 3.3 ms |
-| 500 KB | snapshot + log | 5.4 KB | 2,030 | 2.8 MB | 0.40 ms | 5.4 ms |
+| 2 KB | merged `ydoc` | 1.9 KB | 0.24 | 0.25 ms | 0.23 ms | 0.22 ms |
+| 2 KB | snapshot + log, 64 rows | 0.36 KB | 1.03 | 0.22 ms | 0.74 ms | 0.67 ms |
+| 2 KB | snapshot + log, by size | 0.34 KB | 1.01 | 0.19 ms | 0.86 ms | 0.83 ms |
+| 50 KB | merged `ydoc` | 29.6 KB | 14.1 | 1.98 ms | 0.38 ms | 0.40 ms |
+| 50 KB | snapshot + log, 64 rows | 0.79 KB | 1.22 | 0.13 ms | 1.10 ms | 1.10 ms |
+| 50 KB | snapshot + log, by size | 0.52 KB | 1.09 | 0.10 ms | 0.54 ms | 0.55 ms |
+| 500 KB | merged `ydoc` | 296 KB | 138 | 19.7 ms | 4.3 ms | 4.7 ms |
+| 500 KB | snapshot + log, 64 rows | 5.0 KB | 3.17 | 0.61 ms | 10.0 ms | 10.6 ms |
+| 500 KB | snapshot + log, by size | 0.66 KB | 1.07 | 0.22 ms | 3.7 ms | 3.3 ms |
 
-The log does not remove the rewrite, it batches it: each compaction still
-writes the whole document once, so its share per edit grows with document
-size over the compaction interval. Serving a client costs more, because the
-read merges the snapshot with the log (here half full) in every join.
+What remains: one dead tuple per edit, from deleting log rows at compaction;
+the whole document written once per compaction; and, for a small document,
+the fixed cost of the extra SQL in a join. A returning client costs a decode
+of the snapshot, to diff it.
 
 ```sql
-CREATE TABLE doc_snapshots (id bigint PRIMARY KEY, body ydoc NOT NULL DEFAULT ydoc());
+CREATE TABLE doc_snapshots (
+  id bigint PRIMARY KEY,
+  body ydoc NOT NULL DEFAULT ydoc(),
+  state_vector bytea GENERATED ALWAYS AS (ydoc_state_vector(body, gapless => true)) STORED
+);
 CREATE TABLE doc_updates (
   id bigserial PRIMARY KEY,
   doc_id bigint NOT NULL REFERENCES doc_snapshots,
@@ -90,10 +110,26 @@ CREATE TABLE doc_updates (
 );
 CREATE INDEX ON doc_updates (doc_id, id);
 
--- Write: append (optionally skip updates that add nothing).
+-- Write: append, and now and then check whether the log is due.
 INSERT INTO doc_updates (doc_id, update) VALUES ($1, $2);
+SELECT (SELECT coalesce(sum(octet_length(update)), 0) FROM doc_updates WHERE doc_id = $1)
+       >= greatest(4096, 0.1 * (SELECT pg_column_size(body) FROM doc_snapshots WHERE id = $1));
 
--- Read: snapshot plus log, merged.
+-- Sync step 1: the server's state vector.
+SELECT CASE WHEN s.state_vector IS NOT NULL
+            THEN ydoc_extend_state_vector(s.state_vector,
+                   (SELECT ydoc_merge_agg(update) FROM doc_updates WHERE doc_id = $1))
+            ELSE ydoc_state_vector(ydoc_merge(s.body, coalesce(
+                   (SELECT ydoc_merge_agg(update) FROM doc_updates WHERE doc_id = $1), ydoc()))) END
+  FROM doc_snapshots s WHERE s.id = $1;
+
+-- Sync step 2 for a client at $2: the snapshot's part, then the log's part.
+SELECT ydoc_diff(s.body, $2, true),
+       (SELECT ydoc_diff(ydoc_merge_agg(update), $2, true) FROM doc_updates WHERE doc_id = $1)
+  FROM doc_snapshots s WHERE s.id = $1 AND s.state_vector IS NOT NULL;
+-- (No row: the snapshot has a gap; serve ydoc_diff of the merged document.)
+
+-- Read the whole document: snapshot plus log, merged.
 SELECT ydoc_merge_agg(part) FROM (
   SELECT body::bytea AS part FROM doc_snapshots WHERE id = $1
   UNION ALL
@@ -129,7 +165,7 @@ cd tests/js && npm install
 npm run converge                     # JS Yjs convergence (ROUNDS, PEERS, STEPS, SEED)
 npm run concurrency                  # many connections writing one document (WRITERS)
 npm run dump                         # pg_dump, pg_restore and binary COPY round trips
-npm run bench:storage                # the storage table above (EDITS, COMPACT_EVERY, SIZES)
+npm run bench:storage                # the storage table above (SIZES, EDITS, RATIO, MIN_LOG)
 ```
 
 The convergence test makes random concurrent edits in several JS Yjs docs

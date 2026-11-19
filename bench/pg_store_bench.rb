@@ -36,7 +36,11 @@ ActiveRecord::Schema.define do
     t.index %i[document_id pending]
   end
 end
-conn.execute("alter table y_documents alter column state type ydoc using ydoc(state)") if STORE == "pg"
+if STORE == "pg"
+  conn.execute("alter table y_documents alter column state type ydoc using ydoc(state)")
+  conn.execute("alter table y_documents add column state_vector bytea " \
+               "generated always as (ydoc_state_vector(state, gapless => true)) stored")
+end
 
 now = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
 median = ->(n, &blk) { s = Array.new(n) { t = now.(); blk.(); now.() - t }.sort; s[n / 2] * 1000 }

@@ -25,6 +25,7 @@ if PG_DOCUMENT_URL
       key varchar NOT NULL,
       record_type varchar, record_id bigint, name varchar,
       state ydoc,
+      state_vector bytea GENERATED ALWAYS AS (ydoc_state_vector(state, gapless => true)) STORED,
       created_at timestamp(6) NOT NULL, updated_at timestamp(6) NOT NULL
     );
     CREATE UNIQUE INDEX ON y_documents (key);
@@ -83,7 +84,24 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     doc.read_text("t")
   end
 
-  def log_rows(key) = Y::PgDocument.find_by(key: key).updates.count
+  # Counted in Postgres: Y::DocumentUpdate is on the suite's SQLite connection.
+  def log_rows(key)
+    Y::PgDocument.connection.select_value(<<~SQL).to_i
+      SELECT count(*) FROM y_document_updates u JOIN y_documents d ON d.id = u.document_id
+       WHERE d.key = #{Y::PgDocument.connection.quote(key)}
+    SQL
+  end
+
+  # Apply what sync_diff returned: one update or several, in order.
+  def apply_all(doc, updates) = Array(updates).each { |u| doc.apply_update(u) }
+
+  def with_policy(**settings)
+    saved = settings.keys.to_h { |k| [k, Y::PgDocument.public_send(k)] }
+    settings.each { |k, v| Y::PgDocument.public_send(:"#{k}=", v) }
+    yield
+  ensure
+    saved.each { |k, v| Y::PgDocument.public_send(:"#{k}=", v) }
+  end
 
   def test_state_reads_as_binary_without_a_type_warning
     Y::PgDocument.append("k", typing(1).first.first)
@@ -97,12 +115,83 @@ class PgDocumentTest < ActionCable::Channel::TestCase
 
   def test_appends_load_and_compact
     updates, expected = typing(150)
-    updates.each { |u| Y::PgDocument.append("doc", u) }
+    with_policy(compact_min_log_bytes: 1024, check_compaction_every: 1) do
+      updates.each { |u| Y::PgDocument.append("doc", u) }
+    end
 
     assert_equal expected, text_of(Y::PgDocument.load_state("doc"))
-    assert_operator Y::PgDocument.connection.select_value("SELECT count(*) FROM y_document_updates").to_i,
-                    :<, Y::PgDocument.compact_every, "the log compacted as it grew"
+    assert_operator log_rows("doc"), :<, 100, "the log compacted once its bytes passed the floor"
     assert_nil Y::PgDocument.load_state("missing")
+  end
+
+  # A large snapshot isn't rewritten until the log reaches a share of it.
+  def test_compaction_waits_for_the_log_to_reach_a_share_of_the_snapshot
+    updates, expected = typing(400, seed: 9)
+    base = updates[0...300]
+    rest = updates[300..]
+    base.each { |u| Y::PgDocument.append("doc", u) }
+    Y::PgDocument.find_by(key: "doc").compact!
+    snapshot = Y::PgDocument.connection.select_value("SELECT pg_column_size(state) FROM y_documents").to_i
+    logged = 0
+    with_policy(compact_min_log_bytes: 0, compact_log_ratio: 0.5, check_compaction_every: 1) do
+      rest.each do |u|
+        Y::PgDocument.append("doc", u)
+        logged += u.bytesize
+        break if log_rows("doc").zero?
+      end
+    end
+
+    assert_operator logged, :>=, snapshot / 2, "no compaction before the log reached half the snapshot"
+    assert_equal 0, log_rows("doc"), "and one once it did"
+    rest.each { |u| Y::PgDocument.append("doc", u) }
+
+    assert_equal expected, text_of(Y::PgDocument.load_state("doc"))
+  end
+
+  # The snapshot goes out as stored and the log as a second update; the state
+  # vector comes from the stored one plus the log.
+  def test_sync_serves_snapshot_and_log_apart
+    updates, expected = typing(60, seed: 10)
+    updates[0...40].each { |u| Y::PgDocument.append("doc", u) }
+    Y::PgDocument.find_by(key: "doc").compact!
+    updates[40..].each { |u| Y::PgDocument.append("doc", u) }
+    snapshot = Y::PgDocument.find_by(key: "doc").state
+
+    parts = Y::PgDocument.sync_diff("doc", "\x00".b)
+
+    assert_equal 2, parts.size
+    assert_equal snapshot.b, parts.first.b, "a client with nothing gets the snapshot as stored"
+    client = Y::Doc.new
+    apply_all(client, parts)
+
+    assert_equal expected, client.read_text("t")
+    full = Y::Doc.new
+    updates.each { |u| full.apply_update(u) }
+
+    assert_equal full.encode_state_vector, Y::PgDocument.sync_state("doc")
+    apply_all(full, Y::PgDocument.sync_diff("doc", full.encode_state_vector))
+
+    assert_equal expected, full.read_text("t"), "an up-to-date client gets nothing new"
+  end
+
+  # A snapshot holding content past a gap has no stored state vector and is
+  # served merged, in one update.
+  def test_a_snapshot_with_a_gap_is_served_merged
+    updates, = typing(3, seed: 11)
+    Y::PgDocument.append("doc", updates[0])
+    Y::PgDocument.append("doc", updates[2])
+    Y::PgDocument.find_by(key: "doc").compact!
+    Y::PgDocument.append("doc", updates[1])
+
+    assert_nil Y::PgDocument.connection.select_value("SELECT state_vector FROM y_documents")
+    served = Y::PgDocument.sync_diff("doc", "\x00".b)
+
+    assert_kind_of String, served
+    full = Y::Doc.new
+    updates.each { |u| full.apply_update(u) }
+
+    assert_equal full.read_text("t"), text_of(served)
+    assert_equal full.encode_state_vector, Y::PgDocument.sync_state("doc")
   end
 
   def test_shuffled_updates_wait_in_the_snapshot_and_converge
@@ -129,8 +218,7 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     assert_equal reference.encode_state_vector, sv, "the state vector stops at the gap"
 
     client = Y::Doc.new
-    update = Y::PgDocument.sync_diff("doc", client.encode_state_vector)
-    client.apply_update(update)
+    apply_all(client, Y::PgDocument.sync_diff("doc", client.encode_state_vector))
 
     assert_predicate client, :pending?, "the client holds the gap"
     client.apply_update(updates[1])

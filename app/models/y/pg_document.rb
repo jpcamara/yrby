@@ -7,11 +7,21 @@
 #
 #   has_collaborative_document :body, store: :pg_ydoc
 #
-# It needs the extension (built from pg_ydoc/ in this repo) and a ydoc state
-# column:
+# It needs the extension (built from pg_ydoc/ in this repo), a ydoc state
+# column, and the snapshot's state vector stored beside it:
 #
 #   CREATE EXTENSION pg_ydoc;
 #   ALTER TABLE y_documents ALTER COLUMN state TYPE ydoc USING ydoc(state);
+#   ALTER TABLE y_documents ADD COLUMN state_vector bytea
+#     GENERATED ALWAYS AS (ydoc_state_vector(state, gapless => true)) STORED;
+#
+# Writes append to the log; compaction folds the log into the snapshot once
+# the log's bytes reach a share of the snapshot's, so a large document is
+# rewritten rarely. Serving a client never decodes the snapshot: the state
+# vector is the stored one extended by the log, and the snapshot (as stored,
+# for a client with nothing) and the log go out as two updates. A snapshot
+# holding content past a gap has no stored state vector and is served
+# merged instead.
 #
 # The pending column goes unused. A gapped update waits inside the snapshot,
 # which keeps pending content, so compaction folds and deletes every row it
@@ -29,20 +39,36 @@ class Y::PgDocument < Y::Document
        SELECT payload FROM y_document_updates WHERE document_id = $1
      ) parts) merged
   SQL
+  LOG = "(SELECT ydoc_merge_agg(payload) FROM y_document_updates WHERE document_id = $1)"
+  # True when the snapshot can be served without decoding it: there is none
+  # yet, or it has a stored state vector (no gap).
+  SPLIT = "(d.state IS NULL OR d.state_vector IS NOT NULL)"
 
   LOAD = "SELECT doc::bytea FROM #{MERGED}".freeze
-  # Neither loads the document: the merge, the state vector and the diff all
-  # work on the encoded update.
-  SYNC_STATE = "SELECT ydoc_state_vector(coalesce(doc, ydoc())) FROM #{MERGED}".freeze
-  SYNC_DIFF = "SELECT ydoc_diff(coalesce(doc, ydoc()), $2, include_pending => true) FROM #{MERGED}".freeze
+  SYNC_STATE = <<~SQL.freeze
+    SELECT CASE WHEN #{SPLIT} THEN ydoc_extend_state_vector(d.state_vector, #{LOG})
+                ELSE (SELECT ydoc_state_vector(doc) FROM #{MERGED}) END
+      FROM y_documents d WHERE d.id = $1
+  SQL
+  # The snapshot's part, then the log's part (NULL when it is served merged).
+  SYNC_DIFF = <<~SQL.freeze
+    SELECT CASE WHEN #{SPLIT} THEN coalesce(ydoc_diff(d.state, $2, true), ydoc()::bytea)
+                ELSE (SELECT ydoc_diff(coalesce(doc, ydoc()), $2, true) FROM #{MERGED}) END,
+           CASE WHEN #{SPLIT} THEN ydoc_diff(#{LOG}, $2, true) END
+      FROM y_documents d WHERE d.id = $1
+  SQL
 
-  # Insert, and count the log in the same round trip. The count's snapshot
-  # predates the insert, hence the + 1.
+  # Insert, and on one append in check_compaction_every (by the new row's
+  # id), say whether the log has grown enough to compact: its bytes against
+  # the larger of compact_min_log_bytes and compact_log_ratio of the
+  # snapshot's stored size. The sum's snapshot predates the insert.
   APPEND = <<~SQL
     WITH inserted AS (
-      INSERT INTO y_document_updates (document_id, payload, created_at) VALUES ($1, $2, now())
+      INSERT INTO y_document_updates (document_id, payload, created_at) VALUES ($1, $2, now()) RETURNING id
     )
-    SELECT count(*) + 1 FROM y_document_updates WHERE document_id = $1
+    SELECT (SELECT id FROM inserted) % $3::int = 0
+       AND (SELECT coalesce(sum(octet_length(payload)), 0) FROM y_document_updates WHERE document_id = $1)
+           >= greatest($4::bigint, $5::float8 * (SELECT coalesce(pg_column_size(state), 0) FROM y_documents WHERE id = $1))
   SQL
 
   # Fold the log into the snapshot and delete it, atomically. Appends that
@@ -61,12 +87,21 @@ class Y::PgDocument < Y::Document
   EMPTY_STATE_VECTOR = "\x00".b.freeze
   EMPTY_UPDATE = "\x00\x00".b.freeze
 
+  # Compaction policy (compact_every doesn't apply here). The log compacts
+  # when its bytes reach compact_log_ratio of the snapshot's stored size, or
+  # compact_min_log_bytes for a small one, checked on about one append in
+  # check_compaction_every so an append doesn't sum the log each time.
+  class_attribute :compact_log_ratio, instance_writer: false, default: 0.1
+  class_attribute :compact_min_log_bytes, instance_writer: false, default: 4096
+  class_attribute :check_compaction_every, instance_writer: false, default: 16
+
   class << self
     # The state vector for the server's SyncStep1. Takes a row (or nil before
     # the first write), as Y::Collaborative::Attribute holds one.
     def sync_state_of(row) = row ? row.sync_state : EMPTY_STATE_VECTOR
 
-    # What a client at state_vector is missing, pending content included.
+    # What a client at state_vector is missing, pending content included: one
+    # update, or several to send in order.
     def sync_diff_of(row, state_vector) = row ? row.sync_diff(state_vector) : EMPTY_UPDATE
 
     # The same, by key, for a channel that addresses documents by key.
@@ -77,8 +112,9 @@ class Y::PgDocument < Y::Document
   def load_state = select_one(LOAD, id).first
 
   def append(bytes)
-    count = select_one(APPEND, id, bytes, binary: false).first.to_i
-    compact! if count >= compact_every
+    due = select_one(APPEND, id, bytes, check_compaction_every, compact_min_log_bytes, compact_log_ratio,
+                     binary: false).first
+    compact! if [true, "t"].include?(due) # decoded or text, per the connection's type map
   end
 
   def compact!
@@ -87,7 +123,11 @@ class Y::PgDocument < Y::Document
   end
 
   def sync_state = select_one(SYNC_STATE, id).first
-  def sync_diff(state_vector) = select_one(SYNC_DIFF, id, state_vector).first
+
+  def sync_diff(state_vector)
+    first, log = select_one(SYNC_DIFF, id, state_vector)
+    log.nil? || log == EMPTY_UPDATE ? first : [first, log]
+  end
 
   private
 
