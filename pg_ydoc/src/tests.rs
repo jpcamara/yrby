@@ -235,6 +235,31 @@ mod tests {
     }
 
     #[pg_test]
+    fn state_vector_counts_what_is_stored_without_loading() {
+        // Client 2 types "b" after client 1's "a"; the server has only "b".
+        let a = edits(1, &["a"]).remove(0);
+        let writer = Doc::with_client_id(2);
+        writer.transact_mut().apply_update(Update::decode_v1(&a).unwrap()).unwrap();
+        let text = writer.get_or_insert_text("t");
+        let b = {
+            let mut txn = writer.transact_mut();
+            text.insert(&mut txn, 1, "b");
+            txn.encode_update_v1()
+        };
+        let doc = bytes("select ydoc_apply(null, $1)::bytea", &[arg(&b)]);
+        assert!(flag("select ydoc_has_pending($1::ydoc)", &[arg(&doc)]));
+        // "b" counts (it is stored); client 1 doesn't (nothing of it is).
+        let sv = StateVector::decode_v1(&bytes("select ydoc_state_vector($1::ydoc)", &[arg(&doc)])).unwrap();
+        assert_eq!(sv.get(&writer.client_id()), 1);
+        assert_eq!(sv.get(&Doc::with_client_id(1).client_id()), 0);
+        // So a peer answering the server's step 1 sends "a", and that heals it.
+        let missing = writer.transact().encode_state_as_update_v1(&sv);
+        let healed = bytes("select ydoc_apply($1::ydoc, $2)::bytea", &[arg(&doc), arg(&missing)]);
+        assert!(!flag("select ydoc_has_pending($1::ydoc)", &[arg(&healed)]));
+        assert_eq!(text_of("select ydoc_text($1::ydoc, 't')", &[arg(&healed)]).unwrap(), "ab");
+    }
+
+    #[pg_test]
     fn merge_agg_keeps_a_gap_for_later() {
         let x = edits(1, &["a", "b", "c"]);
         let merged = bytes(
