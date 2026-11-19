@@ -6,7 +6,10 @@ mod tests {
     use pgrx::prelude::*;
     use yrs::updates::decoder::Decode;
     use yrs::updates::encoder::Encode;
-    use yrs::{Array, Doc, GetString, Map, ReadTxn, StateVector, Text, Transact, Update, XmlFragment, XmlTextPrelim};
+    use yrs::{
+        Array, Doc, GetString, Map, ReadTxn, StateVector, Text, Transact, Update, XmlFragment,
+        XmlTextPrelim,
+    };
 
     /// Successive edits by one client to text "t", each as its own update.
     fn edits(client: u64, parts: &[&str]) -> Vec<Vec<u8>> {
@@ -28,7 +31,9 @@ mod tests {
     }
 
     fn bytes(sql: &str, args: &[DatumWithOid]) -> Vec<u8> {
-        Spi::get_one_with_args::<Vec<u8>>(sql, args).unwrap().expect("non-null")
+        Spi::get_one_with_args::<Vec<u8>>(sql, args)
+            .unwrap()
+            .expect("non-null")
     }
 
     fn text_of(sql: &str, args: &[DatumWithOid]) -> Option<String> {
@@ -42,7 +47,9 @@ mod tests {
     /// Text "t" of a document, read with yrs directly.
     fn yrs_text(doc: &[u8]) -> String {
         let d = Doc::new();
-        d.transact_mut().apply_update(Update::decode_v1(doc).unwrap()).unwrap();
+        d.transact_mut()
+            .apply_update(Update::decode_v1(doc).unwrap())
+            .unwrap();
         let t = d.get_or_insert_text("t");
         let s = t.get_string(&d.transact());
         s
@@ -79,18 +86,36 @@ mod tests {
             text_of("select ydoc_text($1::ydoc, 't')", &[arg(&doc)]).unwrap(),
             "hello world"
         );
-        assert_eq!(text_of("select ydoc_text($1::ydoc, 'nope')", &[arg(&doc)]), None);
+        assert_eq!(
+            text_of("select ydoc_text($1::ydoc, 'nope')", &[arg(&doc)]),
+            None
+        );
     }
 
     #[pg_test]
     fn apply_of_a_known_update_returns_the_same_value() {
         let u = edits(1, &["a", "b"]);
-        let doc = bytes("select ydoc_apply(ydoc_apply(null, $1), $2)::bytea", &[arg(&u[0]), arg(&u[1])]);
-        let again = bytes("select ydoc_apply($1::ydoc, $2)::bytea", &[arg(&doc), arg(&u[0])]);
-        assert_eq!(doc, again, "a retried update must not change the stored bytes");
-        assert!(!flag("select ydoc_adds($1::ydoc, $2)", &[arg(&doc), arg(&u[1])]));
+        let doc = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&u[0]), arg(&u[1])],
+        );
+        let again = bytes(
+            "select ydoc_apply($1::ydoc, $2)::bytea",
+            &[arg(&doc), arg(&u[0])],
+        );
+        assert_eq!(
+            doc, again,
+            "a retried update must not change the stored bytes"
+        );
+        assert!(!flag(
+            "select ydoc_adds($1::ydoc, $2)",
+            &[arg(&doc), arg(&u[1])]
+        ));
         let more = edits(2, &["c"]);
-        assert!(flag("select ydoc_adds($1::ydoc, $2)", &[arg(&doc), arg(&more[0])]));
+        assert!(flag(
+            "select ydoc_adds($1::ydoc, $2)",
+            &[arg(&doc), arg(&more[0])]
+        ));
     }
 
     #[pg_test]
@@ -98,16 +123,27 @@ mod tests {
         let doc = Doc::with_client_id(1);
         let text = doc.get_or_insert_text("t");
         text.insert(&mut doc.transact_mut(), 0, "abc");
-        let base = doc.transact().encode_state_as_update_v1(&StateVector::default());
+        let base = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
         let del = {
             let mut txn = doc.transact_mut();
             text.remove_range(&mut txn, 0, 1);
             txn.encode_update_v1()
         };
-        let stored = bytes("select ydoc_apply(ydoc_apply(null, $1), $2)::bytea", &[arg(&base), arg(&del)]);
+        let stored = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&base), arg(&del)],
+        );
         assert_eq!(yrs_text(&stored), "bc");
-        assert!(!flag("select ydoc_adds($1::ydoc, $2)", &[arg(&stored), arg(&del)]));
-        assert!(flag("select ydoc_adds($1::ydoc, $2)", &[arg(&base), arg(&del)]));
+        assert!(!flag(
+            "select ydoc_adds($1::ydoc, $2)",
+            &[arg(&stored), arg(&del)]
+        ));
+        assert!(flag(
+            "select ydoc_adds($1::ydoc, $2)",
+            &[arg(&base), arg(&del)]
+        ));
     }
 
     #[pg_test]
@@ -119,11 +155,17 @@ mod tests {
         );
         // A client that has only the first edit.
         let client = Doc::new();
-        client.transact_mut().apply_update(Update::decode_v1(&u[0]).unwrap()).unwrap();
+        client
+            .transact_mut()
+            .apply_update(Update::decode_v1(&u[0]).unwrap())
+            .unwrap();
         let sv = client.transact().state_vector().encode_v1();
         let missing = bytes("select ydoc_diff($1::ydoc, $2)", &[arg(&server), arg(&sv)]);
         assert!(missing.len() < server.len());
-        client.transact_mut().apply_update(Update::decode_v1(&missing).unwrap()).unwrap();
+        client
+            .transact_mut()
+            .apply_update(Update::decode_v1(&missing).unwrap())
+            .unwrap();
         let t = client.get_or_insert_text("t");
         assert_eq!(t.get_string(&client.transact()), "one two three");
 
@@ -156,8 +198,14 @@ mod tests {
             });
         }
         let applied = applied.unwrap();
-        assert!(flag("select $1::ydoc = $2::ydoc", &[arg(&merged), arg(&applied)]));
-        assert!(flag("select $1::ydoc = $2::ydoc", &[arg(&reversed), arg(&applied)]));
+        assert!(flag(
+            "select $1::ydoc = $2::ydoc",
+            &[arg(&merged), arg(&applied)]
+        ));
+        assert!(flag(
+            "select $1::ydoc = $2::ydoc",
+            &[arg(&reversed), arg(&applied)]
+        ));
         assert_eq!(yrs_text(&merged), yrs_text(&applied));
         assert_eq!(
             bytes("select ydoc_state_vector($1::ydoc)", &[arg(&merged)]),
@@ -174,10 +222,14 @@ mod tests {
         for x in &u {
             Spi::run_with_args("insert into log (u) values ($1)", &[arg(x)]).unwrap();
         }
-        let merged = bytes("select ydoc_merge_agg(u order by random())::bytea from log", &[]);
+        let merged = bytes(
+            "select ydoc_merge_agg(u order by random())::bytea from log",
+            &[],
+        );
         assert_eq!(yrs_text(&merged), parts.concat());
         assert_eq!(
-            Spi::get_one::<Vec<u8>>("select ydoc_merge_agg(u)::bytea from log where false").unwrap(),
+            Spi::get_one::<Vec<u8>>("select ydoc_merge_agg(u)::bytea from log where false")
+                .unwrap(),
             None
         );
     }
@@ -198,40 +250,97 @@ mod tests {
     fn pending_updates_are_kept_and_heal_but_never_served() {
         let x = edits(1, &["a", "b", "c"]);
         // "c" arrives without "b": it has to wait.
-        let doc = bytes("select ydoc_apply(ydoc_apply(null, $1), $2)::bytea", &[arg(&x[0]), arg(&x[2])]);
+        let doc = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&x[0]), arg(&x[2])],
+        );
         assert!(flag("select ydoc_has_pending($1::ydoc)", &[arg(&doc)]));
-        assert_eq!(text_of("select ydoc_text($1::ydoc, 't')", &[arg(&doc)]).unwrap(), "a");
+        assert_eq!(
+            text_of("select ydoc_text($1::ydoc, 't')", &[arg(&doc)]).unwrap(),
+            "a"
+        );
         let served = bytes("select ydoc_diff($1::ydoc)", &[arg(&doc)]);
         assert_eq!(yrs_text(&served), "a");
         let probe = Doc::new();
-        probe.transact_mut().apply_update(Update::decode_v1(&served).unwrap()).unwrap();
-        assert!(probe.transact().store().pending_update().is_none(), "diff must be gap-free");
+        probe
+            .transact_mut()
+            .apply_update(Update::decode_v1(&served).unwrap())
+            .unwrap();
+        assert!(
+            probe.transact().store().pending_update().is_none(),
+            "diff must be gap-free"
+        );
         // "b" arrives and heals the gap.
-        let healed = bytes("select ydoc_apply($1::ydoc, $2)::bytea", &[arg(&doc), arg(&x[1])]);
+        let healed = bytes(
+            "select ydoc_apply($1::ydoc, $2)::bytea",
+            &[arg(&doc), arg(&x[1])],
+        );
         assert!(!flag("select ydoc_has_pending($1::ydoc)", &[arg(&healed)]));
-        assert_eq!(text_of("select ydoc_text($1::ydoc, 't')", &[arg(&healed)]).unwrap(), "abc");
+        assert_eq!(
+            text_of("select ydoc_text($1::ydoc, 't')", &[arg(&healed)]).unwrap(),
+            "abc"
+        );
         // A gapped update counts as adding something.
-        assert!(flag("select ydoc_adds($1::ydoc, $2)", &[arg(&bytes("select ydoc_apply(null, $1)::bytea", &[arg(&x[0])])), arg(&x[2])]));
+        assert!(flag(
+            "select ydoc_adds($1::ydoc, $2)",
+            &[
+                arg(&bytes("select ydoc_apply(null, $1)::bytea", &[arg(&x[0])])),
+                arg(&x[2])
+            ]
+        ));
     }
 
     #[pg_test]
     fn diff_can_include_pending_so_a_peer_heals_too() {
         let x = edits(1, &["a", "b", "c"]);
-        let doc = bytes("select ydoc_apply(ydoc_apply(null, $1), $2)::bytea", &[arg(&x[0]), arg(&x[2])]);
+        let doc = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&x[0]), arg(&x[2])],
+        );
         // A peer that has "a" gets the waiting "c" as well.
-        let sv = bytes("select ydoc_state_vector(ydoc_apply(null, $1))", &[arg(&x[0])]);
-        let served = bytes("select ydoc_diff($1::ydoc, $2, include_pending => true)", &[arg(&doc), arg(&sv)]);
+        let sv = bytes(
+            "select ydoc_state_vector(ydoc_apply(null, $1))",
+            &[arg(&x[0])],
+        );
+        let served = bytes(
+            "select ydoc_diff($1::ydoc, $2, include_pending => true)",
+            &[arg(&doc), arg(&sv)],
+        );
         let peer = Doc::new();
-        peer.transact_mut().apply_update(Update::decode_v1(&x[0]).unwrap()).unwrap();
-        peer.transact_mut().apply_update(Update::decode_v1(&served).unwrap()).unwrap();
-        assert!(peer.transact().store().pending_update().is_some(), "the peer holds the gap");
+        peer.transact_mut()
+            .apply_update(Update::decode_v1(&x[0]).unwrap())
+            .unwrap();
+        peer.transact_mut()
+            .apply_update(Update::decode_v1(&served).unwrap())
+            .unwrap();
+        assert!(
+            peer.transact().store().pending_update().is_some(),
+            "the peer holds the gap"
+        );
         // When "b" reaches the peer, it heals there without asking again.
-        peer.transact_mut().apply_update(Update::decode_v1(&x[1]).unwrap()).unwrap();
-        assert_eq!(peer.get_or_insert_text("t").get_string(&peer.transact()), "abc");
+        peer.transact_mut()
+            .apply_update(Update::decode_v1(&x[1]).unwrap())
+            .unwrap();
+        assert_eq!(
+            peer.get_or_insert_text("t").get_string(&peer.transact()),
+            "abc"
+        );
         // Without a gap, both modes serve the same content.
-        let healed = bytes("select ydoc_apply($1::ydoc, $2)::bytea", &[arg(&doc), arg(&x[1])]);
-        assert_eq!(yrs_text(&bytes("select ydoc_diff($1::ydoc, null, true)", &[arg(&healed)])), "abc");
-        assert_eq!(yrs_text(&bytes("select ydoc_diff($1::ydoc)", &[arg(&healed)])), "abc");
+        let healed = bytes(
+            "select ydoc_apply($1::ydoc, $2)::bytea",
+            &[arg(&doc), arg(&x[1])],
+        );
+        assert_eq!(
+            yrs_text(&bytes(
+                "select ydoc_diff($1::ydoc, null, true)",
+                &[arg(&healed)]
+            )),
+            "abc"
+        );
+        assert_eq!(
+            yrs_text(&bytes("select ydoc_diff($1::ydoc)", &[arg(&healed)])),
+            "abc"
+        );
     }
 
     #[pg_test]
@@ -239,7 +348,10 @@ mod tests {
         // Client 2 types "b" after client 1's "a"; the server has only "b".
         let a = edits(1, &["a"]).remove(0);
         let writer = Doc::with_client_id(2);
-        writer.transact_mut().apply_update(Update::decode_v1(&a).unwrap()).unwrap();
+        writer
+            .transact_mut()
+            .apply_update(Update::decode_v1(&a).unwrap())
+            .unwrap();
         let text = writer.get_or_insert_text("t");
         let b = {
             let mut txn = writer.transact_mut();
@@ -249,14 +361,114 @@ mod tests {
         let doc = bytes("select ydoc_apply(null, $1)::bytea", &[arg(&b)]);
         assert!(flag("select ydoc_has_pending($1::ydoc)", &[arg(&doc)]));
         // "b" counts (it is stored); client 1 doesn't (nothing of it is).
-        let sv = StateVector::decode_v1(&bytes("select ydoc_state_vector($1::ydoc)", &[arg(&doc)])).unwrap();
+        let sv = StateVector::decode_v1(&bytes("select ydoc_state_vector($1::ydoc)", &[arg(&doc)]))
+            .unwrap();
         assert_eq!(sv.get(&writer.client_id()), 1);
         assert_eq!(sv.get(&Doc::with_client_id(1).client_id()), 0);
         // So a peer answering the server's step 1 sends "a", and that heals it.
         let missing = writer.transact().encode_state_as_update_v1(&sv);
-        let healed = bytes("select ydoc_apply($1::ydoc, $2)::bytea", &[arg(&doc), arg(&missing)]);
+        let healed = bytes(
+            "select ydoc_apply($1::ydoc, $2)::bytea",
+            &[arg(&doc), arg(&missing)],
+        );
         assert!(!flag("select ydoc_has_pending($1::ydoc)", &[arg(&healed)]));
-        assert_eq!(text_of("select ydoc_text($1::ydoc, 't')", &[arg(&healed)]).unwrap(), "ab");
+        assert_eq!(
+            text_of("select ydoc_text($1::ydoc, 't')", &[arg(&healed)]).unwrap(),
+            "ab"
+        );
+    }
+
+    #[pg_test]
+    fn a_stored_state_vector_extended_by_the_log_matches_the_merge() {
+        let x = edits(1, &["a", "b", "c", "d"]);
+        let y = edits(2, &["p", "q"]);
+        let snapshot = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&x[0]), arg(&y[0])],
+        );
+        let stored = bytes(
+            "select ydoc_state_vector($1::ydoc, gapless => true)",
+            &[arg(&snapshot)],
+        );
+        let log = bytes(
+            "select ydoc_merge_agg(u)::bytea from unnest(array[$1, $2, $3]) u",
+            &[arg(&x[1]), arg(&x[2]), arg(&y[1])],
+        );
+        let extended = bytes(
+            "select ydoc_extend_state_vector($1, $2::ydoc)",
+            &[arg(&stored), arg(&log)],
+        );
+        let merged = bytes(
+            "select ydoc_state_vector(ydoc_merge($1::ydoc, $2::ydoc))",
+            &[arg(&snapshot), arg(&log)],
+        );
+        assert_eq!(
+            StateVector::decode_v1(&extended).unwrap(),
+            StateVector::decode_v1(&merged).unwrap()
+        );
+        // A log row past a gap doesn't advance it.
+        let gapped = bytes(
+            "select ydoc_extend_state_vector($1, $2::ydoc)",
+            &[arg(&stored), arg(&x[3])],
+        );
+        assert_eq!(
+            StateVector::decode_v1(&gapped).unwrap(),
+            StateVector::decode_v1(&stored).unwrap()
+        );
+        // No stored state vector and no log: empty.
+        assert_eq!(
+            bytes("select ydoc_extend_state_vector(null, null)", &[]),
+            vec![0]
+        );
+    }
+
+    #[pg_test]
+    fn gapless_state_vector_is_null_when_content_waits_past_a_gap() {
+        let x = edits(1, &["a", "b", "c"]);
+        let gapped = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&x[0]), arg(&x[2])],
+        );
+        assert!(Spi::get_one_with_args::<Vec<u8>>(
+            "select ydoc_state_vector($1::ydoc, gapless => true)",
+            &[arg(&gapped)]
+        )
+        .unwrap()
+        .is_none());
+        assert!(flag("select ydoc_has_pending($1::ydoc)", &[arg(&gapped)]));
+        let healed = bytes(
+            "select ydoc_apply($1::ydoc, $2)::bytea",
+            &[arg(&gapped), arg(&x[1])],
+        );
+        assert!(Spi::get_one_with_args::<Vec<u8>>(
+            "select ydoc_state_vector($1::ydoc, gapless => true)",
+            &[arg(&healed)]
+        )
+        .unwrap()
+        .is_some());
+        assert!(Spi::get_one::<Vec<u8>>("select ydoc_state_vector(null)")
+            .unwrap()
+            .is_none());
+    }
+
+    #[pg_test]
+    fn a_peer_with_nothing_gets_the_stored_bytes() {
+        let x = edits(1, &["a", "b"]);
+        let doc = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&x[0]), arg(&x[1])],
+        );
+        assert_eq!(
+            bytes("select ydoc_diff($1::ydoc, '\\x00', true)", &[arg(&doc)]),
+            doc
+        );
+        assert_eq!(
+            bytes("select ydoc_diff($1::ydoc, null, true)", &[arg(&doc)]),
+            doc
+        );
+        assert!(Spi::get_one::<Vec<u8>>("select ydoc_diff(null)")
+            .unwrap()
+            .is_none());
     }
 
     #[pg_test]
@@ -266,17 +478,32 @@ mod tests {
             "select ydoc_merge_agg(u)::bytea from unnest(array[$1, $2]) u",
             &[arg(&x[0]), arg(&x[2])],
         );
-        let healed = bytes("select ydoc_apply($1::ydoc, $2)::bytea", &[arg(&merged), arg(&x[1])]);
+        let healed = bytes(
+            "select ydoc_apply($1::ydoc, $2)::bytea",
+            &[arg(&merged), arg(&x[1])],
+        );
         assert_eq!(yrs_text(&healed), "abc");
     }
 
     #[pg_test]
     fn equality_is_about_content_not_bytes() {
         let a = edits(1, &["a", "b"]);
-        let one_by_one = bytes("select ydoc_apply(ydoc_apply(null, $1), $2)::bytea", &[arg(&a[0]), arg(&a[1])]);
-        let merged = bytes("select ydoc_merge(ydoc($1), ydoc($2))::bytea", &[arg(&a[0]), arg(&a[1])]);
-        assert!(flag("select $1::ydoc = $2::ydoc", &[arg(&one_by_one), arg(&merged)]));
-        assert!(flag("select $1::ydoc <> $2::ydoc", &[arg(&one_by_one), arg(&a[0])]));
+        let one_by_one = bytes(
+            "select ydoc_apply(ydoc_apply(null, $1), $2)::bytea",
+            &[arg(&a[0]), arg(&a[1])],
+        );
+        let merged = bytes(
+            "select ydoc_merge(ydoc($1), ydoc($2))::bytea",
+            &[arg(&a[0]), arg(&a[1])],
+        );
+        assert!(flag(
+            "select $1::ydoc = $2::ydoc",
+            &[arg(&one_by_one), arg(&merged)]
+        ));
+        assert!(flag(
+            "select $1::ydoc <> $2::ydoc",
+            &[arg(&one_by_one), arg(&a[0])]
+        ));
     }
 
     #[pg_test]
@@ -298,14 +525,25 @@ mod tests {
             let xt = frag.push_back(&mut txn, XmlTextPrelim::new("para"));
             let _ = xt;
         }
-        let u = doc.transact().encode_state_as_update_v1(&StateVector::default());
+        let u = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
         assert_eq!(
             text_of("select ydoc_map($1::ydoc, 'meta')::text", &[arg(&u)]).unwrap(),
             r#"{"n": 2, "title": "Notes"}"#
         );
-        assert_eq!(text_of("select ydoc_array($1::ydoc, 'tags')::text", &[arg(&u)]).unwrap(), r#"["a", 1]"#);
-        assert_eq!(text_of("select ydoc_text($1::ydoc, 'body')", &[arg(&u)]).unwrap(), "héllo 👋");
-        assert_eq!(text_of("select ydoc_xml($1::ydoc, 'prosemirror')", &[arg(&u)]).unwrap(), "para");
+        assert_eq!(
+            text_of("select ydoc_array($1::ydoc, 'tags')::text", &[arg(&u)]).unwrap(),
+            r#"["a", 1]"#
+        );
+        assert_eq!(
+            text_of("select ydoc_text($1::ydoc, 'body')", &[arg(&u)]).unwrap(),
+            "héllo 👋"
+        );
+        assert_eq!(
+            text_of("select ydoc_xml($1::ydoc, 'prosemirror')", &[arg(&u)]).unwrap(),
+            "para"
+        );
         // Root types are inferred from content. An XML fragment of nested
         // types looks like an array of them; read XML with ydoc_xml instead.
         assert!(flag(
@@ -328,7 +566,10 @@ mod tests {
         let compact = "with folded as (delete from log where doc_id = 1 returning u)
                        update snap set body = ydoc_apply(body, (select ydoc_merge_agg(u)::bytea from folded)) where id = 1";
         Spi::run(compact).unwrap();
-        assert_eq!(Spi::get_one::<i64>("select count(*) from log").unwrap(), Some(0));
+        assert_eq!(
+            Spi::get_one::<i64>("select count(*) from log").unwrap(),
+            Some(0)
+        );
         assert!(flag("select ydoc_has_pending(body) from snap", &[]));
         let served = bytes("select ydoc_diff(body) from snap", &[]);
         let t = yrs_text(&served);
@@ -352,10 +593,20 @@ mod tests {
         Spi::run("create temp table notes (id int primary key, body ydoc)").unwrap();
         Spi::run("insert into notes values (1, null)").unwrap();
         for x in &u {
-            Spi::run_with_args("update notes set body = ydoc_apply(body, $1) where id = 1", &[arg(x)]).unwrap();
+            Spi::run_with_args(
+                "update notes set body = ydoc_apply(body, $1) where id = 1",
+                &[arg(x)],
+            )
+            .unwrap();
         }
-        assert_eq!(text_of("select ydoc_text(body, 't') from notes", &[]).unwrap(), "xy");
-        assert_eq!(text_of("select ydoc_json(body)->>'t' from notes", &[]).unwrap(), "xy");
+        assert_eq!(
+            text_of("select ydoc_text(body, 't') from notes", &[]).unwrap(),
+            "xy"
+        );
+        assert_eq!(
+            text_of("select ydoc_json(body)->>'t' from notes", &[]).unwrap(),
+            "xy"
+        );
     }
 
     /// Update orders from tests/js/converge.mjs that broke a yrs `Doc`
@@ -370,7 +621,12 @@ mod tests {
                     .unwrap()
                     .lines()
                     .filter(|l| !l.is_empty())
-                    .map(|l| (0..l.len()).step_by(2).map(|i| u8::from_str_radix(&l[i..i + 2], 16).unwrap()).collect())
+                    .map(|l| {
+                        (0..l.len())
+                            .step_by(2)
+                            .map(|i| u8::from_str_radix(&l[i..i + 2], 16).unwrap())
+                            .collect()
+                    })
                     .collect();
                 let json = std::fs::read_to_string(path.with_extension("json")).unwrap();
                 out.push((path.display().to_string(), updates, json));
@@ -392,8 +648,15 @@ mod tests {
                     doc = next;
                 }
             }
-            assert!(!crate::ycore::pending(&doc).unwrap(), "{name}: pending left after apply");
-            assert_eq!(crate::ycore::text(&doc, "body").unwrap().as_deref(), Some(body), "{name}");
+            assert!(
+                !crate::ycore::pending(&doc).unwrap(),
+                "{name}: pending left after apply"
+            );
+            assert_eq!(
+                crate::ycore::text(&doc, "body").unwrap().as_deref(),
+                Some(body),
+                "{name}"
+            );
             // Snapshot + log, compacting every 7 rows; nothing may be lost.
             let mut snap = crate::ycore::EMPTY.to_vec();
             let mut log: Vec<Vec<u8>> = Vec::new();
@@ -407,8 +670,15 @@ mod tests {
             }
             let folded = crate::ycore::merge(&log).unwrap();
             snap = crate::ycore::apply(&snap, &folded).unwrap().unwrap_or(snap);
-            assert!(!crate::ycore::pending(&snap).unwrap(), "{name}: pending left after compaction");
-            assert_eq!(crate::ycore::text(&snap, "body").unwrap().as_deref(), Some(body), "{name}");
+            assert!(
+                !crate::ycore::pending(&snap).unwrap(),
+                "{name}: pending left after compaction"
+            );
+            assert_eq!(
+                crate::ycore::text(&snap, "body").unwrap().as_deref(),
+                Some(body),
+                "{name}"
+            );
             assert!(crate::ycore::equal(&snap, &doc).unwrap(), "{name}");
         }
     }

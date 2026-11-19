@@ -37,7 +37,11 @@ impl Ydoc {
 }
 
 impl FromDatum for Ydoc {
-    unsafe fn from_polymorphic_datum(datum: pg_sys::Datum, is_null: bool, typoid: pg_sys::Oid) -> Option<Self> {
+    unsafe fn from_polymorphic_datum(
+        datum: pg_sys::Datum,
+        is_null: bool,
+        typoid: pg_sys::Oid,
+    ) -> Option<Self> {
         // Same varlena layout as bytea.
         unsafe { <Vec<u8> as FromDatum>::from_polymorphic_datum(datum, is_null, typoid) }.map(Ydoc)
     }
@@ -56,7 +60,8 @@ impl IntoDatum for Ydoc {
 unsafe impl<'fcx> ArgAbi<'fcx> for Ydoc {
     unsafe fn unbox_arg_unchecked(arg: Arg<'_, 'fcx>) -> Self {
         let index = arg.index();
-        unsafe { arg.unbox_arg_using_from_datum() }.unwrap_or_else(|| panic!("argument {index} must not be null"))
+        unsafe { arg.unbox_arg_using_from_datum() }
+            .unwrap_or_else(|| panic!("argument {index} must not be null"))
     }
 
     unsafe fn unbox_nullable_arg(arg: Arg<'_, 'fcx>) -> Nullable<Self> {
@@ -81,11 +86,14 @@ extension_sql!(
 /// Text input: bytea hex (`\x...`). Validated as a v1 update.
 #[pg_extern(immutable, parallel_safe, requires = ["ydoc_shell"])]
 fn ydoc_in(input: &CStr) -> Ydoc {
-    let s = input.to_str().unwrap_or_else(|_| pgrx::error!("pg_ydoc: ydoc input is not UTF-8"));
+    let s = input
+        .to_str()
+        .unwrap_or_else(|_| pgrx::error!("pg_ydoc: ydoc input is not UTF-8"));
     let hex = s
         .strip_prefix("\\x")
         .unwrap_or_else(|| pgrx::error!("pg_ydoc: ydoc input must be bytea hex (\\x...)"));
-    let bytes = decode_hex(hex).unwrap_or_else(|| pgrx::error!("pg_ydoc: invalid hex in ydoc input"));
+    let bytes =
+        decode_hex(hex).unwrap_or_else(|| pgrx::error!("pg_ydoc: invalid hex in ydoc input"));
     ok(ycore::validate(&bytes));
     Ydoc(bytes)
 }
@@ -118,7 +126,10 @@ fn ydoc_recv(mut buf: Internal) -> Ydoc {
     // this value, and the value is the rest of the buffer.
     let buf = unsafe { buf.get_mut::<pg_sys::StringInfoData>() }.expect("ydoc_recv needs a buffer");
     let bytes = unsafe {
-        std::slice::from_raw_parts(buf.data.add(buf.cursor as usize).cast::<u8>(), (buf.len - buf.cursor) as usize)
+        std::slice::from_raw_parts(
+            buf.data.add(buf.cursor as usize).cast::<u8>(),
+            (buf.len - buf.cursor) as usize,
+        )
     }
     .to_vec();
     buf.cursor = buf.len;
@@ -177,7 +188,14 @@ CREATE OPERATOR <> (
 );
 "#,
     name = "ydoc_type",
-    requires = [ydoc_in, ydoc_out, ydoc_recv, ydoc_from_bytea, ydoc_eq, ydoc_ne]
+    requires = [
+        ydoc_in,
+        ydoc_out,
+        ydoc_recv,
+        ydoc_from_bytea,
+        ydoc_eq,
+        ydoc_ne
+    ]
 );
 
 // ---------------------------------------------------------------------------
@@ -198,27 +216,54 @@ fn ydoc_apply(doc: Option<Ydoc>, update: Option<&[u8]>) -> Option<Ydoc> {
 /// True if applying `update` would change the document.
 #[pg_extern(immutable, parallel_safe, requires = ["ydoc_shell"])]
 fn ydoc_adds(doc: Option<Ydoc>, update: &[u8]) -> bool {
-    ok(ycore::adds(doc.as_ref().map(Ydoc::bytes).unwrap_or(&[]), update))
+    ok(ycore::adds(
+        doc.as_ref().map(Ydoc::bytes).unwrap_or(&[]),
+        update,
+    ))
 }
 
-/// The v1 state vector (sync step 1).
-#[pg_extern(immutable, parallel_safe, strict, requires = ["ydoc_shell"])]
-fn ydoc_state_vector(doc: Ydoc) -> Vec<u8> {
-    ok(ycore::state_vector(doc.bytes()))
+/// The v1 state vector (sync step 1). With `gapless`, NULL when the
+/// document holds content past a gap, for a stored column that lets sync
+/// skip decoding the document (see ydoc_extend_state_vector).
+#[pg_extern(immutable, parallel_safe, requires = ["ydoc_shell"])]
+fn ydoc_state_vector(doc: Option<Ydoc>, gapless: default!(bool, false)) -> Option<Vec<u8>> {
+    let doc = doc?;
+    if gapless {
+        ok(ycore::gapless_state_vector(doc.bytes()))
+    } else {
+        Some(ok(ycore::state_vector(doc.bytes())))
+    }
+}
+
+/// `sv` advanced by the content `update` adds contiguously after it. With a
+/// snapshot's stored state vector and its merged log, the state vector of
+/// the two together, without decoding the snapshot.
+#[pg_extern(immutable, parallel_safe, requires = ["ydoc_shell"])]
+fn ydoc_extend_state_vector(sv: Option<&[u8]>, update: Option<Ydoc>) -> Vec<u8> {
+    ok(ycore::extend_state_vector(
+        sv.unwrap_or(&[]),
+        update.as_ref().map(Ydoc::bytes).unwrap_or(&[]),
+    ))
 }
 
 /// What a peer with state vector `sv` is missing (sync step 2). With no
 /// state vector, the whole document. Pending content is left out unless
 /// `include_pending`, which serves it the way Yjs's `encodeStateAsUpdate`
-/// does so a peer can hold it and heal the gap too.
+/// does so a peer can hold it and heal the gap too. NULL for a NULL
+/// document.
 #[pg_extern(immutable, parallel_safe, requires = ["ydoc_shell"])]
-fn ydoc_diff(doc: Ydoc, sv: default!(Option<&[u8]>, "NULL"), include_pending: default!(bool, false)) -> Vec<u8> {
+fn ydoc_diff(
+    doc: Option<Ydoc>,
+    sv: default!(Option<&[u8]>, "NULL"),
+    include_pending: default!(bool, false),
+) -> Option<Vec<u8>> {
+    let doc = doc?;
     let sv = sv.unwrap_or(&[]);
-    if include_pending {
+    Some(if include_pending {
         ok(ycore::diff_with_pending(doc.bytes(), sv))
     } else {
         ok(ycore::diff(doc.bytes(), sv))
-    }
+    })
 }
 
 /// True if the document holds updates waiting on a missing dependency.
@@ -263,18 +308,26 @@ fn ydoc_json(doc: Ydoc) -> JsonB {
 }
 
 fn jsonb(s: String) -> JsonB {
-    JsonB(serde_json::from_str(&s).unwrap_or_else(|e| pgrx::error!("pg_ydoc: bad JSON from yrs: {e}")))
+    JsonB(
+        serde_json::from_str(&s)
+            .unwrap_or_else(|e| pgrx::error!("pg_ydoc: bad JSON from yrs: {e}")),
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Merge aggregate
 
-/// Collected updates, owned by the aggregate's memory context. Folded into
-/// one update every `FOLD_AT` rows to bound memory.
+/// Collected updates, owned by the aggregate's memory context. Every
+/// `FOLD_AT` rows the others are folded into one update to bound memory; the
+/// largest part (a snapshot, typically) is kept aside so it is decoded once,
+/// at the end, rather than at every fold.
 type AggState = Vec<Vec<u8>>;
 const FOLD_AT: usize = 256;
 
-unsafe fn agg_state<'a>(state: Option<Internal>, fcinfo: pg_sys::FunctionCallInfo) -> (Internal, &'a mut AggState) {
+unsafe fn agg_state<'a>(
+    state: Option<Internal>,
+    fcinfo: pg_sys::FunctionCallInfo,
+) -> (Internal, &'a mut AggState) {
     if let Some(mut state) = state {
         if let Some(parts) = unsafe { state.get_mut::<AggState>() } {
             let ptr = parts as *mut AggState;
@@ -286,14 +339,21 @@ unsafe fn agg_state<'a>(state: Option<Internal>, fcinfo: pg_sys::FunctionCallInf
         pgrx::error!("pg_ydoc: ydoc_merge_agg transition called outside an aggregate");
     }
     let ptr = PgMemoryContexts::For(ctx).leak_and_drop_on_delete(AggState::new());
-    (Internal::from(Some(pg_sys::Datum::from(ptr))), unsafe { &mut *ptr })
+    (Internal::from(Some(pg_sys::Datum::from(ptr))), unsafe {
+        &mut *ptr
+    })
 }
 
 fn agg_push(parts: &mut AggState, update: &[u8]) {
     parts.push(update.to_vec());
     if parts.len() >= FOLD_AT {
+        let largest = (0..parts.len())
+            .max_by_key(|&i| parts[i].len())
+            .unwrap_or(0);
+        let big = parts.swap_remove(largest);
         let folded = ok(ycore::merge(parts));
         parts.clear();
+        parts.push(big);
         parts.push(folded);
     }
 }
@@ -350,7 +410,12 @@ CREATE AGGREGATE ydoc_merge_agg(ydoc) (
 );
 "#,
     name = "ydoc_merge_agg",
-    requires = ["ydoc_type", ydoc_merge_agg_bytea_sfunc, ydoc_merge_agg_ydoc_sfunc, ydoc_merge_agg_ffunc]
+    requires = [
+        "ydoc_type",
+        ydoc_merge_agg_bytea_sfunc,
+        ydoc_merge_agg_ydoc_sfunc,
+        ydoc_merge_agg_ffunc
+    ]
 );
 
 #[cfg(any(test, feature = "pg_test"))]
