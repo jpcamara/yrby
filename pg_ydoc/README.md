@@ -60,19 +60,26 @@ handles the same update orders fine. The failing orders are kept as fixtures in 
 
 ## Storage: merged document or snapshot plus log
 
-A `ydoc` column rewrites the whole document on every change. For a document
-edited often, keep a snapshot and append updates to a log, and fold the log
-into the snapshot now and then. Measured on a Mac mini (PG 17, 1000 edits,
-one statement each, `tests/js/storage_bench.mjs`):
+A `ydoc` column rewrites the whole document on every change: a new row
+version, a new copy in TOAST, and all of it in the WAL. For a document edited
+often, keep a snapshot and append updates to a log, and fold the log into the
+snapshot now and then. Measured on a Mac mini (PG 17, 640 one-character
+edits, one statement each, compaction every 64 log rows and counted in the
+log's numbers, autovacuum off; `tests/js/storage_bench.mjs`):
 
-| Starting doc | Storage | Per edit | WAL | Table size |
-|---|---|---|---|---|
-| 2 KB | merged `ydoc` | 0.44 ms | 6.8 MB | 6.1 MB |
-| 2 KB | snapshot + log | 0.07 ms | 0.37 MB | 0.28 MB |
-| 500 KB | merged `ydoc` | 6.4 ms | 95 MB | 90 MB |
-| 500 KB | snapshot + log | 0.10 ms | 0.89 MB | 0.79 MB |
+| Starting doc | Storage | WAL per edit | Dead tuples | Table growth | Per edit | Serve a joining client |
+|---|---|---|---|---|---|---|
+| 2 KB | merged `ydoc` | 1.9 KB | 163 | 1.3 MB | 0.18 ms | 0.10 ms |
+| 2 KB | snapshot + log | 0.4 KB | 644 | 0.1 MB | 0.09 ms | 0.12 ms |
+| 50 KB | merged `ydoc` | 29.5 KB | 9,036 | 17.7 MB | 1.63 ms | 0.41 ms |
+| 50 KB | snapshot + log | 0.8 KB | 790 | 0.4 MB | 0.13 ms | 0.63 ms |
+| 500 KB | merged `ydoc` | 296 KB | 88,396 | 174 MB | 18.2 ms | 3.3 ms |
+| 500 KB | snapshot + log | 5.4 KB | 2,030 | 2.8 MB | 0.40 ms | 5.4 ms |
 
-With a 200-row log, a snapshot + log read takes about as long as reading the merged `ydoc`.
+The log does not remove the rewrite, it batches it: each compaction still
+writes the whole document once, so its share per edit grows with document
+size over the compaction interval. Serving a client costs more, because the
+read merges the snapshot with the log (here half full) in every join.
 
 ```sql
 CREATE TABLE doc_snapshots (id bigint PRIMARY KEY, body ydoc NOT NULL DEFAULT ydoc());
@@ -122,7 +129,7 @@ cd tests/js && npm install
 npm run converge                     # JS Yjs convergence (ROUNDS, PEERS, STEPS, SEED)
 npm run concurrency                  # many connections writing one document (WRITERS)
 npm run dump                         # pg_dump, pg_restore and binary COPY round trips
-npm run bench:storage                # the table above
+npm run bench:storage                # the storage table above (EDITS, COMPACT_EVERY, SIZES)
 ```
 
 The convergence test makes random concurrent edits in several JS Yjs docs
