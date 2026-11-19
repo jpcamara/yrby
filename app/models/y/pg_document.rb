@@ -31,14 +31,10 @@ class Y::PgDocument < Y::Document
   SQL
 
   LOAD = "SELECT doc::bytea FROM #{MERGED}".freeze
-  SYNC_STATE = <<~SQL.freeze
-    SELECT ydoc_state_vector(coalesce(doc, ydoc())), coalesce(ydoc_has_pending(doc), false)
-      FROM #{MERGED}
-  SQL
-  SYNC_DIFF = <<~SQL.freeze
-    SELECT ydoc_diff(coalesce(doc, ydoc()), $2, include_pending => true), coalesce(ydoc_has_pending(doc), false)
-      FROM #{MERGED}
-  SQL
+  # Neither loads the document: the merge, the state vector and the diff all
+  # work on the encoded update.
+  SYNC_STATE = "SELECT ydoc_state_vector(coalesce(doc, ydoc())) FROM #{MERGED}".freeze
+  SYNC_DIFF = "SELECT ydoc_diff(coalesce(doc, ydoc()), $2, include_pending => true) FROM #{MERGED}".freeze
 
   # Insert, and count the log in the same round trip. The count's snapshot
   # predates the insert, hence the + 1.
@@ -66,13 +62,12 @@ class Y::PgDocument < Y::Document
   EMPTY_UPDATE = "\x00\x00".b.freeze
 
   class << self
-    # [state_vector, pending] for the server's SyncStep1. Takes a row (or
-    # nil before the first write), as Y::Collaborative::Attribute holds one.
-    def sync_state_of(row) = row ? row.sync_state : [EMPTY_STATE_VECTOR, false]
+    # The state vector for the server's SyncStep1. Takes a row (or nil before
+    # the first write), as Y::Collaborative::Attribute holds one.
+    def sync_state_of(row) = row ? row.sync_state : EMPTY_STATE_VECTOR
 
-    # [update, pending]: what a client at state_vector is missing, pending
-    # content included.
-    def sync_diff_of(row, state_vector) = row ? row.sync_diff(state_vector) : [EMPTY_UPDATE, false]
+    # What a client at state_vector is missing, pending content included.
+    def sync_diff_of(row, state_vector) = row ? row.sync_diff(state_vector) : EMPTY_UPDATE
 
     # The same, by key, for a channel that addresses documents by key.
     def sync_state(key) = sync_state_of(select(:id).find_by(key: key))
@@ -91,15 +86,8 @@ class Y::PgDocument < Y::Document
     nil
   end
 
-  def sync_state
-    sv, pending = select_one(SYNC_STATE, id)
-    [sv, pending == "\x01".b]
-  end
-
-  def sync_diff(state_vector)
-    update, pending = select_one(SYNC_DIFF, id, state_vector)
-    [update, pending == "\x01".b]
-  end
+  def sync_state = select_one(SYNC_STATE, id).first
+  def sync_diff(state_vector) = select_one(SYNC_DIFF, id, state_vector).first
 
   private
 

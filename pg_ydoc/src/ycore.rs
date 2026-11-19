@@ -131,10 +131,15 @@ pub fn merge<B: AsRef<[u8]>>(updates: &[B]) -> Result<Vec<u8>, Error> {
     }
 }
 
-/// The document's state vector (integrated state only), v1-encoded. This is
-/// what a sync step 1 sends.
+/// The document's state vector, v1-encoded: per client, the clocks it holds
+/// contiguously from zero. This is what a sync step 1 sends. Read from the
+/// encoded update without loading a `Doc`, so a gap stops a client's count
+/// but content from other clients that depends on the gap still counts. A
+/// peer is then asked only for what is actually missing, and it is served
+/// the waiting content with `diff_with_pending`.
 pub fn state_vector(doc: &[u8]) -> Result<Vec<u8>, Error> {
-    Ok(load(doc)?.transact().state_vector().encode_v1())
+    let doc = if doc.is_empty() { &EMPTY[..] } else { doc };
+    Ok(Update::decode_v1(doc)?.state_vector().encode_v1())
 }
 
 /// True if the document holds structs or deletions waiting on a missing

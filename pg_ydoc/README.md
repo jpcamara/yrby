@@ -30,7 +30,7 @@ Updates and state vectors are `bytea` in the v1 encoding Yjs clients use.
 | `ydoc(bytea)`, `bytea::ydoc` | `ydoc` | A document from a v1 update, validated. `ydoc::bytea` is free. |
 | `ydoc_apply(ydoc, bytea)` | `ydoc` | Apply an update. A NULL document counts as empty. Gives back the same value when the update changes nothing. |
 | `ydoc_adds(ydoc, bytea)` | `bool` | Would the update change anything (new content, a new deletion, or a gap to wait on)? Read from the encodings, so it is cheap. |
-| `ydoc_state_vector(ydoc)` | `bytea` | Sync step 1. |
+| `ydoc_state_vector(ydoc)` | `bytea` | Sync step 1: per client, the clocks stored contiguously from zero. Read without loading the document, so content waiting on another client's missing update still counts. |
 | `ydoc_diff(ydoc, sv bytea = NULL, include_pending bool = false)` | `bytea` | Sync step 2: what a peer with `sv` is missing; the whole document without `sv`. Leaves out pending content unless `include_pending`, which serves it as Yjs's `encodeStateAsUpdate` does, so the peer holds the gap and heals when the missing update reaches it. |
 | `ydoc_has_pending(ydoc)` | `bool` | Does the document hold updates waiting on a missing dependency? |
 | `ydoc_merge(ydoc, ydoc)` | `ydoc` | Merge two documents without loading them. |

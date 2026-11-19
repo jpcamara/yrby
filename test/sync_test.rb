@@ -735,14 +735,14 @@ class SyncTest < Minitest::Test
 
       doc = Y::Doc.new
       store.each { |u| doc.apply_update(u) }
-      [doc.encode_state_vector, doc.pending?]
+      doc.encode_state_vector
     end
     helper.class.on_sync_diff do |_key, sv|
       next unless answer
 
       doc = Y::Doc.new
       store.each { |u| doc.apply_update(u) }
-      [doc.encode_state_as_update(sv), doc.pending?]
+      doc.encode_state_as_update(sv)
     end
     helper
   end
@@ -783,7 +783,9 @@ class SyncTest < Minitest::Test
     assert_equal 2, loads.size
   end
 
-  def test_a_store_that_answers_sync_reports_an_open_gap
+  # The store serves the gap without loading the document, so on_gap, which
+  # needs a loaded document, doesn't fire.
+  def test_a_store_that_answers_sync_serves_an_open_gap
     store = [YjsFixtures::Gap::DEPENDENT]
     transmits = []
     gaps = []
@@ -795,7 +797,7 @@ class SyncTest < Minitest::Test
     helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
     client.handle_sync_message(Base64.strict_decode64(transmits.last["update"]))
 
-    assert_equal %w[doc-key doc-key], gaps, "observed at subscribe and at serve"
+    assert_empty gaps
     assert_predicate client, :pending?, "the pending content was served"
     client.apply_update(YjsFixtures::Gap::FIRST)
 

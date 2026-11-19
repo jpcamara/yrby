@@ -112,7 +112,9 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     Y::PgDocument.find_by(key: "doc").compact!
 
     assert_equal expected, text_of(Y::PgDocument.load_state("doc"))
-    assert_equal [false], Y::PgDocument.sync_state("doc").values_at(1)
+    refute Y::PgDocument.connection.select_value(
+      "SELECT ydoc_has_pending(state) FROM y_documents WHERE key = 'doc'"
+    )
   end
 
   def test_sync_serves_pending_content_and_the_client_heals
@@ -120,16 +122,14 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     Y::PgDocument.append("doc", updates[0])
     Y::PgDocument.append("doc", updates[2]) # depends on the missing updates[1]
 
-    sv, pending = Y::PgDocument.sync_state("doc")
-
-    assert pending
+    sv = Y::PgDocument.sync_state("doc")
     reference = Y::Doc.new
     reference.apply_update(updates[0])
 
     assert_equal reference.encode_state_vector, sv, "the state vector stops at the gap"
 
     client = Y::Doc.new
-    update, = Y::PgDocument.sync_diff("doc", client.encode_state_vector)
+    update = Y::PgDocument.sync_diff("doc", client.encode_state_vector)
     client.apply_update(update)
 
     assert_predicate client, :pending?, "the client holds the gap"
@@ -141,10 +141,9 @@ class PgDocumentTest < ActionCable::Channel::TestCase
   end
 
   def test_sync_for_a_document_that_does_not_exist_yet
-    assert_equal ["\x00".b, false], Y::PgDocument.sync_state("nothing")
-    update, pending = Y::PgDocument.sync_diff("nothing", "\x00".b)
+    assert_equal "\x00".b, Y::PgDocument.sync_state("nothing")
+    update = Y::PgDocument.sync_diff("nothing", "\x00".b)
 
-    refute pending
     assert_nil text_of(update)
   end
 
@@ -168,7 +167,7 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     reader = Thread.new do
       last = 0
       while writing
-        sv, = doc.sync_state
+        sv = doc.sync_state
         sum = clock_sum(sv)
         regressions += 1 if sum < last
         last = sum

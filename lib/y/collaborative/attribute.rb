@@ -73,8 +73,8 @@ module Y
       def key = existing_row&.key || Y::Document.key_for(record, name)
 
       # The sync handshake answered by the store, for stores that can
-      # (Y::PgDocument): [state_vector, pending] for the server's SyncStep1,
-      # and [update, pending] for what a client at state_vector is missing.
+      # (Y::PgDocument): the state vector for the server's SyncStep1, and the
+      # update a client at state_vector is missing.
       # nil for the others, which the channel serves through load_state.
       def sync_state
         document_class.sync_state_of(existing_row) if document_class.respond_to?(:sync_state_of)

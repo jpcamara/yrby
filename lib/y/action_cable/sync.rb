@@ -120,19 +120,19 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       # Optional. Lets a store answer the sync handshake itself, so serving a
       # client doesn't load the document into Ruby. Called with (key) in the
-      # channel instance's context; return [state_vector, pending] for the
-      # server's SyncStep1, or nil to fall back to on_load. A store that
-      # merges in the database, such as Y::PgDocument, uses this.
+      # channel instance's context; return the state vector for the server's
+      # SyncStep1, or nil to fall back to on_load. A store that merges in the
+      # database, such as Y::PgDocument, uses this. Answering from the store
+      # skips the on_gap check, which needs a loaded document.
       def on_sync_state(&block)
         @on_sync_state = block if block
         sync_inherited_hook(:on_sync_state)
       end
 
       # Optional, the other half of on_sync_state. Called with (key,
-      # state_vector) when a client sends SyncStep1; return [update, pending]
-      # where update is everything the client is missing, pending content
-      # included (as Yjs's encodeStateAsUpdate serves it), or nil to fall
-      # back to on_load.
+      # state_vector) when a client sends SyncStep1; return the update the
+      # client is missing, pending content included (as Yjs's
+      # encodeStateAsUpdate serves it), or nil to fall back to on_load.
       def on_sync_diff(&block)
         @on_sync_diff = block if block
         sync_inherited_hook(:on_sync_diff)
@@ -206,10 +206,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # is exactly the missing dependency an open gap is waiting on. If a live
       # client has it, the join heals the gap. We only surface it (on_gap); the
       # handshake below already does the soliciting.
-      if (state = sync_store_state)
-        sv, pending = state
+      if (sv = sync_store_state)
         sync_transmit(sync_frame(SYNC_STEP1, sv))
-        sync_observe_gap if pending
       else
         doc = sync_load_doc
         sync_transmit(doc.sync_step1)
@@ -431,10 +429,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       case Y.message_kind(bytes)
       when MSG_KIND_SYNC_STEP1
-        if (diff = sync_store_diff(bytes))
-          update, pending = diff
+        if (update = sync_store_diff(bytes))
           sync_transmit(sync_frame(SYNC_STEP2, update)) # full state, pending included
-          sync_observe_gap if pending
         else
           doc = sync_load_doc
           result = doc.handle_sync_message(bytes)
