@@ -68,6 +68,13 @@ snapshot once the log's bytes reach a share of the snapshot's (10% here, at
 least 4 KB). A large document is then rewritten rarely, and the cost of a
 compaction per edit stays about the same at any size.
 
+Keep the log insert-only. Compaction records the MVCC snapshot it folded
+under (`pg_current_snapshot()`) instead of deleting rows, and reads skip the
+rows that snapshot covers. The log has two partitions; rotation copies the
+older one's unfolded rows into the current one, truncates it, and makes it
+current. The log then leaves no dead tuples: what remains are the snapshot
+rewrites.
+
 Serve a client without decoding the snapshot. Keep its state vector in a
 generated column and extend it by the log for sync step 1. For step 2 send
 the snapshot's part and the log's part as two updates, snapshot first; a
@@ -76,76 +83,101 @@ content past a gap has no stored state vector (`gapless => true` gives NULL)
 and is served merged instead.
 
 Measured on a Mac mini (PG 17, one-character edits, one statement each,
-compactions counted, autovacuum off; joins timed with the log halfway to its
-next compaction; `tests/js/storage_bench.mjs`). "64 rows" is the same
-snapshot + log compacted every 64 rows and served merged:
+compactions and rotations counted, autovacuum off; joins timed with the log
+halfway to its next compaction; `tests/js/storage_bench.mjs`). "64 rows"
+compacts every 64 rows, deletes them and serves merged; "deleting" is the
+size policy and split serving with a deleting log:
 
 | Starting doc | Storage | WAL per edit | Dead tuples per edit | Per edit | New client joins | Returning client joins |
 |---|---|---|---|---|---|---|
-| 2 KB | merged `ydoc` | 1.9 KB | 0.24 | 0.25 ms | 0.23 ms | 0.22 ms |
-| 2 KB | snapshot + log, 64 rows | 0.36 KB | 1.03 | 0.22 ms | 0.74 ms | 0.67 ms |
-| 2 KB | snapshot + log, by size | 0.34 KB | 1.01 | 0.19 ms | 0.86 ms | 0.83 ms |
-| 50 KB | merged `ydoc` | 29.6 KB | 14.1 | 1.98 ms | 0.38 ms | 0.40 ms |
-| 50 KB | snapshot + log, 64 rows | 0.79 KB | 1.22 | 0.13 ms | 1.10 ms | 1.10 ms |
-| 50 KB | snapshot + log, by size | 0.52 KB | 1.09 | 0.10 ms | 0.54 ms | 0.55 ms |
-| 500 KB | merged `ydoc` | 296 KB | 138 | 19.7 ms | 4.3 ms | 4.7 ms |
-| 500 KB | snapshot + log, 64 rows | 5.0 KB | 3.17 | 0.61 ms | 10.0 ms | 10.6 ms |
-| 500 KB | snapshot + log, by size | 0.66 KB | 1.07 | 0.22 ms | 3.7 ms | 3.3 ms |
+| 2 KB | merged `ydoc` | 1.9 KB | 0.24 | 0.28 ms | 0.25 ms | 0.19 ms |
+| 2 KB | snapshot + log, 64 rows | 0.36 KB | 1.03 | 0.24 ms | 0.81 ms | 0.80 ms |
+| 2 KB | snapshot + log, deleting | 0.34 KB | 1.01 | 0.11 ms | 0.48 ms | 0.48 ms |
+| 2 KB | snapshot + log, truncating | 0.24 KB | 0.01 | 0.16 ms | 0.52 ms | 0.56 ms |
+| 50 KB | merged `ydoc` | 30.0 KB | 14.1 | 1.89 ms | 0.48 ms | 0.50 ms |
+| 50 KB | snapshot + log, 64 rows | 0.79 KB | 1.22 | 0.20 ms | 1.24 ms | 1.32 ms |
+| 50 KB | snapshot + log, deleting | 0.52 KB | 1.09 | 0.17 ms | 0.91 ms | 0.91 ms |
+| 50 KB | snapshot + log, truncating | 0.41 KB | 0.10 | 0.22 ms | 0.59 ms | 0.54 ms |
+| 500 KB | merged `ydoc` | 296 KB | 138 | 22.9 ms | 4.1 ms | 4.5 ms |
+| 500 KB | snapshot + log, 64 rows | 5.0 KB | 3.17 | 0.58 ms | 9.7 ms | 10.1 ms |
+| 500 KB | snapshot + log, deleting | 0.66 KB | 1.07 | 0.19 ms | 3.5 ms | 4.0 ms |
+| 500 KB | snapshot + log, truncating | 0.55 KB | 0.14 | 0.25 ms | 3.7 ms | 3.9 ms |
 
-What remains: one dead tuple per edit, from deleting log rows at compaction;
-the whole document written once per compaction; and, for a small document,
-the fixed cost of the extra SQL in a join. A returning client costs a decode
-of the snapshot, to diff it.
+What remains: the whole document written once per compaction; for a small
+document, the fixed cost of the extra SQL in a join; and for a returning
+client, a decode of the snapshot to diff it. Times below a millisecond vary
+by about 0.1 ms between runs.
+
+The fold tracking is transaction ids, which only mean something in the
+cluster that assigned them. Record the cluster's system identifier
+(`pg_control_system()`) with the log, refuse to compact or rotate on a
+cluster with another one (after a logical-replication cutover), and adopt
+the log there by giving every row the current transaction id and clearing
+every folded snapshot. A physical replica keeps the identifier.
 
 ```sql
 CREATE TABLE doc_snapshots (
   id bigint PRIMARY KEY,
   body ydoc NOT NULL DEFAULT ydoc(),
-  state_vector bytea GENERATED ALWAYS AS (ydoc_state_vector(body, gapless => true)) STORED
+  state_vector bytea GENERATED ALWAYS AS (ydoc_state_vector(body, gapless => true)) STORED,
+  folded pg_snapshot
 );
 CREATE TABLE doc_updates (
-  id bigserial PRIMARY KEY,
-  doc_id bigint NOT NULL REFERENCES doc_snapshots,
+  doc_id bigint NOT NULL,
+  txid xid8 NOT NULL DEFAULT pg_current_xact_id(),
+  slot smallint NOT NULL,
   update bytea NOT NULL
-);
-CREATE INDEX ON doc_updates (doc_id, id);
+) PARTITION BY LIST (slot);
+CREATE TABLE doc_updates_0 PARTITION OF doc_updates FOR VALUES IN (0);
+CREATE TABLE doc_updates_1 PARTITION OF doc_updates FOR VALUES IN (1);
+CREATE INDEX ON doc_updates (doc_id, txid);
+CREATE TABLE doc_updates_slot (slot smallint NOT NULL);
+INSERT INTO doc_updates_slot VALUES (0);
 
--- Write: append, and now and then check whether the log is due.
-INSERT INTO doc_updates (doc_id, update) VALUES ($1, $2);
-SELECT (SELECT coalesce(sum(octet_length(update)), 0) FROM doc_updates WHERE doc_id = $1)
-       >= greatest(4096, 0.1 * (SELECT pg_column_size(body) FROM doc_snapshots WHERE id = $1));
+-- Rows of snapshot s not folded into it yet. The txid bound lets the index
+-- skip folded rows waiting for their partition's truncate.
+--   u.doc_id = s.id AND u.txid >= coalesce(pg_snapshot_xmin(s.folded), '0')
+--   AND (s.folded IS NULL OR NOT pg_visible_in_snapshot(u.txid, s.folded))
+-- written UNFOLDED below.
+
+-- Write: append to the current partition, and now and then check whether
+-- the unfolded log is due for compaction.
+INSERT INTO doc_updates (doc_id, slot, update) VALUES ($1, (SELECT slot FROM doc_updates_slot), $2);
+
+-- Compact: fold the unfolded log into the snapshot and record what was seen.
+UPDATE doc_snapshots s
+   SET body = ydoc_apply(s.body, (SELECT ydoc_merge_agg(u.update)::bytea FROM doc_updates u WHERE UNFOLDED)),
+       folded = pg_current_snapshot()
+ WHERE s.id = $1;
+
+-- Rotate (own transaction; old is the slot not current, cur the current):
+BEGIN;
+SET LOCAL lock_timeout = '50ms';
+LOCK TABLE doc_updates_<old> IN ACCESS EXCLUSIVE MODE;  -- waits out its writers
+INSERT INTO doc_updates (doc_id, txid, slot, update)
+  SELECT u.doc_id, u.txid, <cur>, u.update FROM doc_updates_<old> u JOIN doc_snapshots s ON UNFOLDED;
+TRUNCATE doc_updates_<old>;
+UPDATE doc_updates_slot SET slot = <old>;
+COMMIT;
 
 -- Sync step 1: the server's state vector.
 SELECT CASE WHEN s.state_vector IS NOT NULL
             THEN ydoc_extend_state_vector(s.state_vector,
-                   (SELECT ydoc_merge_agg(update) FROM doc_updates WHERE doc_id = $1))
+                   (SELECT ydoc_merge_agg(u.update) FROM doc_updates u WHERE UNFOLDED))
             ELSE ydoc_state_vector(ydoc_merge(s.body, coalesce(
-                   (SELECT ydoc_merge_agg(update) FROM doc_updates WHERE doc_id = $1), ydoc()))) END
+                   (SELECT ydoc_merge_agg(u.update) FROM doc_updates u WHERE UNFOLDED), ydoc()))) END
   FROM doc_snapshots s WHERE s.id = $1;
 
 -- Sync step 2 for a client at $2: the snapshot's part, then the log's part.
 SELECT ydoc_diff(s.body, $2, true),
-       (SELECT ydoc_diff(ydoc_merge_agg(update), $2, true) FROM doc_updates WHERE doc_id = $1)
+       (SELECT ydoc_diff(ydoc_merge_agg(u.update), $2, true) FROM doc_updates u WHERE UNFOLDED)
   FROM doc_snapshots s WHERE s.id = $1 AND s.state_vector IS NOT NULL;
 -- (No row: the snapshot has a gap; serve ydoc_diff of the merged document.)
-
--- Read the whole document: snapshot plus log, merged.
-SELECT ydoc_merge_agg(part) FROM (
-  SELECT body::bytea AS part FROM doc_snapshots WHERE id = $1
-  UNION ALL
-  SELECT update FROM doc_updates WHERE doc_id = $1
-) parts;
-
--- Compact: fold the log into the snapshot and delete it, in one statement.
-WITH folded AS (DELETE FROM doc_updates WHERE doc_id = $1 RETURNING update)
-UPDATE doc_snapshots
-   SET body = ydoc_apply(body, (SELECT ydoc_merge_agg(update)::bytea FROM folded))
- WHERE id = $1;
 ```
 
-Compaction deletes every row it folds. An update still waiting on a dependency
-waits inside the snapshot, as it would in a merged `ydoc` column, so no row
-needs to stay behind. (yrby-core's `compaction::plan` keeps the snapshot
+Compaction folds every row it can see. An update still waiting on a
+dependency waits inside the snapshot, as it would in a merged `ydoc` column,
+so no row needs to stay unfolded. (yrby-core's `compaction::plan` keeps the snapshot
 gap-free and leaves such rows in the log instead; with out-of-order rows that
 approach can drop content, see the fixtures.)
 
@@ -165,7 +197,7 @@ cd tests/js && npm install
 npm run converge                     # JS Yjs convergence (ROUNDS, PEERS, STEPS, SEED)
 npm run concurrency                  # many connections writing one document (WRITERS)
 npm run dump                         # pg_dump, pg_restore and binary COPY round trips
-npm run bench:storage                # the storage table above (SIZES, EDITS, RATIO, MIN_LOG)
+npm run bench:storage                # the storage table above (SIZES, EDITS, RATIO, MIN_LOG, ROTATE_EVERY)
 ```
 
 The convergence test makes random concurrent edits in several JS Yjs docs
@@ -175,10 +207,13 @@ Postgres shuffled with some duplicated, and checks `ydoc_apply`,
 `ydoc_diff` against the JS result.
 
 The concurrency test splits each session's updates across many connections
-writing the same document at once, through both a merged `ydoc` row and a
-snapshot + log, while another connection compacts the log in a loop and
-another reads it. Both stores must end equal to the JS peers, and no read may
-see the state vector go backwards. Under the default READ COMMITTED,
+writing the same document at once, through a merged `ydoc` row, a snapshot +
+log that deletes what it folds, and a snapshot + insert-only log in two
+partitions, while another connection compacts both logs in a loop, another
+rotates the partitioned one, and another reads them. Every store must end
+equal to the JS peers, and no read may see the state vector go backwards.
+Rotating without carrying unfolded rows forward, or without the lock, fails
+it. Under the default READ COMMITTED,
 `UPDATE ... SET body = ydoc_apply(body, $1)` re-reads the row after waiting
 on another writer's lock, so no update is lost.
 

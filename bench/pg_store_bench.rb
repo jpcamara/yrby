@@ -19,7 +19,7 @@ ActiveRecord::Base.logger = nil
 ActiveRecord::Schema.verbose = false
 conn = ActiveRecord::Base.connection
 conn.execute("create extension if not exists pg_ydoc")
-conn.execute("drop table if exists y_document_updates, y_documents")
+conn.execute("drop table if exists y_document_updates, y_documents, y_document_log, y_document_log_slot")
 ActiveRecord::Schema.define do
   create_table :y_documents do |t|
     t.string :key, null: false, index: { unique: true }
@@ -38,8 +38,7 @@ ActiveRecord::Schema.define do
 end
 if STORE == "pg"
   conn.execute("alter table y_documents alter column state type ydoc using ydoc(state)")
-  conn.execute("alter table y_documents add column state_vector bytea " \
-               "generated always as (ydoc_state_vector(state, gapless => true)) stored")
+  conn.execute(Y::PgDocument::SCHEMA)
 end
 
 now = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }

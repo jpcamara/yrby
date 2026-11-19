@@ -18,6 +18,8 @@ module Y
       def initialize_type_map(map)
         super
         map.register_type "ydoc", ActiveRecord::ConnectionAdapters::PostgreSQL::OID::Bytea.new
+        # Y::PgDocument's folded column; only the database reads it.
+        map.register_type "pg_snapshot", ActiveRecord::ConnectionAdapters::PostgreSQL::OID::SpecializedString.new(:pg_snapshot)
       end
     end
   end

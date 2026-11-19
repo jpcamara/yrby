@@ -63,6 +63,8 @@ Metrics/ClassLength:
     # The collaborator keeps its whole stay, from joining to leaving, in one
     # place.
     - "lib/y/collaborator.rb"
+    # Mostly the SQL it runs, kept beside the methods that run it.
+    - "app/models/y/pg_document.rb"
 Minitest/MultipleAssertions:
   Enabled: false
 

@@ -19,13 +19,12 @@ if PG_DOCUMENT_URL
   Y::PgDocument.establish_connection(url: PG_DOCUMENT_URL, pool: 12)
   Y::PgDocument.connection.execute(<<~SQL)
     CREATE EXTENSION IF NOT EXISTS pg_ydoc;
-    DROP TABLE IF EXISTS y_document_updates, y_documents;
+    DROP TABLE IF EXISTS y_document_updates, y_documents, y_document_log, y_document_log_slot;
     CREATE TABLE y_documents (
       id bigserial PRIMARY KEY,
       key varchar NOT NULL,
       record_type varchar, record_id bigint, name varchar,
       state ydoc,
-      state_vector bytea GENERATED ALWAYS AS (ydoc_state_vector(state, gapless => true)) STORED,
       created_at timestamp(6) NOT NULL, updated_at timestamp(6) NOT NULL
     );
     CREATE UNIQUE INDEX ON y_documents (key);
@@ -39,8 +38,11 @@ if PG_DOCUMENT_URL
     );
     CREATE INDEX ON y_document_updates (document_id, pending);
   SQL
+  Y::PgDocument.connection.execute(Y::PgDocument::SCHEMA)
   Y::PgDocument.reset_column_information
-  Minitest.after_run { Y::PgDocument.connection.execute("DROP TABLE y_document_updates, y_documents") }
+  Minitest.after_run do
+    Y::PgDocument.connection.execute("DROP TABLE y_document_updates, y_documents, y_document_log, y_document_log_slot")
+  end
 end
 
 class PgDocumentTest < ActionCable::Channel::TestCase
@@ -52,7 +54,7 @@ class PgDocumentTest < ActionCable::Channel::TestCase
 
   def setup
     skip "set YRBY_PG_URL to a Postgres with pg_ydoc" unless PG_DOCUMENT_URL
-    Y::PgDocument.connection.execute("TRUNCATE y_document_updates, y_documents")
+    Y::PgDocument.connection.execute("TRUNCATE y_document_updates, y_documents, y_document_log")
     @original_authorizer = Y::DocumentChannel.document_authorizer
     stub_connection
   end
@@ -84,13 +86,16 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     doc.read_text("t")
   end
 
-  # Counted in Postgres: Y::DocumentUpdate is on the suite's SQLite connection.
+  # Log rows not yet folded into the document's snapshot.
   def log_rows(key)
     Y::PgDocument.connection.select_value(<<~SQL).to_i
-      SELECT count(*) FROM y_document_updates u JOIN y_documents d ON d.id = u.document_id
+      SELECT count(*) FROM y_documents d JOIN y_document_log l ON #{Y::PgDocument::UNFOLDED}
        WHERE d.key = #{Y::PgDocument.connection.quote(key)}
     SQL
   end
+
+  # Every row in the log, folded or not.
+  def stored_log_rows = Y::PgDocument.connection.select_value("SELECT count(*) FROM y_document_log").to_i
 
   # Apply what sync_diff returned: one update or several, in order.
   def apply_all(doc, updates) = Array(updates).each { |u| doc.apply_update(u) }
@@ -252,6 +257,13 @@ class PgDocumentTest < ActionCable::Channel::TestCase
       end
     end
     compactor = Thread.new { doc.compact! while writing }
+    rotations = 0
+    rotator = Thread.new do
+      while writing
+        rotations += 1 if Y::PgDocument.rotate_log!
+        sleep 0.002
+      end
+    end
     reader = Thread.new do
       last = 0
       while writing
@@ -263,12 +275,58 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     end
     writers.each(&:join)
     writing = false
-    [compactor, reader].each(&:join)
+    [compactor, reader, rotator].each(&:join)
     doc.compact!
+    2.times { Y::PgDocument.rotate_log! }
 
+    assert_operator rotations, :>, 0
+    assert_equal 0, stored_log_rows, "two rotations after the last compaction leave nothing"
     assert_equal 0, regressions
     assert_equal expected, text_of(Y::PgDocument.load_state("doc"))
     assert_equal 0, log_rows("doc")
+  end
+
+  # Rotation keeps what isn't folded yet, drops what is (and rows of deleted
+  # documents), and only touches the older partition.
+  def test_rotation_carries_unfolded_rows_and_truncates_the_rest
+    updates, expected = typing(30, seed: 12)
+    updates[0...20].each { |u| Y::PgDocument.append("doc", u) }
+    Y::PgDocument.find_by(key: "doc").compact!
+    updates[20..].each { |u| Y::PgDocument.append("doc", u) }
+    Y::PgDocument.append("gone", updates[0])
+    Y::PgDocument.where(key: "gone").delete_all
+
+    assert Y::PgDocument.rotate_log!, "the first rotation empties the unused partition"
+    assert_equal 31, stored_log_rows
+    assert Y::PgDocument.rotate_log!
+
+    assert_equal 10, stored_log_rows, "only the unfolded rows were carried"
+    assert_equal 10, log_rows("doc")
+    assert_equal expected, text_of(Y::PgDocument.load_state("doc"))
+  end
+
+  def test_rotation_waits_for_no_transaction
+    Y::PgDocument.transaction do
+      refute Y::PgDocument.rotate_log!
+    end
+  end
+
+  def test_another_cluster_must_be_adopted_before_compaction_or_rotation
+    updates, expected = typing(20, seed: 13)
+    updates[0...10].each { |u| Y::PgDocument.append("doc", u) }
+    Y::PgDocument.find_by(key: "doc").compact!
+    updates[10..].each { |u| Y::PgDocument.append("doc", u) }
+    c = Y::PgDocument.connection
+    c.execute("UPDATE y_document_log_slot SET system_identifier = 0")
+
+    assert_raises(Y::PgDocument::OtherCluster) { Y::PgDocument.find_by(key: "doc").compact! }
+    assert_raises(Y::PgDocument::OtherCluster) { Y::PgDocument.rotate_log! }
+    Y::PgDocument.adopt_log!
+    Y::PgDocument.find_by(key: "doc").compact!
+    2.times { Y::PgDocument.rotate_log! }
+
+    assert_equal 0, stored_log_rows
+    assert_equal expected, text_of(Y::PgDocument.load_state("doc"))
   end
 
   def test_the_shipped_channel_serves_a_pg_ydoc_document_without_loading_it
