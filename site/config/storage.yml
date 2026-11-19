@@ -1,0 +1,5 @@
+# The site accepts no files. Action Text needs an Active Storage service to
+# boot, so this is one that refuses every upload and download (see
+# lib/active_storage/service/refusing_service.rb).
+refusing:
+  service: Refusing
