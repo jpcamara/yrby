@@ -59,6 +59,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # sync type, then the payload with a varuint length prefix.
     SYNC_STEP1 = 0
     SYNC_STEP2 = 1
+    SYNC_UPDATE = 2
 
     # Default incoming-frame size cap (decoded bytes). Generous enough for a
     # large initial SyncStep2, small enough to bound a single message's
@@ -132,7 +133,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # Optional, the other half of on_sync_state. Called with (key,
       # state_vector) when a client sends SyncStep1; return the update the
       # client is missing, pending content included (as Yjs's
-      # encodeStateAsUpdate serves it), or nil to fall back to on_load.
+      # encodeStateAsUpdate serves it), or nil to fall back to on_load. It may
+      # return several updates instead: the first goes out as SyncStep2 and
+      # the rest follow as updates, in order.
       def on_sync_diff(&block)
         @on_sync_diff = block if block
         sync_inherited_hook(:on_sync_diff)
@@ -429,8 +432,10 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       case Y.message_kind(bytes)
       when MSG_KIND_SYNC_STEP1
-        if (update = sync_store_diff(bytes))
-          sync_transmit(sync_frame(SYNC_STEP2, update)) # full state, pending included
+        if (updates = sync_store_diff(bytes))
+          first, *rest = Array(updates)
+          sync_transmit(sync_frame(SYNC_STEP2, first)) # full state, pending included
+          rest.each { |update| sync_transmit(sync_frame(SYNC_UPDATE, update)) }
         else
           doc = sync_load_doc
           result = doc.handle_sync_message(bytes)
