@@ -7,6 +7,7 @@ class CreateYTables < ActiveRecord::Migration<%= migration_version %>
       t.references :record, polymorphic: true, null: true, index: false
       t.string :name
       t.binary :state, limit: 1.gigabyte - 1
+      t.binary :state_vector
       t.timestamps
       t.index %i[record_type record_id name], unique: true,
               where: "record_type IS NOT NULL",

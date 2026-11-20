@@ -48,6 +48,10 @@ class Y::Document < ActiveRecord::Base
   class_attribute :compact_every, instance_writer: false, default: 256
   class_attribute :check_compaction_every, instance_writer: false, default: 16
 
+  # An update with nothing in it, the SyncStep2 for a client that is
+  # missing nothing.
+  EMPTY_UPDATE = "\x00\x00".b
+
   class << self
     def locate(key) = find_by(key: key)
 
@@ -92,6 +96,16 @@ class Y::Document < ActiveRecord::Base
     def append(key, update)
       (select(:id).find_by(key: key) || create_or_find_by!(key: key)).append(update)
     end
+
+    # The sync handshake answered from the stored rows (see #sync_state and
+    # #sync_diff), or nil for the channel to load the document instead.
+    def sync_state(key) = select(:id).find_by(key: key)&.sync_state
+    def sync_diff(key, state_vector) = select(:id).find_by(key: key)&.sync_diff(state_vector)
+
+    # Whether y_documents has the state_vector column (added by
+    # `bin/rails generate yrby:state_vector`). Without it the handshake
+    # reads the snapshot's state vector from its bytes instead.
+    def stores_state_vector? = column_names.include?("state_vector")
 
     # The key for one attribute of one record, such as "post/1/body". It comes
     # from the class name, id, and attribute, so computing it reads and creates
@@ -151,6 +165,30 @@ class Y::Document < ActiveRecord::Base
     [self.class.where(id: id).pick(:state), *tail]
   end
 
+  # The state vector for the server's SyncStep1: the snapshot's, extended by
+  # what the tail adds after it. The snapshot's comes from the state_vector
+  # column, so the snapshot isn't read at all. The tail is read first, as in
+  # load_parts. nil while a row is marked pending: a gap that outlived a
+  # compaction, which the channel then loads the document to see (on_gap).
+  def sync_state
+    tail = clean_tail or return
+    Y.extend_state_vector(snapshot_state_vector || "".b, tail)
+  end
+
+  # What a client at state_vector is missing, as updates to send in order:
+  # the snapshot's part, then the tail as stored. A client with nothing gets
+  # the snapshot's bytes as they are; any other gets Y.diff_update of them,
+  # which slices the encoded update without building a document and keeps
+  # the whole delete set (a delete doesn't move a state vector, so a client
+  # can lack one whatever its state vector says). nil as in sync_state.
+  def sync_diff(state_vector)
+    tail = clean_tail or return
+    snapshot = self.class.where(id: id).pick(:state)
+    snapshot = Y.diff_update(snapshot, state_vector) if snapshot && state_vector.bytesize > 1
+    parts = [snapshot, *tail].compact
+    parts.empty? ? [EMPTY_UPDATE] : parts
+  end
+
   # Compact the tail into state. The row lock serializes racing
   # compactions; a delta landing mid-compaction isn't in `rows`, so it
   # survives the delete and compacts next time.
@@ -176,7 +214,7 @@ class Y::Document < ActiveRecord::Base
       captured, kept = split_rows(doc, rows)
       new_state = doc.compacted_state_update
       # A gap-only batch integrates nothing, so state is left as it was.
-      update!(state: new_state) unless kept.any? && new_state == (state || Y::Doc.new.compacted_state_update)
+      write_state(doc, new_state) unless kept.any? && new_state == (state || Y::Doc.new.compacted_state_update)
       updates.where(id: captured.map(&:first)).delete_all
       updates.where(id: kept.reject(&:last).map(&:first)).update_all(pending: true)
     end
@@ -190,6 +228,31 @@ class Y::Document < ActiveRecord::Base
     return [rows, []] unless doc.pending?
 
     rows.partition { |_, payload, _| doc.update_fits?(payload) }
+  end
+
+  # The new snapshot, and its state vector where the column exists.
+  def write_state(doc, new_state)
+    attributes = { state: new_state }
+    attributes[:state_vector] = doc.encode_state_vector if self.class.stores_state_vector?
+    update!(attributes)
+  end
+
+  # The tail's payloads, or nil if any row is marked pending.
+  def clean_tail
+    rows = updates.reset.pluck(:payload, :pending)
+    rows.map(&:first) unless rows.any?(&:last)
+  end
+
+  # The snapshot's state vector: the stored one, or read from the snapshot's
+  # bytes for a row compacted before the column existed. nil before the
+  # first compaction.
+  def snapshot_state_vector
+    if self.class.stores_state_vector?
+      stored, snapshot = self.class.where(id: id).pick(:state_vector, Arel.sql("state IS NOT NULL"))
+      return stored if stored || !snapshot
+    end
+    snapshot = self.class.where(id: id).pick(:state)
+    snapshot && Y.state_vector_of(snapshot)
   end
 
   # About one append in check_compaction_every, by row id (at random for

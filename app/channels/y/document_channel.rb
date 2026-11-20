@@ -59,6 +59,8 @@ module Y
 
     on_load { |_key| document.load_parts }
     on_change { |_key, update| document.append(update) }
+    on_sync_state { |_key| document.sync_state }
+    on_sync_diff { |_key, state_vector| document.sync_diff(state_vector) }
 
     def subscribed
       return reject unless locate_record

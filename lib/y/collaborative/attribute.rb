@@ -25,6 +25,12 @@ module Y
         row && (row.respond_to?(:load_parts) ? row.load_parts : [row.load_state])
       end
 
+      # The sync handshake answered from the stored rows (Y::Document#sync_state
+      # and #sync_diff). nil before the first write, so the channel loads the
+      # (empty) document instead.
+      def sync_state = existing_row&.sync_state
+      def sync_diff(state_vector) = existing_row&.sync_diff(state_vector)
+
       # Records one change and returns once it's saved. The channel waits for
       # this to return before it acknowledges or broadcasts the change.
       def append(update) = document_row.append(update)
