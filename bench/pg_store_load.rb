@@ -82,7 +82,11 @@ else
   keys.each_with_index { |k, d| updates.each_with_index { |u, i| jobs[(d + i) % WRITERS] << [k, u] } }
 end
 # Interleave each writer's documents so they all advance together.
-jobs.map! { |js| js.group_by(&:first).values.then { |gs| gs.first.zip(*gs[1..]).flatten(1).compact } }
+# Round-robin by index, not zip, which would cut every list to the first one's length.
+jobs.map! do |js|
+  groups = js.group_by(&:first).values
+  Array.new(groups.map(&:size).max) { |i| groups.map { |g| g[i] } }.flatten(1).compact
+end
 
 stop_file = File.join(out, "stop")
 t0 = now.call
