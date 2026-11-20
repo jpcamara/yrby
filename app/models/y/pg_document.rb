@@ -26,8 +26,10 @@
 #
 # Serving a client never decodes the snapshot: the state vector is a stored
 # column extended by the log, and the snapshot (as stored, for a client with
-# nothing) and the log go out as two updates. A snapshot holding content
-# past a gap has no stored state vector and is served merged instead.
+# nothing) and the log go out as two updates. Compaction keeps the snapshot
+# gapless by leaving rows past a gap in the log; a snapshot that still holds
+# content past one (a single update spanning clients, or data from before
+# this) has no stored state vector and is served merged instead.
 #
 # Fold tracking uses transaction ids, which mean nothing in another cluster.
 # The log records the cluster's system identifier; on a cluster with a
@@ -114,17 +116,52 @@ class Y::PgDocument < Y::Document
            (SELECT txid FROM inserted)::text::bigint % $6::int = 0
   SQL
 
+  # The statement's snapshot, with this transaction's own id marked as still
+  # running. Postgres counts its own id as visible once a later transaction
+  # has committed; rows this transaction writes must read as unfolded.
+  FOLDED = <<~SQL.squish.freeze
+    (SELECT CASE WHEN pg_visible_in_snapshot(x, s)
+       THEN (least(pg_snapshot_xmin(s), x)::text || ':' || pg_snapshot_xmax(s)::text || ':' ||
+             (SELECT string_agg(v::text, ',' ORDER BY v) FROM (SELECT pg_snapshot_xip(s) AS v UNION SELECT x) u)
+            )::pg_snapshot
+       ELSE s END
+     FROM (SELECT pg_current_snapshot() AS s, pg_current_xact_id() AS x) q)
+  SQL
+
   # Fold the unfolded log into the snapshot and record the statement's
-  # snapshot as folded: every row it can see is in the new state. Rows that
-  # commit later stay unfolded. A racing compaction waits on the row lock,
-  # then re-reads against the new folded snapshot; if its own snapshot is
-  # older, some rows read as unfolded again and are merged twice, which
-  # changes nothing.
+  # snapshot as folded: every row it can see is accounted for. Rows that
+  # commit later stay unfolded.
+  #
+  # The snapshot is kept gapless, so sync can serve it without decoding it.
+  # When the log holds content past a gap (one client's edits committing
+  # out of order), only the rows that fit below the gap are folded; the
+  # rest are written again as new rows, unfolded, to fold once the gap
+  # closes.
+  #
+  # A racing compaction waits on the row lock, then works from the new
+  # state; rows its older snapshot reads as unfolded again are merged twice,
+  # which changes nothing.
   COMPACT = <<~SQL.freeze
-    UPDATE y_documents d
-       SET state = ydoc_apply(d.state, #{LOG}::bytea), folded = pg_current_snapshot(), updated_at = now()
-     WHERE d.id = $1 AND #{SAME_CLUSTER}
-    RETURNING true
+    WITH d AS (
+      SELECT d.id, d.state, d.folded FROM y_documents d WHERE d.id = $1 AND #{SAME_CLUSTER} FOR UPDATE
+    ), log AS (
+      SELECT l.payload FROM d JOIN y_document_log l ON #{UNFOLDED}
+    ), merged AS (
+      SELECT ydoc_apply(d.state, (SELECT ydoc_merge_agg(payload) FROM log)::bytea) AS doc FROM d
+    ), split AS (
+      SELECT payload, ydoc_fits(payload, (SELECT ydoc_state_vector(doc) FROM merged)) IS NOT FALSE AS fits FROM log
+    ), updated AS (
+      UPDATE y_documents t
+         SET state = CASE WHEN (SELECT bool_and(fits) FROM split) IS NOT FALSE THEN (SELECT doc FROM merged)
+                          ELSE ydoc_apply(d.state, (SELECT ydoc_merge_agg(payload) FROM split WHERE fits)::bytea) END,
+             folded = #{FOLDED}, updated_at = now()
+        FROM d WHERE t.id = d.id
+      RETURNING t.id
+    ), deferred AS (
+      INSERT INTO y_document_log (document_id, slot, payload)
+      SELECT u.id, (SELECT slot FROM y_document_log_slot), s.payload FROM updated u, split s WHERE NOT s.fits
+    )
+    SELECT true FROM updated
   SQL
 
   # The handshake for a document that doesn't exist yet: an empty state

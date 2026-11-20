@@ -452,6 +452,53 @@ mod tests {
     }
 
     #[pg_test]
+    fn rows_that_fit_below_a_gap_fold_without_one() {
+        // a and c arrived, b is missing: the merge runs gapless up to a.
+        let x = edits(1, &["a", "b", "c"]);
+        let reach = bytes(
+            "select ydoc_state_vector(ydoc_merge_agg(u))
+               from unnest(array[$1, $2]) u",
+            &[arg(&x[0]), arg(&x[2])],
+        );
+        assert!(flag("select ydoc_fits($1, $2)", &[arg(&x[0]), arg(&reach)]));
+        assert!(!flag(
+            "select ydoc_fits($1, $2)",
+            &[arg(&x[2]), arg(&reach)]
+        ));
+        // A deletion of content past the gap doesn't fit either.
+        let doc = Doc::with_client_id(1);
+        let t = doc.get_or_insert_text("t");
+        for u in &x {
+            doc.transact_mut()
+                .apply_update(Update::decode_v1(u).unwrap())
+                .unwrap();
+        }
+        let del = {
+            let mut txn = doc.transact_mut();
+            t.remove_range(&mut txn, 2, 1);
+            txn.encode_update_v1()
+        };
+        let reach_ab = bytes(
+            "select ydoc_state_vector(ydoc_merge_agg(u)) from unnest(array[$1, $2]) u",
+            &[arg(&x[0]), arg(&x[1])],
+        );
+        assert!(!flag(
+            "select ydoc_fits($1, $2)",
+            &[arg(&del), arg(&reach_ab)]
+        ));
+        // Once b arrives everything fits.
+        let healed = bytes(
+            "select ydoc_state_vector(ydoc_merge_agg(u)) from unnest(array[$1, $2, $3, $4]) u",
+            &[arg(&x[0]), arg(&x[1]), arg(&x[2]), arg(&del)],
+        );
+        assert!(flag(
+            "select ydoc_fits($1, $2)",
+            &[arg(&x[2]), arg(&healed)]
+        ));
+        assert!(flag("select ydoc_fits($1, $2)", &[arg(&del), arg(&healed)]));
+    }
+
+    #[pg_test]
     fn a_peer_with_nothing_gets_the_stored_bytes() {
         let x = edits(1, &["a", "b"]);
         let doc = bytes(

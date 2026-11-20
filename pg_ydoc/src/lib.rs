@@ -235,6 +235,14 @@ fn ydoc_state_vector(doc: Option<Ydoc>, gapless: default!(bool, false)) -> Optio
     }
 }
 
+/// True if everything `update` inserts or deletes lies below `sv`, per
+/// client, so folding it into a document that runs gapless up to `sv` adds
+/// no gap.
+#[pg_extern(immutable, parallel_safe, strict, requires = ["ydoc_shell"])]
+fn ydoc_fits(update: &[u8], sv: &[u8]) -> bool {
+    ok(ycore::fits(update, sv))
+}
+
 /// `sv` advanced by the content `update` adds contiguously after it. With a
 /// snapshot's stored state vector and its merged log, the state vector of
 /// the two together, without decoding the snapshot.
