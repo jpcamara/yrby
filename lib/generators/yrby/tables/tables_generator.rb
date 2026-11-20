@@ -16,7 +16,8 @@ module Yrby
     # 1 GB - 1 and ignores the limit on bytea otherwise; SQLite ignores
     # limits. Payload is 16.megabytes - 1 (one update can carry a big paste
     # or a client's accumulated offline edits; the 64 KB default blob is
-    # too small).
+    # too small). state_vector is the snapshot's, written at compaction so
+    # the sync handshake needn't read state.
     # The partial unique index's WHERE only keeps
     # key-only rows out of the index: uniqueness holds without it, since
     # unique indexes treat NULLs as distinct on every supported database,

@@ -557,6 +557,17 @@ Y.update_from_message(frame)  # => the document delta carried by a frame, or nil
 Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
 ```
 
+A store can answer the sync handshake from its stored updates with these,
+which work on encoded updates without building a document:
+
+```ruby
+Y.state_vector_of(update)              # => the state vector of the document update encodes
+Y.extend_state_vector(sv, [update])      # => sv advanced by what the updates add contiguously
+                                       #    after it (a lower bound, never higher)
+Y.diff_update(update, sv)              # => what update holds that a peer at sv lacks:
+                                       #    structs past sv and the whole delete set
+```
+
 ### ActionCable Integration
 
 In a Rails app, one generator creates the storage migration. The models and
@@ -586,7 +597,13 @@ gem:
   `on_change`. By default the channel concern calls `.load_parts(key)` (the
   snapshot and the tail, applied in order) and `.append(key, update)` to read
   and write the store; `.load_state(key)` returns the same merged into one
-  update.
+  update. It answers the sync handshake from the stored rows too
+  (`.sync_state(key)` and `.sync_diff(key, state_vector)`), so serving a
+  client doesn't build the document in Ruby: the server's SyncStep1 is the
+  snapshot's stored `state_vector` extended by the tail, and a client gets
+  the snapshot (sliced with `Y.diff_update` unless it has nothing) followed
+  by the tail as stored. While a row is marked as part of an open gap, it
+  loads the document instead, so `on_gap` still sees the gap.
 - **`Y::DocumentUpdate`** holds the uncompacted tail, one delta per row. When
   the tail's bytes reach a share of the snapshot's (`compact_log_ratio`,
   default 0.1, and at least `compact_min_log_bytes`, default 4 KB), yrby
@@ -598,6 +615,21 @@ gem:
   run one at a time under a per-document row lock, and they skip rows with an
   open causal gap, leaving them as they are until the gap closes. Destroying a
   document also deletes its updates.
+
+Tables created before the `state_vector` column existed keep working. The
+handshake then reads the snapshot's state vector from its bytes. Add the
+column with:
+
+```bash
+bin/rails generate yrby:state_vector
+bin/rails db:migrate
+```
+
+A channel that declares its own `on_load` and `on_change` can answer the
+handshake from its store the same way with `on_sync_state { |key| ... }`
+(the state vector for the server's SyncStep1) and `on_sync_diff { |key,
+state_vector| ... }` (one update, or several sent in order). Returning nil
+from either falls back to `on_load`.
 
 For encrypted storage, `Y::EncryptedDocument` writes `state` and update
 payloads through Active Record encryption on the same tables, as
@@ -917,7 +949,9 @@ until it's acked, and on every join or reconnect handshake the client sends
 everything the server hasn't integrated, so any client holding the dependency
 supplies it by connecting. The gap worth alerting on is one that no live client
 can supply, and that's what the `on_gap` hook is for. It fires with the
-document key whenever a document is loaded to serve state while a gap is open.
+document key whenever a document is loaded to serve state while a gap is open
+(a store answering the handshake itself, as `Y::Document` does, loads the
+document while it knows of a gap so the hook still fires).
 Use it to emit a metric, such as a pending-document count or the age of the
 oldest open gap, so you can see a gap that isn't closing. yrby also logs gaps
 at `info`. Errors raised in the hook are swallowed, so a broken metrics call

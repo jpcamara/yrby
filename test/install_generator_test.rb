@@ -48,6 +48,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       # 1 GB - 1 is the largest limit every adapter accepts: Postgres
       # raises above it; MySQL still maps it to longblob.
       assert_match(/t\.binary :state, limit: 1\.gigabyte - 1/, migration)
+      assert_match("t.binary :state_vector", migration)
       assert_match(":y_document_updates", migration)
       assert_match("t.references :document", migration)
       assert_match(/t\.binary :payload, null: false, limit: 16\.megabytes - 1/, migration)

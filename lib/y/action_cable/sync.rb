@@ -55,6 +55,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     MSG_KIND_UPDATE = 2
     MSG_KIND_AWARENESS = 3
 
+    # Sync types in a y-protocols sync frame, which is messageSync (0), the
+    # sync type, then the payload with a varuint length prefix.
+    SYNC_STEP1 = 0
+    SYNC_STEP2 = 1
+    SYNC_UPDATE = 2
+
     # Default incoming-frame size cap (decoded bytes). Generous enough for a
     # large initial SyncStep2, small enough to bound a single message's
     # allocation/parse cost. Override per channel with `max_frame_bytes`.
@@ -67,10 +73,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # The storage a channel gets when it declares no hooks. It uses the gem's
     # own models, the way Action Text defaults to its rich_texts table, and
     # only applies when the yrby-rails models can be loaded. Outside Rails a
-    # channel still has to declare both hooks or subscribing raises.
+    # channel still has to declare both hooks or subscribing raises. The sync
+    # hooks come with it, so the handshake is answered from the same store.
     DEFAULT_STORAGE = {
       on_load: ->(key) { Y::Document.load_parts(key) },
-      on_change: ->(key, update) { Y::Document.append(key, update) }
+      on_change: ->(key, update) { Y::Document.append(key, update) },
+      on_sync_state: ->(key) { Y::Document.sync_state(key) },
+      on_sync_diff: ->(key, state_vector) { Y::Document.sync_diff(key, state_vector) }
     }.freeze
 
     def self.default_hook(name)
@@ -114,6 +123,30 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         superclass.respond_to?(:max_frame_bytes) ? superclass.max_frame_bytes : DEFAULT_MAX_FRAME_BYTES
       end
 
+      # Optional. Lets the store answer the sync handshake from what it has
+      # stored, so serving a client doesn't build the document in Ruby.
+      # Called with (key) in the channel instance's context; return the state
+      # vector for the server's SyncStep1, or nil to fall back to on_load. It
+      # may be lower than the document's (the client then sends something
+      # twice), never higher. Y::Document answers from a stored state vector
+      # and the tail. Answering skips the on_gap check, which needs a loaded
+      # document, so a store should decline while it knows of a gap.
+      def on_sync_state(&block)
+        @on_sync_state = block if block
+        sync_storage_hook(:on_sync_state)
+      end
+
+      # Optional, the other half of on_sync_state. Called with (key,
+      # state_vector) when a client sends SyncStep1; return what the client
+      # is missing, pending content included (as Yjs's encodeStateAsUpdate
+      # serves it), or nil to fall back to on_load. It may return several
+      # updates: the first goes out as SyncStep2 and the rest follow as
+      # updates, in order.
+      def on_sync_diff(&block)
+        @on_sync_diff = block if block
+        sync_storage_hook(:on_sync_diff)
+      end
+
       # Optional observability hook, fired at join/serve time whenever the
       # loaded document still holds a causal gap (a pending struct). Called
       # with (key) in the channel instance's context (instance_exec). Use it
@@ -129,8 +162,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       private
 
-      # The default supplies both hooks or neither, so reads and writes always
-      # go to the same store. Declared hooks are inherited, so a subclass can
+      # The default supplies every storage hook or none, so reads, writes and
+      # the handshake always go to the same store. Declared hooks are inherited, so a subclass can
       # override one hook and keep its parent's other one.
       def sync_storage_hook(name)
         hooks = sync_storage_hooks
@@ -139,7 +172,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       def sync_storage_hooks
         inherited = superclass.respond_to?(:sync_storage_hooks, true) ? superclass.send(:sync_storage_hooks) : {}
-        inherited.merge({ on_load: @on_load, on_change: @on_change }.compact)
+        own = { on_load: @on_load, on_change: @on_change, on_sync_state: @on_sync_state, on_sync_diff: @on_sync_diff }
+        inherited.merge(own.compact)
       end
     end
 
@@ -175,9 +209,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # is exactly the missing dependency an open gap is waiting on. If a live
       # client has it, the join heals the gap. We only surface it (on_gap); the
       # handshake below already does the soliciting.
-      doc = sync_load_doc
-      sync_transmit(doc.sync_step1)
-      sync_observe_gap if doc.pending?
+      if (sv = sync_store_state)
+        sync_transmit(sync_frame(SYNC_STEP1, sv))
+      else
+        doc = sync_load_doc
+        sync_transmit(doc.sync_step1)
+        sync_observe_gap if doc.pending?
+      end
       # Return true so a caller can tell success from rejection. Otherwise the
       # method would return the gap check's result, which is usually nil.
       true
@@ -394,10 +432,16 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
       case Y.message_kind(bytes)
       when MSG_KIND_SYNC_STEP1
-        doc = sync_load_doc
-        result = doc.handle_sync_message(bytes)
-        sync_transmit(result[2]) # full state, pending included
-        sync_observe_gap if doc.pending?
+        if (updates = sync_store_diff(bytes))
+          first, *rest = Array(updates)
+          sync_transmit(sync_frame(SYNC_STEP2, first)) # full state, pending included
+          rest.each { |update| sync_transmit(sync_frame(SYNC_UPDATE, update)) }
+        else
+          doc = sync_load_doc
+          result = doc.handle_sync_message(bytes)
+          sync_transmit(result[2]) # full state, pending included
+          sync_observe_gap if doc.pending?
+        end
         :noop
       when MSG_KIND_UPDATE
         update = Y.update_from_message(bytes)
@@ -435,6 +479,53 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       return encoded unless bytes.getbyte(1) == Y::MSG_SYNC_STEP2
 
       Base64.strict_encode64(Y.wrap_update(update))
+    end
+
+    # The store's answer to the handshake, or nil when the channel has no
+    # on_sync_state hook or the hook declines.
+    def sync_store_state
+      hook = self.class.on_sync_state
+      hook && instance_exec(@sync_key, &hook)
+    end
+
+    def sync_store_diff(step1)
+      hook = self.class.on_sync_diff
+      return unless hook
+
+      sv = sync_frame_payload(step1)
+      sv && instance_exec(@sync_key, sv, &hook)
+    end
+
+    def sync_frame(type, payload)
+      len = payload.bytesize
+      prefix = [0, type].pack("C*")
+      loop do
+        byte = len & 0x7f
+        len >>= 7
+        prefix << (len.zero? ? byte : byte | 0x80)
+        break if len.zero?
+      end
+      prefix + payload.b
+    end
+
+    # The payload of a single sync frame, or nil if the length prefix doesn't
+    # match the frame (Y.message_kind already rejected anything else).
+    def sync_frame_payload(bytes)
+      len = 0
+      shift = 0
+      pos = 2
+      loop do
+        byte = bytes.getbyte(pos) or return nil
+        pos += 1
+        len |= (byte & 0x7f) << shift
+        break if byte < 0x80
+
+        shift += 7
+        return nil if shift > 63
+      end
+      return nil unless pos + len == bytes.bytesize
+
+      bytes.byteslice(pos, len)
     end
 
     # Build a fresh document from the durable store (on_load). Callers validate

@@ -207,6 +207,103 @@ class DocumentTest < Minitest::Test
 
   # -- causal gaps -----------------------------------------------------------
 
+  # -- the sync handshake from the stored rows -------------------------------
+
+  # Edits to one text, each as the update it produced: "abc", then "d", "e",
+  # and a delete of the "a" (which moves no state vector).
+  def edits
+    @edits ||= build_edits
+  end
+
+  def build_edits
+    source = Y::Doc.new
+    text = source.get_text("content")
+    [-> { text.insert(0, "abc") }, -> { text.insert(3, "d") }, -> { text.insert(4, "e") },
+     -> { text.delete(0, 1) }].map do |edit|
+      sv = source.encode_state_vector
+      edit.call
+      source.encode_state_as_update(sv)
+    end
+  end
+
+  def apply_all(updates, doc = Y::Doc.new)
+    Array(updates).each { |u| doc.apply_update(u) }
+    doc
+  end
+
+  def test_compaction_stores_the_snapshots_state_vector
+    edits.each { |u| Y::Document.append("sv", u) }
+    Y::Document.find_by(key: "sv").compact!
+    row = Y::Document.find_by(key: "sv")
+
+    assert_equal Y.state_vector_of(row.state), row.state_vector
+    assert_equal apply_all(edits).encode_state_vector, row.state_vector
+  end
+
+  def test_sync_state_is_the_snapshot_extended_by_the_tail
+    abc, d, e, delete = edits
+    Y::Document.append("sv", abc)
+    Y::Document.find_by(key: "sv").compact!
+    [e, d, delete].each { |u| Y::Document.append("sv", u) }
+
+    assert_equal apply_all(edits).encode_state_vector, Y::Document.sync_state("sv")
+  end
+
+  def test_sync_diff_brings_any_client_up_to_date
+    abc, d, e, delete = edits
+    [abc, delete].each { |u| Y::Document.append("sv", u) }
+    Y::Document.find_by(key: "sv").compact!
+    [d, e].each { |u| Y::Document.append("sv", u) }
+
+    [[], [abc], [abc, d], [abc, d, e]].each do |held|
+      client = apply_all(held)
+
+      apply_all(Y::Document.sync_diff("sv", client.encode_state_vector), client)
+
+      assert_equal "bcde", client.read_text("content"),
+                   "a client holding #{held.size} edits gets the rest, the snapshot's delete included"
+    end
+  end
+
+  def test_sync_diff_sends_the_snapshot_as_stored_to_a_client_with_nothing
+    edits.each { |u| Y::Document.append("sv", u) }
+    Y::Document.find_by(key: "sv").compact!
+
+    assert_equal [Y::Document.find_by(key: "sv").state], Y::Document.sync_diff("sv", "\x00".b)
+  end
+
+  def test_sync_diff_for_a_client_missing_nothing_is_one_empty_update
+    Y::Document.append("sv", edits.first)
+    Y::Document.find_by(key: "sv").compact!
+    Y::Document.create!(key: "empty")
+
+    assert_equal [Y::Document::EMPTY_UPDATE], Y::Document.sync_diff("sv", apply_all(edits.first).encode_state_vector)
+    assert_equal [Y::Document::EMPTY_UPDATE], Y::Document.sync_diff("empty", "\x00".b)
+  end
+
+  def test_the_handshake_declines_while_a_row_is_marked_pending
+    Y::Document.append("gap", YjsFixtures::Gap::DEPENDENT)
+    Y::Document.find_by(key: "gap").compact!
+
+    assert_nil Y::Document.sync_state("gap")
+    assert_nil Y::Document.sync_diff("gap", "\x00".b)
+    assert_nil Y::Document.sync_state("unknown")
+  end
+
+  def test_the_handshake_reads_the_snapshot_without_a_stored_state_vector
+    abc, d, e, delete = edits
+    [abc, delete].each { |u| Y::Document.append("sv", u) }
+    Y::Document.find_by(key: "sv").compact!
+    Y::Document.where(key: "sv").update_all(state_vector: nil) # compacted before the column
+    [d, e].each { |u| Y::Document.append("sv", u) }
+    expected = apply_all(edits).encode_state_vector
+
+    assert_equal expected, Y::Document.sync_state("sv")
+    Y::Document.stub(:stores_state_vector?, false) do
+      assert_equal expected, Y::Document.sync_state("sv")
+    end
+  end
+
   def test_a_gapped_batch_is_quarantined_not_compacted_and_not_destroyed
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
