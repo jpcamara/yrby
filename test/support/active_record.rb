@@ -8,7 +8,23 @@ unless defined?(YRBY_AR_BOOTED)
 
   require "active_record"
 
-  ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
+  # YRBY_PG_URL runs the suite on Postgres instead, with y_document_updates
+  # migrated to the insert-only log (yrby:insert_only_log), e.g.
+  #
+  #   YRBY_PG_URL=postgres://localhost:5432/yrby_test bundle exec rake test
+  YRBY_PG_URL = ENV.fetch("YRBY_PG_URL", nil)
+  if YRBY_PG_URL
+    require "active_record/connection_adapters/postgresql_adapter"
+    require "y/postgres_types"
+    Y::PostgresTypes.register(ActiveRecord::ConnectionAdapters::PostgreSQLAdapter)
+    ActiveRecord::Base.establish_connection(url: YRBY_PG_URL, pool: 16)
+    ActiveRecord::Base.connection.execute(<<~SQL)
+      DROP TABLE IF EXISTS y_document_updates, y_document_updates_slot, y_documents, pages CASCADE;
+      DROP FUNCTION IF EXISTS y_document_updates_slot();
+    SQL
+  else
+    ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
+  end
   # Test-only keys so the encrypted model variants can round-trip.
   ActiveRecord::Encryption.configure(
     primary_key: "test-primary-key" * 2,
@@ -41,5 +57,15 @@ unless defined?(YRBY_AR_BOOTED)
     create_table :pages do |t|
       t.string :title
     end
+  end
+
+  if YRBY_PG_URL
+    require "erb"
+    template = File.expand_path(
+      "../../lib/generators/yrby/insert_only_log/templates/insert_only_y_document_updates.rb", __dir__
+    )
+    version = "[#{ActiveRecord::VERSION::MAJOR}.#{ActiveRecord::VERSION::MINOR}]"
+    eval(ERB.new(File.read(template)).result_with_hash(migration_version: version)) # rubocop:disable Security/Eval
+    ActiveRecord::Migration.suppress_messages { InsertOnlyYDocumentUpdates.new.migrate(:up) }
   end
 end

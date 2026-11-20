@@ -71,7 +71,7 @@ class DocumentTest < Minitest::Test
     document.append(CLIENT_ONE)
     document.compact!
 
-    assert_equal 0, document.updates.count
+    assert_equal 0, document.tail.count
     assert_equal document.reload.state, document.load_state, "no rebuild on the fast path"
   end
 
@@ -123,7 +123,7 @@ class DocumentTest < Minitest::Test
 
     document.compact!
 
-    assert_equal 0, document.updates.count, "tail deleted"
+    assert_equal 0, document.tail.count, "tail deleted"
     assert_predicate document.reload.state, :present?, "state absorbed the tail"
     assert_equal before, read_back("room-1")
   end
@@ -134,11 +134,11 @@ class DocumentTest < Minitest::Test
 
     document.append(CLIENT_ONE)
 
-    assert_equal 1, document.updates.count, "below threshold: no compact"
+    assert_equal 1, document.tail.count, "below threshold: no compact"
 
     document.append(CLIENT_TWO)
 
-    assert_equal 0, document.updates.count, "threshold append compacts"
+    assert_equal 0, document.tail.count, "threshold append compacts"
     assert_equal "from doc1from doc2", read_back("room-1")
   end
 
@@ -151,7 +151,7 @@ class DocumentTest < Minitest::Test
 
     document.append(CLIENT_TWO)
 
-    assert_equal 0, document.updates.count, "at-or-over fires past the multiple"
+    assert_equal 0, document.tail.count, "at-or-over fires past the multiple"
   end
 
   def test_append_compacts_once_the_tail_reaches_a_share_of_the_snapshot
@@ -159,17 +159,17 @@ class DocumentTest < Minitest::Test
     document = Y::Document.locate!("room-1")
     document.append(CLIENT_ONE)
 
-    assert_equal 0, document.updates.count, "no snapshot yet: any tail is due"
+    assert_equal 0, document.tail.count, "no snapshot yet: any tail is due"
     snapshot = document.reload.state.bytesize
     Y::Document.compact_log_ratio = (CLIENT_TWO.bytesize + 1).fdiv(snapshot)
 
     document.append(CLIENT_TWO)
 
-    assert_equal 1, document.updates.count, "below the ratio: no compact"
+    assert_equal 1, document.tail.count, "below the ratio: no compact"
 
     document.append(CLIENT_TWO)
 
-    assert_equal 0, document.updates.count, "at the ratio: compacts"
+    assert_equal 0, document.tail.count, "at the ratio: compacts"
     assert_equal "from doc1from doc2", read_back("room-1")
   end
 
@@ -180,7 +180,7 @@ class DocumentTest < Minitest::Test
     8.times { document.append(CLIENT_ONE) }
 
     assert_predicate document.reload.state, :present?, "a checked append compacted"
-    assert_operator document.updates.count, :<, 4, "only rows since the last checked one remain"
+    assert_operator document.tail.count, :<, 4, "only rows since the last checked one remain"
 
     Y::Document.check_compaction_every = 1_000_000
     other = Y::Document.locate!("room-2")
@@ -320,7 +320,7 @@ class DocumentTest < Minitest::Test
 
     document.compact!
 
-    assert_equal 0, document.updates.count
+    assert_equal 0, document.tail.count
     assert_equal "from doc2", read_back("room-1")
     peer = Y::Doc.new
     peer.apply_update(Y::Document.load_state("room-1"))
@@ -346,7 +346,7 @@ class DocumentTest < Minitest::Test
     document.append(skipped)
     document.compact!
 
-    assert_equal 0, document.updates.count
+    assert_equal 0, document.tail.count
     assert_equal text.to_s, read_back("room-1")
   end
 
@@ -414,7 +414,7 @@ class DocumentTest < Minitest::Test
 
     document.compact!
 
-    assert_equal 0, document.updates.count
+    assert_equal 0, document.tail.count
     assert_equal "ab", read_back("room-1", text: "notepad")
   end
 
