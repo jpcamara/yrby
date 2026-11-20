@@ -31,6 +31,7 @@ Updates and state vectors are `bytea` in the v1 encoding Yjs clients use.
 | `ydoc_apply(ydoc, bytea)` | `ydoc` | Apply an update. A NULL document counts as empty. Gives back the same value when the update changes nothing. |
 | `ydoc_adds(ydoc, bytea)` | `bool` | Would the update change anything (new content, a new deletion, or a gap to wait on)? Read from the encodings, so it is cheap. |
 | `ydoc_state_vector(ydoc, gapless bool = false)` | `bytea` | Sync step 1: per client, the clocks stored contiguously from zero. Read without loading the document, so content waiting on another client's missing update still counts. With `gapless`, NULL when the document holds content past a gap, for the stored column below. |
+| `ydoc_fits(update bytea, sv bytea)` | `bool` | Does everything the update inserts or deletes lie below `sv`? With `sv` from `ydoc_state_vector` of a snapshot plus its log, the log rows that can fold without leaving a gap in the snapshot. |
 | `ydoc_extend_state_vector(sv bytea, ydoc)` | `bytea` | `sv` advanced by what the update adds contiguously after it: a snapshot's stored state vector plus its log, without decoding the snapshot. |
 | `ydoc_diff(ydoc, sv bytea = NULL, include_pending bool = false)` | `bytea` | Sync step 2: what a peer with `sv` is missing; the whole document without `sv`. Leaves out pending content unless `include_pending`, which serves it as Yjs's `encodeStateAsUpdate` does, so the peer holds the gap and heals when the missing update reaches it. With `include_pending` and an empty `sv`, the stored bytes as they are, without decoding. NULL for a NULL document. |
 | `ydoc_has_pending(ydoc)` | `bool` | Does the document hold updates waiting on a missing dependency? |
@@ -78,9 +79,12 @@ rewrites.
 Serve a client without decoding the snapshot. Keep its state vector in a
 generated column and extend it by the log for sync step 1. For step 2 send
 the snapshot's part and the log's part as two updates, snapshot first; a
-client with nothing gets the snapshot's bytes as stored. A snapshot holding
-content past a gap has no stored state vector (`gapless => true` gives NULL)
-and is served merged instead.
+client with nothing gets the snapshot's bytes as stored. For that the
+snapshot must hold no content past a gap, so compaction folds only the rows
+that fit (`ydoc_fits`) and writes the rest again as new, unfolded rows, to
+fold once the gap closes. A snapshot that still holds content past a gap
+has no stored state vector (`gapless => true` gives NULL) and is served
+merged instead.
 
 Measured on a Mac mini (PG 17, one-character edits, one statement each,
 compactions and rotations counted, autovacuum off; joins timed with the log
@@ -145,10 +149,19 @@ INSERT INTO doc_updates_slot VALUES (0);
 INSERT INTO doc_updates (doc_id, slot, update) VALUES ($1, (SELECT slot FROM doc_updates_slot), $2);
 
 -- Compact: fold the unfolded log into the snapshot and record what was seen.
-UPDATE doc_snapshots s
-   SET body = ydoc_apply(s.body, (SELECT ydoc_merge_agg(u.update)::bytea FROM doc_updates u WHERE UNFOLDED)),
-       folded = pg_current_snapshot()
- WHERE s.id = $1;
+-- Rows past a gap are written again, unfolded, so the snapshot keeps none.
+WITH s AS (SELECT * FROM doc_snapshots s WHERE s.id = $1 FOR UPDATE),
+log AS (SELECT u.update FROM s JOIN doc_updates u ON UNFOLDED),
+reach AS (SELECT ydoc_state_vector(ydoc_apply(s.body, (SELECT ydoc_merge_agg(update) FROM log)::bytea)) AS sv FROM s),
+split AS (SELECT update, ydoc_fits(update, (SELECT sv FROM reach)) AS fits FROM log),
+done AS (
+  UPDATE doc_snapshots t
+     SET body = ydoc_apply(s.body, (SELECT ydoc_merge_agg(update) FROM split WHERE fits)::bytea),
+         folded = FOLDED  -- pg_current_snapshot() with this transaction's own id still running
+    FROM s WHERE t.id = s.id RETURNING t.id
+)
+INSERT INTO doc_updates (doc_id, slot, update)
+  SELECT done.id, (SELECT slot FROM doc_updates_slot), split.update FROM done, split WHERE NOT split.fits;
 
 -- Rotate (own transaction; old is the slot not current, cur the current):
 BEGIN;
@@ -175,11 +188,14 @@ SELECT ydoc_diff(s.body, $2, true),
 -- (No row: the snapshot has a gap; serve ydoc_diff of the merged document.)
 ```
 
-Compaction folds every row it can see. An update still waiting on a
-dependency waits inside the snapshot, as it would in a merged `ydoc` column,
-so no row needs to stay unfolded. (yrby-core's `compaction::plan` keeps the snapshot
-gap-free and leaves such rows in the log instead; with out-of-order rows that
-approach can drop content, see the fixtures.)
+Rows written again carry the compacting transaction's id. Postgres counts a
+transaction's own id as visible in its snapshot once a later transaction has
+committed, so the folded snapshot lists it as still running; otherwise a
+compaction inside a longer transaction would mark its own copies folded.
+yrby-core's `compaction::plan` also keeps the snapshot gap-free, but prunes
+content past a gap by re-encoding and deletes the rows, which dropped
+content on the out-of-order fixtures; here nothing is pruned or deleted,
+and the fixtures pass through the store (`test/pg_document_test.rb`).
 
 To skip writes that change nothing, guard with `ydoc_adds`, or add Postgres's
 `suppress_redundant_updates_trigger()` to a merged-`ydoc` table.

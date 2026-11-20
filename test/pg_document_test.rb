@@ -179,27 +179,116 @@ class PgDocumentTest < ActionCable::Channel::TestCase
     assert_equal expected, full.read_text("t"), "an up-to-date client gets nothing new"
   end
 
-  # A snapshot holding content past a gap has no stored state vector and is
-  # served merged, in one update.
+  def stored_state_vector = Y::PgDocument.connection.select_value("SELECT state_vector FROM y_documents")
+
+  # Compaction folds only what fits below a gap; the rest stays in the log
+  # so the snapshot keeps a stored state vector and is served apart.
+  def test_compaction_leaves_rows_past_a_gap_in_the_log
+    updates, = typing(3, seed: 11)
+    Y::PgDocument.append("doc", updates[0])
+    Y::PgDocument.append("doc", updates[2]) # depends on the missing updates[1]
+    Y::PgDocument.find_by(key: "doc").compact!
+
+    refute_nil stored_state_vector, "the snapshot has no gap"
+    assert_equal 1, log_rows("doc"), "the row past the gap waits in the log"
+    assert_equal text_of(updates[0]), text_of(Y::PgDocument.find_by(key: "doc").state)
+
+    Y::PgDocument.append("doc", updates[1])
+    full = Y::Doc.new
+    apply_all(full, updates)
+
+    assert_equal full.encode_state_vector, Y::PgDocument.sync_state("doc")
+    client = Y::Doc.new
+    apply_all(client, Y::PgDocument.sync_diff("doc", "\x00".b))
+
+    assert_equal full.read_text("t"), client.read_text("t")
+
+    Y::PgDocument.find_by(key: "doc").compact!
+
+    assert_equal 0, log_rows("doc"), "with the gap closed everything folds"
+    assert_equal full.read_text("t"), text_of(Y::PgDocument.find_by(key: "doc").state)
+  end
+
+  # The rows compaction leaves in the log carry its own transaction id,
+  # which Postgres counts as visible in its own snapshot once a later
+  # transaction has committed. The folded snapshot must not cover them.
+  def test_rows_left_past_a_gap_survive_compaction_inside_a_transaction
+    updates, = typing(3, seed: 12)
+    Y::PgDocument.transaction do
+      Y::PgDocument.append("doc", updates[0])
+      Y::PgDocument.append("doc", updates[2])
+      Thread.new do
+        Y::PgDocument.connection_pool.with_connection do |c|
+          c.transaction { c.select_value("SELECT pg_current_xact_id()") }
+        end
+      end.join
+      Y::PgDocument.find_by(key: "doc").compact!
+    end
+    Y::PgDocument.append("doc", updates[1])
+    Y::PgDocument.find_by(key: "doc").compact!
+    full = Y::Doc.new
+    apply_all(full, updates)
+
+    assert_equal full.read_text("t"), text_of(Y::PgDocument.load_state("doc"))
+  end
+
+  # Recorded orders that once lost content when compaction kept rows past a
+  # gap out of the snapshot (pg_ydoc/tests/fixtures/out-of-order), through
+  # the store, compacting every few appends.
+  def test_out_of_order_fixtures_survive_compaction_that_keeps_rows_past_gaps
+    fixtures = Dir[File.expand_path("../pg_ydoc/tests/fixtures/out-of-order/*.hex", __dir__)]
+
+    assert_operator fixtures.size, :>=, 10
+    fixtures.each do |path|
+      updates = File.readlines(path, chomp: true).reject(&:empty?).map { |h| [h].pack("H*") }
+      body = JSON.parse(File.read(path.sub(/\.hex\z/, ".json")))["body"]
+      [3, 7].each do |every|
+        key = "#{File.basename(path)}/#{every}"
+        updates.each_with_index do |u, i|
+          Y::PgDocument.append(key, u)
+          Y::PgDocument.find_by(key: key).compact! if i % every == every - 1
+        end
+        Y::PgDocument.find_by(key: key).compact!
+        client = Y::Doc.new
+        apply_all(client, Y::PgDocument.sync_diff(key, "\x00".b))
+
+        assert_equal body, client.read_text("body"), "#{key}: served"
+        assert_equal body, text_of_body(Y::PgDocument.load_state(key)), "#{key}: loaded"
+        assert_equal 0, log_rows(key), "#{key}: everything folds once nothing is missing"
+      end
+    end
+  end
+
+  def text_of_body(bytes)
+    doc = Y::Doc.new
+    doc.apply_update(bytes)
+    doc.read_text("body")
+  end
+
+  # A snapshot that does hold content past a gap (written before compaction
+  # kept them out, say) has no stored state vector and is served merged.
   def test_a_snapshot_with_a_gap_is_served_merged
     updates, = typing(3, seed: 11)
     Y::PgDocument.append("doc", updates[0])
-    Y::PgDocument.append("doc", updates[2])
-    Y::PgDocument.find_by(key: "doc").compact!
+    Y::PgDocument.connection.exec_update(
+      "UPDATE y_documents SET state = ydoc_apply(ydoc_apply(NULL, $1), $2)", "gapped",
+      [ActiveRecord::Relation::QueryAttribute.new("u0", updates[0], ActiveRecord::Type::Binary.new),
+       ActiveRecord::Relation::QueryAttribute.new("u2", updates[2], ActiveRecord::Type::Binary.new)]
+    )
     Y::PgDocument.append("doc", updates[1])
 
-    assert_nil Y::PgDocument.connection.select_value("SELECT state_vector FROM y_documents")
+    assert_nil stored_state_vector
     served = Y::PgDocument.sync_diff("doc", "\x00".b)
 
     assert_kind_of String, served
     full = Y::Doc.new
-    updates.each { |u| full.apply_update(u) }
+    apply_all(full, updates)
 
     assert_equal full.read_text("t"), text_of(served)
     assert_equal full.encode_state_vector, Y::PgDocument.sync_state("doc")
   end
 
-  def test_shuffled_updates_wait_in_the_snapshot_and_converge
+  def test_shuffled_updates_converge_into_a_snapshot_without_gaps
     updates, expected = typing(200, seed: 2)
     order = updates.shuffle(random: Random.new(3))
     order.each { |u| Y::PgDocument.append("doc", u) }

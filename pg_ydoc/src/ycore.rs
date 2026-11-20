@@ -159,16 +159,36 @@ pub fn gapless_state_vector(doc: &[u8]) -> Result<Option<Vec<u8>>, Error> {
     Ok((!has_gap(&update)).then(|| update.state_vector().encode_v1()))
 }
 
+/// True if everything `update` inserts or deletes lies below `sv`, per
+/// client: folded into a document whose content runs gapless up to `sv`, it
+/// adds no gap. Compaction folds the log rows that fit and keeps the rest.
+pub fn fits(update: &[u8], sv: &[u8]) -> Result<bool, Error> {
+    let sv = if sv.is_empty() {
+        StateVector::default()
+    } else {
+        StateVector::decode_v1(sv)?
+    };
+    let update = Update::decode_v1(if update.is_empty() {
+        &EMPTY[..]
+    } else {
+        update
+    })?;
+    Ok(!past(&update, &sv))
+}
+
+fn past(update: &Update, sv: &StateVector) -> bool {
+    let over = |set: &IdSet| {
+        set.iter()
+            .any(|(client, ranges)| ranges.iter().any(|r| r.end > sv.get(client)))
+    };
+    over(&update.insertions(true)) || over(update.delete_set())
+}
+
 /// True if, for some client, the update holds structs or deletions past the
 /// first clock it is missing. A gap that is only across clients (an item
 /// whose origin is another client's missing item) doesn't show here.
 fn has_gap(update: &Update) -> bool {
-    let sv = update.state_vector();
-    let past = |set: &IdSet| {
-        set.iter()
-            .any(|(client, ranges)| ranges.iter().any(|r| r.end > sv.get(client)))
-    };
-    past(&update.insertions(true)) || past(update.delete_set())
+    past(update, &update.state_vector())
 }
 
 /// `sv` advanced by what `update` adds contiguously after it, per client.
