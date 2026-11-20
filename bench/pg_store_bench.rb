@@ -44,7 +44,7 @@ end
 now = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
 median = ->(n, &blk) { s = Array.new(n) { t = now.(); blk.(); now.() - t }.sort; s[n / 2] * 1000 }
 varuint = ->(n) { out = +"".b; loop { b = n & 0x7f; n >>= 7; out << (n.zero? ? b : b | 0x80).chr; break if n.zero? }; out }
-text_of = ->(bytes) { d = Y::Doc.new; d.apply_update(bytes); d.read_text("body") }
+text_of = ->(parts) { d = Y::Doc.new; Array(parts).each { |b| d.apply_update(b) }; d.read_text("body") }
 
 [2, 50, 500].each do |kb|
   seed, half_sv, expected, *updates = File.readlines(File.join(ENV.fetch("WORKLOAD_DIR"), "w#{kb}.txt"), chomp: true).map { |h| [h].pack("H*") }
@@ -66,7 +66,7 @@ text_of = ->(bytes) { d = Y::Doc.new; d.apply_update(bytes); d.read_text("body")
   end
   sql_join = STORE == "pg" ? median.(30) { doc.sync_state; doc.sync_diff(half_sv) } : nil
   ok = text_of.(model.load_state(key)) == expected
-  ok &&= text_of.(doc.sync_diff("\x00".b).first) == expected if STORE == "pg"
+  ok &&= text_of.(Array(doc.sync_diff("\x00".b))) == expected if STORE == "pg"
 
   # Out of order: every update shuffled, compacting as it goes.
   okey = "shuffled/#{kb}"
