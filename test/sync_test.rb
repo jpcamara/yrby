@@ -718,4 +718,21 @@ class SyncTest < Minitest::Test
     assert_equal expected.encode_state_vector, rebuilt.encode_state_vector,
                  "the recorded log converges to all five clients under concurrency"
   end
+
+  def test_on_load_can_return_several_updates
+    first = YjsFixtures::Gap::FIRST
+    second = YjsFixtures::Gap::DEPENDENT
+    transmits = []
+    helper = helper_for(transmits: transmits)
+    helper.class.on_load { |_key| [first, nil, second] }
+
+    client = Y::Doc.new
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    transmits.each { |t| client.handle_sync_message(Base64.strict_decode64(t["update"])) }
+    reference = Y::Doc.new
+    [first, second].each { |u| reference.apply_update(u) }
+
+    assert_equal reference.encode_state_vector, client.encode_state_vector
+    refute_predicate client, :pending?
+  end
 end

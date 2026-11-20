@@ -581,11 +581,17 @@ gem:
   on the same document. The row also holds the merged `state` snapshot, which
   contains only CRDT state. Derived data such as rendered HTML or search text
   is up to your application, and the usual place for it is the channel's
-  `on_change`. By default the channel concern calls `.load_state(key)` and
-  `.append(key, update)` to read and write the store.
+  `on_change`. By default the channel concern calls `.load_parts(key)` (the
+  snapshot and the tail, applied in order) and `.append(key, update)` to read
+  and write the store; `.load_state(key)` returns the same merged into one
+  update.
 - **`Y::DocumentUpdate`** holds the uncompacted tail, one delta per row. When
-  the tail reaches `compact_every` (default 64), yrby compacts it into `state`
-  and deletes those rows. A load reads the snapshot plus the current tail, and
+  the tail's bytes reach a share of the snapshot's (`compact_log_ratio`,
+  default 0.1, and at least `compact_min_log_bytes`, default 4 KB), yrby
+  compacts it into `state` and deletes those rows, so a large document is
+  rewritten rarely, or when it holds `compact_every` rows (256), so loads stay
+  quick. The check runs on about one append in `check_compaction_every`
+  (16). A load reads the snapshot plus the current tail, and
   returns `state` directly when the tail is empty. Compactions of one document
   run one at a time under a per-document row lock, and they skip rows with an
   open causal gap, leaving them as they are until the gap closes. Destroying a
@@ -866,7 +872,7 @@ store, keep two things in mind:
 
 **1. Load losslessly, and tolerate duplicates.** `on_load` should return state
 that keeps pending updates, either `encode_state_as_update` or a replay of the
-raw append log. Don't compact with `compacted_state_update` while
+raw append log (an array of updates is applied in order). Don't compact with `compacted_state_update` while
 `doc.pending?` is true, because that strips the pending struct and loses the
 acked edit inside it. `Y::Document` keeps pending rows out of compaction for
 this reason. When an ack gets lost, the client resends an update the store

@@ -18,6 +18,13 @@ module Y
       # The document as update bytes, or nil before the first write.
       def load_state = existing_row&.load_state
 
+      # The same as updates to apply in order (snapshot, then tail), which
+      # spares the channel decoding a merge it builds a Y::Doc from anyway.
+      def load_parts
+        row = existing_row
+        row && (row.respond_to?(:load_parts) ? row.load_parts : [row.load_state])
+      end
+
       # Records one change and returns once it's saved. The channel waits for
       # this to return before it acknowledges or broadcasts the change.
       def append(update) = document_row.append(update)

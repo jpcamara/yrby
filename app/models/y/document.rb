@@ -35,10 +35,18 @@ class Y::Document < ActiveRecord::Base
   validates :record_id, presence: true, if: :record_type
   before_validation :assign_default_key, on: :create
 
-  # How long the tail may grow before an append compacts it into state.
-  # Lower values compact more often; higher values leave more tail rows
-  # for each load to merge.
-  class_attribute :compact_every, instance_writer: false, default: 64
+  # When an append compacts the tail into state. Compaction rewrites the
+  # whole snapshot, so it waits until the tail's bytes reach
+  # compact_log_ratio of the snapshot's, or compact_min_log_bytes for a
+  # small one: a large document is rewritten rarely, a small one often.
+  # compact_every also compacts once the tail holds that many rows, so loads
+  # (which apply every tail row) stay quick for a large document; nil turns
+  # it off. The check reads the tail's size, so it runs on about one append
+  # in check_compaction_every.
+  class_attribute :compact_log_ratio, instance_writer: false, default: 0.1
+  class_attribute :compact_min_log_bytes, instance_writer: false, default: 4096
+  class_attribute :compact_every, instance_writer: false, default: 256
+  class_attribute :check_compaction_every, instance_writer: false, default: 16
 
   class << self
     def locate(key) = find_by(key: key)
@@ -77,6 +85,10 @@ class Y::Document < ActiveRecord::Base
     # should drag a potentially large snapshot over the wire per call.
     def load_state(key) = select(:id).find_by(key: key)&.load_state
 
+    # The same as separate updates, snapshot first, for a caller that applies
+    # them to a Y::Doc of its own anyway (see load_parts).
+    def load_parts(key) = select(:id).find_by(key: key)&.load_parts
+
     def append(key, update)
       (select(:id).find_by(key: key) || create_or_find_by!(key: key)).append(update)
     end
@@ -101,13 +113,13 @@ class Y::Document < ActiveRecord::Base
     end
   end
 
-  # Record one delta. The trigger is at-or-over rather than an exact
-  # multiple (concurrent appends can jump past one) and counts only clean
-  # rows: pending rows never satisfy it, so a quarantined gap doesn't
-  # retrigger compaction on every append.
+  # Record one delta, and on about one append in check_compaction_every
+  # compact if the tail is due. The trigger is at-or-over (concurrent appends
+  # can jump past a threshold) and counts only clean rows: pending rows never
+  # satisfy it, so a quarantined gap doesn't retrigger compaction.
   def append(bytes)
-    updates.create!(payload: bytes)
-    compact! if updates.where(pending: false).count >= compact_every
+    row = updates.create!(payload: bytes)
+    compact! if compaction_check?(row) && compaction_due?
   end
 
   # The merged document: state plus the whole tail. The tail is read first
@@ -121,14 +133,22 @@ class Y::Document < ActiveRecord::Base
   # parked edit and heals it the moment the missing dependency arrives,
   # while a gap healed by a newer tail row is served merged immediately.
   def load_state
-    tail = updates.reset.pluck(:payload) # reset: never a cached tail
-    snapshot = self.class.where(id: id).pick(:state)
+    snapshot, *tail = load_parts
     return snapshot if tail.empty?
 
     doc = Y::Doc.new
     doc.apply_update(snapshot) if snapshot
     tail.each { |payload| doc.apply_update(payload) }
     doc.encode_state_as_update
+  end
+
+  # The snapshot (nil before the first compaction) and then the tail rows,
+  # read in the order load_state explains. Applying them in order to a
+  # Y::Doc gives the merged document without load_state's merge and
+  # re-encode, which the channel would only decode again.
+  def load_parts
+    tail = updates.reset.pluck(:payload) # reset: never a cached tail
+    [self.class.where(id: id).pick(:state), *tail]
   end
 
   # Compact the tail into state. The row lock serializes racing
@@ -155,6 +175,23 @@ class Y::Document < ActiveRecord::Base
   end
 
   private
+
+  # About one append in check_compaction_every, by row id (at random for
+  # non-integer ids), so most appends skip the size query.
+  def compaction_check?(row)
+    every = [check_compaction_every.to_i, 1].max
+    ((row.id.is_a?(Integer) ? row.id : rand(every)) % every).zero?
+  end
+
+  # Whether the clean tail has reached the compaction policy.
+  def compaction_due?
+    rows, bytes = updates.where(pending: false)
+                         .pick(Arel.sql("COUNT(*)"), Arel.sql("COALESCE(SUM(LENGTH(payload)), 0)"))
+    return true if compact_every && rows.to_i >= compact_every
+
+    snapshot = self.class.where(id: id).pick(Arel.sql("COALESCE(LENGTH(state), 0)"))
+    bytes.to_i >= [compact_min_log_bytes, compact_log_ratio * snapshot.to_i].max
+  end
 
   # The gapped-batch path: fold everything integrable into state, then
   # judge each row against the folded state. A row the folded state

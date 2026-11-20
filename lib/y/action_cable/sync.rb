@@ -69,7 +69,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # only applies when the yrby-rails models can be loaded. Outside Rails a
     # channel still has to declare both hooks or subscribing raises.
     DEFAULT_STORAGE = {
-      on_load: ->(key) { Y::Document.load_state(key) },
+      on_load: ->(key) { Y::Document.load_parts(key) },
       on_change: ->(key, update) { Y::Document.append(key, update) }
     }.freeze
 
@@ -79,7 +79,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
 
     module ClassMethods
       # Load persisted document state. Called once per key with (key); return a
-      # binary Y.js update (or nil for a fresh document). Runs in the channel
+      # binary Y.js update (or nil for a fresh document), or several to apply
+      # in order, such as a snapshot and the updates since. Runs in the channel
       # instance's context (instance_exec). Defaults to Y::Document storage
       # when yrby-rails' models are present. Pass a block to use a different
       # store.
@@ -440,8 +441,9 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # the hooks first, so on_load is present; a nil state means a fresh document.
     def sync_load_doc
       doc = Y::Doc.new
-      state = instance_exec(@sync_key, &self.class.on_load)
-      doc.apply_update(state) if state
+      Array(instance_exec(@sync_key, &self.class.on_load)).each do |state|
+        doc.apply_update(state) if state
+      end
       doc
     end
 
