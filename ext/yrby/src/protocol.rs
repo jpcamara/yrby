@@ -219,6 +219,23 @@ pub(crate) fn update_advances_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool
     }
 }
 
+/// True if the update holds nothing past the doc's state vector: every struct
+/// it inserts and every struct it deletes lies below the doc's clock for that
+/// client. Such an update integrates entirely here, and once applied to this
+/// doc it is fully held by it, deletes included (they target structs the doc
+/// has). The state vector stops at a client's first missing clock, so an
+/// update reaching past a gap never fits. Reads the state vector only, so it
+/// costs the update's size, not the doc's.
+pub(crate) fn update_fits_doc(doc: &Doc, update_bytes: &[u8]) -> Result<bool, String> {
+    let update = Update::decode_v1(update_bytes).map_err(|e| e.to_string())?;
+    let sv = doc.transact().state_vector();
+    let past = |set: &yrs::IdSet| {
+        set.iter()
+            .any(|(client, ranges)| ranges.iter().any(|r| r.end > sv.get(client)))
+    };
+    Ok(!past(&update.insertions(true)) && !past(update.delete_set()))
+}
+
 /// True if the doc holds un-integrable pending structs or a pending delete set:
 /// blocks that couldn't integrate because a causally-prior update is missing. A
 /// pure read; does not mutate.
@@ -971,5 +988,50 @@ mod tests {
             has_pending(&doc),
             "non-destructive: source keeps its pending"
         );
+    }
+
+    #[test]
+    fn update_fits_only_what_lies_below_the_state_vector() {
+        let source = Doc::new();
+        let text = source.get_or_insert_text("content");
+        text.insert(&mut source.transact_mut(), 0, "abc");
+        let first = source
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        let sv = source.transact().state_vector();
+        text.insert(&mut source.transact_mut(), 3, "d");
+        let insert = source.transact().encode_state_as_update_v1(&sv);
+        let sv = source.transact().state_vector();
+        text.remove_range(&mut source.transact_mut(), 1, 1);
+        let delete = source.transact().encode_state_as_update_v1(&sv);
+        let apply = |doc: &Doc, bytes: &[u8]| {
+            doc.transact_mut()
+                .apply_update(Update::decode_v1(bytes).unwrap())
+                .unwrap()
+        };
+
+        let doc = Doc::new();
+        assert!(!update_fits_doc(&doc, &first).unwrap(), "new content");
+        apply(&doc, &insert);
+        assert!(has_pending(&doc));
+        assert!(
+            !update_fits_doc(&doc, &insert).unwrap(),
+            "applied but parked past a gap"
+        );
+        assert!(
+            !update_fits_doc(&doc, &delete).unwrap(),
+            "deletes a struct the doc lacks"
+        );
+
+        apply(&doc, &first);
+        assert!(!has_pending(&doc), "the gap healed");
+        for (name, bytes) in [("first", &first), ("insert", &insert)] {
+            assert!(update_fits_doc(&doc, bytes).unwrap(), "{name} is held");
+        }
+        assert!(
+            update_fits_doc(&doc, &delete).unwrap(),
+            "its target is present, so the delete integrates"
+        );
+        assert!(update_fits_doc(&doc, &[0, 0]).unwrap(), "empty update");
     }
 }
