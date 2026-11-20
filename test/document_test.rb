@@ -340,6 +340,29 @@ class DocumentTest < Minitest::Test
                  "the independent content is in state"
   end
 
+  # yrs doesn't report this gap as pending: the update skips ahead of its
+  # client's clock, but the structs it attaches to are present.
+  def test_an_update_ahead_of_its_clients_clock_stays_until_the_gap_closes
+    source = Y::Doc.new
+    text = source.get_text("content")
+    text.insert(0, "hello world hello world")
+    base = source.encode_state_as_update
+    skipped = source.edit { text.insert(5, "AAA") }
+    ahead = source.edit { text.insert(20, "BBB") }
+    document = Y::Document.locate!("room-1")
+    document.append(base)
+    document.append(ahead)
+
+    document.compact!
+
+    assert_equal [true], document.updates.pluck(:pending), "the row past the gap stays"
+    document.append(skipped)
+    document.compact!
+
+    assert_equal 0, document.updates.count
+    assert_equal text.to_s, read_back("room-1")
+  end
+
   def test_a_healed_gap_folds_out_at_the_next_compaction
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)

@@ -195,13 +195,15 @@ class Y::Document < ActiveRecord::Base
   #
   # One fold of state plus every row. compacted_state_update keeps every
   # struct that integrated, so rows independent of a gap land in state no
-  # matter how they interleave with it. With no gap every row is captured.
-  # With one, each row is judged against the folded doc's state vector: a
-  # row holding nothing past it is fully captured and deleted; a row that
-  # reaches past it carries the gap (or builds on it) and stays, marked
-  # pending, until a later compaction can fold it. That check reads the
-  # state vector, not the document, so a gapped batch costs about what a
-  # clean one does. An acked update never leaves the table before its
+  # matter how they interleave with it. Each row is judged against the
+  # folded doc's state vector: a row holding nothing past it is fully
+  # captured and deleted; a row that reaches past it carries a gap (or
+  # builds on one) and stays, marked pending, until a later compaction can
+  # fold it. Every row is judged, not only when the doc reports pending:
+  # yrs leaves an update that skips ahead of its client's clock
+  # unintegrated without reporting it pending when the structs it attaches
+  # to are present. The check reads the state vector, not the document, so
+  # it costs little. An acked update never leaves the table before its
   # content is durably in state.
   def compact!
     with_lock do
@@ -223,10 +225,8 @@ class Y::Document < ActiveRecord::Base
   private
 
   # The rows the folded doc fully holds, and the rows reaching past its
-  # state vector. With nothing pending, every row is held.
+  # state vector.
   def split_rows(doc, rows)
-    return [rows, []] unless doc.pending?
-
     rows.partition { |_, payload, _| doc.update_fits?(payload) }
   end
 
