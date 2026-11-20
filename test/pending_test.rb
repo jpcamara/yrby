@@ -63,6 +63,25 @@ class PendingTest < Minitest::Test
     assert doc.update_fits?(DEPENDENT), "held once the gap healed"
   end
 
+  # yrs integrates nothing past the gap but doesn't report it pending: the
+  # update skips ahead of its client's clock while the structs it attaches
+  # to are present. update_fits? still sees it, which is why compaction
+  # judges every row.
+  def test_an_update_ahead_of_its_clients_clock_does_not_fit_though_not_pending
+    source = Y::Doc.new
+    text = source.get_text("t")
+    text.insert(0, "hello world hello world")
+    base = source.encode_state_as_update
+    source.edit { text.insert(5, "AAA") }
+    ahead = source.edit { text.insert(20, "BBB") }
+    doc = Y::Doc.new
+    doc.apply_update(base)
+    doc.apply_update(ahead)
+
+    refute_predicate doc, :pending?, "yrs doesn't report it"
+    refute doc.update_fits?(ahead)
+  end
+
   def test_an_update_parked_on_another_clients_missing_origin_does_not_fit
     content = YjsFixtures::CrossClientOrigin::CONTENT
     delta = YjsFixtures::CrossClientOrigin::DELTA
