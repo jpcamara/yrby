@@ -59,6 +59,9 @@ Metrics/ClassLength:
     # The websocket client keeps one socket's life in one place, and the
     # session holds the protocol it drives.
     - "lib/y/action_cable/client.rb"
+    # The store contract, document binding and compaction policy, kept on
+    # the model the way Action Text keeps RichText's.
+    - "app/models/y/document.rb"
     - "lib/y/action_cable/client/session.rb"
     # The collaborator keeps its whole stay, from joining to leaving, in one
     # place.

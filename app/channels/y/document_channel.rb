@@ -57,7 +57,7 @@ module Y
       self.document_authorizer = block
     end
 
-    on_load { |_key| document.load_state }
+    on_load { |_key| document.load_parts }
     on_change { |_key, update| document.append(update) }
 
     def subscribed

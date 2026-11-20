@@ -23,13 +23,18 @@ class DocumentTest < Minitest::Test
     Y::DocumentUpdate.delete_all
     Y::Document.delete_all
     Page.delete_all
-    Y::Document.compact_every = 64
+    # Check the policy on every append, so tests see compaction where they
+    # expect it.
+    Y::Document.check_compaction_every = 1
   end
 
-  # Some tests lower the threshold. Put it back so later test files see the
-  # default.
+  # Some tests change the policy. Put it back so later test files see the
+  # defaults.
   def teardown
-    Y::Document.compact_every = 64
+    Y::Document.compact_every = 256
+    Y::Document.check_compaction_every = 16
+    Y::Document.compact_min_log_bytes = 4096
+    Y::Document.compact_log_ratio = 0.1
   end
 
   def read_back(key, text: "content")
@@ -147,6 +152,57 @@ class DocumentTest < Minitest::Test
     document.append(CLIENT_TWO)
 
     assert_equal 0, document.updates.count, "at-or-over fires past the multiple"
+  end
+
+  def test_append_compacts_once_the_tail_reaches_a_share_of_the_snapshot
+    Y::Document.compact_min_log_bytes = 0
+    document = Y::Document.locate!("room-1")
+    document.append(CLIENT_ONE)
+
+    assert_equal 0, document.updates.count, "no snapshot yet: any tail is due"
+    snapshot = document.reload.state.bytesize
+    Y::Document.compact_log_ratio = (CLIENT_TWO.bytesize + 1).fdiv(snapshot)
+
+    document.append(CLIENT_TWO)
+
+    assert_equal 1, document.updates.count, "below the ratio: no compact"
+
+    document.append(CLIENT_TWO)
+
+    assert_equal 0, document.updates.count, "at the ratio: compacts"
+    assert_equal "from doc1from doc2", read_back("room-1")
+  end
+
+  def test_the_compaction_check_runs_on_one_append_in_check_compaction_every
+    Y::Document.compact_every = 1
+    Y::Document.check_compaction_every = 4
+    document = Y::Document.locate!("room-1")
+    8.times { document.append(CLIENT_ONE) }
+
+    assert_predicate document.reload.state, :present?, "a checked append compacted"
+    assert_operator document.updates.count, :<, 4, "only rows since the last checked one remain"
+
+    Y::Document.check_compaction_every = 1_000_000
+    other = Y::Document.locate!("room-2")
+    3.times { other.append(CLIENT_ONE) }
+
+    assert_nil other.reload.state, "unchecked appends don't compact"
+  end
+
+  def test_load_parts_is_the_snapshot_then_the_tail
+    Y::Document.compact_every = 1
+    document = Y::Document.locate!("room-1")
+    document.append(CLIENT_ONE)
+    Y::Document.compact_every = nil
+    document.append(CLIENT_TWO)
+    snapshot, *tail = Y::Document.load_parts("room-1")
+
+    assert_equal document.reload.state, snapshot
+    assert_equal [CLIENT_TWO], tail
+    doc = Y::Doc.new
+    Y::Document.load_parts("room-1").each { |u| doc.apply_update(u) }
+
+    assert_equal read_back("room-1"), doc.read_text("content")
   end
 
   # -- causal gaps -----------------------------------------------------------
