@@ -155,26 +155,42 @@ class Y::Document < ActiveRecord::Base
   # compactions; a delta landing mid-compaction isn't in `rows`, so it
   # survives the delete and compacts next time.
   #
-  # A gapped batch still compacts everything integrable: the fold's
-  # compacted_state_update captures every struct that integrates, so
-  # rows independent of the gap land in state no matter how they
-  # interleave with it. Only the gap tail survives as raw rows, judged
-  # per row against the folded state: a row the new state could not
-  # integrate cleanly carries the gap (or builds on it) and is
-  # quarantined (marked pending); a row that is ready and adds nothing
-  # is fully captured and deleted. An acked update never leaves the
-  # table before its content is durably in state.
+  # One fold of state plus every row. compacted_state_update keeps every
+  # struct that integrated, so rows independent of a gap land in state no
+  # matter how they interleave with it. With no gap every row is captured.
+  # With one, each row is judged against the folded doc's state vector: a
+  # row holding nothing past it is fully captured and deleted; a row that
+  # reaches past it carries the gap (or builds on it) and stays, marked
+  # pending, until a later compaction can fold it. That check reads the
+  # state vector, not the document, so a gapped batch costs about what a
+  # clean one does. An acked update never leaves the table before its
+  # content is durably in state.
   def compact!
     with_lock do
       rows = updates.pluck(:id, :payload, :pending)
       next if rows.empty?
-      next if compact_rows(rows)
 
-      compact_around_gap(rows)
+      doc = Y::Doc.new
+      doc.apply_update(state) if state
+      rows.each { |_, payload, _| doc.apply_update(payload) }
+      captured, kept = split_rows(doc, rows)
+      new_state = doc.compacted_state_update
+      # A gap-only batch integrates nothing, so state is left as it was.
+      update!(state: new_state) unless kept.any? && new_state == (state || Y::Doc.new.compacted_state_update)
+      updates.where(id: captured.map(&:first)).delete_all
+      updates.where(id: kept.reject(&:last).map(&:first)).update_all(pending: true)
     end
   end
 
   private
+
+  # The rows the folded doc fully holds, and the rows reaching past its
+  # state vector. With nothing pending, every row is held.
+  def split_rows(doc, rows)
+    return [rows, []] unless doc.pending?
+
+    rows.partition { |_, payload, _| doc.update_fits?(payload) }
+  end
 
   # About one append in check_compaction_every, by row id (at random for
   # non-integer ids), so most appends skip the size query.
@@ -191,46 +207,6 @@ class Y::Document < ActiveRecord::Base
 
     snapshot = self.class.where(id: id).pick(Arel.sql("COALESCE(LENGTH(state), 0)"))
     bytes.to_i >= [compact_min_log_bytes, compact_log_ratio * snapshot.to_i].max
-  end
-
-  # The gapped-batch path: fold everything integrable into state, then
-  # judge each row against the folded state. A row the folded state
-  # cannot integrate cleanly carries the gap (or builds on it) and is
-  # quarantined; a row that is ready and adds nothing is fully captured
-  # and deleted.
-  def compact_around_gap(rows)
-    folded = Y::Doc.new
-    folded.apply_update(state) if state
-    rows.each { |_, payload, _| folded.apply_update(payload) }
-    new_state = folded.compacted_state_update
-    # Skip the write when nothing integrated beyond the current state
-    # (compacted encoding is deterministic, so equal structs mean equal
-    # bytes); a gap-only batch leaves state untouched.
-    update!(state: new_state) unless new_state == (state || Y::Doc.new.compacted_state_update)
-
-    base = Y::Doc.new
-    base.apply_update(new_state)
-    tail, captured = rows.partition do |_, payload, _|
-      !base.update_ready?(payload) || base.update_advances?(payload)
-    end
-    updates.where(id: captured.map(&:first)).delete_all
-    updates.where(id: tail.map(&:first)).update_all(pending: true)
-  end
-
-  # Compact state + the given rows if the merge is gap-free: writes state,
-  # deletes the rows, returns true. Leaves everything untouched and returns
-  # false on a gap.
-  def compact_rows(rows) # rubocop:disable Naming/PredicateMethod -- compacts AND reports
-    return true if rows.empty?
-
-    doc = Y::Doc.new
-    doc.apply_update(state) if state
-    rows.each { |_, payload, _| doc.apply_update(payload) }
-    return false if doc.pending?
-
-    update!(state: doc.compacted_state_update)
-    updates.where(id: rows.map(&:first)).delete_all
-    true
   end
 
   # Derives post/1/body from the polymorphic record_type. Rails stores

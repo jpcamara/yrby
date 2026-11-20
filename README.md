@@ -250,6 +250,8 @@ doc.apply_update(update_bytes)    # apply raw V1 update
 doc.pending?                      # => true if holding un-integrable pending structs
 doc.update_ready?(update)         # => true if update would integrate cleanly (no gap)
 doc.update_advances?(update)      # => true if update moves integrated state forward
+doc.update_fits?(update)          # => true if nothing in update lies past this doc's
+                                  #    state vector (cheap: no probe doc)
 
 # Sync protocol
 doc.sync_step1                    # => SyncStep1 message (this doc's state vector)

@@ -20,7 +20,7 @@ use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
 use protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
-    update_is_ready,
+    update_fits_doc, update_is_ready,
 };
 use render_rules::{Rules, Segment};
 pub(crate) use yjs_html_core as render_rules;
@@ -525,6 +525,16 @@ impl RbDoc {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
         nogvl(move || update_advances_doc(doc, &update_bytes))?.map_err(yrb_error)
+    }
+
+    /// True if `update` holds nothing past this doc's state vector, so it
+    /// integrates here with nothing left pending, and once applied it is fully
+    /// held by the doc. Cheap: reads the state vector, not the document. See
+    /// `update_fits_doc`. Pure read; does not mutate.
+    fn update_fits(&self, update: RString) -> Result<bool, Error> {
+        let update_bytes = copy_bytes(update);
+        let doc = &self.0;
+        nogvl(move || update_fits_doc(doc, &update_bytes))?.map_err(yrb_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
@@ -1231,6 +1241,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
     doc_class.define_method("get_xml_text", method!(RbDoc::get_xml_text, 1))?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
+    doc_class.define_method("update_fits?", method!(RbDoc::update_fits, 1))?;
     doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
     doc_class.define_method(

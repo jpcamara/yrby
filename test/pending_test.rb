@@ -46,6 +46,58 @@ class PendingTest < Minitest::Test
     assert_equal "ab", doc.read_text("notepad")
   end
 
+  # --- update_fits? (nothing past the state vector) ---
+
+  def test_an_update_fits_once_everything_it_needs_has_integrated
+    doc = Y::Doc.new
+
+    [FIRST, DEPENDENT, PENDING_DELETE].each { |u| refute doc.update_fits?(u) }
+
+    doc.apply_update(DEPENDENT)
+
+    refute doc.update_fits?(DEPENDENT), "applied, but parked past the gap"
+
+    doc.apply_update(FIRST)
+
+    assert doc.update_fits?(FIRST)
+    assert doc.update_fits?(DEPENDENT), "held once the gap healed"
+  end
+
+  def test_an_update_parked_on_another_clients_missing_origin_does_not_fit
+    content = YjsFixtures::CrossClientOrigin::CONTENT
+    delta = YjsFixtures::CrossClientOrigin::DELTA
+    doc = Y::Doc.new
+    doc.apply_update(delta)
+
+    refute doc.update_fits?(delta)
+
+    doc.apply_update(content)
+
+    assert doc.update_fits?(delta)
+  end
+
+  def test_a_delete_that_arrived_before_its_target_fits_once_the_target_does
+    source = Y::Doc.new
+    source.get_text("t").insert(0, "abc")
+    insert = source.encode_state_as_update
+    sv = source.encode_state_vector
+    source.get_text("t").delete(1, 1)
+    delete = source.encode_state_as_update(sv)
+    doc = Y::Doc.new
+    doc.apply_update(delete)
+
+    refute doc.update_fits?(delete)
+
+    doc.apply_update(insert)
+
+    assert doc.update_fits?(delete)
+    refute_predicate doc, :pending?
+    held = Y::Doc.new
+    held.apply_update(doc.compacted_state_update)
+
+    assert_equal "ac", held.read_text("t"), "the delete is in the compacted state"
+  end
+
   # --- compacted_state_update (gap-free full state) ---
 
   def test_compacted_matches_full_encode_when_clean
