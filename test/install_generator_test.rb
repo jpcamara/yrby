@@ -52,7 +52,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_match(":y_document_updates", migration)
       assert_match("t.references :document", migration)
       assert_match(/t\.binary :payload, null: false, limit: 16\.megabytes - 1/, migration)
-      assert_match("t.boolean :pending, null: false, default: false", migration)
+      assert_match("t.index :document_id", migration)
     end
   end
 

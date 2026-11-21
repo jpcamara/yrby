@@ -203,11 +203,10 @@ class SyncTest < Minitest::Test
     assert_equal source.encode_state_vector, rebuilt.encode_state_vector
   end
 
-  def test_sync_step1_is_answered_with_full_state_including_pending
-    # A store holding a gappy update: the loaded doc has a pending struct.
-    # The concern serves full state, pending included, like any Yjs server;
-    # the client parks the pending struct the same way and heals it when the
-    # missing dependency arrives.
+  def test_sync_step1_is_answered_with_full_state_including_a_gap
+    # A store holding a gappy update. The concern serves full state, gap
+    # included, like any Yjs server; the client heals it the same way when
+    # the missing dependency arrives.
     transmits = []
     helper = helper_for(store: [YjsFixtures::Gap::DEPENDENT], transmits: transmits)
 
@@ -218,10 +217,10 @@ class SyncTest < Minitest::Test
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
-    assert_predicate client, :pending?, "the pending struct was served and parked"
+    assert_nil client.read_text("notepad"), "the gap was served and shows nothing yet"
     client.apply_update(YjsFixtures::Gap::FIRST)
 
-    refute_predicate client, :pending?, "and healed once the dependency arrived"
+    assert_equal "ab", client.read_text("notepad"), "and healed once the dependency arrived"
   end
 
   def test_records_then_relays_and_acks_update
@@ -306,8 +305,7 @@ class SyncTest < Minitest::Test
     replay = Y::Doc.new
     store.each { |u| replay.apply_update(u) }
 
-    # Full-state equality proves the replay integrated everything: a leftover
-    # pending struct would be absent from encode_state_as_update and diverge.
+    # Full-state equality proves the replay holds everything the client does.
     assert_equal client.encode_state_as_update, replay.encode_state_as_update
   end
 
@@ -486,8 +484,8 @@ class SyncTest < Minitest::Test
   # -- causal gaps ---------------------------------------------------------
   #
   # A causally-incomplete update is recorded and acked like any other
-  # (ack-on-durable) and served onward like any other state; it stays pending
-  # until its dependency arrives; join and reconnect handshakes heal it.
+  # (ack-on-durable) and served onward like any other state; it shows
+  # nothing until its dependency arrives; join and reconnect handshakes heal it.
   # These tests rely on the loader being lossless (doc_state uses
   # encode_state_as_update, which keeps pending); the store contract this
   # behavior requires.
@@ -541,7 +539,6 @@ class SyncTest < Minitest::Test
     [YjsFixtures::CausalChain::U1, YjsFixtures::CausalChain::U2,
      YjsFixtures::CausalChain::U3].each { |u| expected.apply_update(u) }
 
-    refute_predicate replay, :pending?, "nothing is left pending once all dependencies arrived"
     assert_equal "ABC", replay.read_text("content"),
                  "replaying the out-of-order recorded log heals every gap into the complete document"
     assert_equal expected.encode_state_vector, replay.encode_state_vector,
@@ -563,7 +560,7 @@ class SyncTest < Minitest::Test
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
-    assert_predicate client, :pending?, "the open gap traveled to the joiner"
+    assert_nil client.read_text("content"), "the open gap traveled to the joiner"
 
     # The missing dependencies arrive (their sender retransmits until acked);
     # the server relays them, and the joiner's copy heals in place.
@@ -572,7 +569,6 @@ class SyncTest < Minitest::Test
     client.apply_update(YjsFixtures::CausalChain::U1)
     client.apply_update(YjsFixtures::CausalChain::U2)
 
-    refute_predicate client, :pending?, "the joiner healed with the room"
     assert_equal "ABC", client.read_text("content"), "into the complete document"
   end
 
@@ -592,66 +588,6 @@ class SyncTest < Minitest::Test
 
     assert_equal 1, store.count("doc-key"), "the store deduped the retry by content hash"
     assert_equal [5, 5], acks_in(transmits), "both are acked (ack-on-durable, idempotent)"
-  end
-
-  def test_serving_while_a_gap_is_open_sends_no_extra_frames
-    gaps = []
-    store = []
-    transmits = []
-    helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
-    helper.class.on_gap { |key| gaps << key }
-    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3), "doc-key") # open a gap
-    transmits.clear
-
-    # A client sends SyncStep1. The server answers it and surfaces the gap
-    # through on_gap; nothing else is transmitted. Healing rides the ack loop
-    # and the join/reconnect handshakes.
-    client = Y::Doc.new
-    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
-
-    assert_equal 1, transmits.length, "the SyncStep2 reply is the only frame"
-    assert_equal ["doc-key"], gaps, "on_gap fired for the open gap"
-  end
-
-  def test_observes_an_open_gap_at_serve_time
-    logged = []
-    gaps = []
-    store = []
-    helper = helper_for(store: store, recorder: ->(_k, u) { store << u })
-    helper.logger = capturing_logger(logged)
-    helper.class.on_gap { |key| gaps << key }
-
-    # The write path records without observing: the gap is durable, quiet.
-    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-
-    assert_empty gaps, "recording a gap does not observe it"
-
-    # Serving rebuilds the doc; an open gap surfaces there.
-    client = Y::Doc.new
-    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
-
-    assert(logged.any? { |lvl, msg| lvl == :info && msg.include?("causal gap") && msg.include?("doc-key") },
-           "the open gap is logged at info so it is findable")
-    assert_equal ["doc-key"], gaps, "the on_gap hook fired with the document key"
-  end
-
-  def test_on_gap_hook_errors_do_not_break_frame_handling
-    logged = []
-    store = []
-    transmits = []
-    helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
-    helper.logger = capturing_logger(logged)
-    helper.class.on_gap { |_key| raise "metrics backend down" }
-    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-    transmits.clear
-
-    # Serving observes the open gap; the raising hook must not break the serve.
-    client = Y::Doc.new
-    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
-
-    refute_empty transmits, "the handshake was still answered"
-    assert_equal [YjsFixtures::CausalChain::U3], store, "the gap stayed recorded"
-    assert(logged.any? { |lvl, msg| lvl == :error && msg.include?("on_gap hook raised") })
   end
 
   def test_receive_without_a_key_fails_closed
@@ -733,7 +669,7 @@ class SyncTest < Minitest::Test
     [first, second].each { |u| reference.apply_update(u) }
 
     assert_equal reference.encode_state_vector, client.encode_state_vector
-    refute_predicate client, :pending?
+    assert_equal "ab", client.read_text("notepad")
   end
 
   # --- a store that answers the handshake itself (on_sync_state/on_sync_diff) ---
@@ -800,25 +736,20 @@ class SyncTest < Minitest::Test
     assert_equal 2, loads.size
   end
 
-  # The store serves the gap without loading the document, so on_gap, which
-  # needs a loaded document, doesn't fire.
   def test_a_store_that_answers_sync_serves_an_open_gap
     store = [YjsFixtures::Gap::DEPENDENT]
     transmits = []
-    gaps = []
     helper = store_sync_helper(store, transmits, [])
-    helper.class.on_gap { |key| gaps << key }
 
     helper.send(:sync_subscribed, "doc-key")
     client = Y::Doc.new
     helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
     client.handle_sync_message(Base64.strict_decode64(transmits.last["update"]))
 
-    assert_empty gaps
-    assert_predicate client, :pending?, "the pending content was served"
+    assert_nil client.read_text("notepad"), "the gap was served"
     client.apply_update(YjsFixtures::Gap::FIRST)
 
-    refute_predicate client, :pending?
+    assert_equal "ab", client.read_text("notepad")
   end
 
   def test_a_store_can_answer_sync_with_several_updates

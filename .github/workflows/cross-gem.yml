@@ -111,7 +111,7 @@ jobs:
             d2 = Y::Doc.new
             d2.apply_update(back)
             raise "round-trip did not converge" unless d2.encode_state_vector == d1.encode_state_vector
-            raise "missing update_ready? (stale binary?)" unless d2.respond_to?(:update_ready?)
+            raise "missing merge_updates (stale binary?)" unless Y.respond_to?(:merge_updates)
             puts "ok: yrby #{Y::VERSION} loaded from #{lib} with no Rust"
           '
 

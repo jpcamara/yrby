@@ -19,8 +19,7 @@ mod xml_text;
 use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
 use protocol::{
-    classify_message, diff_update, extend_state_vector, has_pending, integrated_update,
-    merged_doc_update, state_vector_of, update_advances_doc, update_is_ready,
+    classify_message, diff_update, extend_state_vector, merged_doc_update, state_vector_of,
 };
 use render_rules::{Rules, Segment};
 pub(crate) use yjs_html_core as render_rules;
@@ -180,6 +179,12 @@ fn binary_string(bytes: &[u8]) -> RString {
 }
 
 /// Copy a Ruby string's bytes so they can be used without the GVL.
+/// Whether a transaction inserted or deleted anything: yrs's own record of
+/// what it integrated.
+fn changed(txn: &yrs::TransactionMut) -> bool {
+    !txn.insert_set().is_empty() || !txn.delete_set().is_empty()
+}
+
 fn copy_bytes(s: RString) -> Vec<u8> {
     unsafe { s.as_slice() }.to_vec()
 }
@@ -303,28 +308,6 @@ impl RbDoc {
         })
     }
 
-    /// True if the doc holds un-integrable pending structs or a pending delete
-    /// set: content that couldn't integrate because a causally-prior update is
-    /// missing. Such content is a recovery buffer, not document state; it heals if
-    /// the missing dependency later arrives. A pure read.
-    fn pending(&self) -> Result<bool, Error> {
-        let doc = &self.0;
-        nogvl(move || has_pending(doc))
-    }
-
-    /// Like `encode_state_as_update` (full state), but **gap-free**: it excludes
-    /// any pending (un-integrable) structs and pending delete set. Use this when
-    /// persisting or serving state that other peers will apply. Serving pending
-    /// content poisons their sync. Non-destructive: this doc keeps its pending, so
-    /// a genuine gap still heals if its dependency arrives. (`encode_state_as_update`
-    /// stays lossless for raw-update recovery.)
-    fn compacted_state_update(&self) -> Result<RString, Error> {
-        let doc = &self.0;
-        let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))?
-            .map_err(yrb_error)?;
-        Ok(binary_string(&update))
-    }
-
     /// A live `Y::Array` handle to the root array named `name` (created if
     /// absent). Writes through it mutate the document and sync to every peer.
     fn get_array(&self, name: String) -> Result<array::RbArray, Error> {
@@ -356,11 +339,12 @@ impl RbDoc {
     /// added, or a block removed (the ordinal it had). Ordinals count the
     /// root's `XmlText` blocks, as `xml_text(n)` does, so a divider or an
     /// image above a block doesn't shift it. This is what lets a process
-    /// following a document react to the part that changed.
-    fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
+    /// following a document react to the part that changed. Returns nil when
+    /// the doc already held all of `update`.
+    fn apply_update_changes(&self, update: RString, root: String) -> Result<Value, Error> {
         let bytes = copy_bytes(update);
         let doc = &self.0;
-        let changed = nogvl(move || -> Result<Vec<u32>, String> {
+        let changed = nogvl(move || -> Result<Option<Vec<u32>>, String> {
             // One transaction from the snapshot of the blocks to the commit,
             // under an origin of its own: another write can't change the
             // blocks in between, and its events don't count.
@@ -393,22 +377,29 @@ impl RbDoc {
             let applied = yrs::Update::decode_v1(&bytes)
                 .map_err(|e| e.to_string())
                 .and_then(|parsed| txn.apply_update(parsed).map_err(|e| e.to_string()));
+            let any = changed(&txn);
             // Committing runs the observer.
             drop(txn);
             target.unobserve_deep(key);
             applied?;
+            if !any {
+                return Ok(None);
+            }
             let mut out = hits.lock().unwrap().clone();
             out.sort_unstable();
             out.dedup();
-            Ok(out)
+            Ok(Some(out))
         })?
         .map_err(yrb_error)?;
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let Some(changed) = changed else {
+            return Ok(ruby.qnil().as_value());
+        };
         let array = ruby.ary_new();
         for i in changed {
             array.push(i)?;
         }
-        Ok(array)
+        Ok(array.as_value())
     }
 
     /// The ordinal of the top-level block of the root `XmlText` named `root`
@@ -498,33 +489,19 @@ impl RbDoc {
         Ok(binary_string(&update))
     }
 
-    fn apply_update(&self, update: RString) -> Result<(), Error> {
+    /// Apply `update`. Returns true if the transaction inserted or deleted
+    /// anything, false if the doc already held all of it. This reports what
+    /// applying did; the update is applied either way.
+    fn apply_update(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
-        nogvl(move || -> Result<(), String> {
+        nogvl(move || -> Result<bool, String> {
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
             let mut txn = doc.transact_mut_with(shared::REMOTE);
-            txn.apply_update(update).map_err(|e| e.to_string())
+            txn.apply_update(update).map_err(|e| e.to_string())?;
+            Ok(changed(&txn))
         })?
         .map_err(yrb_error)
-    }
-
-    /// True if applying `update` would integrate cleanly (its dependencies are
-    /// all present). False means it would leave a pending struct, i.e. an earlier
-    /// update is missing. Pure read; does not mutate.
-    fn update_ready(&self, update: RString) -> Result<bool, Error> {
-        let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        nogvl(move || update_is_ready(doc, &update_bytes))?.map_err(yrb_error)
-    }
-
-    /// True if applying `update` would change the document (it carries new
-    /// content), false if the doc already contains it (an already-applied
-    /// retry). See `update_advances_doc`. Pure read; does not mutate.
-    fn update_advances(&self, update: RString) -> Result<bool, Error> {
-        let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        nogvl(move || update_advances_doc(doc, &update_bytes))?.map_err(yrb_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
@@ -1275,17 +1252,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
     doc_class.define_method("read_map", method!(RbDoc::read_map, 1))?;
     doc_class.define_method("read_array", method!(RbDoc::read_array, 1))?;
-    doc_class.define_method("pending?", method!(RbDoc::pending, 0))?;
-    doc_class.define_method(
-        "compacted_state_update",
-        method!(RbDoc::compacted_state_update, 0),
-    )?;
     doc_class.define_method("get_map", method!(RbDoc::get_map, 1))?;
     doc_class.define_method("get_array", method!(RbDoc::get_array, 1))?;
     doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
     doc_class.define_method("get_xml_text", method!(RbDoc::get_xml_text, 1))?;
-    doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
-    doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
     doc_class.define_method(
         "handle_sync_message",
@@ -1439,11 +1409,13 @@ mod tests {
         let diff = update_since(&doc, peer.encode_state_vector().unwrap());
         let fresh = new_doc();
         fresh.apply_update(diff).unwrap();
-        assert!(
-            fresh.pending().unwrap(),
+        assert_eq!(
+            fresh.read_text("t".into()).unwrap(),
+            None,
             "the diff leaves out the first write"
         );
-        peer.apply_update(diff).unwrap();
+        assert!(peer.apply_update(diff).unwrap());
+        assert!(!peer.apply_update(diff).unwrap(), "applying it again changes nothing");
         assert_eq!(
             peer.read_text("t".into()).unwrap().as_deref(),
             Some("one two")
@@ -1481,7 +1453,6 @@ mod tests {
             fresh.read_text("t".into()).unwrap(),
             doc.read_text("t".into()).unwrap()
         );
-        assert!(!fresh.pending().unwrap());
     }
 
     #[ruby_test]
@@ -1535,30 +1506,6 @@ mod tests {
             Some("one\ntwo")
         );
         assert_eq!(doc.read_array("missing".into()).unwrap(), None);
-    }
-
-    #[ruby_test]
-    fn an_update_missing_its_dependency_is_pending_until_it_arrives() {
-        let source = new_doc();
-        push(&source, "t", "a");
-        let first = update(&source);
-        let after_first = source.encode_state_vector().unwrap();
-        push(&source, "t", "b");
-        let second = update_since(&source, after_first);
-
-        let doc = new_doc();
-        assert!(!doc.update_ready(second).unwrap());
-        assert!(doc.update_advances(second).unwrap());
-        doc.apply_update(second).unwrap();
-        assert!(doc.pending().unwrap());
-        assert_eq!(doc.read_text("t".into()).unwrap(), None);
-        let compacted = copy_bytes(doc.compacted_state_update().unwrap());
-        assert!(compacted.len() < copy_bytes(update(&doc)).len());
-
-        doc.apply_update(first).unwrap();
-        assert!(!doc.pending().unwrap());
-        assert_eq!(doc.read_text("t".into()).unwrap().as_deref(), Some("ab"));
-        assert!(!doc.update_advances(second).unwrap());
     }
 
     #[ruby_test]
