@@ -42,7 +42,7 @@ class EncryptedDocumentTest < Minitest::Test
   def test_payloads_are_ciphertext_at_rest
     Y::EncryptedDocument.append("room-1", CLIENT_ONE)
 
-    raw = Y::Document.connection.select_value("SELECT payload FROM y_document_updates LIMIT 1")
+    raw = raw_bytes("SELECT payload FROM y_document_updates LIMIT 1")
 
     refute_equal CLIENT_ONE, raw, "raw column must not hold the plaintext delta"
     assert_includes raw, '"p":', "expected the Active Record encryption envelope"
@@ -56,10 +56,10 @@ class EncryptedDocumentTest < Minitest::Test
 
     document.compact!
 
-    assert_equal 0, document.updates.count, "tail compacted"
+    assert_equal 0, document.tail.count, "tail compacted"
     assert_equal before, read_back(document.load_state)
 
-    raw = Y::Document.connection.select_value("SELECT state FROM y_documents LIMIT 1")
+    raw = raw_bytes("SELECT state FROM y_documents LIMIT 1")
 
     refute_nil raw
     assert_includes raw, '"p":', "expected the Active Record encryption envelope"
@@ -92,5 +92,12 @@ class EncryptedDocumentTest < Minitest::Test
     refute_equal Y::EncryptedDocument.load_state("room-1"),
                  Y::Document.load_state("room-1"),
                  "the plain class must not silently decrypt"
+  end
+
+  private
+
+  # A binary column as stored, decoded from the adapter's wire format.
+  def raw_bytes(sql)
+    Y::DocumentUpdate.type_for_attribute(:payload).deserialize(Y::Document.connection.select_value(sql))
   end
 end

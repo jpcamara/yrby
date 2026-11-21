@@ -11,6 +11,7 @@ AllCops:
     - "lib/generators/yrby/install/templates/**/*"
     - "lib/generators/yrby/tables/templates/**/*"
     - "lib/generators/yrby/state_vector/templates/**/*"
+    - "lib/generators/yrby/insert_only_log/templates/**/*"
     - "ext/**/*"          # Rust extension
     - "tmp/**/*"
     - "vendor/**/*"

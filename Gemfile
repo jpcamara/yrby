@@ -22,6 +22,8 @@ gem "async"
 # railties come in through the yrby-rails gemspec).
 gem "puma", require: false # runs the ActionCable server for the element browser tests
 gem "sqlite3", require: false
+# Test-only: the suite runs on Postgres with the insert-only log when YRBY_PG_URL is set.
+gem "pg", require: false
 
 gem "rubocop", require: false
 
