@@ -20,7 +20,7 @@ use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
 use protocol::{
     classify_message, diff_update, extend_state_vector, has_pending, integrated_update,
-    merged_doc_update, state_vector_of, update_advances_doc, update_fits_doc, update_is_ready,
+    merged_doc_update, state_vector_of, update_advances_doc, update_is_ready,
 };
 use render_rules::{Rules, Segment};
 pub(crate) use yjs_html_core as render_rules;
@@ -527,16 +527,6 @@ impl RbDoc {
         nogvl(move || update_advances_doc(doc, &update_bytes))?.map_err(yrb_error)
     }
 
-    /// True if `update` holds nothing past this doc's state vector, so it
-    /// integrates here with nothing left pending, and once applied it is fully
-    /// held by the doc. Cheap: reads the state vector, not the document. See
-    /// `update_fits_doc`. Pure read; does not mutate.
-    fn update_fits(&self, update: RString) -> Result<bool, Error> {
-        let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        nogvl(move || update_fits_doc(doc, &update_bytes))?.map_err(yrb_error)
-    }
-
     /// Sync step 1: Create a sync message with our state vector
     fn sync_step1(&self) -> Result<RString, Error> {
         let doc = &self.0;
@@ -892,6 +882,29 @@ fn rb_extend_state_vector(state_vector: RString, updates: RArray) -> Result<RStr
         .map(|v| RString::try_convert(v).map(copy_bytes))
         .collect::<Result<Vec<_>, _>>()?;
     let out = nogvl(move || extend_state_vector(&sv, &updates))?.map_err(yrb_error)?;
+    Ok(binary_string(&out))
+}
+
+/// The updates merged into one at the byte level (yrs merge_updates_v1),
+/// without integrating them into a document: every struct and delete in any
+/// of them is in the result, gaps included.
+fn rb_merge_updates(updates: RArray) -> Result<RString, Error> {
+    let updates = updates
+        .into_iter()
+        .map(|v| RString::try_convert(v).map(copy_bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+    if updates.is_empty() {
+        return Ok(binary_string(&[0, 0]));
+    }
+    // A single update is returned as is by the merge, so decode it here:
+    // bytes that aren't an update raise either way.
+    let out = nogvl(move || match updates.as_slice() {
+        [update] => yrs::Update::decode_v1(update)
+            .map(|_| update.clone())
+            .map_err(|e| e.to_string()),
+        _ => merge_unsent(&updates),
+    })?
+    .map_err(yrb_error)?;
     Ok(binary_string(&out))
 }
 
@@ -1272,7 +1285,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
     doc_class.define_method("get_xml_text", method!(RbDoc::get_xml_text, 1))?;
     doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
-    doc_class.define_method("update_fits?", method!(RbDoc::update_fits, 1))?;
     doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
     doc_class.define_method(
@@ -1316,6 +1328,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     module.define_module_function("diff_update", function!(rb_diff_update, 2))?;
     module.define_module_function("state_vector_of", function!(rb_state_vector_of, 1))?;
     module.define_module_function("extend_state_vector", function!(rb_extend_state_vector, 2))?;
+    module.define_module_function("merge_updates", function!(rb_merge_updates, 1))?;
 
     // Define message type constants
     module.const_set("MSG_SYNC", 0u8)?;

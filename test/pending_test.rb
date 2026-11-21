@@ -46,28 +46,11 @@ class PendingTest < Minitest::Test
     assert_equal "ab", doc.read_text("notepad")
   end
 
-  # --- update_fits? (nothing past the state vector) ---
-
-  def test_an_update_fits_once_everything_it_needs_has_integrated
-    doc = Y::Doc.new
-
-    [FIRST, DEPENDENT, PENDING_DELETE].each { |u| refute doc.update_fits?(u) }
-
-    doc.apply_update(DEPENDENT)
-
-    refute doc.update_fits?(DEPENDENT), "applied, but parked past the gap"
-
-    doc.apply_update(FIRST)
-
-    assert doc.update_fits?(FIRST)
-    assert doc.update_fits?(DEPENDENT), "held once the gap healed"
-  end
-
-  # yrs integrates nothing past the gap but doesn't report it pending: the
+  # yrs integrates nothing past this gap but doesn't report it pending: the
   # update skips ahead of its client's clock while the structs it attaches
-  # to are present. update_fits? still sees it, which is why compaction
-  # judges every row.
-  def test_an_update_ahead_of_its_clients_clock_does_not_fit_though_not_pending
+  # to are present. Storage never decides anything from pending? for this
+  # reason (Y::Document compacts by merging bytes).
+  def test_yrs_does_not_report_an_update_ahead_of_its_clients_clock_as_pending
     source = Y::Doc.new
     text = source.get_text("t")
     text.insert(0, "hello world hello world")
@@ -76,45 +59,11 @@ class PendingTest < Minitest::Test
     ahead = source.edit { text.insert(20, "BBB") }
     doc = Y::Doc.new
     doc.apply_update(base)
+    before = doc.encode_state_vector
     doc.apply_update(ahead)
 
     refute_predicate doc, :pending?, "yrs doesn't report it"
-    refute doc.update_fits?(ahead)
-  end
-
-  def test_an_update_parked_on_another_clients_missing_origin_does_not_fit
-    content = YjsFixtures::CrossClientOrigin::CONTENT
-    delta = YjsFixtures::CrossClientOrigin::DELTA
-    doc = Y::Doc.new
-    doc.apply_update(delta)
-
-    refute doc.update_fits?(delta)
-
-    doc.apply_update(content)
-
-    assert doc.update_fits?(delta)
-  end
-
-  def test_a_delete_that_arrived_before_its_target_fits_once_the_target_does
-    source = Y::Doc.new
-    source.get_text("t").insert(0, "abc")
-    insert = source.encode_state_as_update
-    sv = source.encode_state_vector
-    source.get_text("t").delete(1, 1)
-    delete = source.encode_state_as_update(sv)
-    doc = Y::Doc.new
-    doc.apply_update(delete)
-
-    refute doc.update_fits?(delete)
-
-    doc.apply_update(insert)
-
-    assert doc.update_fits?(delete)
-    refute_predicate doc, :pending?
-    held = Y::Doc.new
-    held.apply_update(doc.compacted_state_update)
-
-    assert_equal "ac", held.read_text("t"), "the delete is in the compacted state"
+    assert_equal before, doc.encode_state_vector, "and didn't integrate it"
   end
 
   # --- compacted_state_update (gap-free full state) ---

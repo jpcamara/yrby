@@ -281,12 +281,19 @@ class DocumentTest < Minitest::Test
     assert_equal [Y::Document::EMPTY_UPDATE], Y::Document.sync_diff("empty", "\x00".b)
   end
 
-  def test_the_handshake_declines_while_a_row_is_marked_pending
+  # A gap in storage doesn't change the handshake: the client gets what is
+  # stored, gap included, and heals when the missing update arrives, as
+  # with a Y.js server.
+  def test_the_handshake_serves_a_stored_gap
     Y::Document.append("gap", YjsFixtures::Gap::DEPENDENT)
     Y::Document.find_by(key: "gap").compact!
+    client = Y::Doc.new
 
-    assert_nil Y::Document.sync_state("gap")
-    assert_nil Y::Document.sync_diff("gap", "\x00".b)
+    refute_nil Y::Document.sync_state("gap")
+    apply_all(Y::Document.sync_diff("gap", "\x00".b), client)
+    client.apply_update(YjsFixtures::Gap::FIRST)
+
+    assert_equal "ab", client.read_text("notepad")
     assert_nil Y::Document.sync_state("unknown")
   end
 
@@ -304,45 +311,28 @@ class DocumentTest < Minitest::Test
     end
   end
 
-  def test_a_gapped_batch_is_quarantined_not_compacted_and_not_destroyed
+  # Compaction folds every row it read, gap or not, by merging bytes: it
+  # never asks yrs what integrated.
+  def test_compaction_folds_every_row_and_keeps_a_gap_in_state
     document = Y::Document.locate!("room-1")
-    document.append(YjsFixtures::Gap::DEPENDENT)
-
-    document.compact!
-
-    assert_equal 1, document.updates.where(pending: true).count, "the gap is quarantined"
-    assert_nil document.reload.state, "a gap is never compacted into state"
-  end
-
-  def test_clean_rows_compact_even_while_a_gap_is_quarantined
-    document = Y::Document.locate!("room-1")
-    document.append(YjsFixtures::Gap::DEPENDENT)
-    document.compact!
     document.append(CLIENT_TWO)
+    document.append(YjsFixtures::Gap::DEPENDENT)
 
     document.compact!
 
-    assert_equal [true], document.updates.pluck(:pending),
-                 "the clean row compacted; only the gap remains, quarantined"
+    assert_equal 0, document.updates.count
     assert_equal "from doc2", read_back("room-1")
-  end
+    peer = Y::Doc.new
+    peer.apply_update(Y::Document.load_state("room-1"))
+    peer.apply_update(YjsFixtures::Gap::FIRST)
 
-  def test_independent_rows_in_the_same_batch_as_a_gap_still_compact
-    document = Y::Document.locate!("room-1")
-    document.append(CLIENT_TWO)                    # independent content
-    document.append(YjsFixtures::Gap::DEPENDENT)   # a gap, same batch
-
-    document.compact!
-
-    assert_equal [true], document.updates.pluck(:pending),
-                 "only the gap survives as a row; the independent row folded"
-    assert_equal "from doc2", read_back("room-1"),
-                 "the independent content is in state"
+    assert_equal "ab", peer.read_text("notepad"), "the gap was kept and heals"
   end
 
   # yrs doesn't report this gap as pending: the update skips ahead of its
-  # client's clock, but the structs it attaches to are present.
-  def test_an_update_ahead_of_its_clients_clock_stays_until_the_gap_closes
+  # client's clock while the structs it attaches to are present. Compaction
+  # that kept only what yrs integrated lost it.
+  def test_an_update_ahead_of_its_clients_clock_survives_compaction
     source = Y::Doc.new
     text = source.get_text("content")
     text.insert(0, "hello world hello world")
@@ -352,10 +342,7 @@ class DocumentTest < Minitest::Test
     document = Y::Document.locate!("room-1")
     document.append(base)
     document.append(ahead)
-
     document.compact!
-
-    assert_equal [true], document.updates.pluck(:pending), "the row past the gap stays"
     document.append(skipped)
     document.compact!
 
@@ -363,57 +350,71 @@ class DocumentTest < Minitest::Test
     assert_equal text.to_s, read_back("room-1")
   end
 
-  def test_a_healed_gap_folds_out_at_the_next_compaction
-    document = Y::Document.locate!("room-1")
-    document.append(YjsFixtures::Gap::DEPENDENT)
-    document.compact!                              # quarantined
-    document.append(YjsFixtures::Gap::FIRST)       # the missing dependency
+  # Two clients' edits, stored with local disorder (as from concurrent
+  # writers) and compacted at random points, end equal to the clients'
+  # document. These seeds lost edits when compaction kept only what yrs
+  # reported as integrated, and when it judged rows by state vector.
+  def test_disordered_updates_with_random_compactions_converge
+    Y::Document.check_compaction_every = 1_000_000
+    [4, 46, 68].each do |seed|
+      Y::DocumentUpdate.delete_all
+      Y::Document.delete_all
+      rand = Random.new(seed)
+      updates, expected = two_client_session(rand)
+      document = Y::Document.locate!("room-1")
+      updates.each_slice(16).flat_map { |slice| slice.shuffle(random: rand) }.each do |update|
+        document.append(update)
+        document.compact! if rand.rand < 0.15
+      end
+      document.compact!
 
-    document.compact!
-
-    assert_equal 0, document.updates.count, "everything folded, quarantine included"
-    assert_equal "ab", read_back("room-1", text: "notepad")
+      assert_equal expected, read_back("room-1"), "seed #{seed}"
+    end
   end
 
-  def test_quarantined_rows_do_not_count_toward_the_compact_trigger
-    Y::Document.compact_every = 2
-    document = Y::Document.locate!("room-1")
-    document.append(YjsFixtures::Gap::DEPENDENT)
-    document.append(YjsFixtures::Gap::DEPENDENT_OTHER)
-
-    document.append(CLIENT_ONE)
-
-    assert_equal 1, document.updates.where(pending: false).count,
-                 "one clean row is below the threshold; quarantined rows don't trigger"
+  # 200 edits from two clients that see most of each other's edits, and
+  # the text they end with.
+  def two_client_session(rand)
+    clients = [Y::Doc.new, Y::Doc.new]
+    updates = Array.new(200) do |i|
+      doc = clients[i % 2]
+      text = doc.get_text("content")
+      update = doc.edit do
+        if rand.rand < 0.25 && text.length > 3
+          text.delete(rand.rand(text.length - 1), 1)
+        else
+          text.insert(rand.rand(text.length + 1), %w[a bc d e].sample(random: rand))
+        end
+      end
+      clients[(i + 1) % 2].apply_update(update) if rand.rand < 0.8
+      update
+    end
+    [updates, apply_all(updates).read_text("content")]
   end
 
   def test_load_state_preserves_an_unhealed_gap_so_a_peer_can_heal_it
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
-    document.compact! # quarantined
+    document.compact!
 
     peer = Y::Doc.new
     peer.apply_update(Y::Document.load_state("room-1"))
-
-    assert_predicate peer, :pending?, "the parked edit rides along in served state"
-
     peer.apply_update(YjsFixtures::Gap::FIRST)
 
     assert_equal "ab", peer.read_text("notepad"), "the peer heals without another load"
   end
 
-  def test_a_healed_gap_is_served_immediately_and_compacts_clean
+  def test_a_gap_heals_across_compactions
     document = Y::Document.locate!("room-1")
     document.append(YjsFixtures::Gap::DEPENDENT)
     document.compact!
-
     document.append(YjsFixtures::Gap::FIRST)
 
-    assert_equal "ab", read_back("room-1", text: "notepad"), "healed content serves before any compaction"
+    assert_equal "ab", read_back("room-1", text: "notepad"), "healed before any compaction"
 
     document.compact!
 
-    assert_equal 0, document.updates.count, "the healed batch compacted, quarantine included"
+    assert_equal 0, document.updates.count
     assert_equal "ab", read_back("room-1", text: "notepad")
   end
 
