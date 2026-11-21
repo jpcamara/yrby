@@ -103,7 +103,7 @@ npm install yrby-client yjs y-protocols @rails/actioncable
 - [Usage](#usage)
   - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
   - [Reading document contents](#reading-document-contents)
-  - [Pending structs and gap-free state](#pending-structs-and-gap-free-state)
+  - [Pending structs](#pending-structs)
   - [Rendering to HTML](#rendering-to-html)
   - [Protocol codec (module functions)](#protocol-codec-module-functions)
   - [ActionCable Integration](#actioncable-integration)
@@ -241,13 +241,9 @@ doc = Y::Doc.new(12345) # specific client ID (used for CRDT identity)
 doc.encode_state_vector           # => current state vector
 doc.encode_state_as_update        # => full update (lossless: keeps pending)
 doc.encode_state_as_update(sv)    # => update diff against state vector
-doc.compacted_state_update        # => full update, gap-free (excludes pending)
 
 # Applying updates
 doc.apply_update(update_bytes)    # apply raw V1 update; => false if it changed nothing
-doc.pending?                      # => true if holding un-integrable pending structs
-doc.update_ready?(update)         # => true if update would integrate cleanly (no gap)
-doc.update_advances?(update)      # => true if update moves integrated state forward
 
 # Sync protocol
 doc.sync_step1                    # => SyncStep1 message (this doc's state vector)
@@ -268,25 +264,21 @@ doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
 doc.read_array("cards")       # => a Y.Array root as a JSON string; JSON.parse it
 ```
 
-### Pending structs and gap-free state
+### Pending structs
 
 If a doc applies an update whose causally-prior update is missing (a "gappy"
-update), yrs holds it as a **pending** struct and the integrated state vector
-doesn't move. yrs keeps the pending block as a recovery buffer and integrates
-it if the missing dependency arrives later. `Doc#pending?` tells you when a doc
-is in this state.
+update), yrs holds it as a **pending** struct, and its content doesn't show
+until the missing dependency arrives and it integrates.
 
-`handle_sync_message` answers `SyncStep1` with the doc's full state, pending
-structs included, which is what Y.js's `encodeStateAsUpdate` does too. A peer
-that receives it holds the pending struct and integrates it the same way this
-doc would.
+`encode_state_as_update` and `handle_sync_message` include pending structs,
+which is what Y.js's `encodeStateAsUpdate` does too. A peer that receives
+them holds the pending struct and integrates it the same way this doc would.
 
-yrs doesn't report every gap as pending: an update that skips ahead of its
-own client's clock shows in the text, but isn't reported pending and doesn't
-advance the state vector. So don't keep, drop, or fold stored updates based on
-`pending?`, `update_ready?`, `update_advances?`, or `compacted_state_update`.
-To fold a log into one snapshot, merge the bytes with `Y.merge_updates`,
-which keeps everything, gaps included.
+yrby has no API for asking whether a doc has a gap. yrs doesn't report every
+gap (an update that skips ahead of its own client's clock shows in the text,
+but isn't reported pending and doesn't advance the state vector), so storage
+can't safely decide anything from it. To fold a log into one snapshot, merge
+the bytes with `Y.merge_updates`, which keeps everything.
 
 ### Rendering to HTML
 
