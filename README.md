@@ -250,8 +250,6 @@ doc.apply_update(update_bytes)    # apply raw V1 update
 doc.pending?                      # => true if holding un-integrable pending structs
 doc.update_ready?(update)         # => true if update would integrate cleanly (no gap)
 doc.update_advances?(update)      # => true if update moves integrated state forward
-doc.update_fits?(update)          # => true if nothing in update lies past this doc's
-                                  #    state vector (cheap: no probe doc)
 
 # Sync protocol
 doc.sync_step1                    # => SyncStep1 message (this doc's state vector)
@@ -566,6 +564,8 @@ Y.extend_state_vector(sv, [update])      # => sv advanced by what the updates ad
                                        #    after it (a lower bound, never higher)
 Y.diff_update(update, sv)              # => what update holds that a peer at sv lacks:
                                        #    structs past sv and the whole delete set
+Y.merge_updates([update, update])       # => one update holding everything in them, gaps
+                                       #    included (merged bytes, no document)
 ```
 
 ### ActionCable Integration
@@ -602,19 +602,20 @@ gem:
   client doesn't build the document in Ruby: the server's SyncStep1 is the
   snapshot's stored `state_vector` extended by the tail, and a client gets
   the snapshot (sliced with `Y.diff_update` unless it has nothing) followed
-  by the tail as stored. While a row is marked as part of an open gap, it
-  loads the document instead, so `on_gap` still sees the gap.
+  by the tail as stored.
 - **`Y::DocumentUpdate`** holds the uncompacted tail, one delta per row. When
   the tail's bytes reach a share of the snapshot's (`compact_log_ratio`,
   default 0.1, and at least `compact_min_log_bytes`, default 4 KB), yrby
-  compacts it into `state` and deletes those rows, so a large document is
+  merges it into `state` and deletes those rows, so a large document is
   rewritten rarely, or when it holds `compact_every` rows (256), so loads stay
   quick. The check runs on about one append in `check_compaction_every`
   (16). A load reads the snapshot plus the current tail, and
   returns `state` directly when the tail is empty. Compactions of one document
-  run one at a time under a per-document row lock, and they skip rows with an
-  open causal gap, leaving them as they are until the gap closes. Destroying a
-  document also deletes its updates.
+  run one at a time under a per-document row lock. A compaction merges the
+  bytes of the snapshot and every row it read (`Y.merge_updates`) without
+  asking which updates integrated, so a row past a causal gap is kept in
+  `state`, gap and all, and the gap heals when the missing update arrives.
+  Destroying a document also deletes its updates.
 
 Tables created before the `state_vector` column existed keep working. The
 handshake then reads the snapshot's state vector from its bytes. Add the
@@ -949,9 +950,10 @@ until it's acked, and on every join or reconnect handshake the client sends
 everything the server hasn't integrated, so any client holding the dependency
 supplies it by connecting. The gap worth alerting on is one that no live client
 can supply, and that's what the `on_gap` hook is for. It fires with the
-document key whenever a document is loaded to serve state while a gap is open
-(a store answering the handshake itself, as `Y::Document` does, loads the
-document while it knows of a gap so the hook still fires).
+document key whenever a document is loaded to serve state while a gap is open.
+A store that answers the handshake itself, as `Y::Document` does, doesn't load
+the document, so the hook doesn't fire there. yrs doesn't report every gap as
+pending either, so treat the hook as a signal, not a complete count.
 Use it to emit a metric, such as a pending-document count or the age of the
 oldest open gap, so you can see a gap that isn't closing. yrby also logs gaps
 at `info`. Errors raised in the hook are swallowed, so a broken metrics call

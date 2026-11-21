@@ -129,8 +129,7 @@ class Y::Document < ActiveRecord::Base
 
   # Record one delta, and on about one append in check_compaction_every
   # compact if the tail is due. The trigger is at-or-over (concurrent appends
-  # can jump past a threshold) and counts only clean rows: pending rows never
-  # satisfy it, so a quarantined gap doesn't retrigger compaction.
+  # can jump past a threshold).
   def append(bytes)
     row = updates.create!(payload: bytes)
     compact! if compaction_check?(row) && compaction_due?
@@ -141,19 +140,14 @@ class Y::Document < ActiveRecord::Base
   # compaction committing between the two reads then hands us rows already
   # folded into the fresh snapshot, an idempotent double-apply, where
   # the reverse order could pair a pre-compaction snapshot with an empty
-  # tail and omit committed changes. Quarantined rows are applied too,
-  # and the output is lossless (encode_state_as_update): an unhealed gap
-  # rides along as a pending struct, so a peer loaded mid-gap holds the
-  # parked edit and heals it the moment the missing dependency arrives,
-  # while a gap healed by a newer tail row is served merged immediately.
+  # tail and omit committed changes. The parts are merged byte for byte
+  # (Y.merge_updates), not through a Y::Doc, so everything stored comes
+  # back, gaps included.
   def load_state
     snapshot, *tail = load_parts
     return snapshot if tail.empty?
 
-    doc = Y::Doc.new
-    doc.apply_update(snapshot) if snapshot
-    tail.each { |payload| doc.apply_update(payload) }
-    doc.encode_state_as_update
+    Y.merge_updates([snapshot, *tail].compact)
   end
 
   # The snapshot (nil before the first compaction) and then the tail rows,
@@ -168,10 +162,9 @@ class Y::Document < ActiveRecord::Base
   # The state vector for the server's SyncStep1: the snapshot's, extended by
   # what the tail adds after it. The snapshot's comes from the state_vector
   # column, so the snapshot isn't read at all. The tail is read first, as in
-  # load_parts. nil while a row is marked pending: a gap that outlived a
-  # compaction, which the channel then loads the document to see (on_gap).
+  # load_parts.
   def sync_state
-    tail = clean_tail or return
+    tail = updates.reset.pluck(:payload)
     Y.extend_state_vector(snapshot_state_vector || "".b, tail)
   end
 
@@ -180,67 +173,42 @@ class Y::Document < ActiveRecord::Base
   # the snapshot's bytes as they are; any other gets Y.diff_update of them,
   # which slices the encoded update without building a document and keeps
   # the whole delete set (a delete doesn't move a state vector, so a client
-  # can lack one whatever its state vector says). nil as in sync_state.
+  # can lack one whatever its state vector says).
   def sync_diff(state_vector)
-    tail = clean_tail or return
+    tail = updates.reset.pluck(:payload)
     snapshot = self.class.where(id: id).pick(:state)
     snapshot = Y.diff_update(snapshot, state_vector) if snapshot && state_vector.bytesize > 1
     parts = [snapshot, *tail].compact
     parts.empty? ? [EMPTY_UPDATE] : parts
   end
 
-  # Compact the tail into state. The row lock serializes racing
-  # compactions; a delta landing mid-compaction isn't in `rows`, so it
-  # survives the delete and compacts next time.
+  # Compact the tail into state: the snapshot and every row read, merged
+  # byte for byte (Y.merge_updates), then exactly those rows deleted. The
+  # row lock serializes racing compactions; a delta landing mid-compaction
+  # isn't in `rows`, so it survives the delete and compacts next time.
   #
-  # One fold of state plus every row. compacted_state_update keeps every
-  # struct that integrated, so rows independent of a gap land in state no
-  # matter how they interleave with it. Each row is judged against the
-  # folded doc's state vector: a row holding nothing past it is fully
-  # captured and deleted; a row that reaches past it carries a gap (or
-  # builds on one) and stays, marked pending, until a later compaction can
-  # fold it. Every row is judged, not only when the doc reports pending:
-  # yrs leaves an update that skips ahead of its client's clock
-  # unintegrated without reporting it pending when the structs it attaches
-  # to are present. The check reads the state vector, not the document, so
-  # it costs little. An acked update never leaves the table before its
-  # content is durably in state.
+  # Nothing here asks what integrated. A merge keeps every struct and
+  # delete of its inputs, gaps included, so no row can leave the table
+  # before its content is in state. Routing rows through a Y::Doc and
+  # keeping only what yrs reports as integrated can't promise that: yrs
+  # doesn't always report a gap.
   def compact!
     with_lock do
-      rows = updates.pluck(:id, :payload, :pending)
+      rows = updates.pluck(:id, :payload)
       next if rows.empty?
 
-      doc = Y::Doc.new
-      doc.apply_update(state) if state
-      rows.each { |_, payload, _| doc.apply_update(payload) }
-      captured, kept = split_rows(doc, rows)
-      new_state = doc.compacted_state_update
-      # A gap-only batch integrates nothing, so state is left as it was.
-      write_state(doc, new_state) unless kept.any? && new_state == (state || Y::Doc.new.compacted_state_update)
-      updates.where(id: captured.map(&:first)).delete_all
-      updates.where(id: kept.reject(&:last).map(&:first)).update_all(pending: true)
+      write_state(Y.merge_updates([state, *rows.map(&:last)].compact))
+      updates.where(id: rows.map(&:first)).delete_all
     end
   end
 
   private
 
-  # The rows the folded doc fully holds, and the rows reaching past its
-  # state vector.
-  def split_rows(doc, rows)
-    rows.partition { |_, payload, _| doc.update_fits?(payload) }
-  end
-
   # The new snapshot, and its state vector where the column exists.
-  def write_state(doc, new_state)
+  def write_state(new_state)
     attributes = { state: new_state }
-    attributes[:state_vector] = doc.encode_state_vector if self.class.stores_state_vector?
+    attributes[:state_vector] = Y.state_vector_of(new_state) if self.class.stores_state_vector?
     update!(attributes)
-  end
-
-  # The tail's payloads, or nil if any row is marked pending.
-  def clean_tail
-    rows = updates.reset.pluck(:payload, :pending)
-    rows.map(&:first) unless rows.any?(&:last)
   end
 
   # The snapshot's state vector: the stored one, or read from the snapshot's
@@ -262,10 +230,9 @@ class Y::Document < ActiveRecord::Base
     ((row.id.is_a?(Integer) ? row.id : rand(every)) % every).zero?
   end
 
-  # Whether the clean tail has reached the compaction policy.
+  # Whether the tail has reached the compaction policy.
   def compaction_due?
-    rows, bytes = updates.where(pending: false)
-                         .pick(Arel.sql("COUNT(*)"), Arel.sql("COALESCE(SUM(LENGTH(payload)), 0)"))
+    rows, bytes = updates.pick(Arel.sql("COUNT(*)"), Arel.sql("COALESCE(SUM(LENGTH(payload)), 0)"))
     return true if compact_every && rows.to_i >= compact_every
 
     snapshot = self.class.where(id: id).pick(Arel.sql("COALESCE(LENGTH(state), 0)"))
