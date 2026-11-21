@@ -180,6 +180,12 @@ fn binary_string(bytes: &[u8]) -> RString {
 }
 
 /// Copy a Ruby string's bytes so they can be used without the GVL.
+/// Whether a transaction inserted or deleted anything: yrs's own record of
+/// what it integrated.
+fn changed(txn: &yrs::TransactionMut) -> bool {
+    !txn.insert_set().is_empty() || !txn.delete_set().is_empty()
+}
+
 fn copy_bytes(s: RString) -> Vec<u8> {
     unsafe { s.as_slice() }.to_vec()
 }
@@ -356,11 +362,12 @@ impl RbDoc {
     /// added, or a block removed (the ordinal it had). Ordinals count the
     /// root's `XmlText` blocks, as `xml_text(n)` does, so a divider or an
     /// image above a block doesn't shift it. This is what lets a process
-    /// following a document react to the part that changed.
-    fn apply_update_changes(&self, update: RString, root: String) -> Result<RArray, Error> {
+    /// following a document react to the part that changed. Returns nil when
+    /// the doc already held all of `update`.
+    fn apply_update_changes(&self, update: RString, root: String) -> Result<Value, Error> {
         let bytes = copy_bytes(update);
         let doc = &self.0;
-        let changed = nogvl(move || -> Result<Vec<u32>, String> {
+        let changed = nogvl(move || -> Result<Option<Vec<u32>>, String> {
             // One transaction from the snapshot of the blocks to the commit,
             // under an origin of its own: another write can't change the
             // blocks in between, and its events don't count.
@@ -393,22 +400,29 @@ impl RbDoc {
             let applied = yrs::Update::decode_v1(&bytes)
                 .map_err(|e| e.to_string())
                 .and_then(|parsed| txn.apply_update(parsed).map_err(|e| e.to_string()));
+            let any = changed(&txn);
             // Committing runs the observer.
             drop(txn);
             target.unobserve_deep(key);
             applied?;
+            if !any {
+                return Ok(None);
+            }
             let mut out = hits.lock().unwrap().clone();
             out.sort_unstable();
             out.dedup();
-            Ok(out)
+            Ok(Some(out))
         })?
         .map_err(yrb_error)?;
         let ruby = Ruby::get().map_err(|e| yrb_error(e.to_string()))?;
+        let Some(changed) = changed else {
+            return Ok(ruby.qnil().as_value());
+        };
         let array = ruby.ary_new();
         for i in changed {
             array.push(i)?;
         }
-        Ok(array)
+        Ok(array.as_value())
     }
 
     /// The ordinal of the top-level block of the root `XmlText` named `root`
@@ -498,13 +512,17 @@ impl RbDoc {
         Ok(binary_string(&update))
     }
 
-    fn apply_update(&self, update: RString) -> Result<(), Error> {
+    /// Apply `update`. Returns true if the transaction inserted or deleted
+    /// anything, false if the doc already held all of it. This reports what
+    /// applying did; the update is applied either way.
+    fn apply_update(&self, update: RString) -> Result<bool, Error> {
         let update_bytes = copy_bytes(update);
         let doc = &self.0;
-        nogvl(move || -> Result<(), String> {
+        nogvl(move || -> Result<bool, String> {
             let update = yrs::Update::decode_v1(&update_bytes).map_err(|e| e.to_string())?;
             let mut txn = doc.transact_mut_with(shared::REMOTE);
-            txn.apply_update(update).map_err(|e| e.to_string())
+            txn.apply_update(update).map_err(|e| e.to_string())?;
+            Ok(changed(&txn))
         })?
         .map_err(yrb_error)
     }
@@ -852,6 +870,29 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
     let data_bytes = copy_bytes(data);
     let merged = nogvl(move || merged_doc_update(&data_bytes))?.map_err(yrb_error)?;
     Ok(merged.map(|b| binary_string(&b)))
+}
+
+/// The updates merged into one at the byte level (yrs merge_updates_v1),
+/// without integrating them into a document: every struct and delete in any
+/// of them is in the result, gaps included.
+fn rb_merge_updates(updates: RArray) -> Result<RString, Error> {
+    let updates = updates
+        .into_iter()
+        .map(|v| RString::try_convert(v).map(copy_bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+    if updates.is_empty() {
+        return Ok(binary_string(&[0, 0]));
+    }
+    // A single update is returned as is by the merge, so decode it here:
+    // bytes that aren't an update raise either way.
+    let out = nogvl(move || match updates.as_slice() {
+        [update] => yrs::Update::decode_v1(update)
+            .map(|_| update.clone())
+            .map_err(|e| e.to_string()),
+        _ => merge_unsent(&updates),
+    })?
+    .map_err(yrb_error)?;
+    Ok(binary_string(&out))
 }
 
 // ============================================================================
@@ -1271,6 +1312,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     module.define_module_function("wrap_update", function!(wrap_update, 1))?;
     module.define_module_function("message_kind", function!(message_kind, 1))?;
     module.define_module_function("update_from_message", function!(update_from_message, 1))?;
+    module.define_module_function("merge_updates", function!(rb_merge_updates, 1))?;
 
     // Define message type constants
     module.const_set("MSG_SYNC", 0u8)?;

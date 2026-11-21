@@ -57,6 +57,12 @@ class DocChangesTest < Minitest::Test
     update = @src.edit { Y::Lexxy.append_paragraph(@src, "three") }
     @peer.apply_update_changes(update, "root")
 
+    assert_nil @peer.apply_update_changes(update, "root")
+  end
+
+  def test_a_change_outside_the_root_names_no_block
+    update = @src.edit { @src.get_map("meta")["title"] = "t" }
+
     assert_empty @peer.apply_update_changes(update, "root")
   end
 
