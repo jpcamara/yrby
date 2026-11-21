@@ -129,8 +129,7 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # vector for the server's SyncStep1, or nil to fall back to on_load. It
       # may be lower than the document's (the client then sends something
       # twice), never higher. Y::Document answers from a stored state vector
-      # and the tail. Answering skips the on_gap check, which needs a loaded
-      # document, so a store should decline while it knows of a gap.
+      # and the tail.
       def on_sync_state(&block)
         @on_sync_state = block if block
         sync_storage_hook(:on_sync_state)
@@ -145,19 +144,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       def on_sync_diff(&block)
         @on_sync_diff = block if block
         sync_storage_hook(:on_sync_diff)
-      end
-
-      # Optional observability hook, fired at join/serve time whenever the
-      # loaded document still holds a causal gap (a pending struct). Called
-      # with (key) in the channel instance's context (instance_exec). Use it
-      # to emit a metric (pending-document count, gap age) so an unhealed gap
-      # is visible. Errors in the hook are swallowed so observability can
-      # never break frame handling.
-      def on_gap(&block)
-        @on_gap = block if block
-        return @on_gap if defined?(@on_gap) && @on_gap
-
-        superclass.respond_to?(:on_gap) ? superclass.on_gap : nil
       end
 
       private
@@ -207,17 +193,12 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       # The opening handshake is also the gap-repair prompt: sending our SyncStep1
       # asks the joining client for everything beyond our integrated state, which
       # is exactly the missing dependency an open gap is waiting on. If a live
-      # client has it, the join heals the gap. We only surface it (on_gap); the
-      # handshake below already does the soliciting.
+      # client has it, the join heals the gap.
       if (sv = sync_store_state)
         sync_transmit(sync_frame(SYNC_STEP1, sv))
       else
-        doc = sync_load_doc
-        sync_transmit(doc.sync_step1)
-        sync_observe_gap if doc.pending?
+        sync_transmit(sync_load_doc.sync_step1)
       end
-      # Return true so a caller can tell success from rejection. Otherwise the
-      # method would return the gap check's result, which is usually nil.
       true
     end
     # rubocop:enable Naming/PredicateMethod
@@ -356,28 +337,6 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
     end
 
-    # A causal gap was observed at join/serve time: the update is durable but
-    # its content stays invisible in the document until its missing dependency
-    # arrives and heals it. Healing is quiet, so make the open gap findable: log at info,
-    # and fire the on_gap hook so the app can emit a metric (pending-document
-    # count, gap age). Errors in the hook are swallowed; observability must
-    # never break frame handling.
-    def sync_observe_gap
-      logger.info do
-        parts = ["key=#{@sync_key.inspect}"]
-        parts << sync_log_context_safe
-        "[yrby] causal gap present (pending until its dependency arrives): #{parts.compact.join(" ")}"
-      end
-
-      return unless (hook = self.class.on_gap)
-
-      begin
-        instance_exec(@sync_key, &hook)
-      rescue StandardError => e
-        logger.error { "[yrby] on_gap hook raised (#{e.class}); continuing: key=#{@sync_key.inspect}" }
-      end
-    end
-
     # sync_log_context, guarded: a broken context hook must surface in the log,
     # not take down frame handling.
     def sync_log_context_safe
@@ -437,10 +396,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
           sync_transmit(sync_frame(SYNC_STEP2, first)) # full state, pending included
           rest.each { |update| sync_transmit(sync_frame(SYNC_UPDATE, update)) }
         else
-          doc = sync_load_doc
-          result = doc.handle_sync_message(bytes)
+          result = sync_load_doc.handle_sync_message(bytes)
           sync_transmit(result[2]) # full state, pending included
-          sync_observe_gap if doc.pending?
         end
         :noop
       when MSG_KIND_UPDATE
@@ -462,9 +419,8 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
     # one (a peer parks and heals it the same way this doc does). The gap
     # heals when its missing dependency arrives: its own sender retransmits
     # it until acked, and every join or reconnect handshake has the client
-    # send everything beyond the server's integrated state. An open gap is
-    # surfaced by on_gap at join/serve time. on_change must tolerate
-    # duplicates: a lost-ack retry records again.
+    # send everything beyond the server's integrated state. on_change must
+    # tolerate duplicates: a lost-ack retry records again.
     def sync_handle_document_update(update, encoded)
       sync_record_change(update) # record before relay
       sync_distribute(encoded)
