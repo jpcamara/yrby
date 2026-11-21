@@ -32,9 +32,8 @@ unless defined?(YRBY_AR_BOOTED)
     create_table :y_document_updates do |t|
       t.references :document, null: false, index: false
       t.binary :payload, null: false
-      t.boolean :pending, null: false, default: false
       t.datetime :created_at, null: false
-      t.index %i[document_id pending]
+      t.index :document_id
     end
 
     # A host-app model for the record-binding tests (Y::Document.for).
