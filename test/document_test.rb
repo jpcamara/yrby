@@ -329,9 +329,9 @@ class DocumentTest < Minitest::Test
     assert_equal "ab", peer.read_text("notepad"), "the gap was kept and heals"
   end
 
-  # yrs doesn't report this gap as pending: the update skips ahead of its
-  # client's clock while the structs it attaches to are present. Compaction
-  # that kept only what yrs integrated lost it.
+  # yrs doesn't report this gap as pending or advance the state vector for
+  # it: the update skips ahead of its client's clock while the structs it
+  # attaches to are present. Compaction that judged rows through a Doc lost it.
   def test_an_update_ahead_of_its_clients_clock_survives_compaction
     source = Y::Doc.new
     text = source.get_text("content")
