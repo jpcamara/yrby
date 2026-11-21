@@ -7,6 +7,26 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Requires the yrby release that adds `Y.merge_updates`.
+
+### Fixed
+
+- `Y::Document` compaction could delete rows whose edits never reached
+  `state`. It folded the tail through a `Y::Doc` and kept only what yrs
+  reported as integrated, and yrs doesn't report every gap: an update that
+  skips ahead of its own client's clock isn't reported pending. Compaction
+  now merges the bytes of the snapshot and every row it read and deletes
+  exactly those rows. Rows are no longer marked `pending`; the column is
+  unused.
+- The Ruby client (`Y::ActionCable::Client`) applied a server update only
+  when `update_advances?` said it would change the document. It now applies
+  every update, and skips `on_update` only when applying changed nothing.
+
+### Removed
+
+- The `on_gap` channel hook and the gap log line. They relied on yrs
+  reporting gaps, which it doesn't always do.
+
 ## [0.9.0] - 2026-11-09
 
 Requires yrby 0.9.0 or later.

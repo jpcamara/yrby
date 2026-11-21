@@ -196,8 +196,10 @@ text node, so after a link it starts a new one.
 `apply_update_changes(update, root)` applies an update and returns the
 ordinals of the top-level blocks it touched: a block edited (however deep),
 added, or removed. Ordinals count blocks as `xml_text(n)` does, so a divider
-or an image doesn't shift them. A process following a document reacts to the
-part that changed instead of diffing the text.
+or an image doesn't shift them. It returns nil when the document already held
+the whole update, and an empty array when the update changed something
+outside the root's blocks. A process following a document reacts to the part
+that changed instead of diffing the text.
 
 To put a change into a record's document, write it inside
 `collaborative_document(:body).edit` (see "Editing a document from Ruby"). A
