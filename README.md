@@ -275,9 +275,9 @@ which is what Y.js's `encodeStateAsUpdate` does too. A peer that receives
 them holds the pending struct and integrates it the same way this doc would.
 
 yrby has no API for asking whether a doc has a gap. yrs doesn't report every
-gap (an update that skips ahead of its own client's clock is neither
-integrated nor reported pending), so storage can't safely decide anything
-from it. To fold a log into one snapshot, merge the bytes with
+gap (an update that skips ahead of its own client's clock shows in the text,
+but isn't reported pending and doesn't advance the state vector), so storage
+can't safely decide anything from it. To fold a log into one snapshot, merge the bytes with
 `Y.merge_updates`, which keeps everything.
 
 ### Rendering to HTML
