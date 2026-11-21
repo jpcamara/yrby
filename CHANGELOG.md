@@ -19,6 +19,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   held the whole update, and still returns an empty array when the update
   changed something outside the root's blocks.
 
+### Removed
+
+- `Doc#pending?`, `Doc#update_ready?`, `Doc#update_advances?` and
+  `Doc#compacted_state_update`. yrs doesn't report every gap, so code that
+  kept, dropped or folded updates based on them could lose edits. Fold
+  stored updates with `Y.merge_updates`.
+
 ## [0.9.1] - 2026-11-08
 
 ### Changed
