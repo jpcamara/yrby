@@ -148,13 +148,13 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
         end
       end
 
-      # Apply what the doc does not already hold (its own updates come back
-      # from the server too) and report it. The first SyncStep2 is the load,
-      # not a change, so it does not fire on_update; a later one, after a
-      # reconnect, carries what was missed and does.
+      # Apply every update and report the ones that changed the doc (its own
+      # updates come back from the server too, and change nothing). The first
+      # SyncStep2 is the load, not a change, so it does not fire on_update; a
+      # later one, after a reconnect, carries what was missed and does.
       def receive_update(frame)
         update = Y.update_from_message(frame)
-        apply(update) if update && @doc.update_advances?(update)
+        apply(update) if update
         return :update unless frame.getbyte(1) == SYNC_STEP2 && !@synced
 
         @synced = true
@@ -163,7 +163,11 @@ module Y::ActionCable # rubocop:disable Style/ClassAndModuleChildren
       end
 
       def apply(update)
-        changed = @root ? @doc.apply_update_changes(update, @root) : (@doc.apply_update(update) && nil)
+        if @root
+          return unless (changed = @doc.apply_update_changes(update, @root))
+        else
+          return unless @doc.apply_update(update)
+        end
         @on_update&.call(update, @doc, changed) if @loaded
       end
 

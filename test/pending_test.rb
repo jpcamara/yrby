@@ -212,4 +212,35 @@ class PendingTest < Minitest::Test
     assert_empty([].tap { |a| a << errors.pop until errors.empty? })
     assert_predicate doc, :pending?, "reads left the doc unchanged"
   end
+
+  # --- merging bytes and reporting what applying changed ---
+
+  def test_merge_updates_keeps_a_gap
+    other = Y::Doc.new(99)
+    other.get_text("content") << "hello world"
+    merged = Y.merge_updates([DEPENDENT, other.encode_state_as_update])
+    doc = Y::Doc.new
+    doc.apply_update(merged)
+    doc.apply_update(FIRST)
+
+    assert_equal "ab", doc.read_text("notepad")
+    assert_equal "hello world", doc.read_text("content")
+  end
+
+  def test_merge_updates_of_nothing_is_an_empty_update
+    doc = Y::Doc.new
+
+    refute doc.apply_update(Y.merge_updates([]))
+  end
+
+  def test_merge_updates_rejects_bytes_that_are_not_an_update
+    assert_raises(Y::Error) { Y.merge_updates(["not an update"]) }
+  end
+
+  def test_applying_reports_whether_anything_changed
+    doc = Y::Doc.new
+
+    assert doc.apply_update(FIRST)
+    refute doc.apply_update(FIRST), "applying it again changes nothing"
+  end
 end

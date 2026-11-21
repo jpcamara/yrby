@@ -102,99 +102,46 @@ class Y::Document < ActiveRecord::Base
   end
 
   # Record one delta. The trigger is at-or-over rather than an exact
-  # multiple (concurrent appends can jump past one) and counts only clean
-  # rows: pending rows never satisfy it, so a quarantined gap doesn't
-  # retrigger compaction on every append.
+  # multiple (concurrent appends can jump past one).
   def append(bytes)
     updates.create!(payload: bytes)
-    compact! if updates.where(pending: false).count >= compact_every
+    compact! if updates.count >= compact_every
   end
 
   # The merged document: state plus the whole tail. The tail is read first
   # and the snapshot re-read after it, both straight from the database: a
   # compaction committing between the two reads then hands us rows already
-  # folded into the fresh snapshot, an idempotent double-apply, where
-  # the reverse order could pair a pre-compaction snapshot with an empty
-  # tail and omit committed changes. Quarantined rows are applied too,
-  # and the output is lossless (encode_state_as_update): an unhealed gap
-  # rides along as a pending struct, so a peer loaded mid-gap holds the
-  # parked edit and heals it the moment the missing dependency arrives,
-  # while a gap healed by a newer tail row is served merged immediately.
+  # folded into the fresh snapshot, an idempotent double-merge, where the
+  # reverse order could pair a pre-compaction snapshot with an empty tail
+  # and omit committed changes. The bytes are merged without integrating
+  # them into a document, so an unhealed gap rides along and a peer heals
+  # it the moment the missing dependency arrives.
   def load_state
     tail = updates.reset.pluck(:payload) # reset: never a cached tail
     snapshot = self.class.where(id: id).pick(:state)
     return snapshot if tail.empty?
 
-    doc = Y::Doc.new
-    doc.apply_update(snapshot) if snapshot
-    tail.each { |payload| doc.apply_update(payload) }
-    doc.encode_state_as_update
+    Y.merge_updates([snapshot, *tail].compact)
   end
 
-  # Compact the tail into state. The row lock serializes racing
-  # compactions; a delta landing mid-compaction isn't in `rows`, so it
-  # survives the delete and compacts next time.
-  #
-  # A gapped batch still compacts everything integrable: the fold's
-  # compacted_state_update captures every struct that integrates, so
-  # rows independent of the gap land in state no matter how they
-  # interleave with it. Only the gap tail survives as raw rows, judged
-  # per row against the folded state: a row the new state could not
-  # integrate cleanly carries the gap (or builds on it) and is
-  # quarantined (marked pending); a row that is ready and adds nothing
-  # is fully captured and deleted. An acked update never leaves the
-  # table before its content is durably in state.
+  # Compact the tail into state: merge the bytes of the snapshot and every
+  # row read, then delete exactly those rows. Nothing asks which updates
+  # integrated (yrs doesn't report every gap), so a row past a causal gap
+  # is kept in state, gap and all, and heals when the missing update
+  # arrives. The row lock serializes racing compactions; a delta landing
+  # mid-compaction isn't in `rows`, so it survives the delete and compacts
+  # next time.
   def compact!
     with_lock do
-      rows = updates.pluck(:id, :payload, :pending)
+      rows = updates.pluck(:id, :payload)
       next if rows.empty?
-      next if compact_rows(rows)
 
-      compact_around_gap(rows)
+      update!(state: Y.merge_updates([state, *rows.map(&:last)].compact))
+      updates.where(id: rows.map(&:first)).delete_all
     end
   end
 
   private
-
-  # The gapped-batch path: fold everything integrable into state, then
-  # judge each row against the folded state. A row the folded state
-  # cannot integrate cleanly carries the gap (or builds on it) and is
-  # quarantined; a row that is ready and adds nothing is fully captured
-  # and deleted.
-  def compact_around_gap(rows)
-    folded = Y::Doc.new
-    folded.apply_update(state) if state
-    rows.each { |_, payload, _| folded.apply_update(payload) }
-    new_state = folded.compacted_state_update
-    # Skip the write when nothing integrated beyond the current state
-    # (compacted encoding is deterministic, so equal structs mean equal
-    # bytes); a gap-only batch leaves state untouched.
-    update!(state: new_state) unless new_state == (state || Y::Doc.new.compacted_state_update)
-
-    base = Y::Doc.new
-    base.apply_update(new_state)
-    tail, captured = rows.partition do |_, payload, _|
-      !base.update_ready?(payload) || base.update_advances?(payload)
-    end
-    updates.where(id: captured.map(&:first)).delete_all
-    updates.where(id: tail.map(&:first)).update_all(pending: true)
-  end
-
-  # Compact state + the given rows if the merge is gap-free: writes state,
-  # deletes the rows, returns true. Leaves everything untouched and returns
-  # false on a gap.
-  def compact_rows(rows) # rubocop:disable Naming/PredicateMethod -- compacts AND reports
-    return true if rows.empty?
-
-    doc = Y::Doc.new
-    doc.apply_update(state) if state
-    rows.each { |_, payload, _| doc.apply_update(payload) }
-    return false if doc.pending?
-
-    update!(state: doc.compacted_state_update)
-    updates.where(id: rows.map(&:first)).delete_all
-    true
-  end
 
   # Derives post/1/body from the polymorphic record_type. Rails stores
   # the polymorphic_name there, which is base_class-derived, so STI

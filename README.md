@@ -143,9 +143,7 @@ guarantees, correctness, and thread safety.
 - yrby expects causal gaps, where an update arrives before another update it
   depends on, and it records and acks that update like any other. The sender of
   the missing update keeps retransmitting it until it's acked, and the gap
-  closes when it arrives. `Doc#pending?` and the `on_gap` hook
-  tell you when a document is waiting on a missing update.
-  ([Causal gaps](#causal-gaps))
+  closes when it arrives. ([Causal gaps](#causal-gaps))
 
 ## What about [yrb](https://github.com/y-crdt/yrb)?
 
@@ -246,7 +244,7 @@ doc.encode_state_as_update(sv)    # => update diff against state vector
 doc.compacted_state_update        # => full update, gap-free (excludes pending)
 
 # Applying updates
-doc.apply_update(update_bytes)    # apply raw V1 update
+doc.apply_update(update_bytes)    # apply raw V1 update; => false if it changed nothing
 doc.pending?                      # => true if holding un-integrable pending structs
 doc.update_ready?(update)         # => true if update would integrate cleanly (no gap)
 doc.update_advances?(update)      # => true if update moves integrated state forward
@@ -281,15 +279,14 @@ is in this state.
 `handle_sync_message` answers `SyncStep1` with the doc's full state, pending
 structs included, which is what Y.js's `encodeStateAsUpdate` does too. A peer
 that receives it holds the pending struct and integrates it the same way this
-doc would. The one place pending structs must be left out is a compacted
-snapshot:
+doc would.
 
-- `Doc#compacted_state_update` returns a gap-free full-state update for
-  compaction. Folding a log into one blob would otherwise freeze an
-  un-integrable struct into the base state permanently. The call doesn't modify
-  the doc, which keeps its pending structs.
-- `encode_state_as_update` is lossless, so persistence and serving keep the
-  raw pending bytes and the gap can still close.
+yrs doesn't report every gap as pending: an update that skips ahead of its
+own client's clock shows in the text, but isn't reported pending and doesn't
+advance the state vector. So don't keep, drop, or fold stored updates based on
+`pending?`, `update_ready?`, `update_advances?`, or `compacted_state_update`.
+To fold a log into one snapshot, merge the bytes with `Y.merge_updates`,
+which keeps everything, gaps included.
 
 ### Rendering to HTML
 
@@ -553,6 +550,8 @@ presence, and the server relays awareness frames without reading them.
 Y.message_kind(frame)         # => 0 drop / 1 step1 / 2 update / 3 awareness / 4 query
 Y.update_from_message(frame)  # => the document delta carried by a frame, or nil
 Y.wrap_update(update_bytes)   # => wrap a raw doc update as a sync Update frame
+Y.merge_updates([update, update]) # => one update holding everything in them, gaps
+                                  #    included (merged bytes, no document)
 ```
 
 ### ActionCable Integration
@@ -587,9 +586,11 @@ gem:
   the tail reaches `compact_every` (default 64), yrby compacts it into `state`
   and deletes those rows. A load reads the snapshot plus the current tail, and
   returns `state` directly when the tail is empty. Compactions of one document
-  run one at a time under a per-document row lock, and they skip rows with an
-  open causal gap, leaving them as they are until the gap closes. Destroying a
-  document also deletes its updates.
+  run one at a time under a per-document row lock. A compaction merges the
+  bytes of the snapshot and every row it read (`Y.merge_updates`) without
+  asking which updates integrated, so a row past a causal gap is kept in
+  `state`, gap and all, and the gap heals when the missing update arrives.
+  Destroying a document also deletes its updates.
 
 For encrypted storage, `Y::EncryptedDocument` writes `state` and update
 payloads through Active Record encryption on the same tables, as
@@ -857,21 +858,20 @@ full state with pending structs included, so a peer holds the same pending
 struct and integrates it the same way. Closing the gap takes no special
 machinery, because the missing
 dependency is an update its sender still holds unacked, and at-least-once
-retransmission delivers it. Only compaction excludes pending
-(`compacted_state_update`), because folding a log must not freeze an
-un-integrable struct into the base state.
+retransmission delivers it.
 
 The bundled `Y::Document` store handles all of this. If you write your own
-store, keep two things in mind:
+store:
 
-**1. Load losslessly, and tolerate duplicates.** `on_load` should return state
-that keeps pending updates, either `encode_state_as_update` or a replay of the
-raw append log. Don't compact with `compacted_state_update` while
-`doc.pending?` is true, because that strips the pending struct and loses the
-acked edit inside it. `Y::Document` keeps pending rows out of compaction for
-this reason. When an ack gets lost, the client resends an update the store
-already has. Replay still converges because CRDT apply is idempotent, so
-deduping is optional. If log size matters, dedup by content hash:
+**Load losslessly, and tolerate duplicates.** `on_load` should return state
+that keeps pending updates: the raw append log (an array of updates is applied
+in order), or one snapshot merged from it with `Y.merge_updates`. Don't fold
+the log by applying it to a `Y::Doc` and keeping what integrated, and don't
+keep or drop rows based on whether they look like gaps; yrs doesn't report
+every gap, and either can lose an acked edit. When an ack gets lost, the
+client resends an update the store already has. Replay still converges
+because CRDT apply is idempotent, so deduping is optional. If log size
+matters, dedup by content hash:
 
 ```ruby
 class DocumentStore
@@ -881,46 +881,19 @@ class DocumentStore
                     unique_by: %i[doc_key update_hash])
   end
 
-  # load is lossless: replay the raw log so a pending struct is preserved and
-  # heals when its dependency arrives.
+  # load is lossless: the raw log, pending updates included.
   def load(key)
     updates = Revision.where(doc_key: key).order(:id).pluck(:update)
-    return nil if updates.empty?
-
-    doc = Y::Doc.new
-    updates.each { |u| doc.apply_update(u) }
-    doc.encode_state_as_update # lossless: keeps pending
+    updates.presence
   end
 
-  # optional compaction: only when there is no open gap, or you would drop it.
+  # optional compaction: merge the bytes of every row read, then delete
+  # exactly those rows.
   def compact(key)
-    doc = Y::Doc.new
-    Revision.where(doc_key: key).order(:id).pluck(:update).each { |u| doc.apply_update(u) }
-    return if doc.pending? # a gap is open; compacting now would drop it
-    # ... replace the log with a single revision holding doc.compacted_state_update ...
+    rows = Revision.where(doc_key: key).order(:id).pluck(:id, :update)
+    # ... insert one revision holding Y.merge_updates(rows.map(&:last)),
+    #     then delete rows.map(&:first) ...
   end
-end
-```
-
-**2. Watch for gaps that don't close.** An open gap is easy to miss, because
-the pending edit doesn't show up in the document until its dependency arrives.
-Usually the gap closes by itself. The sender retransmits the missing update
-until it's acked, and on every join or reconnect handshake the client sends
-everything the server hasn't integrated, so any client holding the dependency
-supplies it by connecting. The gap worth alerting on is one that no live client
-can supply, and that's what the `on_gap` hook is for. It fires with the
-document key whenever a document is loaded to serve state while a gap is open.
-Use it to emit a metric, such as a pending-document count or the age of the
-oldest open gap, so you can see a gap that isn't closing. yrby also logs gaps
-at `info`. Errors raised in the hook are swallowed, so a broken metrics call
-can't break
-frame handling.
-
-```ruby
-class DocumentChannel < ApplicationCable::Channel
-  include Y::ActionCable
-
-  on_gap { |key| StatsD.increment("yrby.gap", tags: ["doc:#{key}"]) }
 end
 ```
 
@@ -1001,10 +974,7 @@ class ScratchpadChannel < ApplicationCable::Channel
   on_load { |key| @doc_state }
 
   on_change do |key, update|
-    doc = Y::Doc.new
-    doc.apply_update(@doc_state) if @doc_state
-    doc.apply_update(update)
-    @doc_state = doc.compacted_state_update
+    @doc_state = Y.merge_updates([@doc_state, update].compact)
   end
 
   def subscribed    = sync_subscribed(params[:id])
@@ -1031,10 +1001,8 @@ class ScratchpadChannel < ApplicationCable::Channel
   on_load { |key| doc_state && Base64.strict_decode64(doc_state) }
 
   on_change do |key, update|
-    doc = Y::Doc.new
-    doc.apply_update(Base64.strict_decode64(doc_state)) if doc_state
-    doc.apply_update(update)
-    self.doc_state = Base64.strict_encode64(doc.compacted_state_update)
+    current = doc_state && Base64.strict_decode64(doc_state)
+    self.doc_state = Base64.strict_encode64(Y.merge_updates([current, update].compact))
   end
 
   def subscribed    = sync_subscribed(params[:id])
@@ -1050,7 +1018,7 @@ Both hooks run in the channel instance through `instance_exec`, so they can use
 anything the channel can. `sync_receive` rebuilds the document from `on_load`
 on every update, which is why the store can sit on the connection. On Action
 Cable the channel instance lasts as long as the connection, so an instance
-variable is all the store you need. Merging with `compacted_state_update` keeps
+variable is all the store you need. Merging with `Y.merge_updates` keeps
 the store at one blob so it doesn't grow into an update log.
 
 Because the store is per connection, this pattern has limits. A single writer

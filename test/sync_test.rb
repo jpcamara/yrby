@@ -594,66 +594,6 @@ class SyncTest < Minitest::Test
     assert_equal [5, 5], acks_in(transmits), "both are acked (ack-on-durable, idempotent)"
   end
 
-  def test_serving_while_a_gap_is_open_sends_no_extra_frames
-    gaps = []
-    store = []
-    transmits = []
-    helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
-    helper.class.on_gap { |key| gaps << key }
-    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3), "doc-key") # open a gap
-    transmits.clear
-
-    # A client sends SyncStep1. The server answers it and surfaces the gap
-    # through on_gap; nothing else is transmitted. Healing rides the ack loop
-    # and the join/reconnect handshakes.
-    client = Y::Doc.new
-    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
-
-    assert_equal 1, transmits.length, "the SyncStep2 reply is the only frame"
-    assert_equal ["doc-key"], gaps, "on_gap fired for the open gap"
-  end
-
-  def test_observes_an_open_gap_at_serve_time
-    logged = []
-    gaps = []
-    store = []
-    helper = helper_for(store: store, recorder: ->(_k, u) { store << u })
-    helper.logger = capturing_logger(logged)
-    helper.class.on_gap { |key| gaps << key }
-
-    # The write path records without observing: the gap is durable, quiet.
-    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-
-    assert_empty gaps, "recording a gap does not observe it"
-
-    # Serving rebuilds the doc; an open gap surfaces there.
-    client = Y::Doc.new
-    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
-
-    assert(logged.any? { |lvl, msg| lvl == :info && msg.include?("causal gap") && msg.include?("doc-key") },
-           "the open gap is logged at info so it is findable")
-    assert_equal ["doc-key"], gaps, "the on_gap hook fired with the document key"
-  end
-
-  def test_on_gap_hook_errors_do_not_break_frame_handling
-    logged = []
-    store = []
-    transmits = []
-    helper = helper_for(store: store, recorder: ->(_k, u) { store << u }, transmits: transmits)
-    helper.logger = capturing_logger(logged)
-    helper.class.on_gap { |_key| raise "metrics backend down" }
-    helper.send(:sync_receive, update_message(YjsFixtures::CausalChain::U3, id: 1), "doc-key")
-    transmits.clear
-
-    # Serving observes the open gap; the raising hook must not break the serve.
-    client = Y::Doc.new
-    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
-
-    refute_empty transmits, "the handshake was still answered"
-    assert_equal [YjsFixtures::CausalChain::U3], store, "the gap stayed recorded"
-    assert(logged.any? { |lvl, msg| lvl == :error && msg.include?("on_gap hook raised") })
-  end
-
   def test_receive_without_a_key_fails_closed
     helper = helper_for
 

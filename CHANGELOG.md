@@ -6,6 +6,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Y.merge_updates(updates)` merges updates into one at the byte level,
+  without a document, so everything in them is kept, gaps included.
+
+### Changed
+
+- `Doc#apply_update` returns true if applying inserted or deleted anything
+  and false if the doc already held all of it. It returned nil.
+- Experimental: `Doc#apply_update_changes` returns nil when the doc already
+  held the whole update, and still returns an empty array when the update
+  changed something outside the root's blocks.
+
 ## [0.9.1] - 2026-11-08
 
 ### Changed
