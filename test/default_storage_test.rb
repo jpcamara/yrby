@@ -111,4 +111,38 @@ class DefaultStorageTest < Minitest::Test
     assert_equal 1, Y::Document.count
     refute_empty doc.read_text("content").to_s
   end
+
+  def test_the_default_answers_the_handshake_from_the_stored_rows
+    Y::Document.append("room", YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+    Y::Document.find_by(key: "room").compact!
+    Y::Document.append("room", YjsFixtures::TwoDocsMerged::DOC2_UPDATE)
+    channel = bare_channel
+    client = Y::Doc.new
+
+    Y::Document.stub(:load_state, ->(*) { flunk "loaded the document" }) do
+      channel.send(:sync_subscribed, "room")
+      channel.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "room")
+    end
+    frames = channel.transmits.map { |t| Base64.strict_decode64(t["update"]) }
+    frames.drop(1).each { |f| client.handle_sync_message(f) }
+
+    assert_equal Y::Document.sync_state("room"), frames.first.byteslice(3..),
+                 "SyncStep1 carries the stored state vector"
+    assert_equal "from doc1from doc2", client.read_text("content")
+  end
+
+  def test_declaring_storage_drops_the_default_handshake
+    klass = Class.new do
+      include Y::ActionCable::Sync
+
+      on_load { |_key| nil }
+      on_change { |_key, _update| nil }
+    end
+    channel = klass.new
+    Y::Document.append("room", YjsFixtures::TwoDocsMerged::DOC1_UPDATE)
+    channel.instance_variable_set(:@sync_key, "room")
+
+    assert_nil channel.send(:sync_stored_state)
+    assert_nil channel.send(:sync_stored_diff, "\x00".b)
+  end
 end

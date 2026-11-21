@@ -40,6 +40,10 @@ class Y::Document < ActiveRecord::Base
   # for each load to merge.
   class_attribute :compact_every, instance_writer: false, default: 64
 
+  # An update with nothing in it, the SyncStep2 for a client that is
+  # missing nothing.
+  EMPTY_UPDATE = "\x00\x00".b
+
   class << self
     def locate(key) = find_by(key: key)
 
@@ -80,6 +84,16 @@ class Y::Document < ActiveRecord::Base
     def append(key, update)
       (select(:id).find_by(key: key) || create_or_find_by!(key: key)).append(update)
     end
+
+    # The sync handshake answered from the stored rows (see #sync_state and
+    # #sync_diff), or nil for the channel to load the document instead.
+    def sync_state(key) = select(:id).find_by(key: key)&.sync_state
+    def sync_diff(key, state_vector) = select(:id).find_by(key: key)&.sync_diff(state_vector)
+
+    # Whether y_documents has the state_vector column (added by
+    # `bin/rails generate yrby:state_vector`). Without it the handshake
+    # reads the snapshot's state vector from its bytes instead.
+    def stores_state_vector? = column_names.include?("state_vector")
 
     # The key for one attribute of one record, such as "post/1/body". It comes
     # from the class name, id, and attribute, so computing it reads and creates
@@ -124,6 +138,31 @@ class Y::Document < ActiveRecord::Base
     Y.merge_updates([snapshot, *tail].compact)
   end
 
+  # The state vector for the server's SyncStep1: the snapshot's, extended by
+  # what the tail adds after it. The snapshot's comes from the state_vector
+  # column, so the snapshot isn't read at all. Both stop at a client's first
+  # missing clock, so this can be lower than the document's state vector (a
+  # client then sends something twice), never higher.
+  def sync_state
+    tail = updates.reset.pluck(:payload)
+    Y.extend_state_vector(snapshot_state_vector || "".b, tail)
+  end
+
+  # What a client at state_vector is missing, as updates to send in order:
+  # the snapshot's part, then the tail as stored. A client with nothing gets
+  # the snapshot's bytes as they are; any other gets Y.diff_update of them,
+  # which slices the encoded update without building a document and keeps
+  # the whole delete set (a delete doesn't move a state vector, so a client
+  # can lack one whatever its state vector says). The tail is read first, as
+  # in load_state.
+  def sync_diff(state_vector)
+    tail = updates.reset.pluck(:payload)
+    snapshot = self.class.where(id: id).pick(:state)
+    snapshot = Y.diff_update(snapshot, state_vector) if snapshot && state_vector.bytesize > 1
+    parts = [snapshot, *tail].compact
+    parts.empty? ? [EMPTY_UPDATE] : parts
+  end
+
   # Compact the tail into state: merge the bytes of the snapshot and every
   # row read, then delete exactly those rows. Nothing asks which updates
   # integrated (yrs doesn't report every gap), so a row past a causal gap
@@ -136,12 +175,31 @@ class Y::Document < ActiveRecord::Base
       rows = updates.pluck(:id, :payload)
       next if rows.empty?
 
-      update!(state: Y.merge_updates([state, *rows.map(&:last)].compact))
+      write_state(Y.merge_updates([state, *rows.map(&:last)].compact))
       updates.where(id: rows.map(&:first)).delete_all
     end
   end
 
   private
+
+  # The new snapshot, and its state vector where the column exists.
+  def write_state(new_state)
+    attributes = { state: new_state }
+    attributes[:state_vector] = Y.state_vector_of(new_state) if self.class.stores_state_vector?
+    update!(attributes)
+  end
+
+  # The snapshot's state vector: the stored one, or read from the snapshot's
+  # bytes for a row compacted before the column existed. nil before the
+  # first compaction.
+  def snapshot_state_vector
+    if self.class.stores_state_vector?
+      stored, snapshot = self.class.where(id: id).pick(:state_vector, Arel.sql("state IS NOT NULL"))
+      return stored if stored || !snapshot
+    end
+    snapshot = self.class.where(id: id).pick(:state)
+    snapshot && Y.state_vector_of(snapshot)
+  end
 
   # Derives post/1/body from the polymorphic record_type. Rails stores
   # the polymorphic_name there, which is base_class-derived, so STI

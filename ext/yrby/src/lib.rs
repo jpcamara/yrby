@@ -18,7 +18,9 @@ mod text;
 mod xml_text;
 use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
-use protocol::{classify_message, merged_doc_update};
+use protocol::{
+    classify_message, diff_update, extend_state_vector, merged_doc_update, state_vector_of,
+};
 use render_rules::{Rules, Segment};
 pub(crate) use yjs_html_core as render_rules;
 
@@ -829,6 +831,38 @@ fn update_from_message(data: RString) -> Result<Option<RString>, Error> {
     Ok(merged.map(|b| binary_string(&b)))
 }
 
+// Update-bytes helpers for stores, also `Y` module functions. Each works on
+// encoded updates without integrating them into a doc, so a store can answer
+// the sync handshake from its rows at the cost of decoding them.
+
+/// What `update` holds that a peer at `state_vector` lacks (an empty string
+/// for a peer at nothing): the structs past it and the whole delete set.
+fn rb_diff_update(update: RString, state_vector: RString) -> Result<RString, Error> {
+    let (update, sv) = (copy_bytes(update), copy_bytes(state_vector));
+    let out = nogvl(move || diff_update(&update, &sv))?.map_err(yrb_error)?;
+    Ok(binary_string(&out))
+}
+
+/// The state vector of the document `update` encodes. It stops at a
+/// client's first missing clock, so it can be lower than the document's.
+fn rb_state_vector_of(update: RString) -> Result<RString, Error> {
+    let update = copy_bytes(update);
+    let out = nogvl(move || state_vector_of(&update))?.map_err(yrb_error)?;
+    Ok(binary_string(&out))
+}
+
+/// `state_vector` advanced by what `updates` (an array) add contiguously
+/// after it. A lower bound on the merged document's state vector.
+fn rb_extend_state_vector(state_vector: RString, updates: RArray) -> Result<RString, Error> {
+    let sv = copy_bytes(state_vector);
+    let updates = updates
+        .into_iter()
+        .map(|v| RString::try_convert(v).map(copy_bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+    let out = nogvl(move || extend_state_vector(&sv, &updates))?.map_err(yrb_error)?;
+    Ok(binary_string(&out))
+}
+
 /// The updates merged into one at the byte level (yrs merge_updates_v1),
 /// without integrating them into a document: every struct and delete in any
 /// of them is in the result, gaps included.
@@ -1263,6 +1297,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     module.define_module_function("message_kind", function!(message_kind, 1))?;
     module.define_module_function("update_from_message", function!(update_from_message, 1))?;
     module.define_module_function("merge_updates", function!(rb_merge_updates, 1))?;
+    module.define_module_function("diff_update", function!(rb_diff_update, 2))?;
+    module.define_module_function("state_vector_of", function!(rb_state_vector_of, 1))?;
+    module.define_module_function("extend_state_vector", function!(rb_extend_state_vector, 2))?;
 
     // Define message type constants
     module.const_set("MSG_SYNC", 0u8)?;

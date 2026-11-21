@@ -125,5 +125,14 @@ module Y
     def document
       (record || locate_record)&.collaborative_document(params[:name].to_s)
     end
+
+    # Answer the handshake from the document's stored rows (see Sync).
+    def sync_stored_state
+      document.sync_state
+    end
+
+    def sync_stored_diff(state_vector)
+      document.sync_diff(state_vector)
+    end
   end
 end

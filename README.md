@@ -546,6 +546,17 @@ Y.merge_updates([update, update]) # => one update holding everything in them, ga
                                   #    included (merged bytes, no document)
 ```
 
+A store can answer the sync handshake from its stored updates with these,
+which work on encoded updates without building a document:
+
+```ruby
+Y.state_vector_of(update)          # => the state vector of the document update encodes
+Y.extend_state_vector(sv, [update]) # => sv advanced by what the updates add contiguously
+                                   #    after it (a lower bound, never higher)
+Y.diff_update(update, sv)          # => what update holds that a peer at sv lacks:
+                                   #    structs past sv and the whole delete set
+```
+
 ### ActionCable Integration
 
 In a Rails app, one generator creates the storage migration. The models and
@@ -573,7 +584,13 @@ gem:
   contains only CRDT state. Derived data such as rendered HTML or search text
   is up to your application, and the usual place for it is the channel's
   `on_change`. By default the channel concern calls `.load_state(key)` and
-  `.append(key, update)` to read and write the store.
+  `.append(key, update)` to read and write the store. It answers the sync
+  handshake from the stored rows too (`.sync_state(key)` and
+  `.sync_diff(key, state_vector)`), so serving a client doesn't build the
+  document in Ruby: the server's SyncStep1 is the snapshot's stored
+  `state_vector` extended by the tail, and a client gets the snapshot
+  (sliced with `Y.diff_update` unless it has nothing) followed by the tail
+  as stored.
 - **`Y::DocumentUpdate`** holds the uncompacted tail, one delta per row. When
   the tail reaches `compact_every` (default 64), yrby compacts it into `state`
   and deletes those rows. A load reads the snapshot plus the current tail, and
@@ -583,6 +600,18 @@ gem:
   asking which updates integrated, so a row past a causal gap is kept in
   `state`, gap and all, and the gap heals when the missing update arrives.
   Destroying a document also deletes its updates.
+
+Tables created before the `state_vector` column existed keep working. The
+handshake then reads the snapshot's state vector from its bytes. Add the
+column with:
+
+```bash
+bin/rails generate yrby:state_vector
+bin/rails db:migrate
+```
+
+A channel that declares its own `on_load` and `on_change` builds the
+document from `on_load` for the handshake.
 
 For encrypted storage, `Y::EncryptedDocument` writes `state` and update
 payloads through Active Record encryption on the same tables, as
