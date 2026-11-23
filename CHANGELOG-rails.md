@@ -26,6 +26,9 @@ Requires the yrby release that adds `Y.merge_updates`.
 
 - The `on_gap` channel hook and the gap log line. They relied on yrs
   reporting gaps, which it doesn't always do.
+- The `pending` column from the `yrby:tables` migration; `y_document_updates`
+  is indexed on `document_id`. Existing tables keep the column, unused, and
+  can drop it.
 
 ## [0.9.0] - 2026-11-09
 

@@ -18,10 +18,7 @@ mod text;
 mod xml_text;
 use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
-use protocol::{
-    classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
-    update_is_ready,
-};
+use protocol::{classify_message, merged_doc_update};
 use render_rules::{Rules, Segment};
 pub(crate) use yjs_html_core as render_rules;
 
@@ -309,28 +306,6 @@ impl RbDoc {
         })
     }
 
-    /// True if the doc holds un-integrable pending structs or a pending delete
-    /// set: content that couldn't integrate because a causally-prior update is
-    /// missing. Such content is a recovery buffer, not document state; it heals if
-    /// the missing dependency later arrives. A pure read.
-    fn pending(&self) -> Result<bool, Error> {
-        let doc = &self.0;
-        nogvl(move || has_pending(doc))
-    }
-
-    /// Like `encode_state_as_update` (full state), but **gap-free**: it excludes
-    /// any pending (un-integrable) structs and pending delete set. Use this when
-    /// persisting or serving state that other peers will apply. Serving pending
-    /// content poisons their sync. Non-destructive: this doc keeps its pending, so
-    /// a genuine gap still heals if its dependency arrives. (`encode_state_as_update`
-    /// stays lossless for raw-update recovery.)
-    fn compacted_state_update(&self) -> Result<RString, Error> {
-        let doc = &self.0;
-        let update = nogvl(move || integrated_update(doc, &yrs::StateVector::default()))?
-            .map_err(yrb_error)?;
-        Ok(binary_string(&update))
-    }
-
     /// A live `Y::Array` handle to the root array named `name` (created if
     /// absent). Writes through it mutate the document and sync to every peer.
     fn get_array(&self, name: String) -> Result<array::RbArray, Error> {
@@ -525,24 +500,6 @@ impl RbDoc {
             Ok(changed(&txn))
         })?
         .map_err(yrb_error)
-    }
-
-    /// True if applying `update` would integrate cleanly (its dependencies are
-    /// all present). False means it would leave a pending struct, i.e. an earlier
-    /// update is missing. Pure read; does not mutate.
-    fn update_ready(&self, update: RString) -> Result<bool, Error> {
-        let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        nogvl(move || update_is_ready(doc, &update_bytes))?.map_err(yrb_error)
-    }
-
-    /// True if applying `update` would change the document (it carries new
-    /// content), false if the doc already contains it (an already-applied
-    /// retry). See `update_advances_doc`. Pure read; does not mutate.
-    fn update_advances(&self, update: RString) -> Result<bool, Error> {
-        let update_bytes = copy_bytes(update);
-        let doc = &self.0;
-        nogvl(move || update_advances_doc(doc, &update_bytes))?.map_err(yrb_error)
     }
 
     /// Sync step 1: Create a sync message with our state vector
@@ -1262,17 +1219,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
     doc_class.define_method("read_map", method!(RbDoc::read_map, 1))?;
     doc_class.define_method("read_array", method!(RbDoc::read_array, 1))?;
-    doc_class.define_method("pending?", method!(RbDoc::pending, 0))?;
-    doc_class.define_method(
-        "compacted_state_update",
-        method!(RbDoc::compacted_state_update, 0),
-    )?;
     doc_class.define_method("get_map", method!(RbDoc::get_map, 1))?;
     doc_class.define_method("get_array", method!(RbDoc::get_array, 1))?;
     doc_class.define_method("get_text", method!(RbDoc::get_text, 1))?;
     doc_class.define_method("get_xml_text", method!(RbDoc::get_xml_text, 1))?;
-    doc_class.define_method("update_ready?", method!(RbDoc::update_ready, 1))?;
-    doc_class.define_method("update_advances?", method!(RbDoc::update_advances, 1))?;
     doc_class.define_method("sync_step1", method!(RbDoc::sync_step1, 0))?;
     doc_class.define_method(
         "handle_sync_message",
@@ -1423,11 +1373,16 @@ mod tests {
         let diff = update_since(&doc, peer.encode_state_vector().unwrap());
         let fresh = new_doc();
         fresh.apply_update(diff).unwrap();
-        assert!(
-            fresh.pending().unwrap(),
+        assert_eq!(
+            fresh.read_text("t".into()).unwrap(),
+            None,
             "the diff leaves out the first write"
         );
-        peer.apply_update(diff).unwrap();
+        assert!(peer.apply_update(diff).unwrap());
+        assert!(
+            !peer.apply_update(diff).unwrap(),
+            "applying it again changes nothing"
+        );
         assert_eq!(
             peer.read_text("t".into()).unwrap().as_deref(),
             Some("one two")
@@ -1465,7 +1420,6 @@ mod tests {
             fresh.read_text("t".into()).unwrap(),
             doc.read_text("t".into()).unwrap()
         );
-        assert!(!fresh.pending().unwrap());
     }
 
     #[ruby_test]
@@ -1519,30 +1473,6 @@ mod tests {
             Some("one\ntwo")
         );
         assert_eq!(doc.read_array("missing".into()).unwrap(), None);
-    }
-
-    #[ruby_test]
-    fn an_update_missing_its_dependency_is_pending_until_it_arrives() {
-        let source = new_doc();
-        push(&source, "t", "a");
-        let first = update(&source);
-        let after_first = source.encode_state_vector().unwrap();
-        push(&source, "t", "b");
-        let second = update_since(&source, after_first);
-
-        let doc = new_doc();
-        assert!(!doc.update_ready(second).unwrap());
-        assert!(doc.update_advances(second).unwrap());
-        doc.apply_update(second).unwrap();
-        assert!(doc.pending().unwrap());
-        assert_eq!(doc.read_text("t".into()).unwrap(), None);
-        let compacted = copy_bytes(doc.compacted_state_update().unwrap());
-        assert!(compacted.len() < copy_bytes(update(&doc)).len());
-
-        doc.apply_update(first).unwrap();
-        assert!(!doc.pending().unwrap());
-        assert_eq!(doc.read_text("t".into()).unwrap().as_deref(), Some("ab"));
-        assert!(!doc.update_advances(second).unwrap());
     }
 
     #[ruby_test]

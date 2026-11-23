@@ -203,11 +203,10 @@ class SyncTest < Minitest::Test
     assert_equal source.encode_state_vector, rebuilt.encode_state_vector
   end
 
-  def test_sync_step1_is_answered_with_full_state_including_pending
-    # A store holding a gappy update: the loaded doc has a pending struct.
-    # The concern serves full state, pending included, like any Yjs server;
-    # the client parks the pending struct the same way and heals it when the
-    # missing dependency arrives.
+  def test_sync_step1_is_answered_with_full_state_including_a_gap
+    # A store holding a gappy update. The concern serves full state, gap
+    # included, like any Yjs server; the client heals it the same way when
+    # the missing dependency arrives.
     transmits = []
     helper = helper_for(store: [YjsFixtures::Gap::DEPENDENT], transmits: transmits)
 
@@ -218,10 +217,10 @@ class SyncTest < Minitest::Test
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
-    assert_predicate client, :pending?, "the pending struct was served and parked"
+    assert_nil client.read_text("notepad"), "the gap was served and shows nothing yet"
     client.apply_update(YjsFixtures::Gap::FIRST)
 
-    refute_predicate client, :pending?, "and healed once the dependency arrived"
+    assert_equal "ab", client.read_text("notepad"), "and healed once the dependency arrived"
   end
 
   def test_records_then_relays_and_acks_update
@@ -306,8 +305,7 @@ class SyncTest < Minitest::Test
     replay = Y::Doc.new
     store.each { |u| replay.apply_update(u) }
 
-    # Full-state equality proves the replay integrated everything: a leftover
-    # pending struct would be absent from encode_state_as_update and diverge.
+    # Full-state equality proves the replay holds everything the client does.
     assert_equal client.encode_state_as_update, replay.encode_state_as_update
   end
 
@@ -486,8 +484,8 @@ class SyncTest < Minitest::Test
   # -- causal gaps ---------------------------------------------------------
   #
   # A causally-incomplete update is recorded and acked like any other
-  # (ack-on-durable) and served onward like any other state; it stays pending
-  # until its dependency arrives; join and reconnect handshakes heal it.
+  # (ack-on-durable) and served onward like any other state; it shows
+  # nothing until its dependency arrives; join and reconnect handshakes heal it.
   # These tests rely on the loader being lossless (doc_state uses
   # encode_state_as_update, which keeps pending); the store contract this
   # behavior requires.
@@ -541,7 +539,6 @@ class SyncTest < Minitest::Test
     [YjsFixtures::CausalChain::U1, YjsFixtures::CausalChain::U2,
      YjsFixtures::CausalChain::U3].each { |u| expected.apply_update(u) }
 
-    refute_predicate replay, :pending?, "nothing is left pending once all dependencies arrived"
     assert_equal "ABC", replay.read_text("content"),
                  "replaying the out-of-order recorded log heals every gap into the complete document"
     assert_equal expected.encode_state_vector, replay.encode_state_vector,
@@ -563,7 +560,7 @@ class SyncTest < Minitest::Test
     reply = Base64.strict_decode64(transmits.first["update"])
     client.handle_sync_message(reply)
 
-    assert_predicate client, :pending?, "the open gap traveled to the joiner"
+    assert_nil client.read_text("content"), "the open gap traveled to the joiner"
 
     # The missing dependencies arrive (their sender retransmits until acked);
     # the server relays them, and the joiner's copy heals in place.
@@ -572,7 +569,6 @@ class SyncTest < Minitest::Test
     client.apply_update(YjsFixtures::CausalChain::U1)
     client.apply_update(YjsFixtures::CausalChain::U2)
 
-    refute_predicate client, :pending?, "the joiner healed with the room"
     assert_equal "ABC", client.read_text("content"), "into the complete document"
   end
 

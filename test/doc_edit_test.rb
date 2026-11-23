@@ -102,7 +102,7 @@ class DocEditTest < Minitest::Test
   end
 
   # Edits on several threads at once each take what's unsent, and together
-  # their updates hold every write with nothing left pending.
+  # their updates hold every write.
   def test_edits_on_several_threads_at_once_lose_nothing
     doc = Y::Doc.new
     text = doc.get_text("t")
@@ -120,7 +120,6 @@ class DocEditTest < Minitest::Test
     fresh.apply_update(updates.pop) until updates.empty?
 
     assert_equal 800, fresh.read_text("t").length
-    refute_predicate fresh, :pending?
   end
 
   # An interrupt landing anywhere in an edit leaves its update in the
@@ -144,7 +143,6 @@ class DocEditTest < Minitest::Test
     sent.compact.each { |update| fresh.apply_update(update) }
 
     assert_equal text.to_s, fresh.read_text("t")
-    refute_predicate fresh, :pending?
   end
 
   # An edit in a fiber or thread the block starts counts as nested, so the

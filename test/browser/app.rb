@@ -57,7 +57,6 @@ ActiveRecord::Schema.define do
   create_table :y_document_updates, force: true do |t|
     t.references :document, null: false
     t.binary :payload, null: false
-    t.boolean :pending, null: false, default: false
     t.datetime :created_at, null: false
   end
 end
