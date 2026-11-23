@@ -1,0 +1,23 @@
+# The demo agents' worker. Each agent stays in its room for minutes, mostly
+# waiting on the cable and the model, so it runs as a fiber, and `fibers` is
+# how many one process runs at once. JOB_PROCESSES forks more worker
+# processes. AgentSeats caps agents across all of them at MAX_AGENTS, in the
+# database, so DemosController#agent turns invitations away before anything
+# waits in the queue.
+#
+# bin/serve starts this beside Falcon (bin/jobs).
+default: &default
+  dispatchers:
+    - polling_interval: 1
+      batch_size: 500
+  workers:
+    - queues: "*"
+      fibers: <%= Limits::MAX_AGENTS %>
+      processes: <%= Integer(ENV.fetch("JOB_PROCESSES", 1)) %>
+      polling_interval: 0.1
+
+development:
+  <<: *default
+
+production:
+  <<: *default

@@ -9,14 +9,33 @@ default: &default
   pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
   timeout: 5000
 
+# Solid Queue's tables live in a second file, so polling for jobs doesn't
+# share a write lock with the documents. Tests use Active Job's test adapter,
+# but they have the file too, so eager loading Solid Queue's models works as
+# it does in production.
 development:
-  <<: *default
-  database: storage/development.sqlite3
+  primary:
+    <<: *default
+    database: storage/development.sqlite3
+  queue:
+    <<: *default
+    database: storage/development_queue.sqlite3
+    migrations_paths: db/queue_migrate
 
 test:
-  <<: *default
-  database: storage/test.sqlite3
+  primary:
+    <<: *default
+    database: storage/test.sqlite3
+  queue:
+    <<: *default
+    database: storage/test_queue.sqlite3
+    migrations_paths: db/queue_migrate
 
 production:
-  <<: *default
-  database: storage/production.sqlite3
+  primary:
+    <<: *default
+    database: storage/production.sqlite3
+  queue:
+    <<: *default
+    database: storage/production_queue.sqlite3
+    migrations_paths: db/queue_migrate

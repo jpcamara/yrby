@@ -74,6 +74,11 @@ class Rack::Attack
 
   throttle("pages/ip", limit: Limits::PAGE_REQUESTS, period: Limits::PAGE_PERIOD, &:ip)
 
+  # Inviting the agent starts a model call, so it gets a much lower limit.
+  throttle("agent invites/ip", limit: Limits::AGENT_INVITES_PER_HOUR, period: 60 * 60) do |req|
+    req.ip if req.post? && req.path.end_with?("/agent")
+  end
+
   # Starting a room creates a Room row, so it gets a limit of its own.
   throttle("room starts/ip", limit: Limits::ROOM_STARTS_PER_HOUR, period: 60 * 60) do |req|
     req.ip if req.post? && req.path.end_with?("/start")
