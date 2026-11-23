@@ -1,0 +1,11 @@
+{
+  "name": "pixel-bay-spinel-wasm-experiment",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.mjs"
+  },
+  "dependencies": {
+    "@rails/actioncable": "8.1.300"
+  }
+}

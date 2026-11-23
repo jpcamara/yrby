@@ -1,0 +1,20 @@
+diff --git a/yffi/src/lib.rs b/yffi/src/lib.rs
+index 932a71c..36f5f66 100644
+--- a/yffi/src/lib.rs
++++ b/yffi/src/lib.rs
+@@ -4780,7 +4780,14 @@ pub struct YUndoManagerOptions {
+ /// This object can be deallocated via `yundo_manager_destroy`.
+ #[no_mangle]
+ pub unsafe extern "C" fn yundo_manager(options: *const YUndoManagerOptions) -> *mut YUndoManager {
+-    let mut o = yrs::undo::Options::default();
++    let mut o = yrs::undo::Options {
++        capture_timeout_millis: 500,
++        tracked_origins: Default::default(),
++        capture_transaction: None,
++        timestamp: std::sync::Arc::new(yrs::sync::time::SystemClock),
++        init_undo_stack: Vec::new(),
++        init_redo_stack: Vec::new(),
++    };
+     if let Some(options) = options.as_ref() {
+         if options.capture_timeout_millis >= 0 {
+             o.capture_timeout_millis = options.capture_timeout_millis as u64;
