@@ -315,8 +315,8 @@ bin/rails db:prepare   # creates yrby_demo_development + document_changes
 Both stores keep every delta forever, and `replay` applies the full
 history. That is deliberate here: the audit story depends on it (`/audit`
 replays the log and byte-matches the live doc). At scale you would
-checkpoint a snapshot periodically (`Doc#compacted_state_update` is the
-gap-free encoding for this) and replay only the deltas since. Cold loads
+checkpoint a snapshot periodically (`Y.merge_updates` folds the deltas
+into one without dropping any) and replay only the deltas since. Cold loads
 and derived-view renders (see `NoteMaterializer`) then cost O(changes
 since the snapshot) instead of O(all changes).
 
