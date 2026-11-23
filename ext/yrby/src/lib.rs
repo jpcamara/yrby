@@ -1379,7 +1379,10 @@ mod tests {
             "the diff leaves out the first write"
         );
         assert!(peer.apply_update(diff).unwrap());
-        assert!(!peer.apply_update(diff).unwrap(), "applying it again changes nothing");
+        assert!(
+            !peer.apply_update(diff).unwrap(),
+            "applying it again changes nothing"
+        );
         assert_eq!(
             peer.read_text("t".into()).unwrap().as_deref(),
             Some("one two")
