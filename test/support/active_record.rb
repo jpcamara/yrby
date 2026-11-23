@@ -23,6 +23,7 @@ unless defined?(YRBY_AR_BOOTED)
       t.references :record, polymorphic: true, null: true, index: false
       t.string :name
       t.binary :state
+      t.binary :state_vector
       t.timestamps
       t.index %i[record_type record_id name], unique: true,
                                               where: "record_type IS NOT NULL",

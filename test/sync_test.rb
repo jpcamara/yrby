@@ -654,4 +654,114 @@ class SyncTest < Minitest::Test
     assert_equal expected.encode_state_vector, rebuilt.encode_state_vector,
                  "the recorded log converges to all five clients under concurrency"
   end
+
+  # --- a store that answers the handshake itself (sync_stored_state/diff) ---
+
+  # A helper whose store answers sync from a Y::Doc it keeps, standing in for
+  # a database-side store, and counts how often on_load runs. It overrides the
+  # private methods the way Y::DocumentChannel does.
+  def store_sync_helper(store, transmits, loads, answer: true, diff: nil)
+    helper = helper_for(store: store, transmits: transmits)
+    test = self
+    helper.class.on_load do |_key|
+      loads << 1
+      test.doc_state(store)
+    end
+    helper.define_singleton_method(:sync_stored_state) do
+      next unless answer
+
+      doc = Y::Doc.new
+      store.each { |u| doc.apply_update(u) }
+      doc.encode_state_vector
+    end
+    helper.define_singleton_method(:sync_stored_diff) do |sv|
+      next unless answer
+      next diff if diff
+
+      doc = Y::Doc.new
+      store.each { |u| doc.apply_update(u) }
+      doc.encode_state_as_update(sv)
+    end
+    helper
+  end
+
+  def test_a_store_that_answers_sync_serves_without_loading
+    store = [YjsFixtures::TwoDocsMerged::DOC1_UPDATE]
+    transmits = []
+    loads = []
+    helper = store_sync_helper(store, transmits, loads)
+
+    helper.send(:sync_subscribed, "doc-key")
+    reference = Y::Doc.new
+    reference.apply_update(store.first)
+
+    assert_equal reference.sync_step1, Base64.strict_decode64(transmits.first["update"]),
+                 "the store's state vector goes out in the same SyncStep1 frame Y::Doc builds"
+
+    client = Y::Doc.new
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    client.handle_sync_message(Base64.strict_decode64(transmits.last["update"]))
+
+    assert_equal "from doc1", client.read_text("content")
+    assert_empty loads, "on_load never ran"
+  end
+
+  def test_a_store_that_declines_falls_back_to_on_load
+    store = [YjsFixtures::TwoDocsMerged::DOC1_UPDATE]
+    transmits = []
+    loads = []
+    helper = store_sync_helper(store, transmits, loads, answer: false)
+
+    helper.send(:sync_subscribed, "doc-key")
+    client = Y::Doc.new
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    client.handle_sync_message(Base64.strict_decode64(transmits.last["update"]))
+
+    assert_equal "from doc1", client.read_text("content")
+    assert_equal 2, loads.size
+  end
+
+  def test_a_store_that_answers_sync_serves_an_open_gap
+    store = [YjsFixtures::Gap::DEPENDENT]
+    transmits = []
+    helper = store_sync_helper(store, transmits, [])
+
+    helper.send(:sync_subscribed, "doc-key")
+    client = Y::Doc.new
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    client.handle_sync_message(Base64.strict_decode64(transmits.last["update"]))
+
+    assert_nil client.read_text("notepad"), "the gap was served"
+    client.apply_update(YjsFixtures::Gap::FIRST)
+
+    assert_equal "ab", client.read_text("notepad")
+  end
+
+  def test_a_store_can_answer_sync_with_several_updates
+    first = YjsFixtures::Gap::FIRST
+    second = YjsFixtures::Gap::DEPENDENT
+    transmits = []
+    helper = store_sync_helper([first, second], transmits, [], diff: [first, second])
+
+    client = Y::Doc.new
+    helper.send(:sync_receive, { "update" => Base64.strict_encode64(client.sync_step1) }, "doc-key")
+    frames = transmits.map { |t| Base64.strict_decode64(t["update"]) }
+
+    assert_equal [[0, 1], [0, 2]], frames.map { |f| f.bytes.first(2) }, "SyncStep2, then an update"
+    frames.each { |f| client.handle_sync_message(f) }
+    reference = Y::Doc.new
+    [first, second].each { |u| reference.apply_update(u) }
+
+    assert_equal reference.encode_state_vector, client.encode_state_vector
+  end
+
+  def test_sync_frames_round_trip_long_payloads
+    helper = helper_for
+    payload = "x".b * 70_000 # a three-byte length prefix
+
+    frame = helper.send(:sync_frame, 0, payload)
+
+    assert_equal payload, helper.send(:sync_frame_payload, frame)
+    assert_nil helper.send(:sync_frame_payload, frame.byteslice(0, frame.bytesize - 1)), "a short frame is refused"
+  end
 end
