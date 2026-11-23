@@ -194,8 +194,10 @@ adds text at the end of a block; Lexical drops text that doesn't follow a
 text node, so after a link it starts a new one.
 
 `apply_update_changes(update, root)` applies an update and returns the
-ordinals of the top-level blocks it touched: a block edited (however deep),
-added, or removed. Ordinals count blocks as `xml_text(n)` does, so a divider
+ordinals of the top-level blocks it touched: a block edited (however deep)
+or added. A removed block is gone, so it isn't listed, and every ordinal
+names a block the document has after the update. Ordinals count blocks as
+`xml_text(n)` does, so a divider
 or an image doesn't shift them. A process following a document reacts to the
 part that changed instead of diffing the text.
 
