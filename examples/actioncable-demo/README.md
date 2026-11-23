@@ -44,6 +44,7 @@ reachable through several front ends (linked from the nav on each page):
 | `/docs/demo/lexxy` | `Y.XmlText` | Lexxy / Lexical |
 | `/docs/demo/rhino` | `Y.XmlFragment` | Rhino (Tiptap 3, its Collaboration extensions) |
 | `/docs/demo/codemirror` | `Y.Text` | CodeMirror 6 (code + cursors) |
+| `/docs/demo/pixels` | `Y.Map` pixel layers | paint with people and a Ruby LLM artist |
 | `/docs/demo/whiteboard` | `Y.Map` of shapes | draggable sticky notes |
 | `/docs/demo/kanban` | `Y.Array` of card `Y.Map`s | add / move / delete |
 | `/docs/demo/forms` | `Y.Map` of fields | co-filled form |
@@ -61,6 +62,132 @@ two writes to the same key are last-writer-wins. Its sorting and column order
 come from [TanStack Table](https://tanstack.com/table)'s headless core and are
 deliberately never written to the document — two browsers can sort the same rows
 differently while editing the same cells.
+
+### Pixel Bay: paint with a Ruby artist
+
+Open `/docs/demo/pixels` in two browsers. A 64×32 San Francisco postcard is
+shared over the same `DocumentChannel`. Pick from 16 colors, drag to paint,
+restore the original scene with the eraser, or undo your own last stroke.
+The copy-link button invites another person into this room. A different
+`:id` starts a fresh postcard.
+
+**Invite Ruby to paint** starts `PixelArtist`, a Ruby websocket peer with its
+own name and cursor. It asks RubyLLM 2 for one small contribution when it
+joins, then reacts after people paint or change the shared direction. Its
+own paint does not trigger another model call. People can keep drawing while
+it thinks and can stop it from either browser.
+
+Configure a server-side `FIREWORKS_API_KEY`, `OPENROUTER_API_KEY`, or
+`ANTHROPIC_API_KEY`, using the same provider settings as the document agent.
+`AGENT_PROVIDER` selects a provider, `AGENT_MODEL` overrides its model, and
+`PIXEL_MODEL` overrides the model for this artist alone. `PIXEL_REASONING`
+defaults to `low`, independently of the document reviewer’s reasoning setting.
+No key produces a visible configuration error; there is no scripted artist fallback.
+
+After the normal database and frontend setup, this is the simplest stage
+configuration (load your existing key into the environment first):
+
+```bash
+STORE_KIND=file bundle exec falcon serve --bind http://127.0.0.1:3000 --count 1
+```
+
+Use one worker: the duplicate-invitation guard is process-local. Under
+Falcon, the inviter holds a streaming request and leaving that page ends the
+artist. Puma uses the existing background-thread invitation path. Either
+way, **Let Ruby take a break** stops the peer, including an in-flight model
+request. The peer also leaves an empty room and has a maximum lifetime.
+
+The model receives the full canvas as numbered hexadecimal palette rows,
+a mask of human-painted pixels, the recent changes, and the shared artistic
+direction. It returns structured JSON with at most 96 pixel edits and a
+short public note. Bounds, colors, duplicates, and patch size are validated
+before any paint is applied. The model uses this text raster, not an image
+generation endpoint; visual interpretation and artistic quality vary.
+
+The document contains four maps: `scene` is the initial postcard, `pixels`
+is the human layer, `artist_pixels` is the artist layer, and `mural` carries
+the shared direction, controls, and status. Rendering always takes a human
+pixel first, then an artist pixel, then the original scene. This explicit
+application rule protects human paint even when an agent update arrives
+late. Erasing writes the scene color into the human layer; undo can remove
+that override. Two human edits to the same pixel still use normal Yjs map
+conflict resolution. CRDT convergence does not choose artistic intent.
+
+An inference based on an outdated human layer or direction is discarded
+and reconsidered. The artist checks again between small groups of pixels
+while painting. This is a tiny collaborative canvas, not an audience-load
+benchmark; rehearse with the intended model and network before a talk.
+
+```bash
+# Unit checks, including deterministic races between a human edit and inference:
+bundle exec ruby -Itest -e 'Dir["test/pixel*_test.rb"].sort.each { |f| require_relative f }'
+
+# Two real Chrome browsers: strokes, local undo, reconnect, persistence, mobile.
+cd frontend
+BASE=http://127.0.0.1:3000 npm run test:pixels
+
+# Also exercise the actual configured model. This makes model API calls.
+LIVE_ARTIST=1 BASE=http://127.0.0.1:3000 npm run test:pixels
+```
+
+The live test paints over Ruby's work, waits for an unprompted response, and
+stops the artist during its next inference. Screenshots go to `/tmp` by
+default; set `SHOTS` to change the destination.
+
+### Optional experiment: reusable Ruby/WASM browser client
+
+The first-class browser path remains **yrby-client**. The separate
+`/docs/demo/pixels/ruby` page runs the full Pixel Bay interface in browser
+Ruby, using the reusable experimental [`yrby-wasm-client`](../../packages/wasm-client).
+It shares the `demo:pixels` document with the normal studio. The normal
+frontend bundle does not include either WASM runtime.
+
+After the normal demo setup, build the optional assets from the repository root:
+
+```bash
+(cd packages/client && npm ci && npm run build)
+(cd packages/wasm-client && npm ci)
+(cd examples/actioncable-demo/frontend/experiments/ruby-wasm && npm ci --ignore-scripts && npm run build)
+```
+
+The optional build uses Bun. Open `/docs/demo/pixels/ruby`, then **Open main
+studio**. Both studios have the palette, brush, restore-scene eraser, personal
+stroke undo/redo, pixel grid, pointer/touch/keyboard controls, room sharing,
+remembered names, shared artist direction, presence and cursors. Invite or stop
+the existing artist from either studio. Disconnect the Ruby window, paint in
+both, then reconnect to watch the replicas merge their edits.
+
+What runs where:
+
+- `experiments/ruby-wasm/src/pixel_peer.rb` owns the interface in actual browser
+  CRuby. Both routes render the same Rails partial, so tools and layout stay aligned.
+- `packages/wasm-client/ruby/yrby_wasm.rb` supplies a reusable Ruby API for named
+  maps, text and arrays, transactions, scoped undo, presence, status and recovery.
+- The generic JavaScript core runs Yrs WASM and reuses **yrby-client/reliable**
+  for acknowledged delivery, retransmit and reconnect replay. It has no pixel
+  selectors or application map names, and creates no hidden Yjs document.
+- Rails and the native Ruby artist use their existing document protocol. The
+  artist remains an independent peer with its own document replica.
+
+This is a new browser binding, not the Magnus-based yrby gem compiled for WASM.
+The pinned ywasm npm package ships a Node loader; the reusable build helper
+adapts its exports and filesystem initialization for browsers. Generated
+bindings, WASM binaries and dependencies stay out of git. The Ruby runtime is
+about 29 MB uncompressed. Assets are served locally without a runtime CDN.
+
+The reusable client exposes snapshots and unacknowledged updates for
+application-managed recovery; Pixel Bay keeps disconnected edits in memory.
+Reloading a disconnected tab can therefore lose unsent edits. This experimental
+API does not yet replace Yjs editor bindings, DocumentSessionStore's grant and
+attachment lifecycle, or the normal client's Turbo integration. See the
+[package README](../../packages/wasm-client/README.md) for API examples and limits.
+
+```bash
+# From frontend/, after building the optional assets:
+BASE=http://127.0.0.1:3000 node pixels_wasm_e2e.mjs
+# Also exercise the configured live artist (makes model API calls):
+LIVE_ARTIST=1 BASE=http://127.0.0.1:3000 node pixels_wasm_e2e.mjs
+```
 
 ### The agent, over the websocket
 

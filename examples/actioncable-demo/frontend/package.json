@@ -5,7 +5,9 @@
   "scripts": {
     "build": "bun build.mjs",
     "watch": "bun build.mjs --watch",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:pixels": "node pixels_e2e.mjs",
+    "test:pixels:wasm": "node pixels_wasm_e2e.mjs"
   },
   "dependencies": {
     "@37signals/lexxy": "^0.9.29",
