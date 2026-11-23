@@ -102,6 +102,7 @@ const ENTRIES = [
   // holds the sorting/column order, which stays out of the document.
   { entry: "src/spreadsheet.js", name: "spreadsheet.js" },
   { entry: "src/sudoku.js", name: "sudoku.js" },             // Y.Map of cells, checked by a Ruby peer
+  { entry: "src/cursors.js", name: "cursors.js" },           // Y.Map of signs, eight Ruby peers as cursors
 ]
 
 async function buildEntry({ entry, name, plugins }) {
