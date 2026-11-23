@@ -21,7 +21,12 @@
 /public/hero.js
 /public/space.js
 /public/space.css
+/public/board.js
+/public/board.css
 /public/*.js.map
+
+# Microsoft Fluent emoji art for the board (bun run build:emoji)
+/public/emoji/
 
 # Built stylesheet (Tailwind via `bun run build:css`)
 /public/site.css

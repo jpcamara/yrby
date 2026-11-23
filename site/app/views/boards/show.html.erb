@@ -1,0 +1,59 @@
+<%# The agent board. frontend/src/board.js draws the room's board document
+    and adds the agents; app/agents/board_agent.rb is the agent's side. %>
+<div class="board-app">
+  <header class="board-head">
+    <%= link_to root_path, class: "board-mark", title: "yrby home" do %>y<% end %>
+    <div class="board-titles">
+      <input id="board-title" class="board-title" type="text" maxlength="80" placeholder="Untitled board" aria-label="Board title" autocomplete="off">
+      <input id="board-subtitle" class="board-subtitle" type="text" maxlength="140" placeholder="Add a subtitle" aria-label="Board subtitle" autocomplete="off">
+    </div>
+  </header>
+
+  <div class="board-people">
+    <span id="status" class="board-status">Connecting…</span>
+    <div id="avatars" class="board-avatars" aria-label="People and agents on this board"></div>
+    <button id="share" type="button" class="board-button">Share</button>
+  </div>
+
+  <%= collaborative_document_tag @room, :board do %>
+    <div id="board" class="board-canvas" tabindex="0" aria-label="Whiteboard" data-agent-url="<%= board_agent_path(@room) %>">
+      <div class="board-world"></div>
+    </div>
+  <% end %>
+
+  <aside id="asks" class="board-asks" aria-label="Asks"></aside>
+
+  <form id="ask-box" class="ask-box" hidden>
+    <span class="ask-at">@agent</span>
+    <input id="ask-input" type="text" maxlength="300" autocomplete="off"
+           placeholder="Lay out an illustrated timeline for the Huckleberry Pie launch, from locking the flavor to holiday delivery">
+    <button type="submit" class="ask-send" aria-label="Ask">↑</button>
+  </form>
+
+  <nav class="board-tools" aria-label="Tools">
+    <button type="button" data-tool="select" title="Select and move (V)" class="is-active"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-3 6z"/></svg></button>
+    <button type="button" data-tool="pen" title="Pen (P)"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16zM14 6l3 3"/></svg></button>
+    <button type="button" data-tool="text" title="Text (T)"><svg viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M9 19h6"/></svg></button>
+    <button type="button" data-tool="note" title="Sticky note (N)"><svg viewBox="0 0 24 24"><path d="M4 4h16v10l-6 6H4zM14 20v-6h6"/></svg></button>
+    <button type="button" data-tool="shape" title="Shape (S)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/></svg></button>
+    <button type="button" data-tool="connector" title="Connector (C)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5M12 5h7v7"/></svg></button>
+    <button type="button" data-tool="sticker" title="Sticker (E)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8.5 14a4 4 0 007 0M9 10h.01M15 10h.01"/></svg></button>
+    <span class="tool-sep"></span>
+    <button type="button" id="ask-agent" class="tool-ask" title="Ask your agent (A)"><span class="agent-spark">✦</span><span>Ask agent</span></button>
+  </nav>
+
+  <div class="sticker-tray" id="sticker-tray" aria-label="Stickers" hidden>
+    <% %w[🎉 👍 ❤️ 😍 🔥 ⭐ 🤔 👀].each_with_index do |emoji, i| %>
+      <button type="button" data-sticker="<%= emoji %>" class="<%= "is-active" if i.zero? %>"><%= emoji %></button>
+    <% end %>
+  </div>
+
+  <div class="board-zoom" aria-label="Zoom">
+    <button type="button" data-zoom="out" title="Zoom out">−</button>
+    <button type="button" data-zoom="fit" id="zoom-level" title="Fit to content">100%</button>
+    <button type="button" data-zoom="in" title="Zoom in">+</button>
+  </div>
+</div>
+
+<p id="toast" class="board-toast" role="status" hidden></p>
+<p id="notice" class="board-toast is-notice" role="alert" hidden></p>
