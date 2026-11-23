@@ -1,6 +1,8 @@
 # What the demo agent says, from its model. With FIREWORKS_API_KEY set it asks
-# the agent's own chat (see PageAgent). Without it (development, tests) it
-# streams a fixed reply, so the demo runs without a key and without cost.
+# the agent's own chat (see PageAgent). With LOCAL_MODEL_URL set it asks a
+# small model on this server instead (see Local). Without either (development,
+# tests) it streams a fixed reply, so the demo runs without a key and without
+# cost.
 #
 # Every call counts against AgentSeats' daily budget. A spent budget, and any
 # model failure, raise AgentModel::Error with a short reason the agent writes
@@ -35,7 +37,12 @@ class AgentModel
     Change that proposal the way they asked.
   TEXT
 
-  def self.for(agent) = ENV["FIREWORKS_API_KEY"].to_s.empty? ? Canned.new : new(agent)
+  def self.for(agent)
+    if ENV["LOCAL_MODEL_URL"].present? then Local.new(agent)
+    elsif ENV["FIREWORKS_API_KEY"].present? then new(agent)
+    else Canned.new
+    end
+  end
 
   def initialize(agent, seats: AgentSeats.current)
     @agent = agent
@@ -95,6 +102,29 @@ class AgentModel
     when TIMEOUT then "the model timed out"
     when /\b401\b|unauthor/i then "the model rejected the site's key"
     else "the model call failed"
+    end
+  end
+
+  # A small model served by llama-server beside the app (bin/local-model),
+  # such as Qwen2.5-0.5B-Instruct. A model that size loses the thread with
+  # PageAgent's instructions, the paragraph, and read_document, so it gets
+  # only the selected text and the ask, and no tools. It doesn't see the
+  # paragraph around the selection.
+  class Local < AgentModel
+    INSTRUCTIONS = "You rewrite text. Reply with only the rewritten text.".freeze
+
+    def rewrite(paragraph, prompt, previous: nil, &)
+      text = previous.presence || paragraph[/\[\[(.*)\]\]/m, 1] || paragraph
+      stream("#{prompt}:\n\n#{text}", &)
+    end
+
+    private
+
+    # llama-server answers with whichever model it loaded, whatever the name.
+    def chat
+      RubyLLM.chat(model: "local", provider: :openai, assume_model_exists: true)
+             .with_instructions(INSTRUCTIONS)
+             .with_temperature(0.2)
     end
   end
 

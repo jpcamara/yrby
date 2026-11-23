@@ -800,6 +800,13 @@ the page shows it:
 - `AgentModel` asks the agent's chat, on Fireworks AI through ruby_llm, when
   `FIREWORKS_API_KEY` is set, and streams a canned reply otherwise, so
   development and tests run without a key. `AGENT_MODEL` picks the model.
+- With `LOCAL_MODEL_URL` set (for example `http://127.0.0.1:8081/v1`),
+  `AgentModel::Local` asks a small model on the same server instead.
+  `bin/local-model` runs llama.cpp's `llama-server` for it on loopback, with
+  one thread at low priority. A model that small can't follow the full
+  prompt, so it gets the selected text and the ask, without the paragraph
+  or `read_document`. Qwen2.5-0.5B-Instruct (Q4_K_M) takes about 500 MB and
+  1.5 to 3 seconds per rewrite on a t3.medium, and answers one ask at a time.
 
 The limits, in `config/limits.rb`:
 
