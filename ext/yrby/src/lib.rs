@@ -11,19 +11,18 @@ use yrs::{DeepObservable, Doc, GetString, ReadTxn, Text, Transact};
 
 mod array;
 mod map;
-mod protocol;
 mod read;
 mod shared;
 mod text;
 mod xml_text;
 use lexical_yjs_html as lexical_html;
 use prosemirror_yjs_html as prosemirror_html;
-use protocol::{
+use render_rules::{Rules, Segment};
+pub(crate) use yjs_html_core as render_rules;
+use yrby_core::protocol::{
     classify_message, has_pending, integrated_update, merged_doc_update, update_advances_doc,
     update_is_ready,
 };
-use render_rules::{Rules, Segment};
-pub(crate) use yjs_html_core as render_rules;
 
 /// Wrapper around yrs Doc.
 ///

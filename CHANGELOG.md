@@ -6,6 +6,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The native extension's protocol helpers moved into `yrby-core`, a crate in
+  `ext/yrby/crates/` that the gem builds from source like the renderer
+  crates. yrby's Rust servers use the same crate, so the rules exist once. No
+  behavior changes.
+
 ## [0.9.1] - 2026-11-08
 
 ### Changed
