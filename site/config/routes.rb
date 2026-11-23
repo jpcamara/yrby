@@ -34,6 +34,11 @@ Rails.application.routes.draw do
   # The Lexxy room as a shared page with agents. /space starts a new room.
   get "space", to: "demos#new_space"
   get "demos/lexxy/:room/space", to: "demos#space", as: :demo_space
+  # A room's agent sheet: a spreadsheet with tabs, formulas, and agents.
+  # /sheet starts a new room.
+  get "sheet", to: "demos#new_sheet"
+  get "demos/spreadsheet/:room/sheet", to: "demos#sheet", as: :demo_sheet
+  post "demos/spreadsheet/:room/agent", to: "demos#agent", as: :demo_sheet_agent, defaults: { sheet: "1" }
   # The server-side read for the other demos: Ruby rebuilds the document from
   # stored state (see DemosController#stored).
   get "demos/:demo/:room/stored", to: "demos#stored", as: :demo_stored

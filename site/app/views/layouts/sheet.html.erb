@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title><%= content_for(:title).presence || "Agent sheet · yrby" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%# Each room belongs to whoever opened it and is deleted later. %>
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#ffffff">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= action_cable_meta_tag %>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <%# bun builds sheet.css with the page's JS, from frontend/src/sheet.css. %>
+    <link rel="stylesheet" href="<%= busted "/sheet.css" %>">
+    <%= javascript_include_tag busted("/sheet.js"), defer: true, skip_pipeline: true %>
+  </head>
+  <body class="sheet-body">
+    <%= yield %>
+  </body>
+</html>
