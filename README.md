@@ -595,7 +595,8 @@ gem:
 - **`Y::DocumentUpdate`** holds the uncompacted tail, one delta per row. When
   the tail's bytes reach a share of the snapshot's (`compact_log_ratio`,
   default 0.1, and at least `compact_min_log_bytes`, default 4 KB), yrby
-  merges it into `state` and deletes those rows, so a large document is
+  merges it into `state` and deletes those rows (or, with the insert-only
+  log below, marks them folded), so a large document is
   rewritten rarely, or when it holds `compact_every` rows (256), so loads stay
   quick. The check runs on about one append in `check_compaction_every`
   (16). A load reads the snapshot plus the current tail, and
@@ -614,6 +615,30 @@ column with:
 bin/rails generate yrby:state_vector
 bin/rails db:migrate
 ```
+
+On Postgres 13 or later, the tail can be an insert-only log instead:
+
+```bash
+bin/rails generate yrby:insert_only_log
+bin/rails db:migrate
+```
+
+The migration rebuilds `y_document_updates` with two partitions and records
+the transaction that wrote each row. Compaction then deletes nothing. It
+records the MVCC snapshot it read the tail under, and reads skip the rows
+that snapshot saw, so a row whose transaction was still open stays in the
+tail. Every `rotate_log_every` appends (4096), or when you call
+`Y::Document.rotate_log!` from a job, yrby copies the older partition's
+unfolded rows into the current one and truncates it. The log leaves no dead
+tuples, so autovacuum has nothing to fall behind on and a long-running
+transaction can't make it grow. Rotation waits at most `rotate_lock_timeout`
+(50ms) for the older partition and otherwise tries again later. Appends
+don't wait for a compaction of their document either. The tracking uses
+transaction ids, which belong to one cluster: after moving the data to a
+cluster with another system identifier (a logical-replication cutover, say),
+compaction and rotation raise `Y::Document::OtherCluster` until you run
+`Y::Document.adopt_log!`. A physical replica or a failover keeps the
+identifier.
 
 A channel that declares its own `on_load` and `on_change` can answer the
 handshake from its store the same way with `on_sync_state { |key| ... }`

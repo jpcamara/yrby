@@ -12,6 +12,10 @@ module Yrby
     initializer "yrby.collaborative" do
       ActiveSupport.on_load(:active_record) { include Y::Collaborative }
       ActiveSupport.on_load(:action_view) { include Y::Collaborative::Helper }
+      ActiveSupport.on_load(:active_record_postgresqladapter) do
+        require "y/postgres_types"
+        Y::PostgresTypes.register(self)
+      end
     end
 
     initializer "yrby.deprecator" do |app|
