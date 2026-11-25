@@ -14,9 +14,10 @@ GlobalID.app ||= "yrby-forms-test"
 SignedGlobalID.app ||= "yrby-forms-test"
 SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-forms-test-secret")
 
-# The form helper pair: collaborative_fields renders the <collaborative-form>
-# container (channel, signed sgid, doc key, identity) and collaborative_field
-# wraps the stock input for each attribute in <collaborative-field>.
+# The form helper pair: collaborative_fields renders the <yrby-document>
+# element for the field set (channel, grant, name, presence identity) and
+# collaborative_field wraps the stock input for each attribute in
+# <collaborative-field>.
 class FormsHelperTest < Minitest::Test
   class Ticket < ActiveRecord::Base
     self.table_name = "tickets"
@@ -36,6 +37,7 @@ class FormsHelperTest < Minitest::Test
   def setup
     @ticket = Ticket.create!
     @view = ActionView::Base.empty
+    @view.extend(Y::Collaborative::Helper) # as the engine does
     user = FakeUser.new(name: "Ada")
     @view.define_singleton_method(:current_user) { user }
     @form = ActionView::Helpers::FormBuilder.new("ticket", @ticket, @view, {})
@@ -47,31 +49,29 @@ class FormsHelperTest < Minitest::Test
     Y::Document.delete_all
   end
 
-  def element_attributes(html, element = "collaborative-form")
+  def element_attributes(html, element = "yrby-document")
     fragment = html[/<#{element}[^>]*>/]
     fragment.scan(/([\w-]+)="([^"]*)"/).to_h.transform_values { |v| CGI.unescapeHTML(v) }
   end
 
-  def test_container_carries_channel_sgid_doc_key_and_identity
+  def test_container_is_the_document_tag_for_the_field_set
     html = @form.collaborative_fields { "INNER".html_safe }
 
-    assert_match %r{<collaborative-form[^>]*>INNER</collaborative-form>}, html
+    assert_match %r{<yrby-document[^>]*>INNER</yrby-document>}, html
 
     attrs = element_attributes(html)
 
-    assert_equal "FormFieldsChannel", attrs["channel"]
-    assert_equal "forms_helper_test_ticket-#{@ticket.id}-fields", attrs["doc-key"]
-    assert_equal "Ada", attrs["name"]
-    assert_match(/\Ahsl\(\d+, 70%, 45%\)\z/, attrs["color"], "derived presence color is stable per name")
-    assert_equal @ticket, GlobalID::Locator.locate_signed(attrs["sgid"], for: Y::Forms.sgid_purpose),
-                 "the signed GlobalID round-trips to the record"
+    assert_equal "Y::Forms::FieldsChannel", attrs["channel"]
+    assert_equal "fields", attrs["name"]
+    assert_equal @ticket, Y::Collaborative.locate(attrs["grant"], :fields), "the grant verifies to the record"
+    assert_nil Y::Collaborative.locate(attrs["grant"], :body), "and to no other attribute"
   end
 
-  def test_sgid_is_purpose_scoped
+  def test_container_carries_the_presence_identity
     attrs = element_attributes(@form.collaborative_fields { "".html_safe })
 
-    assert_nil GlobalID::Locator.locate_signed(attrs["sgid"], for: :something_else),
-               "a signed id minted for collaboration must not verify for another purpose"
+    assert_equal "Ada", attrs["data-user-name"]
+    assert_match(/\Ahsl\(\d+, 70%, 45%\)\z/, attrs["data-user-color"], "derived presence color is stable per name")
   end
 
   def test_identity_lambda_supplies_name_and_color
@@ -79,8 +79,21 @@ class FormsHelperTest < Minitest::Test
 
     attrs = element_attributes(@form.collaborative_fields { "".html_safe })
 
-    assert_equal "Grace", attrs["name"]
-    assert_equal "#111111", attrs["color"]
+    assert_equal "Grace", attrs["data-user-name"]
+    assert_equal "#111111", attrs["data-user-color"]
+  end
+
+  def test_options_pass_through_to_the_document_tag
+    attrs = element_attributes(
+      @form.collaborative_fields(refresh: "/tickets/1/grant", id: "ticket-fields", data: { turbo: false }) do
+        "".html_safe
+      end
+    )
+
+    assert_equal "/tickets/1/grant", attrs["refresh"]
+    assert_equal "ticket-fields", attrs["id"]
+    assert_equal "false", attrs["data-turbo"]
+    assert_equal "Ada", attrs["data-user-name"]
   end
 
   def test_field_wrapper_carries_name_and_tier

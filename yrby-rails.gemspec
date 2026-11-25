@@ -33,7 +33,7 @@ Gem::Specification.new do |spec|
     "README.md",
     "CHANGELOG-rails.md"
   ] - Dir["lib/yrby/agent/**/*", "lib/y/action_cable/client.rb", "lib/y/action_cable/client/**/*",
-          "lib/yrby/forms/**/*", "lib/generators/yrby_forms{,/**/*}"]
+          "lib/yrby/forms/**/*", "app/channels/y/forms{,/**/*}"]
   spec.require_paths = ["lib"]
 
   spec.metadata["source_code_uri"] = spec.homepage

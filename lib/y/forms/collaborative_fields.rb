@@ -2,12 +2,16 @@
 
 require "active_support/concern"
 require "json"
+require "y/collaborative"
 
 module Y
   module Forms
-    # Adds a Y::Document-backed set of collaborative form fields to a model.
+    # Adds a set of collaborative form fields to a model. The fields share one
+    # collaborative document, which the model declares the same way
+    # has_collaborative_document does.
     module CollaborativeFields
       extend ActiveSupport::Concern
+      include Y::Collaborative
 
       module ClassMethods
         # Declares which attributes collaborate and resolves a tier for each:
@@ -23,12 +27,16 @@ module Y
           end
           self.collaborative_field_tiers = collaborative_field_tiers.merge(tiers).freeze
 
-          # encrypted: true stores CRDT state through Y::EncryptedDocument.
-          # Encrypting the materialized columns themselves is the model's own
-          # +encrypts+ declaration.
-          document_class = encrypted ? "Y::EncryptedDocument" : "Y::Document"
+          # encrypted: true stores the document through Y::EncryptedDocument.
+          # To encrypt the columns the values are written to, use the model's
+          # own +encrypts+.
+          has_collaborative_document Y::Forms::DOCUMENT_NAME, encrypted:, channel: Y::Forms::CHANNEL_NAME
+
+          # The document's row, or nil before the first edit. The association
+          # is here so that destroying the record destroys its document.
           has_one :collaborative_fields_document, -> { where(name: Y::Forms::DOCUMENT_NAME) },
-                  class_name: document_class, as: :record, inverse_of: :record, dependent: :destroy
+                  class_name: encrypted ? "Y::EncryptedDocument" : "Y::Document",
+                  as: :record, inverse_of: :record, dependent: :destroy
         end
 
         private
@@ -68,27 +76,12 @@ module Y
 
         def collaborative_field?(name) = collaborative_field_tiers.key?(name.to_sym)
 
-        # The document, if collaboration has started (nil until the first join).
-        def collaborative_document = collaborative_fields_document
-
-        # Creates the document on first use. The association supplies the
-        # class, so an encrypted field set gets a Y::EncryptedDocument.
-        def find_or_create_collaborative_fields_document
-          collaborative_fields_document || begin
-            association(:collaborative_fields_document).klass.for(self, Y::Forms::DOCUMENT_NAME)
-            reload_collaborative_fields_document
-          end
-        end
-
-        # Reloads the document and writes the declared fields' current values
+        # Reads the document and writes the declared fields' current values
         # into their columns while holding the record lock. Returns false
-        # when the document has no state.
+        # before the document's first edit.
         def refresh_collaborative_fields
-          document = collaborative_fields_document
-          return false unless document
-
           with_lock do
-            state = document.reload.load_state
+            state = collaborative_document(Y::Forms::DOCUMENT_NAME).load_state
             break false if state.nil?
 
             doc = Y::Doc.new

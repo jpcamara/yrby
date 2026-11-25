@@ -37,11 +37,11 @@ class PackagingTest < Minitest::Test
 
     %w[lib/yrby-forms.rb lib/yrby/forms/version.rb lib/y/forms.rb
        lib/y/forms/collaborative_fields.rb lib/y/forms/form_builder.rb lib/y/forms/engine.rb
-       lib/generators/yrby_forms/install/install_generator.rb
-       lib/generators/yrby_forms/install/templates/form_fields_channel.rb].each do |f|
+       app/channels/y/forms/fields_channel.rb].each do |f|
       assert_includes files, f
     end
-    assert_empty files.grep(%r{action_cable|ext/|app/}), "core and Rails-layer files ship in their own gems"
+    assert_empty files.grep(%r{action_cable|ext/|app/(?!channels/y/forms/)}),
+                 "core and Rails-layer files ship in their own gems"
   end
 
   def test_core_gem_ships_its_own_essentials

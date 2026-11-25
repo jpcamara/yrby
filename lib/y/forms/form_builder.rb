@@ -2,21 +2,20 @@
 
 module Y
   module Forms
-    # form.collaborative_fields wraps a block of inputs in the
-    # <collaborative-form> element; form.collaborative_field wraps one input
-    # in <collaborative-field>. Y::Forms.identity supplies the presence name
-    # and color.
+    # form.collaborative_fields wraps a block of inputs in the <yrby-document>
+    # element for the record's field set. form.collaborative_field wraps one
+    # input in <collaborative-field>.
     module FormBuilder
-      def collaborative_fields(&)
+      # Renders collaborative_document_tag for the field set, with the presence
+      # name and color from Y::Forms.identity as data attributes. Options go
+      # through to the tag, so expires_in: and refresh: work as they do there.
+      def collaborative_fields(**options, &)
         record = collaborative_record!
         identity = Y::Forms.identity.call(@template)
         name = identity[:name]
-        @template.content_tag("collaborative-form", @template.capture(&),
-                              "channel" => Y::Forms::CHANNEL_NAME,
-                              "sgid" => record.to_sgid(for: Y::Forms.sgid_purpose).to_s,
-                              "doc-key" => "#{record.model_name.param_key}-#{record.id}-#{Y::Forms::DOCUMENT_NAME}",
-                              "name" => name,
-                              "color" => identity[:color] || Y::Forms.collaborator_color(name))
+        user = { user_name: name, user_color: identity[:color] || Y::Forms.collaborator_color(name) }
+        @template.collaborative_document_tag(record, Y::Forms::DOCUMENT_NAME,
+                                             **options, data: user.merge(options.fetch(:data, {})), &)
       end
 
       # Renders the stock input for the attribute's type inside the wrapper.

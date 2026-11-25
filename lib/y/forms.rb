@@ -4,26 +4,19 @@ require "y"
 
 module Y
   # Collaborative form fields over yrby: a model macro
-  # (has_collaborative_fields), form helpers rendering the
-  # <collaborative-form> / <collaborative-field> elements, and an install
-  # generator for the channel. One Y::Document per record holds the whole
-  # field set: LWW fields in a "fields" map share, text-tier fields in one
-  # "fields/<name>" text share each.
+  # (has_collaborative_fields), form helpers that render <yrby-document> and
+  # <collaborative-field>, and the channel that serves them. One document per
+  # record, named "fields", holds the whole field set: LWW fields in a
+  # "fields" map share, and each text-tier field in its own "fields/<name>"
+  # text share.
   module Forms
-    # Signed ids from the form helper carry this purpose scoped to the
-    # field-set document (sgid_purpose), so a token minted elsewhere can't
-    # join it.
-    SGID_PURPOSE = :y_forms
-
-    # The channel the installer generates and the form helper points elements at.
-    CHANNEL_NAME = "FormFieldsChannel"
-
-    # The Y::Document name for a record's field set: one document per record.
+    # The collaborative document every field set lives in, one per record.
     DOCUMENT_NAME = "fields"
 
-    class << self
-      def sgid_purpose = "#{SGID_PURPOSE}/#{DOCUMENT_NAME}"
+    # The channel has_collaborative_fields declares for that document.
+    CHANNEL_NAME = "Y::Forms::FieldsChannel"
 
+    class << self
       # Presence identity, called with the view context; returns { name:, color: }
       # (a nil color gets a stable one derived from the name).
       attr_writer :identity

@@ -24,7 +24,7 @@ Gem::Specification.new do |spec|
     "lib/yrby/forms/**/*.rb",
     "lib/y/forms.rb",
     "lib/y/forms/**/*.rb",
-    "lib/generators/yrby_forms/**/*",
+    "app/channels/y/forms/**/*.rb",
     "LICENSE",
     "README-forms.md",
     "CHANGELOG-forms.md"

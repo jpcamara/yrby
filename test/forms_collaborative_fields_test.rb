@@ -9,14 +9,19 @@ require_relative "../app/models/y/document_update"
 require_relative "../app/models/y/encrypted_document"
 require_relative "../app/models/y/encrypted_document_update"
 require "y/forms"
+require "global_id"
+
+GlobalID.app ||= "yrby-forms-test"
+SignedGlobalID.app ||= "yrby-forms-test"
+SignedGlobalID.verifier ||= GlobalID::Verifier.new("yrby-forms-test-secret")
 
 # The has_collaborative_fields macro: tier detection, the field-set document
-# association, and the materializer writing declared fields back to their
-# columns. Documents are built from Y.js fixture bytes (Y::Doc is read-only
-# from Ruby).
+# it declares, and the materializer writing declared fields back to their
+# columns. Documents are built from Y.js fixture bytes.
 class FormsCollaborativeFieldsTest < Minitest::Test
   class Ticket < ActiveRecord::Base
     self.table_name = "tickets"
+    include GlobalID::Identification
     include Y::Forms::CollaborativeFields
 
     enum :status, { triage: "triage", active: "active", done: "done" }
@@ -95,65 +100,59 @@ class FormsCollaborativeFieldsTest < Minitest::Test
     end
 
     assert_respond_to bare, :has_collaborative_fields, "the macro is available"
-    refute bare.method_defined?(:find_or_create_collaborative_fields_document),
-           "instance API arrives only with a declaration"
-    refute bare.method_defined?(:refresh_collaborative_fields)
+    refute bare.method_defined?(:refresh_collaborative_fields), "instance API arrives only with a declaration"
+    refute bare.method_defined?(:collaborative_fields?)
   end
 
   # -- the field-set document ------------------------------------------------
 
-  def test_one_document_per_record_named_fields
-    document = @ticket.find_or_create_collaborative_fields_document
-
-    assert_equal @ticket, document.record
-    assert_equal "fields", document.name
-    assert_equal document, @ticket.collaborative_fields_document, "has_one"
-    assert_equal document, @ticket.find_or_create_collaborative_fields_document, "created once, found after"
+  def test_the_macro_declares_the_fields_document_and_its_channel
+    assert_equal({ encrypted: false, channel: "Y::Forms::FieldsChannel" },
+                 Ticket.collaborative_document_options["fields"])
+    assert_equal "Y::Forms::FieldsChannel", fields.channel
+    assert_equal @ticket, Y::Collaborative.locate(fields.grant, :fields), "the grant is yrby's own"
     assert_predicate @ticket, :collaborative_fields?
     assert @ticket.collaborative_field?(:status)
     refute @ticket.collaborative_field?(:title)
   end
 
+  def test_one_document_per_record_named_fields
+    assert_nil @ticket.collaborative_fields_document, "no row before the first edit"
+
+    fields.append(YjsFixtures::FormFields::FULL)
+    document = @ticket.reload.collaborative_fields_document
+
+    assert_equal @ticket, document.record
+    assert_equal "fields", document.name
+    assert_equal fields.document_row, document
+  end
+
   def test_destroying_the_record_sweeps_document_and_log
-    @ticket.find_or_create_collaborative_fields_document.append(YjsFixtures::FormFields::FULL)
+    fields.append(YjsFixtures::FormFields::FULL)
     @ticket.destroy!
 
     assert_equal 0, Y::Document.count
     assert_equal 0, Y::DocumentUpdate.count, "the log follows the record's lifecycle"
   end
 
-  def test_encrypted_field_set_wires_the_encrypted_document_class
-    klass = Class.new(ActiveRecord::Base) do
-      self.table_name = "tickets"
-      def self.name = "Ticket"
-      include Y::Forms::CollaborativeFields
+  def test_encrypted_field_set_stores_through_the_encrypted_document
+    record = encrypted_ticket_class.create!
 
-      has_collaborative_fields :summary, encrypted: true
-    end
-
-    assert_equal Y::EncryptedDocument, klass.reflect_on_association(:collaborative_fields_document).klass
-    record = klass.create!
-
-    assert_instance_of Y::EncryptedDocument, record.find_or_create_collaborative_fields_document
+    assert_equal Y::EncryptedDocument, record.class.collaborative_document_class(:fields)
+    assert_instance_of Y::EncryptedDocument, record.collaborative_document(:fields).document_row
+    assert_equal Y::EncryptedDocument, record.class.reflect_on_association(:collaborative_fields_document).klass
   end
 
   def test_encrypted_field_set_materializes_and_stores_ciphertext
-    klass = Class.new(ActiveRecord::Base) do
-      self.table_name = "tickets"
-      def self.name = "Ticket"
-      include Y::Forms::CollaborativeFields
-
-      has_collaborative_fields :summary, encrypted: true
-    end
-    record = klass.find(@ticket.id)
-    document = record.find_or_create_collaborative_fields_document
+    record = encrypted_ticket_class.find(@ticket.id)
+    document = record.collaborative_document(:fields)
     document.append(YjsFixtures::FormFields::FULL)
 
     assert record.refresh_collaborative_fields
     assert_equal "Fix the flaky spec", record.reload.summary, "materialization is unchanged by encryption"
 
     raw = Y::Document.connection.select_value(
-      "SELECT payload FROM y_document_updates WHERE document_id = #{document.id} LIMIT 1"
+      "SELECT payload FROM y_document_updates WHERE document_id = #{document.document_row.id} LIMIT 1"
     )
 
     assert_includes raw, '"p":', "payload rows hold the Active Record encryption envelope"
@@ -164,13 +163,13 @@ class FormsCollaborativeFieldsTest < Minitest::Test
   def test_refresh_is_false_with_no_document_or_no_state
     refute @ticket.refresh_collaborative_fields, "no document yet"
 
-    @ticket.find_or_create_collaborative_fields_document
+    fields.document_row
 
     refute @ticket.refresh_collaborative_fields, "a document with no recorded state"
   end
 
   def test_refresh_writes_declared_fields_through_their_tiers_and_types
-    @ticket.find_or_create_collaborative_fields_document.append(YjsFixtures::FormFields::FULL)
+    fields.append(YjsFixtures::FormFields::FULL)
 
     assert @ticket.refresh_collaborative_fields
     @ticket.reload
@@ -187,23 +186,22 @@ class FormsCollaborativeFieldsTest < Minitest::Test
     # The fixture map carries "title" (a real column, not declared) and
     # "hacked" (no such attribute). Neither may be assigned: this is the
     # line between collaboration and mass assignment.
-    @ticket.find_or_create_collaborative_fields_document.append(YjsFixtures::FormFields::FULL)
+    fields.append(YjsFixtures::FormFields::FULL)
 
     assert @ticket.refresh_collaborative_fields
     assert_equal "keep me", @ticket.reload.title
   end
 
   def test_refresh_applies_the_last_write
-    document = @ticket.find_or_create_collaborative_fields_document
-    document.append(YjsFixtures::FormFields::FULL)
-    document.append(YjsFixtures::FormFields::STATUS_DONE)
+    fields.append(YjsFixtures::FormFields::FULL)
+    fields.append(YjsFixtures::FormFields::STATUS_DONE)
 
     assert @ticket.refresh_collaborative_fields
     assert_equal "done", @ticket.reload.status
   end
 
   def test_refresh_is_idempotent
-    @ticket.find_or_create_collaborative_fields_document.append(YjsFixtures::FormFields::FULL)
+    fields.append(YjsFixtures::FormFields::FULL)
     @ticket.refresh_collaborative_fields
     first = @ticket.reload.attributes
 
@@ -219,9 +217,23 @@ class FormsCollaborativeFieldsTest < Minitest::Test
     record = klass.find(@ticket.id)
 
     refute_predicate record, :valid?
-    record.find_or_create_collaborative_fields_document.append(YjsFixtures::FormFields::FULL)
+    record.collaborative_document(:fields).append(YjsFixtures::FormFields::FULL)
 
     assert record.refresh_collaborative_fields
     assert_equal "Fix the flaky spec", record.reload.summary
+  end
+
+  private
+
+  def fields = @ticket.collaborative_document(:fields)
+
+  def encrypted_ticket_class
+    Class.new(ActiveRecord::Base) do
+      self.table_name = "tickets"
+      def self.name = "Ticket"
+      include Y::Forms::CollaborativeFields
+
+      has_collaborative_fields :summary, encrypted: true
+    end
   end
 end
