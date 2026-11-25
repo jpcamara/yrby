@@ -1,7 +1,7 @@
 {
   "name": "yrby-forms",
   "version": "0.1.0",
-  "description": "Collaborative form fields over yrby: the <collaborative-form> and <collaborative-field> custom elements bind plain form controls to a shared Y.Doc through yrby-client's ActionCable provider. Last-write-wins fields via a shared map, character-merge text fields via Y.Text, and focus presence (outline + name chip). Rendered by the yrby-forms Rails gem's form helpers.",
+  "description": "Collaborative form fields over yrby. The <collaborative-field> custom element binds a plain form control to the document of the <yrby-document> around it. Selects, checkboxes, numbers, and dates are last-write-wins map entries, and text fields merge concurrent typing through Y.Text. A field shows who else has it focused. The yrby-forms Rails gem's form helpers render the elements.",
   "type": "module",
   "main": "./dist/cjs/index.js",
   "module": "./dist/index.js",
@@ -57,8 +57,7 @@
     "y-protocols": "^1.0.5"
   },
   "dependencies": {
-    "@rails/actioncable": "^8.0.0",
-    "yrby-client": "^0.5.0"
+    "yrby-client": "^0.7.1"
   },
   "devDependencies": {
     "yjs": "^13.6.0",
