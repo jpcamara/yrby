@@ -2,15 +2,26 @@
 
 module Y
   module Forms
-    # form.collaborative_fields wraps a block of inputs in the <yrby-document>
-    # element for the record's field set. form.collaborative_field wraps one
-    # input in <collaborative-field>.
+    # form.collaborative_fields wraps a block of inputs in the element that
+    # holds the record's field set: <yrby-document>, or <collaborative-fields>
+    # when the document is a column. form.collaborative_field wraps one input
+    # in <collaborative-field>.
     module FormBuilder
       # Renders collaborative_document_tag for the field set, with the presence
       # name and color from Y::Forms.identity as data attributes. Options go
       # through to the tag, so expires_in: and refresh: work as they do there.
+      #
+      # When the document is a column, renders <collaborative-fields> with the
+      # document in its value attribute. Options become attributes, so
+      # autosave: true posts the form after each edit.
       def collaborative_fields(**options, &)
         record = collaborative_record!
+        if (column = record.collaborative_fields_column)
+          return @template.content_tag("collaborative-fields", @template.capture(&), **options,
+                                       name: field_name(column), value: record.collaborative_fields_state)
+        end
+        raise ArgumentError, "#{record.class.name} must be persisted to collaborate on it" unless record.persisted?
+
         identity = Y::Forms.identity.call(@template)
         name = identity[:name]
         user = { user_name: name, user_color: identity[:color] || Y::Forms.collaborator_color(name) }
@@ -39,7 +50,6 @@ module Y
         unless record.respond_to?(:collaborative_fields?) && record.collaborative_fields?
           raise ArgumentError, "#{record.class.name} has no collaborative fields (declare has_collaborative_fields)"
         end
-        raise ArgumentError, "#{record.class.name} must be persisted to collaborate on it" unless record.persisted?
 
         record
       end

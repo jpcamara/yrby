@@ -52,6 +52,7 @@ unless defined?(YRBY_AR_BOOTED)
       t.date :due_on
       t.string :summary
       t.text :description
+      t.text :fields_ydoc
     end
   end
 end
