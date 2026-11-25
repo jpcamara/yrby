@@ -14,6 +14,10 @@ It is two packages, versioned in this repo:
 - **[`yrby-forms` (npm)](packages/forms)** has the `<collaborative-field>`
   element. The connection is yrby-client's `<yrby-document>`.
 
+A model can also keep the document in one of its own columns. Then the form
+posts the document like any other field and needs no connection. See
+[A document in a column](#a-document-in-a-column).
+
 ## Install
 
 ```ruby
@@ -36,6 +40,14 @@ registers the elements:
 
 ```js
 import "yrby-forms"
+```
+
+An import-map app needs no npm. The gem ships the same module as an asset.
+Pin it next to the pins `yrby:install` added:
+
+```ruby
+# config/importmap.rb
+pin "yrby-forms", to: "yrby-forms/yrby-forms.js"
 ```
 
 ## Declare and render
@@ -158,11 +170,95 @@ presence. A tampered client can show any name, so treat the name on a field
 as a label. The grant and your `authorize_document` block decide who can read
 and write.
 
+## A document in a column
+
+With `column:` the document is a column of the model's own table, stored as
+Base64. There is no `y_documents` table, no channel, and no connection:
+
+```ruby
+class Draft < ApplicationRecord
+  has_collaborative_fields :title, :body, column: :fields_ydoc
+end
+```
+
+```ruby
+add_column :drafts, :fields_ydoc, :text
+```
+
+The form is the same, and the controller is a plain one that permits the
+column with the fields:
+
+```erb
+<%= form_with(model: @draft) do |form| %>
+  <%= form.collaborative_fields do %>
+    <%= form.collaborative_field :title %>
+    <%= form.collaborative_field :body %>
+  <% end %>
+<% end %>
+```
+
+```ruby
+def update
+  @draft.update!(params.expect(draft: [:title, :body, :fields_ydoc]))
+  redirect_to @draft
+end
+```
+
+`collaborative_fields` renders `<collaborative-fields>` with the document in
+its `value` attribute. The element adds the edited document to the form's
+data under the column's name, so every submit carries it. A `before_save`
+callback merges the posted document into the stored one and reads the
+declared fields from the result. Two people who submit the same form both
+keep their edits, and nobody gets a `StaleObjectError`.
+
+Pass `autosave: true` to post the form 300 ms after each edit, without a
+page load. The page that answers holds the merged document, and the element
+merges it into the open form:
+
+```erb
+<%= form.collaborative_fields autosave: true do %>
+```
+
+A new document also reaches an open form when the `value` attribute changes,
+which is what a Turbo morph of the page does. A bound control is left out of
+the morph, so the person typing keeps their cursor.
+
+This mode needs only `<collaborative-fields>` and `<collaborative-field>`.
+An app with no connection can import them without yrby-client:
+
+```js
+import "yrby-forms/column"
+```
+
+```ruby
+# config/importmap.rb
+pin "yjs", to: "yrby/yjs.js"
+pin "yrby-forms/column", to: "yrby-forms/column.js"
+```
+
+What to know about the column:
+
+- The document owns the declared fields. On every save they are read from
+  it, so a value assigned to a declared field in Ruby is replaced.
+- A record gets its document on the first save, built from its text
+  columns. For records that exist already, run `Draft.find_each(&:save!)`.
+- A column that is not a valid document fails the save with an `:invalid`
+  error on the column.
+- The stored document is read under a row lock, so two saves at the same
+  moment merge one after the other.
+- There is no presence, because there is no connection.
+- `encrypted:` is rejected. Use the model's own `encrypts :fields_ydoc`.
+
+Anything that saves the record through Active Record merges the same way, so
+a sync layer that writes the column works as the transport. Offline edits
+then merge when they arrive.
+
 ## Limitations
 
 - Values go from the document to the columns, and not the other way. An
-  attribute assigned in Ruby is not written to the document, and a record's
-  existing column values do not fill a new document.
+  attribute assigned in Ruby is not written to the document. With a
+  `Y::Document`, a record's existing column values do not fill a new
+  document. With `column:`, the text columns do.
 - A change made to the document from Ruby does not reach the columns until
   you call `refresh_collaborative_fields` or a browser makes the next change.
 - Presence is per field. There are no carets inside a field.

@@ -37,5 +37,21 @@ The first release.
 - `form.collaborative_field :status` wraps the usual input for the attribute,
   or one from a block, in `<collaborative-field name tier>`.
 - The `yrby-forms` npm package has the `<collaborative-field>` element.
+- `has_collaborative_fields :title, :body, column: :fields_ydoc` keeps the
+  document in a column of the model's own table, as Base64, with no channel
+  and no connection. The form posts the document with the fields. A
+  `before_save` callback merges it into the stored document under a row lock
+  and reads the declared fields from the result. A record's first save builds
+  the document from its text columns. A column that is not a document fails
+  the save with an `:invalid` error.
+- With `column:`, `form.collaborative_fields` renders `<collaborative-fields>`
+  with the document in its `value` attribute, for new records too.
+  `autosave: true` posts the form after each edit and merges the answer.
+- The npm package has the `<collaborative-fields>` element, and a
+  `yrby-forms/column` entry that registers both elements without yrby-client.
+- The gem ships the JavaScript as import-map assets:
+  `yrby-forms/yrby-forms.js` and `yrby-forms/column.js`.
+- The engine requires Action Cable's classes, so an app that keeps every
+  document in a column loads without the cable.
 
 Requires yrby-rails 0.9.0 or later.

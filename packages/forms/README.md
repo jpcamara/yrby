@@ -1,9 +1,10 @@
 # yrby-forms
 
 Collaborative form fields over [yrby](https://github.com/jpcamara/yrby). The
-package adds one custom element, `<collaborative-field>`, and uses
+package adds `<collaborative-field>` and uses
 [yrby-client](https://www.npmjs.com/package/yrby-client)'s `<yrby-document>`
-for the connection.
+for the connection. A second element, `<collaborative-fields>`, holds the
+document for a form [without a connection](#without-a-connection).
 
 `<collaborative-field>` binds the form control inside it to the document of
 the `<yrby-document>` around it. It binds when the document syncs and unbinds
@@ -28,7 +29,7 @@ for the Rails side and the document layout.
 npm install yrby-forms yjs y-protocols @rails/actioncable
 ```
 
-Import it once from your entry point. Importing registers both elements:
+Import it once from your entry point. Importing registers the elements:
 
 ```js
 import "yrby-forms"
@@ -65,6 +66,43 @@ grant is what gives access.
 
 A field sets its presence to `{ user: { name, color }, field }`. `field` is
 the focused field's name, or `null`.
+
+## Without a connection
+
+`<collaborative-fields>` holds the document for a form that opens no
+connection. The server renders the document's state, as Base64, in the
+element's `value` attribute:
+
+```html
+<form action="/drafts/1" method="post">
+  <input type="hidden" name="_method" value="patch">
+  <collaborative-fields name="draft[fields_ydoc]" value="AQH…" autosave>
+    <collaborative-field name="title" tier="text">
+      <input type="text" name="draft[title]">
+    </collaborative-field>
+    <collaborative-field name="body" tier="text">
+      <textarea name="draft[body]"></textarea>
+    </collaborative-field>
+  </collaborative-fields>
+</form>
+```
+
+- The element adds the current state to the form's data under its `name`, so
+  a submit carries every edit. The server merges it into the state it holds.
+- When the `value` attribute changes, the new state is merged into the open
+  form. A Turbo morph of the page does this.
+- With `autosave`, each edit posts the form after 300 ms. The response is the
+  page the server renders next, and the element merges the state it finds in
+  that page's `<collaborative-fields>` of the same `name`.
+- A bound control cancels its own `turbo:before-morph-element`, so a morph
+  does not replace what the person is typing.
+
+There is no presence in this mode. A page that uses only this mode can skip
+yrby-client:
+
+```js
+import "yrby-forms/column"
+```
 
 ## Styling
 
