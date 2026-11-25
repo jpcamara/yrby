@@ -8,13 +8,13 @@ Gem::Specification.new do |spec|
   spec.authors = ["JP Camara"]
   spec.email = ["johnpcamara@gmail.com"]
 
-  spec.summary = "Collaborative form fields for Rails over yrby: model macro, form helpers, and channel generator"
-  spec.description = "Collaborative form fields for Rails over yrby. Declare attributes with " \
-                     "has_collaborative_fields and every open form shares one CRDT document per record: " \
-                     "last-write-wins fields in a shared map, character-merge text fields in Y.Text shares. " \
-                     "Ships form helpers rendering the <collaborative-form>/<collaborative-field> elements " \
-                     "(the yrby-forms npm package), a materializer writing values back to the columns, and " \
-                     "an install generator for the sync channel."
+  spec.summary = "Collaborative form fields for Rails over yrby"
+  spec.description = "Declare attributes with has_collaborative_fields and every open form for a record " \
+                     "edits one yrby document. Selects, checkboxes, numbers, and dates are " \
+                     "last-write-wins map entries. Text fields merge concurrent typing through Y.Text. " \
+                     "The form helpers render yrby's <yrby-document> element and the yrby-forms npm " \
+                     "package's <collaborative-field>, and the gem's channel writes each change to " \
+                     "the record's columns."
   spec.homepage = "https://github.com/jpcamara/yrby"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
@@ -37,19 +37,16 @@ Gem::Specification.new do |spec|
   spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  # 0.7.1 is the current core release; the materializer reads documents
-  # through Y::Doc#read_map and #read_text.
-  spec.add_dependency "yrby", ">= 0.7.1"
-  # 0.6.1 is the current Rails-layer release; storage and the sync channel
-  # concern come from it (Y::Document, Y::EncryptedDocument, Y::ActionCable).
-  spec.add_dependency "yrby-rails", ">= 0.6.1"
+  # The columns are read from the document with Doc#read_map and #read_text.
+  # 0.9.0 is the floor yrby-rails 0.9 sets.
+  spec.add_dependency "yrby", ">= 0.9.0"
+  # has_collaborative_fields declares its document with
+  # has_collaborative_document's channel: option, new in yrby-rails 0.9.0.
+  spec.add_dependency "yrby-rails", ">= 0.9"
 
   spec.add_dependency "actionview", ">= 7.1"
   spec.add_dependency "activerecord", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
-  # The form helper mints signed GlobalIDs; the generated channel locates
-  # records through them.
-  spec.add_dependency "globalid", ">= 1.0"
   spec.add_dependency "railties", ">= 7.1"
 
   spec.add_development_dependency "minitest", "~> 5.0"

@@ -1,9 +1,9 @@
-// Two-window e2e for the yrby-forms page (/tickets/:id): the packaged
-// <collaborative-form>/<collaborative-field> elements over a real Rails form,
-// FormFieldsChannel, and Y::Document storage. Asserts the LWW field converges
-// (last write wins), the text field merges concurrent typing, presence shows
-// on the peer, and the materialized columns match what the clients converged
-// on.
+// Two-window e2e for the yrby-forms page (/tickets/:id): <yrby-document> and
+// the packaged <collaborative-field> over a real Rails form,
+// Y::Forms::FieldsChannel, and Y::Document storage. Asserts the LWW fields
+// converge (last write wins), the text field merges concurrent typing,
+// presence shows on the peer, and the ticket's columns match what the clients
+// converged on.
 //
 //   SERVER=puma PORT=3777 frontend/boot_server.sh   # or any booted demo server
 //   PORT=3777 node frontend/form_fields_e2e.mjs
@@ -20,7 +20,7 @@ const ab = (s, ...a) => { try { return execFileSync(AB, a, { env: { ...process.e
 async function waitEval(s, js, label, ms = 15000) { const end = Date.now() + ms; while (Date.now() < end) { if (/\btrue\b/.test(ab(s, "eval", js))) return true; await sleep(300) } console.log(`  TIMEOUT: ${label} (${s})`); return false }
 let failures = 0; const check = (l, ok) => { console.log(`${ok ? "ok" : "FAIL"}: ${l}`); if (!ok) failures++ }
 
-const synced = (s) => waitEval(s, "document.querySelector('collaborative-form')?.provider?.synced === true", "synced")
+const synced = (s) => waitEval(s, "document.querySelector('yrby-document')?.current !== undefined", "synced")
 const setValue = (s, selector, value) =>
   ab(s, "eval", `(() => { const e = document.querySelector('${selector}'); e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); })()`)
 
@@ -33,6 +33,12 @@ setValue("ff-a", "select", "active")
 check("b sees a's status", await waitEval("ff-b", "document.querySelector('select').value === 'active'", "lww sync"))
 setValue("ff-b", "select", "done")
 check("a sees b's later status (last write wins)", await waitEval("ff-a", "document.querySelector('select').value === 'done'", "lww last write"))
+
+// A checkbox. Rails renders a hidden input before it, and the field binds the
+// checkbox.
+const URGENT = "collaborative-field[name=urgent] input[type=checkbox]"
+ab("ff-a", "click", URGENT)
+check("b sees a's checkbox", await waitEval("ff-b", `document.querySelector('${URGENT}').checked === true`, "checkbox sync"))
 
 // Text: concurrent typing in the description merges (both edits survive).
 const DESC = "collaborative-field[name=description] textarea"
@@ -51,14 +57,14 @@ setValue("ff-a", "collaborative-field[name=summary] input", `Fix the flaky spec 
 
 // Presence: a focuses the description; b shows the outline and name chip.
 ab("ff-a", "click", DESC)
-check("a announces the focused field", await waitEval("ff-a", "document.querySelector('collaborative-form').awareness.getLocalState().field === 'description'", "presence local"))
+check("a announces the focused field", await waitEval("ff-a", "document.querySelector('yrby-document').provider.awareness.getLocalState()?.field === 'description'", "presence local"))
 check("b outlines the field a is in", await waitEval("ff-b", "document.querySelector('collaborative-field[name=description]').hasAttribute('data-remote')", "presence outline"))
 check("b shows a's name chip", await waitEval("ff-b", "(document.querySelector('collaborative-field[name=description] .collaborative-field-chip')?.textContent || '').length > 0", "presence chip"))
 
-// Materialization: the channel refreshes the columns after every change.
-// Poll until the refresh caught up with the merge, then assert both clients
-// hold exactly the materialized text — a == columns == b proves convergence
-// without parsing strings out of the browser sessions.
+// The channel writes the columns after every change. Poll until they hold
+// the merge, then check that both clients show the description column's text.
+// a == column == b proves convergence without parsing strings out of the
+// browser sessions.
 let state = {}
 for (let i = 0; i < 30; i++) {
   state = await (await fetch(`${BASE}/tickets/${TAG}/state`)).json()
@@ -66,11 +72,12 @@ for (let i = 0; i < 30; i++) {
       `${state.description}`.includes(`B${TAG}`) && state.summary) break
   await sleep(400)
 }
-check("materialized status is the last write", state.status === "done")
-check("materialized summary matches", state.summary === `Fix the flaky spec ${TAG}`)
+check("the status column is the last write", state.status === "done")
+check("the urgent column is true", state.urgent === true)
+check("the summary column matches", state.summary === `Fix the flaky spec ${TAG}`)
 const descJs = JSON.stringify(state.description ?? "")
-check("a's text equals the materialized description", await waitEval("ff-a", `document.querySelector('${DESC}').value === ${descJs}`, "materialized == a"))
-check("b's text equals the materialized description", await waitEval("ff-b", `document.querySelector('${DESC}').value === ${descJs}`, "materialized == b"))
+check("a's text equals the description column", await waitEval("ff-a", `document.querySelector('${DESC}').value === ${descJs}`, "column == a"))
+check("b's text equals the description column", await waitEval("ff-b", `document.querySelector('${DESC}').value === ${descJs}`, "column == b"))
 
 ab("ff-a", "close"); ab("ff-b", "close")
 

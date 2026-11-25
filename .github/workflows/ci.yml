@@ -284,11 +284,11 @@ jobs:
           # document, and that a peer's focused cell shows up in the other
           # browser.
           PORT=3777 node frontend/spreadsheet_e2e.mjs
-          # yrby-forms: the packaged <collaborative-form>/<collaborative-field>
-          # elements over a real Rails form (tickets page). Two real browsers:
-          # the LWW field converges last-write-wins, the text field merges
+          # yrby-forms: <yrby-document> and <collaborative-field> over a real
+          # Rails form (tickets page). Two real browsers: the select and the
+          # checkbox converge last-write-wins, the text field merges
           # concurrent typing, presence outlines the peer's field, and the
-          # materialized columns match what the clients converged on.
+          # ticket's columns match what the clients converged on.
           PORT=3777 node frontend/form_fields_e2e.mjs
           kill "$(cat /tmp/puma.pid)" || true
 

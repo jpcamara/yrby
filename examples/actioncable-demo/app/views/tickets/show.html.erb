@@ -6,8 +6,6 @@
  collaborative-field label{display:block;font-size:12px;color:#555;margin-bottom:.2rem}
  collaborative-field :is(input[type=text],input[type=number],input[type=date],select,textarea){width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font:14px system-ui}
  collaborative-field textarea{height:5rem;resize:vertical}
- body:has(collaborative-form[status=synced]) #status::after{content:"synced"}
- body:not(:has(collaborative-form[status=synced])) #status::after{content:"connecting…"}
 </style>
 <% end %>
 <div class="demo">
@@ -17,10 +15,10 @@
       A plain Rails form over one shared document per record. Selects,
       checkboxes, numbers, and dates are last-writer-wins map entries;
       the text fields are <code>Y.Text</code> shares that merge concurrent
-      typing. The channel writes the values back to the ticket's columns
-      after every change (<a href="<%= ticket_state_path(@ticket) %>">materialized state</a>).
+      typing. The channel writes the values to the ticket's columns after
+      every change (<a href="<%= ticket_state_path(@ticket) %>">the columns</a>).
     </p>
-    <p id="status" class="status"></p>
+    <p id="status" class="status">connecting…</p>
   </header>
   <%= form_with(model: @ticket, url: "#", id: "ticket-form") do |form| %>
     <%= form.collaborative_fields do %>
