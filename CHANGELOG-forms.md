@@ -6,32 +6,36 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The first release.
+
 ### Added
 
-- Initial gem: collaborative form fields over yrby.
-  - `has_collaborative_fields :status, :summary, ...` declares which
-    attributes collaborate. Tiers are detected per attribute: Rails enums
-    are LWW, string and text columns are text tier (Y.Text), everything
-    else is LWW; `text:`/`lww:` kwargs force a tier. An unknown attribute
-    raises at declaration. `encrypted: true` stores CRDT state through
-    `Y::EncryptedDocument`.
-  - One `Y::Document` (named `"fields"`) per record holds the whole field
-    set: LWW entries in a `"fields"` map share, one `"fields/<name>"`
-    Y.Text share per text-tier field.
-  - `refresh_collaborative_fields` materializes the document back into the
-    declared columns under the record lock (`save!(validate: false)`),
-    casting LWW values through the attribute types. Map keys outside the
-    declared set are ignored: a client can write any key into the shared
-    map, and none of them reach `assign_attributes`.
-  - Form helpers: `form.collaborative_fields` renders the
-    `<collaborative-form>` container (channel, signed GlobalID, doc key,
-    presence identity from `Y::Forms.identity`);
-    `form.collaborative_field :status` wraps the stock input for the
-    attribute — or a block-supplied one — in
-    `<collaborative-field name tier>`.
-  - `yrby_forms:install` generator: a FormFieldsChannel (signed-GlobalID
-    locate scoped to `Y::Forms.sgid_purpose`, deny-by-default
-    `authorized?`, storage through the record's document, refresh after
-    every append) plus the storage migration via `yrby:tables`.
-  - The companion npm package `yrby-forms` ships the two custom elements
-    the helpers render.
+- `has_collaborative_fields :status, :summary` declares which attributes of a
+  model collaborate. Enums are last-write-wins. String and text columns merge
+  concurrent typing through a Y.Text. Every other type is last-write-wins.
+  `text:` and `lww:` force a tier. A name that isn't an attribute raises when
+  the class loads.
+- The fields share one collaborative document per record, declared as
+  `has_collaborative_document "fields"` with `Y::Forms::FieldsChannel` as its
+  channel. Last-write-wins values are entries in a `fields` map, and each
+  text field is a Y.Text named `fields/<name>`. `encrypted: true` stores the
+  document through `Y::EncryptedDocument`. Destroying the record destroys
+  its document.
+- `Y::Forms::FieldsChannel` ships with the gem and subclasses
+  `Y::DocumentChannel`. It saves each change and then writes the record's
+  columns. It accepts a grant only for the `fields` document of a model with
+  collaborative fields, and `authorize_document` adds a check of the current
+  user. A failed column write is logged and the change is still acknowledged.
+- `refresh_collaborative_fields` writes the document's values to the declared
+  columns under the record lock, with `save!(validate: false)`. Values are
+  cast by the attribute types. Map keys outside the declared set are ignored,
+  so a client can't write another column.
+- `form.collaborative_fields` renders `<yrby-document>` with the record's
+  grant, and takes `collaborative_document_tag`'s options. The presence name
+  and color come from `Y::Forms.identity` and render as `data-user-name` and
+  `data-user-color`.
+- `form.collaborative_field :status` wraps the usual input for the attribute,
+  or one from a block, in `<collaborative-field name tier>`.
+- The `yrby-forms` npm package has the `<collaborative-field>` element.
+
+Requires yrby-rails 0.9.0 or later.

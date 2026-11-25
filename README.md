@@ -231,12 +231,12 @@ to ActionText on the server with `Y::Tiptap` or `Y::Lexxy`.
 
 ## Forms
 
-Plain form fields collaborate too: the `yrby-forms` gem + npm package pair
-adds `has_collaborative_fields` to a model, form helpers, and two custom
-elements, with one shared document per record — selects and checkboxes
-converge last-write-wins, text fields merge concurrent typing, and the
-server writes the values back to the columns. See
-[README-forms.md](README-forms.md).
+Plain form fields collaborate too. The `yrby-forms` gem and npm package add
+`has_collaborative_fields` to a model, two form helpers, and a
+`<collaborative-field>` element. Each record has one shared document for its
+fields. Selects and checkboxes are last-write-wins, text fields merge
+concurrent typing, and the server writes the values to the record's columns.
+See [README-forms.md](README-forms.md).
 
 ## Usage
 

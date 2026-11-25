@@ -37,8 +37,8 @@ Gem::Specification.new do |spec|
   spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  # The columns are read from the document with Doc#read_map and #read_text.
-  # 0.9.0 is the floor yrby-rails 0.9 sets.
+  # The document is read with Doc#read_map and Doc#read_text. 0.9.0 is the
+  # floor yrby-rails 0.9 sets.
   spec.add_dependency "yrby", ">= 0.9.0"
   # has_collaborative_fields declares its document with
   # has_collaborative_document's channel: option, new in yrby-rails 0.9.0.

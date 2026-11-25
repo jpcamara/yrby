@@ -1,18 +1,18 @@
 # yrby-forms
 
-Collaborative form fields for Rails over [yrby](README.md). Declare which
-attributes of a model collaborate, render them with two form helpers, and
-every open form on that record shares live state: selects, checkboxes,
-numbers, and dates converge last-write-wins per field; text fields merge
-concurrent typing per character. The server materializes the shared values
-back into the columns after every change.
+Collaborative form fields for Rails over [yrby](README.md). You declare which
+attributes of a model collaborate and render them with two form helpers.
+Every open form for that record then edits one shared document. Selects,
+checkboxes, numbers, and dates are last-write-wins per field. Text fields
+merge concurrent typing per character. The server writes the values to the
+record's columns after every change.
 
-Two packages, versioned together in this repo:
+It is two packages, versioned in this repo:
 
-- **`yrby-forms` (gem)** — the model macro, the form helpers, the
-  materializer, and an install generator for the channel.
-- **[`yrby-forms` (npm)](packages/forms)** — the `<collaborative-form>` and
-  `<collaborative-field>` custom elements the helpers render.
+- **`yrby-forms` (gem)** has the model macro, the form helpers, and the
+  channel.
+- **[`yrby-forms` (npm)](packages/forms)** has the `<collaborative-field>`
+  element. The connection is yrby-client's `<yrby-document>`.
 
 ## Install
 
@@ -22,15 +22,21 @@ gem "yrby-forms"
 ```
 
 ```sh
-bin/rails generate yrby_forms:install
+bin/rails generate yrby:install
 bin/rails db:migrate
-npm install yrby-forms yjs y-protocols
+npm install yrby-forms yjs y-protocols @rails/actioncable
 ```
 
-The generator creates `app/channels/form_fields_channel.rb` and the storage
-migration (yrby's `y_documents` / `y_document_updates` tables). Import the
-npm package once from your JavaScript entry point; importing registers the
-elements.
+`yrby:install` is yrby-rails' generator. It creates the migration for the
+`y_documents` and `y_document_updates` tables. Skip it if the app already
+has them.
+
+Import the npm package once from your JavaScript entry point. Importing
+registers the elements:
+
+```js
+import "yrby-forms"
+```
 
 ## Declare and render
 
@@ -42,26 +48,26 @@ class Ticket < ApplicationRecord
 end
 ```
 
-Declare enums before the macro; tier detection reads them. Tiers resolve per
-attribute:
+Declare enums before the macro, because it reads them to pick each
+attribute's tier:
 
 | Attribute | Tier |
 |---|---|
-| Rails enum | LWW |
-| `:string` / `:text` column | text (Y.Text, character merge) |
-| everything else (integer, boolean, date, datetime, decimal, …) | LWW |
+| Rails enum | `lww` |
+| `:string` or `:text` column | `text` (a Y.Text, merged per character) |
+| anything else (integer, boolean, date, datetime, decimal) | `lww` |
 
-Force a tier with the kwargs — they win over detection:
+`text:` and `lww:` force a tier:
 
 ```ruby
 has_collaborative_fields :summary, :notes, lww: [:summary]
 ```
 
-A name that isn't a real attribute raises at declaration. `encrypted: true`
-stores the CRDT state through `Y::EncryptedDocument` (the columns themselves
-encrypt with your own `encrypts` declarations).
+A name that isn't an attribute raises when the class loads. `encrypted: true`
+stores the document through `Y::EncryptedDocument`. To encrypt the columns,
+use the model's own `encrypts`.
 
-Render inside any form:
+Render the fields inside any form:
 
 ```erb
 <%= form_with(model: @ticket) do |form| %>
@@ -73,9 +79,9 @@ Render inside any form:
 <% end %>
 ```
 
-`collaborative_field` renders the stock input for the attribute's type (enum
-→ select, boolean → checkbox, date → date field, …). Pass a block to render
-your own input instead:
+`collaborative_field` renders the usual input for the attribute's type: a
+select for an enum, a checkbox for a boolean, a date field for a date. Pass a
+block to render your own:
 
 ```erb
 <%= form.collaborative_field :status do %>
@@ -83,79 +89,96 @@ your own input instead:
 <% end %>
 ```
 
+`collaborative_fields` renders yrby's `<yrby-document>` with
+`collaborative_document_tag`, and takes the same options, such as
+`expires_in:` and `refresh:`.
+
 ## How it works
 
-One `Y::Document` per record (named `"fields"`) holds the whole field set:
+The macro declares one collaborative document on the model, as
+`has_collaborative_document "fields", channel: "Y::Forms::FieldsChannel"`
+would. The document holds the whole field set:
 
-- a `"fields"` map share keyed by field name for the LWW tier — each write
-  replaces the value, last write wins per field;
-- one `"fields/<name>"` Y.Text share per text-tier field — concurrent
-  typing merges per character.
+- A `fields` map has one entry per `lww` field. Each write replaces the
+  value, and the last write wins.
+- Each `text` field has its own Y.Text named `fields/<name>`.
 
-The generated FormFieldsChannel locates the record through the signed
-GlobalID the helper minted, appends every update to the document, and then
-calls `refresh_collaborative_fields`: under the record lock, the document is
-reloaded, read (`read_map` / `read_text`), and the declared fields are
-assigned and saved with `save!(validate: false)`. LWW values cast through
-the attribute types, so `"7"` lands in an integer column as `7` and
-`"2026-09-01"` in a date column as a date.
+`Y::Forms::FieldsChannel` ships with the gem and subclasses
+`Y::DocumentChannel`. It saves each change and then calls
+`refresh_collaborative_fields` on the record. That method locks the record,
+reads the document, assigns the declared fields, and saves with
+`save!(validate: false)`. Values are cast by the attribute types, so `"7"`
+becomes `7` in an integer column and `"2026-09-01"` becomes a date.
 
-Only declared fields are ever assigned. The map is client-written — a
-hostile client can put any key in it, another column's name included — and
-every undeclared key is dropped before `assign_attributes`. A value an
-attribute rejects (an unknown enum name) fails that materialization; the
-channel logs it and the columns catch up on the next valid change.
+Only declared fields are assigned. Clients write the map, so a client can put
+any key in it, including another column's name. Keys outside the declared set
+are dropped before `assign_attributes`.
+
+A change is acknowledged once it is saved. If the column write then fails,
+for example on an enum value the model rejects, the channel logs the error.
+The columns catch up on the next change that can be written.
+
+Destroying the record destroys its document.
 
 ## Authorization and identity
 
-Access is enforced server-side, twice: the form helper mints a signed
-GlobalID scoped to `Y::Forms.sgid_purpose`, so a token minted elsewhere
-can't join a field set, and the generated channel's `authorized?` denies
-everyone until you implement it:
+The form helper renders a grant signed for this record's `fields` document.
+The channel accepts only that. A grant for another attribute, or for a model
+without collaborative fields, is rejected.
+
+A valid grant is enough by default, so the view that renders the form must
+require edit permission. To also check the current user when a client
+subscribes, give the channel an `authorize_document` block, as you would for
+`Y::DocumentChannel`:
 
 ```ruby
-# app/channels/form_fields_channel.rb
-def authorized?
-  record.editable_by?(current_user)
+# config/initializers/yrby_forms.rb
+Rails.application.config.to_prepare do
+  Y::Forms::FieldsChannel.authorize_document do |record, _name|
+    current_user.present? && record.editable_by?(current_user)
+  end
 end
 ```
 
-Presence names and colors come from `Y::Forms.identity`, called with the
-view context (the default reads `current_user`'s `name` / `username` /
-`handle`, falling back to `"Anonymous"`):
+A block set on `Y::DocumentChannel` applies to forms too, until
+`Y::Forms::FieldsChannel` has its own.
+
+Presence names and colors come from `Y::Forms.identity`, which is called with
+the view context. The default reads `current_user`'s `name`, `username`, or
+`handle`, and uses `"Anonymous"` when there is none. A `nil` color becomes a
+color derived from the name:
 
 ```ruby
 Y::Forms.identity = ->(view) { { name: view.current_user.handle, color: nil } }
 ```
 
-Names are cosmetic; access is enforced. Presence metadata is written by the
-client, so a tampered client can label itself with any name. What a client
-can never do is grant itself access: reading and writing the field set are
-gated by the signed GlobalID and your `authorized?` check, entirely on the
-server. Treat the name on a field outline as a label for people who already
-share the record, never as authentication.
+The helper renders the name and color as `data-user-name` and
+`data-user-color` on `<yrby-document>`, and the browser sends them as
+presence. A tampered client can show any name, so treat the name on a field
+as a label. The grant and your `authorize_document` block decide who can read
+and write.
 
 ## Limitations
 
-- **No server→document write-back.** Column values flow from the shared
-  document to the database, not the other way: an attribute assigned in
-  Ruby is not written into an existing shared document, and a record's
-  current column values do not seed a brand-new one (writing into a live
-  document from the server needs yrby's document-editing API,
-  [yrby#33](https://github.com/jpcamara/yrby/issues/33)). Until then the
-  document is client-authored; treat the columns as the materialized view
-  of it.
-- v1 scope: no in-field remote carets (presence is per field), no offline
-  queueing, no conflict UI, no nested attributes / `fields_for`. Rich text
-  belongs to [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime).
+- Values go from the document to the columns, and not the other way. An
+  attribute assigned in Ruby is not written to the document, and a record's
+  existing column values do not fill a new document.
+- A change made to the document from Ruby does not reach the columns until
+  you call `refresh_collaborative_fields` or a browser makes the next change.
+- Presence is per field. There are no carets inside a field.
+- Nothing is stored in the browser, so a change that has not reached the
+  server is lost on reload.
+- Nested attributes and `fields_for` are not supported.
+- Rich text belongs to
+  [lexxy-realtime](https://github.com/jpcamara/lexxy-realtime).
 
-## The elements
+## The element
 
-See the [npm package README](packages/forms/README.md) for the element
-attributes, the AnyCable consumer hook (`setConsumer`), and styling.
+The [npm package README](packages/forms/README.md) covers the markup, the
+presence state, using another consumer such as AnyCable's, and styling.
 
 ## Demo
 
 The [actioncable-demo](examples/actioncable-demo)'s `/tickets/:id` page runs
-the whole stack — helpers, channel, elements, materialization — and
-`frontend/form_fields_e2e.mjs` drives it with two real browsers in CI.
+all of it. `frontend/form_fields_e2e.mjs` drives the page with two browsers
+in CI.

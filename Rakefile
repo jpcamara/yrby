@@ -70,7 +70,7 @@ namespace :release do
          a. bump packages/client/package.json version, commit
          b. cd packages/client && npm publish
 
-      5) yrby-forms #{forms_npm}: npm package (the collaborative form elements)
+      5) yrby-forms #{forms_npm}: npm package (the <collaborative-field> element)
          a. bump packages/forms/package.json version, commit
          b. cd packages/forms && npm publish
 
