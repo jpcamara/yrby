@@ -26,6 +26,12 @@ class DocumentTest < Minitest::Test
     Y::Document.compact_every = 64
   end
 
+  # Some tests lower the threshold. Put it back so later test files see the
+  # default.
+  def teardown
+    Y::Document.compact_every = 64
+  end
+
   def read_back(key, text: "content")
     doc = Y::Doc.new
     doc.apply_update(Y::Document.load_state(key))

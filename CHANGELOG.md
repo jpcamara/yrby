@@ -4,6 +4,211 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.9.1] - 2026-11-08
+
+### Changed
+
+- yrby builds against yrs 0.28.1. An insert into a text no longer recounts
+  the UTF-16 length of each string before it, so appending to a long text
+  costs about the same at any length: 80k one-character appends took 2.5 s
+  and now take 48 ms.
+
+### Experimental
+
+- `Y::Doc#edit` returns the document's own writes and never a peer's. The
+  document keeps the update of every local transaction until an edit returns
+  it, merged into one, so a write made outside an edit, from another thread
+  or fiber, or in a block that raised comes with the next edit. Before this,
+  the edit returned everything the document gained while the block ran, so
+  an update applied from a peer meanwhile was sent again as the edit's own,
+  and a caller had to lock the document to keep them apart. Each edit takes
+  everything unsent at once, so the updates edits return have no gaps
+  between them. A peer's update doesn't wait for an edit.
+
+- `Y::Map#set_text(key, content = "")` stores a new `Y.Text` at a key and
+  returns its live `Y::Text`. `Y::Array#push_text(content = "")` and
+  `#insert_text(index, content = "")` do the same in a list. Before this,
+  Ruby could edit a nested `Y.Text` a browser made but couldn't make one,
+  so a server couldn't set up a form whose fields merge typing.
+
+## yrby-client 0.7.1 - 2026-11-03
+
+### Fixed
+
+- yrby-client: `connect()` restores the presence that `disconnect()` removed,
+  unless the app set or cleared presence in between. Before this, a `renew()`
+  (which document sessions call with a renewed grant) or a manual reconnect
+  left the local awareness state `null`, and y-protocols ignores
+  `setLocalStateField` while it is `null`, so the user stayed invisible to
+  peers until reload.
+
+## [0.9.0] - 2026-11-03
+
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
+
+- Live handles that write to a document from Ruby: `Doc#get_map`,
+  `get_array`, `get_text`, and `get_xml_text` return `Y::Map`, `Y::Array`,
+  `Y::Text`, and `Y::XmlText`. A write is a CRDT edit, so a person editing the
+  same document keeps their change. A handle stays on the shared type it was
+  made for while others edit around it, and releases the GVL like `Doc`.
+  Indexes are Ruby characters, and negative indexes count from the end as in
+  Ruby. `push`, `<<`, and `insert` return the receiver, and `each`
+  without a block an Enumerator, as Ruby's own do.
+- `Doc#edit { }` runs a block that writes to the document and returns the
+  update its writes produced, or nil when it wrote nothing. It is the unit a
+  process saves and sends as it writes.
+- `Y::Lexical` and `Y::Lexxy` write Lexical's node shape: `append_paragraph`,
+  `append_heading`, `append_list`, `append_quote`, `append_code`,
+  `append_markdown`, `insert_paragraph`, `append_text`, `replace_runs`, and
+  `delete_block`.
+  Text takes formatted runs (`bold:`, `italic:`, `code:`, `link:`, and so on).
+  What Ruby writes renders the same as what a person typed. Each helper
+  writes its block in one transaction. `XmlText#push_xml_text` and
+  `insert_xml_text` take the new block's content, and `append` and
+  `replace` write content into a block.
+- `append_markdown` writes a link to a script as plain text.
+- `Y::Anchor`, from `XmlText#anchor`, is a block's identity as a value to
+  store or send. `Doc#block_at` and `Doc#find` resolve it.
+  `relative_position(index)` builds the Yjs caret shape editors put in
+  awareness, and `Text#index_at(position)` resolves one.
+- `Doc#apply_update_changes(update, root)` applies an update and returns the
+  ordinals of the top-level blocks it touched. It reads the blocks and
+  applies the update in one transaction, so another thread's write doesn't
+  show up in the result.
+- `Y::Awareness` builds and reads presence frames, and `Doc#client_id` returns
+  the id a document writes under.
+
+### Changed
+
+- yrby and the renderer crates are on yrs 0.28. yrs 0.28 replaced the number
+  variants of `Any` with `Any::Number(Number::Int | Number::Float)`. Because
+  the crates take yrs types, this is a breaking release for them:
+  `lexical-yjs-html` 0.2.0, `prosemirror-yjs-html` 0.2.0, and
+  `yjs-html-core` 0.2.0 need yrs 0.28.
+
+### Fixed
+
+- The Lexical and ProseMirror renderers (and the `lexical-yjs-html` and
+  `prosemirror-yjs-html` 0.2.1 crates) refuse a link to a script: Lexical
+  sends it to `about:blank` and ProseMirror empties its `href`, as each
+  editor does.
+- A `Timeout`, `Thread#raise`, or `Thread#kill` that arrives during a
+  native call raises once the call returns. Before, Ruby could jump over
+  the extension's Rust frames without running their cleanup.
+
+## yrby-client 0.7.0 - 2026-10-08
+
+This release updates yrby-client only. The gems are unchanged.
+
+### Added
+
+- yrby-client: `<yrby-document>` has a read-only `current` property that
+  returns the `yrby:synced` detail of the bound session, or undefined when
+  nothing is bound. A binding that loads after the event fired can bind from
+  it.
+- yrby-client: `<yrby-document>` has a `retry()` method that acquires the
+  document again after its session blocked or was discarded, without changing
+  whether the page is live. It works from a lease abort handler or right after
+  `session.discard()`, so a binding can replace a broken document with a fresh
+  session. It replaces calling `activate()`, which is internal to the Turbo
+  adapter.
+- yrby-client: `YrbyDocumentElement.consumer` accepts a function that returns
+  a consumer or a promise of one. The element calls it when it first needs a
+  consumer and reuses the result. A function that throws or rejects is called
+  again on the next attempt, and assigning a different value replaces the
+  result.
+
+## [0.8.1] - 2026-10-03
+
+### Added
+
+- `unknown_types` on `Y::Lexical` and `Y::ProseMirror`, and so on `Y::Lexxy`
+  and `Y::Tiptap`. It lists the node types in a document that neither the
+  built-in schema nor a rule handles, which are the ones `to_html` can't fully
+  render. Render a real document from your editor in a test and assert the list
+  is empty.
+- The renderer crates export `escape_text` and `escape_attr` for callers that
+  build their own markup (`lexical-yjs-html` 0.1.4, `prosemirror-yjs-html`
+  0.1.5).
+
+### Changed
+
+- The demo app and the render-parity test run on Lexxy 1.0. `Y::Lexxy`
+  output matches Lexxy 1.0's own `value`, including image alt text edited
+  after the document syncs.
+
+### Fixed
+
+- The Lexical renderers keep the text of an unknown inline wrapper, such as a
+  mark with no rule. The text renders without the wrapper. Before, the whole
+  node rendered as nothing, so its text was missing from the HTML.
+- `Y::Lexxy`'s list-item rule escapes the stored `__checked` and `__value`
+  attributes. Collaborators write those attributes, and a crafted value could
+  break out of the HTML attribute. Normal values (booleans and integers) render
+  the same as before.
+- The crate READMEs' callback examples escape the values they insert, and both
+  READMEs describe how unknown node types render.
+
+## [0.8.0] - 2026-10-01
+
+This release ships alongside yrby-client 0.6.0, and the client entries below
+are for that version.
+
+### Added
+
+- `Doc#read_array(name)` returns a `Y.Array` root as a JSON string, for
+  documents whose content lives in an array.
+
+### Changed
+
+- yrby-client document elements now use shared document sessions scoped to
+  the consumer. A session tracks pending delivery separately from the editors
+  attached to it, and each editor binding gets an abort signal for cleanup. A
+  clean remount after a delay reloads from the server. `doc` and `provider`
+  are unavailable until the session is acquired and while it is retargeting.
+  Turbo no longer serializes CRDT state into cached HTML. Turbolinks 5 works
+  the same way, with its before-cache, render, load, and preview signals
+  handled alongside Turbo's.
+- Managed sessions expose their delivery status and hold rejected work until
+  you call `retry()` or `discard()`. Each session uses its own subscription
+  nonce, so acknowledgment sequences from different sessions don't mix.
+  Provider status events now include a `pending` flag.
+- The element accepts a `refresh` attribute. If a subscription is rejected
+  and `refresh` is set, the session fetches that URL once, expects
+  `{ "grant": ... }` back, and resubscribes with the new grant, keeping the
+  same document and pending edits. A failed fetch or a second rejection
+  blocks the session as before. The session doesn't renew grants on a timer.
+
+- `YProtocolSession` and `ReliableSync` renamed their transport hooks to read
+  as commands. `onConnect()`, `onDisconnect()`, and `ack()`/`onAck()` are now
+  `resume()`, `pause()`, and `acknowledge(id)`, and `ReliableSync`'s
+  `onTick()` is now `retransmit()`. `onStatusChange` keeps the `on` prefix
+  because it's the only one that registers a listener. `ReliableSync#pending`
+  returns an independent snapshot with its own copy of the update bytes, and
+  enqueueing copies the buffer you pass in.
+- A grant refresh request now times out after 15 seconds and blocks the
+  session. Previously the session stayed offline indefinitely. If a consumer
+  throws while resubscribing with a renewed grant, that now blocks the
+  session too, where it used to be an unhandled rejection.
+- When a status listener throws, the error goes to `onError`, and the other
+  listeners and the cable callback that fired it still run. The provider also
+  reports failures in awareness events and unsubscribe. A throwing callback
+  can't interrupt presence removal or leave the awareness timer running. If
+  the error handler itself throws, the error goes to the console.
+
+### Fixed
+
+- ActionCable providers now ignore callbacks from subscriptions that have
+  been replaced, so a late disconnect or rejection can't stop the new
+  subscription from delivering edits. Synchronous consumer callbacks wait
+  until subscription creation returns, and managed sessions use distinct
+  subscription identifiers so old ACKs stay separate.
+
 ## [0.7.1] - 2026-08-19
 
 ### Fixed

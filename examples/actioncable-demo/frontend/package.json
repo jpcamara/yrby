@@ -8,7 +8,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@37signals/lexxy": "^0.9.29",
+    "@37signals/lexxy": "^1.0.0",
     "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.26.0",
@@ -21,6 +21,8 @@
     "@tiptap/core": "^2.11.0",
     "@tiptap/extension-collaboration": "^2.11.0",
     "@tiptap/extension-collaboration-cursor": "^2.11.0",
+    "@tiptap/extension-list": "^3.27",
+    "@tiptap/extensions": "^3.27",
     "@tiptap/pm": "^2.11.0",
     "@tiptap/starter-kit": "^2.11.0",
     "codemirror": "^6.0.1",

@@ -66,6 +66,37 @@ bin/rails s
 
 ## Pull requests
 
+### Browser tests for the document element
+
+After `bundle install` and `bundle exec rake compile`, run:
+
+```bash
+cd packages/client
+npm ci
+npm test
+npm run test:browser
+npm run test:browser:turbolinks
+npm run test:browser:collaboration
+```
+
+`npm ci` installs `agent-browser`, which also needs a Chrome to drive. Run
+`agent-browser install` once, or set `AGENT_BROWSER_EXECUTABLE_PATH` to an
+existing Chrome. Set `AB_BIN` to use a different `agent-browser` binary. Each
+suite starts a local Rails fixture app (`test/browser/app.rb`) on `PORT`
+(default 3789; the collaboration suite starts at 3793) and writes logs and
+screenshots under `tmp/`.
+
+The collaboration suite runs every combination of Turbo or Turbolinks with the
+ActionCable or AnyCable client. Set `FRAMEWORK=turbo` or `FRAMEWORK=turbolinks`
+and `CONSUMER=actioncable` or `CONSUMER=anycable` to run just one. Run the
+browser suites one at a time so their browser daemons don't interfere with
+each other.
+
+The fixture has no authentication beyond the grants under test, so only run
+it locally.
+
+### Submission checks
+
 - Keep the binding layer thin; put testable logic in pure functions.
 - Add/adjust tests (Ruby, and Rust for pure logic).
 - Make sure `rake test`, `cargo test`, rubocop, clippy, and rustfmt all pass.

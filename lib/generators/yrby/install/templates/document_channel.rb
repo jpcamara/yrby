@@ -16,11 +16,7 @@ class DocumentChannel < ApplicationCable::Channel
   # and yrby-client retries it.
   on_change { |key, update| Y::Document.append(key, update) }
 
-  def subscribed
-    return reject unless authorized?(params[:id])
-
-    sync_subscribed(params[:id])
-  end
+  def subscribed = sync_subscribed(params[:id])
 
   def receive(data) = sync_receive(data, params[:id])
 
@@ -28,8 +24,9 @@ class DocumentChannel < ApplicationCable::Channel
 
   # Everyone is denied until you fill this in. Wire it to your app's auth:
   # identify current_user on the cable connection, then check they may read
-  # and write this document. Don't lean on on_change raising for access
-  # control; that path exists for store failures.
+  # and write this document. This runs once when the client subscribes, and
+  # the subscription stays authorized until it ends. Raising in on_change is
+  # for store failures, so don't use it for access control.
   def authorized?(_document_key)
     false
   end

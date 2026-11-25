@@ -1,24 +1,24 @@
-//! Custom render rules and segmented output — the extensibility core shared
-//! by both HTML renderers.
+//! The custom render rules and segmented output that both HTML renderers
+//! share.
 //!
-//! Callers register per-node rules. Two tiers:
+//! Callers register a rule per node. There are two tiers:
 //!
-//! - **Declarative rules** (tag, attributes, text, content slot) compile to
-//!   [`NodeRule`]/[`MarkRule`] here and render natively, inside the document
+//! - A declarative rule (tag, attributes, text, content slot) compiles to a
+//!   [`NodeRule`] or [`MarkRule`] and renders natively, inside the document
 //!   transaction, at full speed. This covers the tiptap-php `renderHTML`
 //!   shape: markup as data.
-//! - **Callback rules** defer to the caller. Rendering never runs app code
-//!   while the document is locked — the renderer emits [`Segment::Deferred`]
-//!   entries carrying the node's type, attributes (as JSON), and its
-//!   already-rendered children, and the caller fills them in after the
-//!   render returns. (In the Ruby gem, that caller is the app's block, run
-//!   once the transaction has closed and the GVL is held again.)
+//! - A callback rule defers to the caller. The renderer never runs
+//!   application code while the document is locked. It emits
+//!   [`Segment::Deferred`] entries with the node type, the attributes as
+//!   JSON, and the already-rendered children, and the caller fills them in
+//!   after the render returns. In the Ruby gem that caller is the app's
+//!   block, run once the transaction has closed and the GVL is held again.
 //!
-//! Rules arrive as one JSON document (see `parse`), so the same format
-//! serves any binding or caller.
+//! Rules arrive as one JSON document (see `parse`), so one format serves
+//! every binding and caller.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use yrs::{Any, Out, ReadTxn, Xml};
+use yrs::{Any, Number, Out, ReadTxn, Xml};
 
 /// One piece of renderer output. `Html` is finished markup; `Deferred` is a
 /// callback node whose markup the caller supplies after the render, carrying
@@ -216,12 +216,12 @@ pub fn xml_ref_attr<T: ReadTxn, N: Xml>(txn: &T, node: &N, name: &str) -> Option
 pub fn any_attr_string(any: &Any) -> Option<String> {
     match any {
         Any::String(s) => Some(s.to_string()),
-        Any::Number(n) => Some(if n.fract() == 0.0 {
+        Any::Number(Number::Int(n)) => Some(format!("{n}")),
+        Any::Number(Number::Float(n)) => Some(if n.fract() == 0.0 {
             format!("{}", *n as i64)
         } else {
             format!("{n}")
         }),
-        Any::BigInt(n) => Some(format!("{n}")),
         Any::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
         _ => None,
     }
@@ -458,9 +458,40 @@ fn parse_parts(name: &str, parts: &[serde_json::Value]) -> Result<Vec<AttrPart>,
         .collect()
 }
 
+/// The scheme a URL names, lowercased, or `None` for a URL without one (a
+/// path). Browsers ignore whitespace and control characters in a scheme, so
+/// they don't count here either: `java\tscript:` is `javascript`.
+pub fn url_scheme(url: &str) -> Option<String> {
+    let url: String = url
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    let (scheme, _) = url.split_once(':')?;
+    let mut chars = scheme.chars();
+    let starts_with_letter = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
+    let valid = chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'));
+    (starts_with_letter && valid).then(|| scheme.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn url_scheme_reads_a_scheme_as_a_browser_does() {
+        assert_eq!(url_scheme("https://example.com").as_deref(), Some("https"));
+        assert_eq!(
+            url_scheme("JavaScript:alert(1)").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(
+            url_scheme(" java\tscript:alert(1)").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(url_scheme("/docs/a:b"), None);
+        assert_eq!(url_scheme("#top"), None);
+        assert_eq!(url_scheme("example.com"), None);
+    }
 
     #[test]
     fn parses_the_compiled_rule_shape() {

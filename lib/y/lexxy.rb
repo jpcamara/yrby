@@ -2,7 +2,7 @@
 
 module Y
   # The Lexxy renderer: Y::Lexical (core Lexical) plus the Lexxy-specific
-  # schema, applied beneath the app's rules — an app rule for one of these
+  # schema, applied beneath the app's rules: an app rule for one of these
   # types simply replaces it. This is the byte-parity class: the fixture
   # tests hold `Y::Lexxy.new(doc).to_html` identical to a live editor's own
   # serialized value.
@@ -11,6 +11,27 @@ module Y
   # nodes are declarative hashes, nodes with logic are plain methods mapped
   # in NODES.
   class Lexxy < Lexical
+    # Lexxy's list items are its own node type (it leaves a list when you press
+    # Enter on an empty item), so lists written for a Lexxy editor use it.
+    def self.list_item_type
+      "early_escape_listitem"
+    end
+
+    # Lexxy's code block is its own node type, with a syntax-highlight flag.
+    def self.code_attributes(language: "plain")
+      { **super, "__type" => "early_escape_code", "__isSyntaxHighlightSupported" => true }
+    end
+
+    # Lexxy links carry rel="noreferrer".
+    def self.link_attributes(url, title: nil)
+      { **super, "__rel" => "noreferrer" }
+    end
+
+    # Lexxy puts a quote's text inside a paragraph within the quote block.
+    def self.append_quote(doc, runs, root: "root")
+      doc.get_xml_text(root).push_xml_text(quote_attributes, [[PARAGRAPH_ATTRIBUTES, content(runs)]])
+    end
+
     # A cursor-placement placeholder; empty ones export to nothing.
     def self.provisional_paragraph(node)
       node.content.empty? ? "" : "<p>#{node.content}</p>"
@@ -36,14 +57,14 @@ module Y
       %(<th class="lexxy-content__table-cell--header" #{style}>#{node.content}</th>)
     end
 
-    # Attribute order follows Lexxy's export — checked items put aria-checked
+    # Attribute order follows Lexxy's export: checked items put aria-checked
     # before value; items holding a nested list append the
     # lexxy-nested-listitem class after value.
     def self.list_item(node)
       out = +"<li"
       checked = node.attrs["__checked"]
-      out << %( aria-checked="#{checked}") unless checked.nil?
-      out << %( value="#{node.attrs["__value"] || 1}")
+      out << %( aria-checked="#{RenderRules.escape_attr(checked)}") unless checked.nil?
+      out << %( value="#{RenderRules.escape_attr(node.attrs["__value"] || 1)}")
       out << %( class="lexxy-nested-listitem") if node.child_types.include?("list")
       "#{out}>#{node.content}</li>"
     end
@@ -101,6 +122,8 @@ module Y
 
     NODES = {
       # Lexxy's replacement for Lexical's CodeNode.
+      # Lexxy wraps a quote's content in a paragraph.
+      "quote" => { tag: "blockquote", contains: :blocks },
       "early_escape_code" => { tag: "pre", attrs: { "data-language" => :language } },
       "horizontal_divider" => { tag: "hr", void: true },
       "provisonal_paragraph" => method(:provisional_paragraph), # (sic: Lexxy's spelling)
@@ -109,6 +132,8 @@ module Y
       "wrapped_table_node" => { contains: :blocks, render: method(:table) },
       "tablecell" => { contains: :blocks, render: method(:table_cell) },
       "listitem" => { contains: :blocks, render: method(:list_item) },
+      # Lexxy's own list item (it leaves the list on Enter in an empty item).
+      "early_escape_listitem" => { contains: :blocks, render: method(:list_item) },
       "action_text_attachment" => method(:upload),
       "action_text_attachment_upload" => method(:pending_upload),
       "custom_action_text_attachment" => method(:mention)

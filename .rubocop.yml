@@ -7,7 +7,7 @@ AllCops:
   NewCops: enable
   SuggestExtensions: false
   Exclude:
-    # ERB, not Ruby — the migration template interpolates the AR version.
+    # ERB, not Ruby: the migration template interpolates the AR version.
     - "lib/generators/yrby/install/templates/**/*"
     - "lib/generators/yrby/tables/templates/**/*"
     - "lib/generators/yrby_forms/install/templates/**/*"
@@ -57,6 +57,13 @@ Metrics/BlockLength:
 Metrics/ClassLength:
   Exclude:
     - "test/**/*"
+    # The websocket client keeps one socket's life in one place, and the
+    # session holds the protocol it drives.
+    - "lib/y/action_cable/client.rb"
+    - "lib/y/action_cable/client/session.rb"
+    # The collaborator keeps its whole stay, from joining to leaving, in one
+    # place.
+    - "lib/y/collaborator.rb"
 Minitest/MultipleAssertions:
   Enabled: false
 
@@ -69,6 +76,7 @@ Naming/FileName:
   Exclude:
     - "lib/yrby.rb"
     - "lib/yrby-rails.rb"
+    - "lib/yrby-agent.rb"
     - "lib/yrby-decoder.rb"
     - "lib/yrby-forms.rb"
 

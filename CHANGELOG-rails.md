@@ -5,6 +5,187 @@ documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.9.0] - 2026-11-09
+
+Requires yrby 0.9.0 or later.
+
+### Security
+
+- `Y::ActionCable::Sync`'s methods and `Y::DocumentChannel`'s
+  `authorized_document_key` accessors are private. Action Cable treats a
+  channel's public methods as actions a client can call, so a client could call
+  `sync_subscribed` directly and skip the channel's own `subscribed` and
+  `receive`. Channels that call these from `subscribed` and `receive` keep
+  working. Code that calls them on a channel from outside, such as a test, now
+  needs `send`.
+
+### Added
+
+- `bin/rails generate yrby:install` pins `yrby-client`, `yrby-client/element`,
+  `yjs`, and `@rails/actioncable` when the app has `config/importmap.rb`. The
+  gem ships `yrby/yrby-client.js` and `yrby/yjs.js` for those pins, so an
+  import-map app needs no npm packages. Each shared module has one pin, so the
+  page and its editor binding load one copy of yjs. Pins the app already has
+  are left alone.
+- `has_collaborative_document :body, channel: "PostDocumentChannel"` names
+  an app's own `Y::DocumentChannel` subclass for an attribute.
+  `collaborative_document(:body).channel` returns it, so
+  `collaborative_document_tag` and Ruby clients subscribe there without
+  passing `channel:` each time.
+
+## [0.8.0] - 2026-11-03
+
+Requires yrby 0.9.0 or later.
+
+### Experimental
+
+These are new, and they may change in a minor release. See
+[docs/experimental.md](docs/experimental.md).
+
+- `collaborative_document(:body).edit { |doc| ... }` edits a record's
+  document from Ruby. It records the change in the document's rows, encrypted
+  ones included, and broadcasts it to open editors.
+  `Y::ActionCable.broadcast(key, update)` sends an already recorded update.
+
+### Added
+
+- `collaborative_document(name)` answers `grant(expires_in:)` and `channel`:
+  the grant a page or client subscribes with, and the channel that accepts
+  it. A gem with its own grants and channel, such as lexxy-realtime, returns
+  its own document with both.
+
+### Changed
+
+- `collaborative_document_tag` renders the document's grant and channel, so
+  it works for a gem that returns its own document. `channel:` still
+  overrides the channel.
+
+### Deprecated
+
+- `collaborative_sgid(name, expires_in:)`. Use
+  `collaborative_document(name).grant(expires_in:)`. It logs through
+  `Y.deprecator`, which the engine adds to `Rails.application.deprecators`,
+  and goes away in yrby-rails 0.9.
+
+### Fixed
+
+- The channel relays a client's SyncStep2 to peers as a plain update.
+  Relayed as is, a peer that was still joining could take it for the answer
+  to its own handshake and report itself loaded before it had the server's
+  state.
+
+## [0.7.0] - 2026-10-01
+
+### Added
+
+- `Y::DocumentChannel.authorize_document { |record, name| ... }` runs the
+  application's permission check when a client subscribes, on top of the
+  signed grant. The block runs in channel context. If it denies access, the
+  channel rejects that subscription without opening a stream or serving
+  state, and other subscriptions on the connection keep working. Without a
+  block, a valid signed grant is enough.
+
+  The check runs once per subscription, so a permission you revoke
+  mid-session takes effect the next time that client subscribes.
+- `record.collaborative_document(name)` returns a bound
+  `Y::Collaborative::Attribute`, which both application code and the shipped
+  channel use to read and write the document. `y_doc` builds a native
+  `Y::Doc`, and `load_state`, `append`, and `key` all use the same storage
+  class. `key` and `load_state` don't create a row, but the first `append`
+  does. Use `.document_row` for the built-in row operations.
+- `Y::Document.key_for(record, name)` returns the conventional key without
+  creating a document row.
+- `collaborative_sgid(name, expires_in:)` and
+  `collaborative_document_tag(record, name, expires_in:, refresh:)` let you
+  set the grant lifetime, which used to be GlobalID's default with no way to
+  shorten it. `refresh:` is a URL the element fetches when a subscription is
+  rejected. That action re-runs the app's authorization and renders
+  `{ grant: ... }`, and the client resubscribes the same session with the new
+  grant. The client fetches the URL once per rejection and does not poll.
+
+- `Y::DocumentChannel` ships in the gem, so apps don't need to write a
+  channel. Clients subscribe with the signed grant the page rendered
+  (`{ grant:, name: }`). The channel finds the record from the grant, loads
+  the document, and stores changes in `Y::Document`. It rejects grants that
+  are missing, tampered with, for the wrong attribute, or for a destroyed
+  record.
+
+- `collaborative_document_tag(record, name, **options)` is available in
+  Action View through the engine. It renders the mount element with the
+  signed grant, the attribute name, and the channel name as data attributes.
+  Anyone holding the grant can open the document, the same as with a
+  `turbo_stream_from` stream name, so only render the tag on pages where the
+  user is allowed to edit the record.
+
+- Channels get `Y::Document` storage by default. Declare `on_load` and
+  `on_change` if you want a different store. Outside a yrby-rails app there
+  is still no default, and subscribing raises until both hooks are declared.
+
+- `has_collaborative_document :name, encrypted: true` declares which storage
+  class backs an attribute, and `Y::DocumentChannel` uses that class. Every
+  load and append for an encrypted attribute goes through
+  `Y::EncryptedDocument`, so the bytes are ciphertext at rest and the plain
+  classes can't read them. The model decides whether an attribute is
+  encrypted, and a page or client can't change that. Undeclared attributes use
+  plain `Y::Document`.
+
+- `Y::Collaborative` adds signed tokens for record-backed documents, and the
+  engine includes it into ActiveRecord::Base. A page creates a token with
+  `record.collaborative_sgid(:body)`, and the channel finds the record with
+  `Y::Collaborative.locate(params[:grant], :body)`. The token is a signed
+  GlobalID scoped to one attribute, so a token for one field can't open
+  another. This is the standard way to implement `authorized?` for
+  record-backed documents. lexxy-realtime already uses this flow, and now it
+  ships in yrby-rails.
+
+### Changed
+
+- **Breaking:** channels reject every subscription until they define
+  `authorized?(key)`. `sync_subscribed` now calls it before opening a stream
+  or serving state, and the default returns `false`. Add the method to every
+  channel that includes `Y::ActionCable`:
+
+  ```ruby
+  private
+
+  def authorized?(key)
+    current_user&.can_edit?(key)
+  end
+  ```
+
+  Return `true` for public documents. If the default is what rejected a
+  subscription, the log message says so.
+
+- `yrby:install` now creates only the storage migration, since the gem ships
+  `Y::DocumentChannel`. Pass `--channel` to also generate an application
+  channel for custom authorization or room-keyed documents. That channel
+  rejects every subscription until you implement `authorized?`.
+
+### Fixed
+
+- Document elements now attach editors to sessions that exist independently
+  of any editor, so pending edits survive navigation under their original
+  grant and rejected deliveries can still be recovered. Turbo previews are
+  inert, and cached HTML contains no CRDT bytes.
+- When an attribute morphs, the element releases the old editor binding and
+  acquires the new document. It doesn't move pending edits or authorization
+  over to the new document.
+
+- Default storage now supplies the loader and recorder together, and
+  declaring only one custom hook raises before subscribing or acknowledging
+  an update. Previously, reads and writes silently went to different stores.
+
+- Signed grants work even when the host app doesn't load Active Job.
+
+- The `yrby:tables` migration template caps `y_documents.state` at
+  `1.gigabyte - 1` instead of `4.gigabytes - 1`. Postgres raises
+  `ArgumentError` for binary limits above 1 GB - 1, so `db:migrate` on a
+  fresh Postgres app failed. MySQL maps both values to `longblob`, and
+  SQLite ignores limits, so nothing changes there. Apps that already
+  migrated are unaffected.
+
 ## [0.6.1] - 2026-08-11
 
 ### Fixed

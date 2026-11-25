@@ -76,7 +76,7 @@ fn main() {
             verify_sv(&args[2], &args[3])
         }
         "version" => {
-            println!("{}", json!({"runtime": "yrs", "version": "0.27"}));
+            println!("{}", json!({"runtime": "yrs", "version": "0.28"}));
             return;
         }
         _ => {

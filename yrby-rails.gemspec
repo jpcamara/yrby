@@ -24,12 +24,16 @@ Gem::Specification.new do |spec|
     "lib/yrby/**/*.rb",
     "lib/y/action_cable.rb",
     "lib/y/action_cable/**/*.rb",
+    "lib/y/collaborative.rb",
+    "lib/y/collaborative/**/*.rb",
     "app/**/*.rb",
+    "app/assets/javascript/**/*",
     "lib/generators/**/*",
     "LICENSE",
     "README.md",
     "CHANGELOG-rails.md"
-  ] - Dir["lib/yrby/forms/**/*", "lib/generators/yrby_forms{,/**/*}"]
+  ] - Dir["lib/yrby/agent/**/*", "lib/y/action_cable/client.rb", "lib/y/action_cable/client/**/*",
+          "lib/yrby/forms/**/*", "lib/generators/yrby_forms{,/**/*}"]
   spec.require_paths = ["lib"]
 
   spec.metadata["source_code_uri"] = spec.homepage
@@ -40,14 +44,18 @@ Gem::Specification.new do |spec|
   spec.add_dependency "activerecord", ">= 7.1"
   spec.add_dependency "base64", "~> 0.2"
   spec.add_dependency "railties", ">= 7.1"
-  # 0.7.0's handle_sync_message serves full state, pending included; the
-  # channel's serve path and the store contract both depend on it.
-  spec.add_dependency "yrby", ">= 0.7.0"
+  # Attribute#edit writes through Doc#edit, new in 0.9.0.
+  spec.add_dependency "yrby", ">= 0.9.0"
   # The concern calls ActionCable.server directly, and railties doesn't
   # depend on actioncable, so declare it. activesupport comes along with
   # activerecord either way; listed because the gem uses it directly.
   spec.add_dependency "actioncable", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
+  # Y::Collaborative signs its tokens with globalid. Rails apps get it through
+  # activejob, but activerecord alone doesn't depend on it.
+  spec.add_dependency "globalid", ">= 1.0"
+  # collaborative_document_tag uses Action View's tag builder.
+  spec.add_dependency "actionview", ">= 7.1"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"

@@ -3,4 +3,5 @@
 # Entry point matching the gem name, so `Bundler.require` loads it automatically.
 require "yrby/rails/version"
 require "y/action_cable"
+require "y/collaborative"
 require "yrby/engine" if defined?(Rails::Engine)

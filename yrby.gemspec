@@ -29,10 +29,10 @@ Gem::Specification.new do |spec|
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
-  ] - Dir["lib/yrby-rails.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*",
-          "lib/yrby/**/*", "app/**/*",
-          "lib/yrby-forms.rb", "lib/y/forms.rb", "lib/y/forms/**/*",
-          "lib/generators/yrby_forms/**/*"]
+  ] - Dir["lib/yrby-rails.rb", "lib/y/action_cable.rb", "lib/y/action_cable/**/*", "lib/y/collaborator.rb", "lib/y/collaborator/**/*",
+          "lib/yrby-agent.rb", "lib/y/agent.rb", "lib/y/agent/**/*",
+          "lib/yrby-forms.rb", "lib/y/forms.rb", "lib/y/forms/**/*", "lib/generators/yrby_forms/**/*",
+          "lib/yrby/**/*", "app/**/*"]
 
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/yrby/extconf.rb"]

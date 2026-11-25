@@ -1,48 +1,61 @@
-//! Native HTML rendering of Lexical documents from the yrs collab structure —
-//! no Node process, no headless editor.
+//! HTML for Lexical documents, rendered from the Yjs structure the editor
+//! syncs. No Node process and no headless editor. A server that holds the
+//! document bytes produces the markup itself.
 //!
-//! This renders **core Lexical**: paragraphs, headings, quotes, code, lists
-//! and list items, tables, horizontal rules, links, and the whole text-format
-//! model. Everything Lexxy-specific — its own node types (attachments,
+//! This renders core Lexical: paragraphs, headings, quotes, code blocks,
+//! lists and list items, tables, horizontal rules, links, and the whole
+//! text-format model. Lexxy's additions live in the Ruby layer, as the
+//! `Y::Lexxy` renderer's rule set: its own node types (attachments,
 //! galleries, `early_escape_code`, `horizontal_divider`) and its decorations
-//! of core nodes (the table figure wrapper, header-cell styling, the
-//! nested-list-item class) — lives in the Ruby layer as the `Y::Lexxy`
-//! renderer's rule set, built on the same extension API apps use
-//! (`Y::Lexical` is the core base class). The Lexxy byte-parity guarantee is
-//! held there: the Ruby fixture tests and the live headless-Chrome e2e pin
-//! `Y::Lexxy#to_html` against a real editor's own serialized value. The
-//! native tests pin core output as regression goldens (stock Lexical has no
-//! canonical serializer to capture against).
+//! of core nodes (the figure around a table, header-cell styling, the
+//! nested-list-item class). That rule set uses the same extension API
+//! applications use. `Y::Lexical` is the core base class. The byte-parity
+//! guarantee is held there too: the Ruby fixture tests and the
+//! headless-Chrome end-to-end run pin `Y::Lexxy#to_html` against a real
+//! editor's serialized value. The tests in this crate pin core output as
+//! regression goldens. Stock Lexical has no canonical serializer to capture
+//! from.
 //!
-//! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in pure
-//! PHP — a schema-pinned renderer outside the JS runtime. This works from the
-//! collab (Yjs) structure rather than JSON.
+//! Prior art: `ueberdosis/tiptap-php` renders ProseMirror JSON to HTML in
+//! plain PHP, outside any JavaScript runtime. This crate does the same job
+//! from the collaborative (Yjs) structure.
 //!
-//! Storage model (verified against bytes captured from a live editor):
-//! - Blocks are `Y.XmlText` with a `__type` attribute (`paragraph`, `heading`
-//!   (+`__tag`), `quote`, `code` (+`__language`), `list`/`listitem`,
-//!   `table`/`tablerow`/`tablecell`, `link`/`autolink` (inline)).
-//! - Text runs are preceded by an embedded `Y.Map` carrying per-run metadata
-//!   (`__type: "text" | "code-highlight" | "tab"`, `__format` bitmask).
-//! - `linebreak` is a bare metadata map; `tab` is a map followed by a "\t" run.
-//! - Decorator nodes are `Y.XmlElement`s with their fields as plain
-//!   attributes (`horizontalrule` here; app/Lexxy decorators via rules).
+//! How Lexical stores a document, checked against bytes captured from a live
+//! editor:
 //!
-//! Text-format rendering follows the export pipeline Lexxy runs (Lexical's
-//! `$generateHtmlFromNodes` + sanitize), which is the only externally
-//! pinnable truth for formatting: inner tag `strong` (bold) / `em` (italic,
-//! when not bold); outer tag `code` / `mark` / `sub` / `sup`; an `<i>` wrap
-//! only when bold+italic combine (the `em` slot is taken); `<s>` / `<u>`
-//! wraps always; `<span>`s are unwrapped, so unformatted text is bare. A
-//! run's `__style` (highlight colors) survives on the createDOM tag,
-//! filtered to color/background-color; on a plain or s/u-only run it dies
-//! with the unwrapped span. Case-transform format bits are never rendered
-//! (their text-transform style is outside the sanitize whitelist).
+//! - Blocks are `Y.XmlText` with a `__type` attribute: `paragraph`,
+//!   `heading` (plus `__tag`), `quote`, `code` (plus `__language`), `list`
+//!   and `listitem`, `table`, `tablerow` and `tablecell`, and the inline
+//!   `link` and `autolink`.
+//! - Each text run is preceded by an embedded `Y.Map` with its metadata: a
+//!   `__type` of `text`, `code-highlight`, or `tab`, and a `__format`
+//!   bitmask.
+//! - A `linebreak` is a bare metadata map. A `tab` is a map followed by a
+//!   `"\t"` run.
+//! - Decorator nodes are `Y.XmlElement`s whose fields are plain attributes.
+//!   `horizontalrule` is handled here. Application and Lexxy decorators come
+//!   in through rules.
 //!
-//! Custom nodes: rules are registered by `__type` (see `yjs-html-core`) and
-//! consulted before the built-in arms, so they extend the schema or override
-//! a built-in. Declarative rules render here; callback rules emit
-//! `Segment::Deferred` for the caller to fill in after the render.
+//! Text formatting follows the export pipeline Lexxy runs: Lexical's
+//! `$generateHtmlFromNodes`, then sanitize. That output is the only
+//! formatting truth that can be pinned from outside. The inner tag is
+//! `strong` for bold, or `em` for italic without bold. The outer tag is
+//! `code`, `mark`, `sub`, or `sup`. An `<i>` wraps only when bold and italic
+//! combine, because the `em` slot is taken. `<s>` and `<u>` wrap whenever
+//! present. `<span>`s are unwrapped, so unformatted text is bare. A run's
+//! `__style` (highlight colors) survives on the createDOM tag, filtered to
+//! color and background-color. On a plain run, or one with only strike or
+//! underline, it goes away with the span. The case-transform format bits
+//! never render; their text-transform style is outside the sanitize
+//! whitelist.
+//!
+//! A node type with no rule still renders its text and child blocks, just
+//! unwrapped.
+//!
+//! Custom nodes register rules by `__type` (see `yjs-html-core`). A rule is
+//! consulted before the built-in arms, so it can extend the schema or
+//! replace a built-in. Declarative rules render here. Callback rules emit
+//! `Segment::Deferred` for the caller to fill in after the render returns.
 
 // README examples are living code: compile-checked on every cargo test.
 #[cfg(doctest)]
@@ -54,8 +67,8 @@ mod readme_examples {}
 pub use yjs_html_core::*;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, GetString, Map, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
-    XmlOut, XmlTextRef,
+    Any, GetString, Map, Number, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment,
+    XmlFragmentRef, XmlOut, XmlTextRef,
 };
 
 // Lexical text format bitmask (lexical 0.44).
@@ -378,13 +391,11 @@ fn open_block<T: ReadTxn>(
             push_block_children(txn, t, depth, "</tr>", false, stack);
         }
         "tablecell" => {
-            let header = matches!(
-                t.get_attribute(txn, "__headerState"),
-                Some(Out::Any(Any::Number(n))) if n > 0.0
-            ) || matches!(
-                t.get_attribute(txn, "__headerState"),
-                Some(Out::Any(Any::BigInt(n))) if n > 0
-            );
+            let header = match t.get_attribute(txn, "__headerState") {
+                Some(Out::Any(Any::Number(Number::Int(n)))) => n > 0,
+                Some(Out::Any(Any::Number(Number::Float(n)))) => n > 0.0,
+                _ => false,
+            };
             let close = if header {
                 em.push_str("<th>");
                 "</th>"
@@ -549,8 +560,8 @@ fn open_listitem<T: ReadTxn>(
     rules: &Rules,
 ) {
     let value = match t.get_attribute(txn, "__value") {
-        Some(Out::Any(Any::Number(n))) => n as i64,
-        Some(Out::Any(Any::BigInt(n))) => n,
+        Some(Out::Any(Any::Number(Number::Int(n)))) => n,
+        Some(Out::Any(Any::Number(Number::Float(n)))) => n as i64,
         _ => 1,
     };
     let checked = match t.get_attribute(txn, "__checked") {
@@ -656,8 +667,8 @@ fn render_inline<T: ReadTxn>(
                     _ => {
                         is_tab = false;
                         format = match m.get(txn, "__format") {
-                            Some(Out::Any(Any::Number(n))) => n as u32,
-                            Some(Out::Any(Any::BigInt(n))) => n as u32,
+                            Some(Out::Any(Any::Number(Number::Int(n)))) => n as u32,
+                            Some(Out::Any(Any::Number(Number::Float(n)))) => n as u32,
                             _ => 0,
                         };
                         style = match m.get(txn, "__style") {
@@ -684,8 +695,15 @@ fn render_inline<T: ReadTxn>(
                         None => render_link(txn, &child, depth, em, rules),
                     }
                 } else if ruled_inline && !is_builtin(&ty) {
-                    if let Some(rule) = rules.nodes.get(ty.as_str()) {
-                        render_rule_inline(txn, &child, &ty, rule, depth, em, rules);
+                    match rules.nodes.get(ty.as_str()) {
+                        Some(rule) => render_rule_inline(txn, &child, &ty, rule, depth, em, rules),
+                        // An unknown inline wrapper, such as a mark with no
+                        // rule, renders its text without the wrapper, the same
+                        // way unknown blocks do. Its text is kept.
+                        None if depth < MAX_INLINE_DEPTH => {
+                            render_inline(txn, &child, depth + 1, ruled_inline, em, rules);
+                        }
+                        None => {}
                     }
                 }
                 // Nested blocks are rendered by their parent block's renderer.
@@ -776,13 +794,24 @@ fn lexxy_style(style: &str) -> Option<String> {
     if css.is_empty() { None } else { Some(css) }
 }
 
+/// The schemes a link may use, and what an editor shows for any other, as
+/// Lexical's `LinkNode` does: a `javascript:` link would run in the page.
+const LINK_SCHEMES: [&str; 5] = ["http", "https", "mailto", "sms", "tel"];
+
+fn safe_href(url: String) -> String {
+    match url_scheme(&url) {
+        Some(scheme) if !LINK_SCHEMES.contains(&scheme.as_str()) => "about:blank".to_string(),
+        _ => url,
+    }
+}
+
 /// `link` / `autolink`: Lexxy's sanitize keeps only `href` and `title`
 /// (`target`/`rel` are stored in the doc but stripped from exported HTML).
 fn render_link<T: ReadTxn>(txn: &T, t: &XmlTextRef, depth: usize, em: &mut Emitter, rules: &Rules) {
     em.push_str("<a");
     if let Some(url) = str_attr(txn, t, "__url") {
         em.push_str(" href=\"");
-        em.push_str(&escape_attr(&url));
+        em.push_str(&escape_attr(&safe_href(url)));
         em.push('"');
     }
     if let Some(title) = str_attr(txn, t, "__title").filter(|s| !s.is_empty()) {
@@ -943,21 +972,39 @@ fn elem_type<T: ReadTxn>(txn: &T, e: &XmlElementRef) -> String {
 }
 
 /// Text-content escaping, matching what the browser's serializer emits:
-/// `&`, `<`, `>` escaped; quotes left alone in text.
-fn escape_text(s: &str) -> String {
+/// `&`, `<`, `>` escaped; quotes left alone in text. Public for splice
+/// callers. Values read from a deferred segment's attributes come from
+/// collaborators, so escape anything you put into markup.
+pub fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
-/// Attribute-value escaping: text escaping plus `"`.
-fn escape_attr(s: &str) -> String {
+/// Attribute-value escaping: text escaping plus `"`. Public for splice
+/// callers, for document values interpolated into attribute positions.
+pub fn escape_attr(s: &str) -> String {
     escape_text(s).replace('"', "&quot;")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_to_an_unsafe_scheme_goes_nowhere() {
+        assert_eq!(
+            safe_href("https://example.com".into()),
+            "https://example.com"
+        );
+        assert_eq!(safe_href("/docs".into()), "/docs");
+        assert_eq!(
+            safe_href("mailto:a@example.com".into()),
+            "mailto:a@example.com"
+        );
+        assert_eq!(safe_href("javascript:alert(1)".into()), "about:blank");
+        assert_eq!(safe_href(" JAVA\tSCRIPT:alert(1)".into()), "about:blank");
+    }
     use yrs::updates::decoder::Decode;
     use yrs::{Doc, Transact, Update};
 
@@ -1125,6 +1172,34 @@ mod tests {
         let html = render(&txn, &frag).unwrap();
         assert_eq!(html, expected.trim_end());
         assert!(html.contains("<p>Before gallery</p>"));
+    }
+
+    /// An unknown inline wrapper never drops its text. The fixture is a
+    /// real capture: two collaborating editors typed "Collab #ruby rocks
+    /// and #peer too", the word "rocks" wrapped in @lexical/mark's
+    /// MarkNode and the hashtags as @lexical/hashtag TextNode runs. With
+    /// no rules, the mark's wrapper is lost but "rocks" survives, and
+    /// hashtags render as their text.
+    #[test]
+    fn unknown_inline_wrappers_keep_their_text() {
+        let bytes = include_bytes!("fixtures/mark_hashtag.bin");
+        let doc = Doc::new();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(bytes).unwrap())
+            .unwrap();
+        let txn = doc.transact();
+        let frag = txn.get_xml_fragment("root").unwrap();
+        let html = render(&txn, &frag).unwrap();
+
+        assert!(
+            html.contains("rocks"),
+            "marked text survives without a rule: {html}"
+        );
+        assert!(
+            !html.contains("<mark"),
+            "no wrapper is invented for it: {html}"
+        );
+        assert!(html.contains("#ruby"), "hashtag text survives: {html}");
     }
 
     #[test]

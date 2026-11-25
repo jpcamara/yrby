@@ -1,40 +1,45 @@
-//! Native HTML rendering of ProseMirror/Tiptap documents from the yrs collab
-//! structure — no Node process, no headless editor.
+//! HTML for ProseMirror and Tiptap documents, rendered from the Yjs
+//! structure the editor syncs. No Node process and no headless editor.
 //!
-//! The y-prosemirror binding stores a document in a Y.XmlFragment: block nodes
-//! are Y.XmlElement (the tag is the node type, its attributes are the node
-//! attrs), and text is Y.XmlText whose per-run formatting attributes are the
-//! marks. Node and mark names come from the editor's schema, so this accepts
-//! both spellings in use: Tiptap's camelCase (`bulletList`, `bold`) and the
-//! prosemirror-schema-basic snake_case (`bullet_list`, `strong`).
+//! The y-prosemirror binding stores a document in a `Y.XmlFragment`. Block
+//! nodes are `Y.XmlElement`s: the tag is the node type and the attributes
+//! are the node attrs. Text is `Y.XmlText`, and each run's formatting
+//! attributes are its marks. Node and mark names come from the editor's
+//! schema, so both spellings are accepted: Tiptap's camelCase (`bulletList`,
+//! `bold`) and prosemirror-schema-basic's snake_case (`bullet_list`,
+//! `strong`).
 //!
-//! This renders **core ProseMirror**: the prosemirror-schema-basic node set
-//! plus the prosemirror-tables family — paragraphs, headings, blockquotes,
-//! code blocks, bullet/ordered lists, images, hard breaks, horizontal rules,
-//! and tables (semantic `<table><tbody>…`, without the `<colgroup>`/
-//! `min-width` styling editor views inject). Tiptap's extension nodes — task
-//! lists, mentions, the details family — live in the Ruby layer as the
-//! `Y::Tiptap` renderer's rule set, built on the same extension API apps use
-//! (`Y::ProseMirror` is the core base class). Output follows
-//! `ueberdosis/tiptap-php`, and with `Y::Tiptap`'s rules it matches Tiptap's
-//! own `getHTML()` byte for byte on the captured fixtures — that guarantee
-//! is held at the Ruby layer; the native tests pin core output as goldens
-//! where a fixture contains Tiptap-only nodes.
+//! This renders core ProseMirror: the prosemirror-schema-basic node set plus
+//! the prosemirror-tables family. That is paragraphs, headings, blockquotes,
+//! code blocks, bullet and ordered lists, images, hard breaks, horizontal
+//! rules, and tables as semantic `<table><tbody>…`, without the
+//! `<colgroup>` and `min-width` styling an editor view injects. Tiptap's
+//! extension nodes (task lists, mentions, the details family) live in the
+//! Ruby layer as the `Y::Tiptap` renderer's rule set, built on the same
+//! extension API applications use. `Y::ProseMirror` is the core base class.
+//! The output follows `ueberdosis/tiptap-php`. With `Y::Tiptap`'s rules it
+//! matches Tiptap's own `getHTML()` byte for byte on the captured fixtures.
+//! That guarantee is held at the Ruby layer. Where a fixture contains
+//! Tiptap-only nodes, the tests here pin core output as goldens.
 //!
-//! Marks stay native on purpose: mark serialization is text-run machinery
-//! (nesting order, textStyle's CSS, code's exclusivity), which the rule
-//! system can't express. The built-in set covers schema-basic's marks and
-//! Tiptap's — nesting outermost-first: link, a textStyle span, bold, italic,
-//! strike, underline, highlight, then subscript/superscript. `code` excludes
-//! the other formatting marks, so a code run is `<code>` alone — though a
+//! Marks stay native on purpose. Mark serialization is text-run machinery
+//! (nesting order, textStyle's CSS, code's exclusivity) that the rule system
+//! cannot express. The built-in set covers schema-basic's marks and
+//! Tiptap's, nested outermost-first: link, a textStyle span, bold, italic,
+//! strike, underline, highlight, then subscript and superscript. `code`
+//! excludes the other formatting marks, so a code run is `<code>` alone. A
 //! link still wraps it (see `render_run`).
 //!
-//! Custom nodes and marks: apps register rules by node type and mark name
-//! (see `render_rules`). A node rule is consulted before the built-in arms, so
-//! it can extend the schema or override a built-in; a mark rule claims its
-//! mark from the built-in wraps and wraps outside everything, link included.
-//! Declarative rules render here; callback rules emit `Segment::Deferred` for
-//! the caller to fill in after the render.
+//! A node type with no rule still renders its text and child blocks, just
+//! unwrapped.
+//!
+//! Applications register custom nodes and marks as rules keyed by node type
+//! and mark name (see `render_rules`). A node rule is consulted before the
+//! built-in arms, so it can extend the schema or replace a built-in. A mark
+//! rule claims its mark from the built-in wraps and wraps outside
+//! everything, link included. Declarative rules render here. Callback rules
+//! emit `Segment::Deferred` for the caller to fill in after the render
+//! returns.
 
 // README examples are living code: compile-checked on every cargo test.
 #[cfg(doctest)]
@@ -47,8 +52,8 @@ pub use yjs_html_core::*;
 use yrs::types::Attrs;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, GetString, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut,
-    XmlTextRef,
+    Any, GetString, Number, Out, ReadTxn, Text, Xml, XmlElementRef, XmlFragment, XmlFragmentRef,
+    XmlOut, XmlTextRef,
 };
 
 // The block tree is walked on a heap stack, so depth can't overflow the
@@ -802,16 +807,25 @@ fn hex_to_rgb(value: &str) -> Option<String> {
     Some(format!("rgb({r}, {g}, {b})"))
 }
 
+/// The schemes a link may use, as Tiptap's link mark allows them. It
+/// renders a link with any other scheme with an empty `href`, since a
+/// `javascript:` link would run in the page.
+const LINK_SCHEMES: [&str; 10] = [
+    "http", "https", "ftp", "ftps", "mailto", "tel", "callto", "sms", "cid", "xmpp",
+];
+
 /// `<a>` with Tiptap's attribute order (target, rel, class, href, title),
 /// skipping any that are absent or null.
 fn link_open(link: &std::collections::HashMap<String, Any>) -> String {
     let mut out = String::from("<a");
     for key in ["target", "rel", "class", "href", "title"] {
         if let Some(Any::String(v)) = link.get(key) {
+            let unsafe_href = key == "href"
+                && url_scheme(v).is_some_and(|scheme| !LINK_SCHEMES.contains(&scheme.as_str()));
             out.push(' ');
             out.push_str(key);
             out.push_str("=\"");
-            out.push_str(&escape_attr(v));
+            out.push_str(&escape_attr(if unsafe_href { "" } else { v }));
             out.push('"');
         }
     }
@@ -869,27 +883,47 @@ fn str_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<String
 
 fn num_attr<T: ReadTxn>(txn: &T, e: &XmlElementRef, name: &str) -> Option<i64> {
     match e.get_attribute(txn, name) {
-        Some(Out::Any(Any::Number(n))) => Some(n as i64),
-        Some(Out::Any(Any::BigInt(n))) => Some(n),
+        Some(Out::Any(Any::Number(Number::Int(n)))) => Some(n),
+        Some(Out::Any(Any::Number(Number::Float(n)))) => Some(n as i64),
         _ => None,
     }
 }
 
 /// Text-content escaping, matching the browser serializer: `&`, `<`, `>`.
-fn escape_text(s: &str) -> String {
+/// Public for splice callers. Values read from a deferred segment's
+/// attributes come from collaborators, so escape anything you put into
+/// markup.
+pub fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
-/// Attribute-value escaping: text escaping plus `"`.
-fn escape_attr(s: &str) -> String {
+/// Attribute-value escaping: text escaping plus `"`. Public for splice
+/// callers, for document values interpolated into attribute positions.
+pub fn escape_attr(s: &str) -> String {
     escape_text(s).replace('"', "&quot;")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_to_an_unsafe_scheme_has_an_empty_href() {
+        let link = |href: &str| {
+            link_open(&std::collections::HashMap::from([(
+                "href".to_string(),
+                Any::from(href),
+            )]))
+        };
+        assert_eq!(
+            link("https://example.com"),
+            r#"<a href="https://example.com">"#
+        );
+        assert_eq!(link("ftp://example.com"), r#"<a href="ftp://example.com">"#);
+        assert_eq!(link("javascript:alert(1)"), r#"<a href="">"#);
+    }
     use std::collections::HashMap;
     use std::sync::Arc;
     use yrs::updates::decoder::Decode;
