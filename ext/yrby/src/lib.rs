@@ -264,6 +264,20 @@ impl RbDoc {
         })
     }
 
+    /// A `Y.Text` root as a Yjs delta in a JSON array string: the runs of
+    /// text with their formatting attributes, and the embeds. What
+    /// `ytext.toDelta()` gives in JavaScript. `read_text` gives the
+    /// characters alone. Callers parse the JSON. The serialization lives in
+    /// `read::text_delta_json` (pure, Rust-tested).
+    fn read_text_delta(&self, name: String) -> Result<Option<String>, Error> {
+        let doc = &self.0;
+        nogvl(move || {
+            let txn = doc.transact();
+            let text = txn.get_text(name.as_str())?;
+            Some(read::text_delta_json(&txn, &text))
+        })
+    }
+
     /// Text of an XML-shaped root, one top-level block per line. The walk +
     /// block-join logic lives in `read::xml_blocks_text` (pure, Rust-tested);
     /// this just opens the transaction and resolves the root.
@@ -1218,6 +1232,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     doc_class.define_private_method("native_keep_unsent", method!(RbDoc::keep_unsent, 1))?;
     doc_class.define_method("root_names", method!(RbDoc::root_names, 0))?;
     doc_class.define_method("read_text", method!(RbDoc::read_text, 1))?;
+    doc_class.define_method("read_text_delta", method!(RbDoc::read_text_delta, 1))?;
     doc_class.define_method("read_xml", method!(RbDoc::read_xml, 1))?;
     doc_class.define_method("read_map", method!(RbDoc::read_map, 1))?;
     doc_class.define_method("read_array", method!(RbDoc::read_array, 1))?;

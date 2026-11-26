@@ -23,6 +23,7 @@ require_relative "y/map"
 require_relative "y/array"
 require_relative "y/doc"
 require_relative "y/tiptap"
+require_relative "y/trix"
 require_relative "y/decoder"
 
 module Y

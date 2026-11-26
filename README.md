@@ -268,6 +268,7 @@ doc.read_text("prosemirror")  # => plain text of a Y.Text root, or nil
 doc.read_xml("root")          # => text of an XML root, one block per line
 doc.read_map("state")         # => a Y.Map root as a JSON string; JSON.parse it
 doc.read_array("cards")       # => a Y.Array root as a JSON string; JSON.parse it
+doc.read_text_delta("body")   # => a Y.Text root with its formatting, as a JSON string (Yjs's toDelta)
 ```
 
 ### Pending structs and gap-free state
@@ -364,6 +365,34 @@ types replaces the built-in one.
 
 In both renderers, an unknown node still renders its text and nested blocks as
 readable markup.
+
+#### `Y::Trix`
+
+```ruby
+Y::Trix.new(doc).to_html           # the root named "trix"
+Y::Trix.new(doc).to_html("body")   # another root
+```
+
+Renders a [Trix](https://trix-editor.org) document shared with the
+[y-trix](https://github.com/jpcamara/y-trix) binding to the HTML Trix itself
+saves, which is what Action Text stores. y-trix keeps the whole document in
+one `Y.Text`: the text carries Trix's attributes (bold, italic, strike,
+href), an attachment is an embed, and each block ends in a line break whose
+attributes name the block (heading, quote, code, list item, and how they
+nest). `Y::Trix` reads that with `Doc#read_text_delta` and is plain Ruby.
+
+The output is checked against a few hundred documents captured from real
+Trix editors, attachments and nested lists included
+(`test/fixtures/trix.json`).
+
+Nothing in the document is trusted. Text is escaped, only the attributes
+Trix knows are read, and links and images keep only URLs a browser would not
+run. A content attachment (a mention, an embed card) stores HTML of its own,
+and that is left out unless you say how to make it safe:
+
+```ruby
+Y::Trix.new(doc, content: ->(html) { sanitize(html) }).to_html
+```
 
 #### Custom nodes and marks
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "json"
 require_relative "fixtures/yjs_fixtures"
 
 class DocTest < Minitest::Test
@@ -184,5 +185,35 @@ class DocTest < Minitest::Test
     # Both should now have the Y.js content
     assert_equal YjsFixtures::TextHelloWorld::STATE_VECTOR, doc2.encode_state_vector
     assert_equal doc1.encode_state_vector, doc2.encode_state_vector
+  end
+
+  # ---- read_text_delta: a Y.Text with its formatting ---------------------------
+
+  def test_read_text_delta_of_plain_text_is_one_run
+    doc = Y::Doc.new
+    doc.get_text("t").insert(0, "plain")
+
+    assert_equal [{ "insert" => "plain" }], JSON.parse(doc.read_text_delta("t"))
+  end
+
+  def test_read_text_delta_reads_what_a_yjs_client_wrote
+    fixture = JSON.parse(File.read(File.expand_path("fixtures/trix.json", __dir__))).find { |f| f["name"] == "links" }
+    doc = Y::Doc.new
+    doc.apply_update(fixture["update"].unpack1("m"))
+    delta = JSON.parse(doc.read_text_delta("trix"))
+
+    assert_equal "link", delta[0]["insert"]
+    assert_equal({ "href" => "https://example.com/a?b=1&c=2" }, delta[0]["attributes"])
+    assert_equal({ "blockBreak" => true }, delta.last["attributes"])
+    assert_equal doc.read_text("trix"), delta.map { |op| op["insert"] }.join
+  end
+
+  def test_read_text_delta_is_nil_for_a_missing_root_and_empty_for_an_empty_text
+    doc = Y::Doc.new
+
+    assert_nil doc.read_text_delta("nope")
+    doc.get_text("t")
+
+    assert_equal "[]", doc.read_text_delta("t")
   end
 end

@@ -6,6 +6,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Y::Doc#read_text_delta(name)` reads a `Y.Text` root with its formatting:
+  the runs of text with their attributes, and the embeds, as a JSON array
+  string. It is what `ytext.toDelta()` returns in JavaScript. `read_text`
+  gives the characters alone, which is not enough for an editor that keeps
+  rich text in a plain `Y.Text` (Quill, or Trix through y-trix).
+
+- `Y::Trix` renders a Trix document shared with the
+  [y-trix](https://github.com/jpcamara/y-trix) binding to the HTML Trix
+  saves: `Y::Trix.new(doc).to_html`. Blocks and how they nest, text
+  attributes, links, line breaks, Trix's handling of spaces, right to left
+  text and attachments come out as Trix writes them, checked against
+  documents captured from real editors. Content from the document is
+  escaped and filtered, and the HTML of a content attachment is left out
+  unless `content:` says how to make it safe.
+
 ## [0.9.1] - 2026-11-08
 
 ### Changed
