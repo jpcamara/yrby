@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, Array, ArrayRef, GetString, Map, MapRef, Out, ReadTxn, Text, Xml, XmlFragment,
+    Any, Array, ArrayRef, GetString, Map, MapRef, Out, ReadTxn, Text, TextRef, Xml, XmlFragment,
     XmlFragmentRef, XmlOut, XmlTextRef,
 };
 
@@ -183,6 +183,34 @@ pub fn array_json<T: ReadTxn>(txn: &T, array: &ArrayRef) -> String {
     any_to_json(&Any::Array(items.into()))
 }
 
+/// A `Y.Text` as a Yjs delta, in a JSON array string: what `ytext.toDelta()`
+/// returns in JavaScript. Each element is `{"insert": ...}` with the run's
+/// formatting under `"attributes"` when it has any. A string run inserts a
+/// string; an embed inserts its value (an object, usually).
+///
+/// `read_text` gives the characters alone. An editor that keeps rich text in a
+/// plain `Y.Text` (Quill, Trix through y-trix) puts everything else in the
+/// attributes: bold, links, and what kind of block a line break ends. This is
+/// how a server reads those. Object keys are sorted, as in `map_json`.
+pub fn text_delta_json<T: ReadTxn>(txn: &T, text: &TextRef) -> String {
+    let mut ops: Vec<Any> = Vec::new();
+    for d in text.diff(txn, YChange::identity) {
+        let mut op: HashMap<String, Any> = HashMap::new();
+        op.insert("insert".to_string(), out_to_any(txn, &d.insert));
+        if let Some(attrs) = d.attributes {
+            if !attrs.is_empty() {
+                let hm: HashMap<String, Any> = attrs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect();
+                op.insert("attributes".to_string(), Any::Map(Arc::new(hm)));
+            }
+        }
+        ops.push(Any::Map(Arc::new(op)));
+    }
+    any_to_json(&Any::Array(ops.into()))
+}
+
 /// JSON-serialize an `Any` with object keys sorted at every depth. yrs's own
 /// `Any::to_json` iterates `Any::Map` (a `HashMap`) in arbitrary order, so a
 /// nested map would serialize unpredictably and differ run to run; sorting here
@@ -310,6 +338,53 @@ mod tests {
         let frag = doc.get_or_insert_xml_fragment("empty");
         let txn = doc.transact();
         assert_eq!(xml_blocks_text(&txn, &frag), "");
+    }
+
+    #[test]
+    fn text_delta_json_gives_runs_with_their_attributes_and_embeds() {
+        use yrs::types::Attrs;
+        let doc = Doc::new();
+        let text = doc.get_or_insert_text("t");
+        {
+            let mut txn = doc.transact_mut();
+            let embed: HashMap<String, Any> =
+                HashMap::from([("src".to_string(), Any::from("a.png"))]);
+            text.insert_embed(&mut txn, 0, Any::Map(Arc::new(embed)));
+            text.insert(&mut txn, 1, "plain ");
+            let bold: Attrs = HashMap::from([(Arc::from("bold"), Any::Bool(true))]);
+            text.insert_with_attributes(&mut txn, 7, "bold", bold);
+            let link: Attrs = HashMap::from([
+                (Arc::from("href"), Any::from("https://example.com/")),
+                (Arc::from("bold"), Any::Bool(true)),
+            ]);
+            text.insert_with_attributes(&mut txn, 11, "link", link);
+            let block: Attrs = HashMap::from([
+                (Arc::from("blockBreak"), Any::Bool(true)),
+                (
+                    Arc::from("block"),
+                    Any::Array(Arc::from(vec![Any::from("quote")])),
+                ),
+            ]);
+            text.insert_with_attributes(&mut txn, 15, "\n", block);
+        }
+        let txn = doc.transact();
+        assert_eq!(
+            text_delta_json(&txn, &text),
+            concat!(
+                r#"[{"insert":{"src":"a.png"}},"#,
+                r#"{"insert":"plain "},"#,
+                r#"{"attributes":{"bold":true},"insert":"bold"},"#,
+                r#"{"attributes":{"bold":true,"href":"https://example.com/"},"insert":"link"},"#,
+                r#"{"attributes":{"block":["quote"],"blockBreak":true},"insert":"\n"}]"#
+            )
+        );
+    }
+
+    #[test]
+    fn text_delta_json_of_an_empty_text_is_an_empty_array() {
+        let doc = Doc::new();
+        let text = doc.get_or_insert_text("t");
+        assert_eq!(text_delta_json(&doc.transact(), &text), "[]");
     }
 
     #[test]

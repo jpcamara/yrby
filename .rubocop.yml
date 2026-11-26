@@ -55,6 +55,8 @@ Metrics/BlockLength:
     - "Rakefile" # rake task blocks (e.g. release:steps) are legitimately long
 Metrics/ClassLength:
   Exclude:
+    # One editor's whole rendering, kept together like Trix's own views.
+    - "lib/y/trix.rb"
     - "test/**/*"
     # The websocket client keeps one socket's life in one place, and the
     # session holds the protocol it drives.
