@@ -1,6 +1,6 @@
 {
   "name": "yrby-forms",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "description": "Collaborative form fields over yrby. The <collaborative-field> custom element binds a plain form control to the document of the <yrby-document> around it. Selects, checkboxes, numbers, and dates are last-write-wins map entries, and text fields merge concurrent typing through Y.Text. A field shows who else has it focused. The yrby-forms Rails gem's form helpers render the elements.",
   "type": "module",
   "main": "./dist/cjs/index.js",
