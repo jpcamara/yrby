@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { Window } from "happy-dom";
 import * as Y from "yjs";
 
-// The elements need a DOM, and jsdom provides it. The globals must be in
+// The elements need a DOM, and happy-dom provides it. The globals must be in
 // place before the package is imported, because importing registers the
 // elements.
-const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://app.example/tickets/1" });
+const win = new Window({ url: "https://app.example/tickets/1" });
 for (const key of [
   "window",
   "document",
@@ -21,14 +21,14 @@ for (const key of [
   "AbortController",
   "DOMParser",
 ]) {
-  globalThis[key] = dom.window[key];
+  globalThis[key] = win[key];
 }
 // A browser fires `formdata` on the form when a FormData is built from it.
-// jsdom does not, so this does.
-globalThis.FormData = class extends dom.window.FormData {
+// happy-dom does not, so this does.
+globalThis.FormData = class extends win.FormData {
   constructor(form) {
     super(form);
-    form.dispatchEvent(Object.assign(new dom.window.Event("formdata"), { formData: this }));
+    form.dispatchEvent(Object.assign(new win.Event("formdata"), { formData: this }));
   }
 };
 await import("../dist/column.js");
@@ -39,7 +39,7 @@ const decode = (state) => {
   Y.applyUpdate(doc, Buffer.from(state, "base64"));
   return doc;
 };
-const fire = (el, type) => el.dispatchEvent(new dom.window.Event(type, { bubbles: true, cancelable: true }));
+const fire = (el, type) => el.dispatchEvent(new win.Event(type, { bubbles: true, cancelable: true }));
 
 // The stored document: what the server would render into the form.
 function stored() {

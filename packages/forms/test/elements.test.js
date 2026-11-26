@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { Window } from "happy-dom";
 import * as Y from "yjs";
 import * as encoding from "lib0/encoding";
 import { encodeAwarenessUpdate, applyAwarenessUpdate } from "y-protocols/awareness";
 
-// The elements need a DOM, and jsdom provides it. The globals must be in
+// The elements need a DOM, and happy-dom provides it. The globals must be in
 // place before the packages are imported, because importing registers the
 // elements and yrby-client's session store extends EventTarget.
-const dom = new JSDOM("<!doctype html><html><body></body></html>");
+const win = new Window();
 for (const key of [
   "window",
   "document",
@@ -23,7 +23,7 @@ for (const key of [
   "FocusEvent",
   "Node",
 ]) {
-  globalThis[key] = dom.window[key];
+  globalThis[key] = win[key];
 }
 await import("../dist/index.js");
 const { DocumentSessionStore, MessageType } = await import("yrby-client");
@@ -87,7 +87,7 @@ async function makeForm(t, { name = "Ada", color = "#112233", sync = true, serve
   const control = (fieldName) =>
     form.querySelector(`collaborative-field[name="${fieldName}"]`).querySelector("input:not([type=hidden]), textarea, select");
   const field = (fieldName) => form.querySelector(`collaborative-field[name="${fieldName}"]`);
-  const fire = (el, type) => el.dispatchEvent(new dom.window.Event(type, { bubbles: true }));
+  const fire = (el, type) => el.dispatchEvent(new win.Event(type, { bubbles: true }));
   const synced = async () => {
     deliverSync(subscription, serverDoc);
     await form.whenSynced;
