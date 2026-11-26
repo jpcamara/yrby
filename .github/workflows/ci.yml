@@ -152,6 +152,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      # bun builds the import-map assets. It is pinned so a rebuild is the same on every run.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - run: npm ci
       - run: npm test
       # The gem ships these for import-map apps. A rebuild must match them.

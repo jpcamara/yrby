@@ -36,7 +36,7 @@
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({ type: 'commonjs' }) + '\\n')\"",
     "typecheck": "tsc --noEmit",
-    "build:importmap": "node scripts/build_importmap.mjs",
+    "build:importmap": "bun scripts/build_importmap.mjs",
     "prepack": "npm run build",
     "test": "npm run build && node --test"
   },
@@ -71,7 +71,6 @@
     "yrby-client": "^0.7.1"
   },
   "devDependencies": {
-    "esbuild": "^0.25.12",
     "happy-dom": "^21.0.4",
     "typescript": "^5.6.0",
     "y-protocols": "^1.0.5",

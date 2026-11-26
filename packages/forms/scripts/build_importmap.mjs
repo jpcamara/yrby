@@ -7,19 +7,17 @@
 //   column.js      yrby-forms/column, which needs yjs only.
 //
 // CI rebuilds and fails if the committed assets are stale.
-import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 
 const here = dir => fileURLToPath(new URL(dir, import.meta.url));
 const outdir = process.env.IMPORTMAP_ASSETS_OUT || here("../../../app/assets/javascript/yrby-forms");
 
-const asset = (name, entry, external) => build({
-  entryPoints: [here(`../src/${entry}.ts`)],
-  outfile: `${outdir}/${name}.js`,
-  bundle: true,
+const asset = (name, entry, external) => Bun.build({
+  entrypoints: [here(`../src/${entry}.ts`)],
+  outdir,
+  naming: `${name}.js`,
   format: "esm",
-  sourcemap: true,
-  logLevel: "warning",
+  sourcemap: "linked",
   external,
 });
 

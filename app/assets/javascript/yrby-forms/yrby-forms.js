@@ -1,12 +1,14 @@
 // src/index.ts
-import "yrby-client/element";
+import"yrby-client/element";
 
 // src/bindings.ts
 var FIELDS_MAP = "fields";
 function diffSplice(oldValue, newValue) {
-  if (oldValue === newValue) return null;
+  if (oldValue === newValue)
+    return null;
   let start = 0;
-  while (start < oldValue.length && start < newValue.length && oldValue[start] === newValue[start]) start++;
+  while (start < oldValue.length && start < newValue.length && oldValue[start] === newValue[start])
+    start++;
   let oldEnd = oldValue.length;
   let newEnd = newValue.length;
   while (oldEnd > start && newEnd > start && oldValue[oldEnd - 1] === newValue[newEnd - 1]) {
@@ -21,24 +23,29 @@ function bindLww(doc, name, control) {
   const origin = {};
   const read = () => isCheckbox(control) ? control.checked : control.value;
   const write = (value) => {
-    if (isCheckbox(control)) control.checked = value === true;
+    if (isCheckbox(control))
+      control.checked = value === true;
     else {
       const text = value == null ? "" : String(value);
-      if (control.value !== text) control.value = text;
+      if (control.value !== text)
+        control.value = text;
     }
   };
   const onInput = () => {
-    if (map.get(name) === read()) return;
+    if (map.get(name) === read())
+      return;
     doc.transact(() => map.set(name, read()), origin);
   };
   control.addEventListener("input", onInput);
   control.addEventListener("change", onInput);
   const observer = (event, transaction) => {
-    if (transaction.origin === origin || !event.keysChanged.has(name)) return;
+    if (transaction.origin === origin || !event.keysChanged.has(name))
+      return;
     write(map.get(name));
   };
   map.observe(observer);
-  if (map.has(name)) write(map.get(name));
+  if (map.has(name))
+    write(map.get(name));
   return () => {
     control.removeEventListener("input", onInput);
     control.removeEventListener("change", onInput);
@@ -49,19 +56,24 @@ function bindText(doc, name, control) {
   const text = doc.getText(`${FIELDS_MAP}/${name}`);
   const origin = {};
   let shadow = control.value;
-  if (text.length > 0) shadow = control.value = text.toString();
+  if (text.length > 0)
+    shadow = control.value = text.toString();
   const onInput = () => {
     const change = diffSplice(shadow, control.value);
     shadow = control.value;
-    if (!change) return;
+    if (!change)
+      return;
     doc.transact(() => {
-      if (change.deleteCount > 0) text.delete(change.index, change.deleteCount);
-      if (change.insert) text.insert(change.index, change.insert);
+      if (change.deleteCount > 0)
+        text.delete(change.index, change.deleteCount);
+      if (change.insert)
+        text.insert(change.index, change.insert);
     }, origin);
   };
   control.addEventListener("input", onInput);
   const observer = (_event, transaction) => {
-    if (transaction.origin === origin) return;
+    if (transaction.origin === origin)
+      return;
     const value = text.toString();
     if (control.value === value) {
       shadow = value;
@@ -87,7 +99,8 @@ function bindText(doc, name, control) {
 // src/styles.ts
 var STYLE_ID = "yrby-forms-styles";
 function ensureStyles(doc) {
-  if (doc.getElementById(STYLE_ID)) return;
+  if (doc.getElementById(STYLE_ID))
+    return;
   const style = doc.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
@@ -113,7 +126,8 @@ collaborative-field[data-remote] :is(input, textarea, select) {
 
 // src/collaborative_field.ts
 var FALLBACK_COLOR = "#958DF1";
-var CollaborativeField = class extends HTMLElement {
+
+class CollaborativeField extends HTMLElement {
   #host = null;
   #unbind = null;
   connectedCallback() {
@@ -125,16 +139,17 @@ var CollaborativeField = class extends HTMLElement {
     }
     this.#host = host;
     host.addEventListener("yrby:synced", this.#onSynced);
-    if (host.current) this.#bind(host.current);
+    if (host.current)
+      this.#bind(host.current);
   }
   disconnectedCallback() {
     this.#host?.removeEventListener("yrby:synced", this.#onSynced);
     this.#host = null;
     this.#unbind?.();
   }
-  // The event bubbles, so a document nested inside this one is ignored.
   #onSynced = (event) => {
-    if (event.target === this.#host) this.#bind(event.detail);
+    if (event.target === this.#host)
+      this.#bind(event.detail);
   };
   #bind({ doc, lease, signal }) {
     this.#unbind?.();
@@ -146,13 +161,14 @@ var CollaborativeField = class extends HTMLElement {
     }
     const unbindControl = this.getAttribute("tier") === "text" ? bindText(doc, name, control) : bindLww(doc, name, control);
     const keep = (event) => {
-      if (event.target === control) event.preventDefault();
+      if (event.target === control)
+        event.preventDefault();
     };
     this.addEventListener("turbo:before-morph-element", keep);
-    const unbindPresence = lease ? this.#bindPresence(name, lease) : () => {
-    };
+    const unbindPresence = lease ? this.#bindPresence(name, lease) : () => {};
     const unbind = () => {
-      if (this.#unbind !== unbind) return;
+      if (this.#unbind !== unbind)
+        return;
       this.#unbind = null;
       unbindControl();
       this.removeEventListener("turbo:before-morph-element", keep);
@@ -161,8 +177,6 @@ var CollaborativeField = class extends HTMLElement {
     this.#unbind = unbind;
     signal.addEventListener("abort", unbind, { once: true });
   }
-  // Presence says which field this person is in. The name and color come
-  // from the form helper, as data attributes on <yrby-document>.
   #bindPresence(name, lease) {
     const { userName, userColor } = this.#host.dataset;
     const user = { name: userName || "Anonymous", color: userColor || FALLBACK_COLOR };
@@ -185,7 +199,8 @@ var CollaborativeField = class extends HTMLElement {
     };
   }
   #renderPresence(peers) {
-    for (const chip of this.querySelectorAll(".collaborative-field-chip")) chip.remove();
+    for (const chip of this.querySelectorAll(".collaborative-field-chip"))
+      chip.remove();
     if (peers.length === 0) {
       this.removeAttribute("data-remote");
       this.style.removeProperty("--collaborative-field-color");
@@ -201,75 +216,81 @@ var CollaborativeField = class extends HTMLElement {
       this.appendChild(chip);
     }
   }
-};
+}
 
 // src/collaborative_fields.ts
 import * as Y from "yjs";
 var SAVE_DELAY = 300;
 var REMOTE = "remote";
-var CollaborativeFields = class extends HTMLElement {
+
+class CollaborativeFields extends HTMLElement {
   static observedAttributes = ["value"];
-  // What a <collaborative-field> binds to, as <yrby-document> has it.
   current;
   #form = null;
   #abort = null;
   #timer;
   connectedCallback() {
-    const doc = new Y.Doc();
-    this.#abort = new AbortController();
+    const doc = new Y.Doc;
+    this.#abort = new AbortController;
     const { signal } = this.#abort;
     this.current = { doc, signal };
     this.#merge(this.getAttribute("value"));
     this.#form = this.closest("form");
     this.#form?.addEventListener("formdata", this.#onFormData, { signal });
     doc.on("update", (_update, origin) => {
-      if (origin !== REMOTE && this.hasAttribute("autosave")) this.#schedule();
+      if (origin !== REMOTE && this.hasAttribute("autosave"))
+        this.#schedule();
     });
     this.dispatchEvent(new CustomEvent("yrby:synced", { detail: this.current, bubbles: true }));
   }
   disconnectedCallback() {
-    if (this.#timer !== void 0) void this.#save();
+    if (this.#timer !== undefined)
+      this.#save();
     this.#abort?.abort();
-    this.current = void 0;
+    this.current = undefined;
   }
   attributeChangedCallback(_name, _old, value) {
     this.#merge(value);
   }
   #merge(state) {
-    if (this.current && state) Y.applyUpdate(this.current.doc, fromBase64(state), REMOTE);
+    if (this.current && state)
+      Y.applyUpdate(this.current.doc, fromBase64(state), REMOTE);
   }
   #onFormData = ({ formData }) => {
     const name = this.getAttribute("name");
-    if (name && this.current) formData.set(name, toBase64(Y.encodeStateAsUpdate(this.current.doc)));
+    if (name && this.current)
+      formData.set(name, toBase64(Y.encodeStateAsUpdate(this.current.doc)));
   };
   #schedule() {
     clearTimeout(this.#timer);
     this.#timer = setTimeout(() => void this.#save(), SAVE_DELAY);
   }
-  // Posts the form as a submit would. The answer is the page the server
-  // renders next, which holds the state it stored.
-  async #save() {
+  async#save() {
     clearTimeout(this.#timer);
-    this.#timer = void 0;
+    this.#timer = undefined;
     const form = this.#form;
     const doc = this.current?.doc;
-    if (!form || !doc) return;
+    if (!form || !doc)
+      return;
     const body = new URLSearchParams(new FormData(form));
     const response = await fetch(form.getAttribute("action") || location.href, {
       method: "POST",
       body,
       headers: { Accept: "text/html" }
     });
-    if (!response.ok || this.current?.doc !== doc) return;
+    if (!response.ok || this.current?.doc !== doc)
+      return;
     const page = new DOMParser().parseFromString(await response.text(), "text/html");
     for (const fields of page.querySelectorAll("collaborative-fields")) {
-      if (fields.getAttribute("name") === this.getAttribute("name")) this.#merge(fields.getAttribute("value"));
+      if (fields.getAttribute("name") === this.getAttribute("name"))
+        this.#merge(fields.getAttribute("value"));
     }
   }
-};
+}
 var toBase64 = (bytes) => {
   let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes)
+    binary += String.fromCharCode(byte);
   return btoa(binary);
 };
 var fromBase64 = (text) => Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
@@ -279,10 +300,13 @@ for (const [name, element] of [
   ["collaborative-field", CollaborativeField],
   ["collaborative-fields", CollaborativeFields]
 ]) {
-  if (!customElements.get(name)) customElements.define(name, element);
+  if (!customElements.get(name))
+    customElements.define(name, element);
 }
 export {
   CollaborativeField,
   CollaborativeFields
 };
+
+//# debugId=4D1856F888688AB364756E2164756E21
 //# sourceMappingURL=yrby-forms.js.map
