@@ -10,12 +10,28 @@ module Updates
   # A Trix document as the y-trix binding keeps it, in a Y.Text root named
   # "trix": a bullet list of "one", "two bold" (the last word bold) and
   # "three", then a paragraph "after". From the gem's test/fixtures/trix.json.
-  TRIX_LIST = b64("ARm5upjVBQAEAQR0cml4A29uZYa5upjVBQIKYmxvY2tCcmVhawR0cnVlhrm6mNUFAwVibG9jaxdbImJ1bGxldExpc3QiLCJidWxsZXQiXYS5upjVBQQBCoa5" \
-                  "upjVBQUKYmxvY2tCcmVhawRudWxshrm6mNUFBgVibG9jawRudWxshLm6mNUFBwR0d28ghrm6mNUFCwRib2xkBHRydWWEubqY1QUMBGJvbGSGubqY1QUQBGJvbGQEbnVsbIa5" \
-                  "upjVBREKYmxvY2tCcmVhawR0cnVlhrm6mNUFEgVibG9jaxdbImJ1bGxldExpc3QiLCJidWxsZXQiXYS5upjVBRMBCoa5upjVBRQKYmxvY2tCcmVhawRudWxshrm6mNUFFQVi" \
-                  "bG9jawRudWxshLm6mNUFFgV0aHJlZYa5upjVBRsFYmxvY2sXWyJidWxsZXRMaXN0IiwiYnVsbGV0Il2GubqY1QUcCmJsb2NrQnJlYWsEdHJ1ZYS5upjVBR0BCoa5upjVBR4F" \
-                  "YmxvY2sEbnVsbIa5upjVBR8KYmxvY2tCcmVhawRudWxshLm6mNUFIAVhZnRlcoa5upjVBSUKYmxvY2tCcmVhawR0cnVlhLm6mNUFJgEKhrm6mNUFJwpibG9ja0JyZWFrBG51" \
-                  "bGwA")
+  TRIX_LIST = b64(
+    "ARm5upjVBQAEAQR0cml4A29uZYa5upjVBQIKYmxvY2tCcmVhawR0cnVlhrm6mNUFAwVibG9jaxdbImJ1bGxldExpc3" \
+    "QiLCJidWxsZXQiXYS5upjVBQQBCoa5upjVBQUKYmxvY2tCcmVhawRudWxshrm6mNUFBgVibG9jawRudWxshLm6mNUF" \
+    "BwR0d28ghrm6mNUFCwRib2xkBHRydWWEubqY1QUMBGJvbGSGubqY1QUQBGJvbGQEbnVsbIa5upjVBREKYmxvY2tCcm" \
+    "VhawR0cnVlhrm6mNUFEgVibG9jaxdbImJ1bGxldExpc3QiLCJidWxsZXQiXYS5upjVBRMBCoa5upjVBRQKYmxvY2tC" \
+    "cmVhawRudWxshrm6mNUFFQVibG9jawRudWxshLm6mNUFFgV0aHJlZYa5upjVBRsFYmxvY2sXWyJidWxsZXRMaXN0Ii" \
+    "wiYnVsbGV0Il2GubqY1QUcCmJsb2NrQnJlYWsEdHJ1ZYS5upjVBR0BCoa5upjVBR4FYmxvY2sEbnVsbIa5upjVBR8K" \
+    "YmxvY2tCcmVhawRudWxshLm6mNUFIAVhZnRlcoa5upjVBSUKYmxvY2tCcmVhawR0cnVlhLm6mNUFJgEKhrm6mNUFJw" \
+    "pibG9ja0JyZWFrBG51bGwA"
+  )
+
+  # A Trix document with three attachments a browser on this site can't
+  # make: an image at another site, an image in a data: URL, and a content
+  # attachment holding script. "before ", the three, " after".
+  TRIX_ATTACHMENTS = b64(
+    "AQjOxIaqCwAEAQR0cml4B2JlZm9yZSCFzsSGqgsGX3siYXR0YWNobWVudCI6eyJ1cmwiOiJodHRwczovL2V4YW1wbG" \
+    "UuY29tL2EucG5nIiwiY29udGVudFR5cGUiOiJpbWFnZS9wbmciLCJmaWxlbmFtZSI6ImEucG5nIn19hc7EhqoLB1V7" \
+    "ImF0dGFjaG1lbnQiOnsidXJsIjoiZGF0YTppbWFnZS9wbmc7YmFzZTY0LGlWQk9SdzBLR2dvPSIsImNvbnRlbnRUeX" \
+    "BlIjoiaW1hZ2UvcG5nIn19hc7EhqoLCFJ7ImF0dGFjaG1lbnQiOnsiY29udGVudCI6IjxzY3JpcHQ+YWxlcnQoMSk8" \
+    "L3NjcmlwdD48aW1nIHNyYz14IG9uZXJyb3I9YWxlcnQoMik+In19hM7EhqoLCQYgYWZ0ZXKGzsSGqgsPCmJsb2NrQn" \
+    "JlYWsEdHJ1ZYTOxIaqCxABCobOxIaqCxEKYmxvY2tCcmVhawRudWxsAA=="
+  )
 
   # Three causally dependent inserts from one client: "A", then "B", then "C".
   # U3 can't integrate until U2 is applied, so applying only U1 and U3 leaves

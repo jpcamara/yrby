@@ -23,17 +23,19 @@ function bind(target, ydoc, provider) {
   const element = document.createElement("trix-editor")
   element.setAttribute("toolbar", bar.id)
   element.setAttribute("aria-label", "Shared document")
-  // The site takes no uploads. Trix asks before it accepts a file, and an
-  // attachment that gets into the document another way (a client that talks
-  // the protocol directly can put one in the Y.Text) is taken out again.
-  element.addEventListener("trix-file-accept", (event) => event.preventDefault())
+  // The site takes no uploads, so the binding runs with attachments off (see
+  // below): it refuses files, and it shows an attachment that is in the
+  // Y.Text all the same (a client that talks the protocol directly can put
+  // one there) as a placeholder character and not as an image or a card.
+  // This listener is the second lock on the same door: should Trix ever end
+  // up with an attachment in this editor, it is taken out again.
   element.addEventListener("trix-attachment-add", ({ attachment }) => attachment.remove())
 
   let binding = null
   let gone = false
   element.addEventListener("trix-initialize", () => {
     if (gone) return
-    binding = new TrixBinding(ydoc.getText("trix"), element, provider.awareness, { Trix })
+    binding = new TrixBinding(ydoc.getText("trix"), element, provider.awareness, { Trix, attachments: false })
     bar.hidden = false
   }, { once: true })
   target.querySelector("#editor").append(element)

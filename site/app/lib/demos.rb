@@ -109,6 +109,16 @@ module Demos
     # or nil when the room has no document yet. read_text and read_xml return
     # a string, and read_map and read_array return a JSON string. The panel
     # shows the result as is.
+    # The Trix demo's HTML, without attachments. The site takes no uploads
+    # and the editor runs with attachments off, but a client that talks the
+    # protocol directly can still put one in the Y.Text, with any URL or a
+    # data: URL in it. Each becomes U+FFFD before rendering, which is what
+    # the page's editor shows for it, so none of it reaches the HTML.
+    def trix_html(doc, root)
+      json = doc.read_text_delta(root) or return nil
+      Y::Trix.render(JSON.parse(json).map { |op| op["insert"].is_a?(String) ? op : { "insert" => "\uFFFD" } })
+    end
+
     # The Ruby the read panel says it runs.
     def read_call(reader)
       return %(Y::Trix.new(doc).to_html("#{reader.root}")) if reader.kind == :trix
@@ -124,7 +134,7 @@ module Demos
       case reader.kind
       when :text then doc.read_text(reader.root)
       when :xml then doc.read_xml(reader.root)
-      when :trix then Y::Trix.new(doc).to_html(reader.root)
+      when :trix then trix_html(doc, reader.root)
       when :map then doc.read_map(reader.root)
       when :array then doc.read_array(reader.root)
       end

@@ -309,14 +309,26 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     assert_includes bundle.read, "dragover"
   end
 
-  test "the trix page refuses files and takes attachments out again" do
+  test "the trix page binds with attachments off and takes any attachment out again" do
     source = Rails.root.join("frontend/src/trix.js").read
 
-    # Trix asks before it accepts a file, and an attachment that reaches the
-    # document another way is removed. The toolbar has no attach button.
-    assert_match(/addEventListener\("trix-file-accept", \(event\) => event\.preventDefault\(\)\)/, source)
+    # The binding refuses files and shows an attachment in the document as a
+    # placeholder character. The listener removes one that reaches Trix
+    # anyway. The toolbar has no attach button.
+    assert_match(/new TrixBinding\(.*\{ Trix, attachments: false \}\)/, source)
     assert_match(/addEventListener\("trix-attachment-add", \(\{ attachment \}\) => attachment\.remove\(\)\)/, source)
     refute_includes Rails.root.join("app/views/demos/_trix.html.erb").read, "attachFiles"
+  end
+
+  test "the trix demo's server-side HTML leaves out attachments a raw client put in the document" do
+    Room.find_or_create_by!(slug: "room1").collaborative_document(:trix).append(Updates::TRIX_ATTACHMENTS)
+
+    get "/demos/trix/room1/stored"
+
+    body = response.parsed_body["body"]
+
+    assert_equal "<div>before \uFFFD\uFFFD\uFFFD after</div>", body
+    %w[figure img data: example.com script].each { |part| refute_includes body, part }
   end
 
   test "the lexxy bundle does not include the upload client" do

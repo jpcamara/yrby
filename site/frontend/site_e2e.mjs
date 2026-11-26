@@ -217,6 +217,24 @@ const refused = await js(A, `(() => { const el = document.querySelector("trix-ed
 check("a file handed to Trix is not attached", refused === 0)
 check("and the text is as it was", !!(await converge("trix after a file", trixShown, (v) => v.includes("trix from A"))))
 
+// HTML with an image in it, as a paste brings: the text comes in and the
+// image does not, in this editor or in the shared document.
+const embeds = (s) => js(s, `window.__yrby.ytext.toDelta().filter((op) => typeof op.insert !== "string").length`)
+const figures = (s) => js(s, `document.querySelectorAll("trix-editor figure, trix-editor img").length`)
+// (insertHTML is what Trix does with HTML from the clipboard.)
+await js(A, `(() => { const el = document.querySelector("trix-editor"); const end = el.editor.getDocument().getLength() - 1; el.editor.setSelectedRange([end, end]); el.editor.insertHTML('<div>pasted text <img src="https://example.com/pasted.png"> and more</div>'); return true })()`)
+check("pasted text arrives", !!(await converge("trix paste", trixShown, (v) => v.includes("pasted text") && v.includes("and more"))))
+check("an image in pasted HTML is not attached, here or in the shared document",
+  (await embeds(A)) === 0 && (await embeds(B)) === 0 && (await figures(A)) === 0 && (await figures(B)) === 0)
+
+// A client that talks the protocol directly can write an attachment into the
+// Y.Text. B's page does that here, past its editor. Neither editor shows an
+// image or a card for it, and the server's HTML has nothing of it.
+await js(B, `(() => { const t = window.__yrby.ytext; t.doc.transact(() => { t.insertEmbed(0, { attachment: { url: "https://example.com/raw.png", contentType: "image/png", filename: "raw.png" } }); t.insertEmbed(1, { attachment: { content: "<img src=x onerror=alert(1)>" } }) }, "raw"); return true })()`)
+await waitFor("the raw attachments reach A", async () => (await embeds(A)) === 2)
+check("an attachment written straight into the document is shown as a placeholder, not drawn",
+  (await figures(A)) === 0 && (await figures(B)) === 0 && String(await trixShown(A)).includes("\ufffd\ufffd"))
+
 // The server renders the same document to HTML in Ruby (Y::Trix), with no
 // browser involved.
 // (One request every two seconds: the page limit is per IP, and this run has
@@ -230,8 +248,10 @@ for (let i = 0; i < 45 && !storedTrix.includes("trix from A"); i++) {
   storedTrix = await trixStored()
   if (!storedTrix.includes("trix from A")) await sleep(2000)
 }
-check(`the server renders the trix document to Trix's HTML (${storedTrix.slice(0, 50)})`,
-  storedTrix.startsWith("<div><strong>trix</strong> from A"))
+check(`the server renders the trix document to Trix's HTML (${storedTrix.slice(0, 60)})`,
+  storedTrix.startsWith("<div>\ufffd\ufffd<strong>trix</strong> from A"))
+check("and leaves the attachments out of it",
+  !storedTrix.includes("figure") && !storedTrix.includes("example.com") && !storedTrix.includes("onerror"))
 
 // --- 2) The room is the boundary ---------------------------------------------
 // A second room on the same demo is a different document, on the same process.
