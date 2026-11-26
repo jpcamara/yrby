@@ -12,22 +12,25 @@
 //
 // y-protocols and lib0 keep no state that crosses assets, so they're bundled.
 // CI rebuilds and fails if the committed assets are stale.
-import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 
 const here = dir => fileURLToPath(new URL(dir, import.meta.url));
 const outdir = process.env.IMPORTMAP_ASSETS_OUT || here("../../../app/assets/javascript/yrby");
 
-const asset = (name, contents, options = {}) => build({
-  stdin: { contents, resolveDir: here("../src"), loader: "ts", sourcefile: `${name}.js` },
-  outfile: `${outdir}/${name}.js`,
-  bundle: true,
-  format: "esm",
-  sourcemap: true,
-  logLevel: "warning",
-  ...options,
-});
+// The entry is a file bun holds in memory. It sits in src so its imports resolve.
+const asset = (name, contents, external = []) => {
+  const entry = here(`../src/${name}.entry.ts`);
+  return Bun.build({
+    entrypoints: [entry],
+    files: { [entry]: contents },
+    outdir,
+    naming: `${name}.js`,
+    format: "esm",
+    sourcemap: "linked",
+    external,
+  });
+};
 
 await asset("yjs", `export * from "yjs";`);
 await asset("yrby-client", `export * from "./index.ts";\nexport * from "./document_element.ts";`,
-  { external: ["yjs", "@rails/actioncable"] });
+  ["yjs", "@rails/actioncable"]);

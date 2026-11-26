@@ -7,6 +7,11 @@ this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The import-map scripts are built with bun. `yrby/yjs.js` is about a quarter
+  smaller, because the build leaves out comments.
+
 ## [0.9.0] - 2026-11-09
 
 Requires yrby 0.9.0 or later.
