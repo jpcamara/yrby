@@ -22,9 +22,11 @@
         "lexical": "^0.52",
         "lexxy-realtime": "^0.9.1",
         "lib0": "^0.2.117",
+        "trix": "^2.1.19",
         "y-codemirror.next": "^0.3.5",
         "y-prosemirror": "^1.3.7",
         "y-protocols": "^1.0.6",
+        "y-trix": "github:jpcamara/y-trix#496aa3d",
         "yjs": "^13.6.20",
         "yrby-client": "^0.7.1",
       },
@@ -520,6 +522,8 @@
 
     "to-regex-range": ["to-regex-range@5.0.1", "", { "dependencies": { "is-number": "^7.0.0" } }, "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ=="],
 
+    "trix": ["trix@2.1.19", "", { "dependencies": { "dompurify": "^3.2.5" } }, "sha512-E7RA3EOeUiUwNJlrF5onIOkqCA06xUU6GmHOVxXyMnGMValrDK3Ce7uaMVgiVUOvVt4mzUERAHAzD10mxoLpOg=="],
+
     "type-check": ["type-check@0.4.0", "", { "dependencies": { "prelude-ls": "^1.2.1" } }, "sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew=="],
 
     "uc.micro": ["uc.micro@2.1.0", "", {}, "sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A=="],
@@ -537,6 +541,8 @@
     "y-prosemirror": ["y-prosemirror@1.3.7", "", { "dependencies": { "lib0": "^0.2.109" }, "peerDependencies": { "prosemirror-model": "^1.7.1", "prosemirror-state": "^1.2.3", "prosemirror-view": "^1.9.10", "y-protocols": "^1.0.1", "yjs": "^13.5.38" } }, "sha512-NpM99WSdD4Fx4if5xOMDpPtU3oAmTSjlzh5U4353ABbRHl1HtAFUx6HlebLZfyFxXN9jzKMDkVbcRjqOZVkYQg=="],
 
     "y-protocols": ["y-protocols@1.0.7", "", { "dependencies": { "lib0": "^0.2.85" }, "peerDependencies": { "yjs": "^13.0.0" } }, "sha512-YSVsLoXxO67J6eE/nV4AtFtT3QEotZf5sK5BHxFBXso7VDUT3Tx07IfA6hsu5Q5OmBdMkQVmFZ9QOA7fikWvnw=="],
+
+    "y-trix": ["y-trix@github:jpcamara/y-trix#496aa3d", { "peerDependencies": { "trix": ">=2.1.15", "y-protocols": "^1.0.6", "yjs": "^13.6.0" } }, "jpcamara-y-trix-496aa3d", "sha512-3BLKIb0CPukkR5u4ulSDT+EDzL+Gy1NahsJTkc620pZBTEnGHpWMwkfrL2yoJf4ScNtAqs72oUTxFilyiBL0mQ=="],
 
     "yjs": ["yjs@13.6.32", "", { "dependencies": { "lib0": "^0.2.99" } }, "sha512-lfiJIIC4Xayt5ItynE407ehlE03pCjeOc4hkR4yxxvvNJ4kuiN25B0g+Qp8XagYz361LLL7DCzR5bvFJ81QKtQ=="],
 

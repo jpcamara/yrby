@@ -30,9 +30,11 @@
     "lexical": "^0.52",
     "lexxy-realtime": "^0.9.1",
     "lib0": "^0.2.117",
+    "trix": "^2.1.19",
     "y-codemirror.next": "^0.3.5",
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.6",
+    "y-trix": "github:jpcamara/y-trix#496aa3d",
     "yjs": "^13.6.20",
     "yrby-client": "^0.7.1"
   },
