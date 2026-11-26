@@ -60,6 +60,7 @@ const ENTRIES = [
   // the bundler from trying to resolve it.
   { entry: "src/lexxy.js", external: ["@rails/activestorage"] },
   "src/tiptap.js",       // Y.XmlFragment via Tiptap's Collaboration extension
+  "src/trix.js",         // Y.Text via the y-trix binding
   "src/spreadsheet.js",  // Y.Array of row Y.Maps, cells nested as Y.Maps
   "src/whiteboard.js",   // Y.Map of shape records
   "src/kanban.js",       // Y.Array of card Y.Maps

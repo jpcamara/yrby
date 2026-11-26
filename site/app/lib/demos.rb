@@ -29,6 +29,14 @@ module Demos
       read: Reader.new(root: "default", kind: :xml)
     ),
     Demo.new(
+      slug: "trix",
+      title: "Trix",
+      shape: "Y.Text",
+      blurb: "Basecamp's Trix editor through the y-trix binding, with other people's carets and an undo " \
+             "that only takes back your own changes.",
+      read: Reader.new(root: "trix", kind: :text)
+    ),
+    Demo.new(
       slug: "spreadsheet",
       title: "Spreadsheet",
       shape: "Y.Array of row Y.Maps",

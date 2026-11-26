@@ -1,0 +1,23 @@
+<%# Trix reads this toolbar by its id. A button's data-trix-attribute or
+    data-trix-action is the Trix command it runs, and Trix adds .trix-active
+    to the buttons that apply at the caret. There's no attach button, because
+    the site takes no uploads. %>
+<trix-toolbar id="trix-toolbar" hidden>
+  <div class="mb-2 flex flex-wrap gap-1">
+    <button type="button" data-trix-attribute="bold" data-trix-key="b" title="Bold (⌘B)" class="tb" tabindex="-1"><strong>B</strong></button>
+    <button type="button" data-trix-attribute="italic" data-trix-key="i" title="Italic (⌘I)" class="tb" tabindex="-1"><em>I</em></button>
+    <button type="button" data-trix-attribute="strike" title="Strikethrough" class="tb" tabindex="-1"><s>S</s></button>
+    <span class="tb-sep"></span>
+    <button type="button" data-trix-attribute="heading1" title="Heading" class="tb" tabindex="-1">H1</button>
+    <button type="button" data-trix-attribute="quote" title="Quote" class="tb" tabindex="-1">"</button>
+    <button type="button" data-trix-attribute="code" title="Code" class="tb font-mono" tabindex="-1">{ }</button>
+    <button type="button" data-trix-attribute="bullet" title="Bullet list" class="tb" tabindex="-1">•≡</button>
+    <button type="button" data-trix-attribute="number" title="Numbered list" class="tb" tabindex="-1">1≡</button>
+    <span class="tb-sep"></span>
+    <button type="button" data-trix-action="undo" data-trix-key="z" title="Undo (⌘Z)" class="tb" tabindex="-1">↶</button>
+    <button type="button" data-trix-action="redo" data-trix-key="shift+z" title="Redo (⇧⌘Z)" class="tb" tabindex="-1">↷</button>
+  </div>
+</trix-toolbar>
+<%= collaborative_document_tag @room, @demo.slug, channel: "RoomChannel" do %>
+  <div id="editor"></div>
+<% end %>

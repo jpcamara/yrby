@@ -1,0 +1,14 @@
+<p>
+  A <a href="https://trix-editor.org">Trix</a> editor bound to the room's
+  document with <a href="https://github.com/jpcamara/y-trix">y-trix</a>. The
+  whole document is one <code>Y.Text</code> named <code>trix</code>, in the
+  shape of Trix's own model: text with its attributes, and a formatted
+  <code>"\n"</code> at the end of each block. Pressing Enter inserts one
+  character and joining two blocks deletes one, so two people editing around
+  the same line break both keep their text.
+</p>
+<p>
+  Undo and redo only take back your own changes. Other people's carets and
+  selections come through awareness, which the server passes along without
+  saving.
+</p>

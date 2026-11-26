@@ -337,6 +337,52 @@
     @apply my-2 border-l-2 border-zinc-700 pl-3 text-zinc-400;
   }
 
+  /* -------------------------------------------------------------------------
+   * Trix. The page has its own toolbar (the .tb buttons above), so Trix's
+   * stylesheet isn't loaded: its toolbar icons are data: URLs, which the
+   * CSP's img-src blocks. Trix marks the active buttons with .trix-active.
+   * ---------------------------------------------------------------------- */
+  .tb.trix-active {
+    @apply border-rose-500/60 bg-rose-500/10 text-zinc-100;
+  }
+
+  .tb:disabled {
+    @apply cursor-default opacity-40 hover:border-zinc-800 hover:text-zinc-300;
+  }
+
+  #editor trix-editor {
+    @apply block min-h-80 rounded-xl border border-zinc-800 bg-panel px-5 py-4
+           leading-relaxed text-zinc-200 outline-none;
+  }
+
+  #editor trix-editor:focus-within {
+    @apply border-rose-500/60;
+  }
+
+  #editor trix-editor h1 {
+    @apply mt-4 mb-2 text-2xl font-semibold text-zinc-100;
+  }
+
+  #editor trix-editor :is(ul, ol) {
+    @apply my-2 list-disc pl-6;
+  }
+
+  #editor trix-editor ol {
+    @apply list-decimal;
+  }
+
+  #editor trix-editor blockquote {
+    @apply my-2 border-l-2 border-zinc-700 pl-3 text-zinc-400;
+  }
+
+  #editor trix-editor pre {
+    @apply my-2 rounded-lg bg-zinc-950 px-3 py-2 font-mono text-sm whitespace-pre-wrap;
+  }
+
+  #editor trix-editor a {
+    @apply text-accent underline;
+  }
+
   /* Remote carets (CollaborationCursor). */
   .collaboration-cursor__caret {
     @apply pointer-events-none relative -mx-px border-x border-current

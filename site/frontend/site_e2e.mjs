@@ -175,6 +175,62 @@ check("whisper is not offered to the provider on the public demo", counts.canWhi
 check(`awareness went out via send, not a whisper (${counts.awarenessSends} awareness sends)`, counts.awarenessSends > 0)
 check(`document updates went through send too (${counts.documentSends} document sends)`, counts.documentSends > 0)
 
+// --- 1b) Rich text (Trix): one Y.Text through the y-trix binding --------------
+await openBoth(`/demos/trix/${ROOM}`)
+
+const trixText = (s) => js(s, `JSON.stringify(document.querySelector("trix-editor")?.editor ? window.__yrby.ytext.toString() : null)`)
+await waitFor("both trix editors mounted", async () =>
+  (await Promise.all(SESSIONS.map(trixText))).every((v) => v !== undefined && v !== "null"))
+// What each window shows, which the binding has to keep equal to the Y.Text.
+const trixShown = (s) => js(s, `JSON.stringify(document.querySelector("trix-editor").editor.getDocument().toString())`)
+
+await clickAt(A, "trix-editor")
+await ab(A, "keyboard", "type", "trix from A")
+check("A's trix typing reaches B", !!(await converge("trix prose", trixShown, (v) => v.includes("trix from A"))))
+
+await clickAt(B, "trix-editor")
+await ab(B, "press", "End")
+await ab(B, "keyboard", "type", " and B")
+check("both trix editors converge on both people's text",
+  !!(await converge("trix both", trixShown, (v) => v.includes("trix from A") && v.includes("and B"))))
+check("each trix editor shows what its Y.Text holds",
+  (await Promise.all(SESSIONS.map(async (s) => (await trixShown(s)) === (await trixText(s))))).every(Boolean))
+
+// A sees B's caret, drawn by the binding from awareness.
+await waitFor("A draws B's caret", async () => (await js(A, `document.querySelectorAll("[data-y-caret]").length`)) === 1)
+check("A draws one remote caret in the trix room", (await js(A, `document.querySelectorAll("[data-y-caret]").length`)) === 1)
+
+// Undo in B takes back B's typing and leaves A's.
+await js(B, `(document.querySelector("trix-editor").editor.undo(), true)`)
+check("undo in B takes back only B's text",
+  !!(await converge("trix undo", trixShown, (v) => v.includes("trix from A") && !v.includes("and B"))))
+
+// The toolbar is the page's own, and a button formats through Trix.
+await js(A, `(document.querySelector("trix-editor").editor.setSelectedRange([0, 4]), true)`)
+await clickAt(A, '#trix-toolbar [data-trix-attribute="bold"]')
+const trixBold = (s) => js(s, `JSON.stringify(document.querySelector("trix-editor strong")?.textContent ?? null)`)
+check("a toolbar button's formatting reaches B", !!(await converge("trix bold", trixBold, (v) => v === '"trix"')))
+
+// The site takes no uploads: Trix is refused a file.
+// (With the caret at the end: a file would replace a selection.)
+const refused = await js(A, `(() => { const el = document.querySelector("trix-editor"); const end = el.editor.getDocument().getLength() - 1; el.editor.setSelectedRange([end, end]); el.editor.insertFile(new File(["x"], "x.txt", { type: "text/plain" })); return el.editor.getDocument().getAttachments().length })()`)
+check("a file handed to Trix is not attached", refused === 0)
+check("and the text is as it was", !!(await converge("trix after a file", trixShown, (v) => v.includes("trix from A"))))
+
+// The server reads the same text back in Ruby, with no browser involved.
+// (One request every two seconds: the page limit is per IP, and this run has
+// already spent part of it on the Lexxy body above.)
+const trixStored = async () => {
+  const res = await fetch(`${BASE}/demos/trix/${ROOM}/stored`)
+  return res.ok ? (await res.json()).body || "" : ""
+}
+let storedTrix = ""
+for (let i = 0; i < 45 && !storedTrix.includes("trix from A"); i++) {
+  storedTrix = await trixStored()
+  if (!storedTrix.includes("trix from A")) await sleep(2000)
+}
+check("the server reads the trix document with read_text", storedTrix.includes("trix from A"))
+
 // --- 2) The room is the boundary ---------------------------------------------
 // A second room on the same demo is a different document, on the same process.
 await ab(B, "open", `${BASE}/demos/tiptap/${ROOM}-other`)
@@ -424,4 +480,4 @@ check("a rejected element shows the couldn't-join notice",
 await ab(A, "close", "--all")
 console.log("")
 if (failures > 0) { console.log(`FAILED: ${failures} check(s) failed`); process.exit(1) }
-console.log("PASS: site demos: lexxy and its stored column, tiptap, room isolation, cell-level merges, kanban, chat, form, whiteboard, code, rejection")
+console.log("PASS: site demos: lexxy and its stored column, tiptap, trix, room isolation, cell-level merges, kanban, chat, form, whiteboard, code, rejection")

@@ -696,6 +696,7 @@ There are eight demo pages, picked to cover different Yjs shapes:
 |---|---|---|
 | Lexxy | `Y.XmlText` | Lexxy on the published lexxy-realtime stack: the gem's quick start on `Room`, a channel built on the gem's, and the server rendering the Action Text `room.body` with `Y::Lexxy` |
 | Tiptap | `Y.XmlFragment` | The same shape through Tiptap's own Collaboration extension |
+| Trix | `Y.Text` | Basecamp's Trix through the y-trix binding: one text in the shape of Trix's own model, with carets and per-person undo |
 | Spreadsheet | `Y.Array` of row `Y.Map`s, cells nested | Cell-level merges, with sorting kept out of the document |
 | Whiteboard | `Y.Map` | Records in a map, the way canvas tools store shapes |
 | Kanban | `Y.Array` | A move is one `map.set`, so concurrent moves never conflict |

@@ -309,6 +309,16 @@ class NoUploadsTest < ActionDispatch::IntegrationTest
     assert_includes bundle.read, "dragover"
   end
 
+  test "the trix page refuses files and takes attachments out again" do
+    source = Rails.root.join("frontend/src/trix.js").read
+
+    # Trix asks before it accepts a file, and an attachment that reaches the
+    # document another way is removed. The toolbar has no attach button.
+    assert_match(/addEventListener\("trix-file-accept", \(event\) => event\.preventDefault\(\)\)/, source)
+    assert_match(/addEventListener\("trix-attachment-add", \(\{ attachment \}\) => attachment\.remove\(\)\)/, source)
+    refute_includes Rails.root.join("app/views/demos/_trix.html.erb").read, "attachFiles"
+  end
+
   test "the lexxy bundle does not include the upload client" do
     bundle = Rails.root.join("public/lexxy.js")
     skip "run `cd frontend && bun run build` first" unless bundle.exist?
