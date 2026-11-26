@@ -8,7 +8,8 @@ module Demos
 
   # How the server reads a demo's document without a browser: the root name
   # and its type. `kind` picks the Doc reader (read_text, read_xml, read_map,
-  # or read_array). The Lexxy demo has no reader. It saves HTML to room.body,
+  # or read_array), or :trix for Y::Trix, which renders the Trix demo's
+  # Y.Text to the HTML Trix saves. The Lexxy demo has no reader. It saves HTML to room.body,
   # an Action Text field, and DemosController#body returns that.
   Reader = Data.define(:root, :kind)
 
@@ -34,7 +35,7 @@ module Demos
       shape: "Y.Text",
       blurb: "Basecamp's Trix editor through the y-trix binding, with other people's carets and an undo " \
              "that only takes back your own changes.",
-      read: Reader.new(root: "trix", kind: :text)
+      read: Reader.new(root: "trix", kind: :trix)
     ),
     Demo.new(
       slug: "spreadsheet",
@@ -108,6 +109,13 @@ module Demos
     # or nil when the room has no document yet. read_text and read_xml return
     # a string, and read_map and read_array return a JSON string. The panel
     # shows the result as is.
+    # The Ruby the read panel says it runs.
+    def read_call(reader)
+      return %(Y::Trix.new(doc).to_html("#{reader.root}")) if reader.kind == :trix
+
+      %(doc.read_#{reader.kind}("#{reader.root}"))
+    end
+
     def read_stored(reader, state)
       return nil if state.nil?
 
@@ -116,6 +124,7 @@ module Demos
       case reader.kind
       when :text then doc.read_text(reader.root)
       when :xml then doc.read_xml(reader.root)
+      when :trix then Y::Trix.new(doc).to_html(reader.root)
       when :map then doc.read_map(reader.root)
       when :array then doc.read_array(reader.root)
       end

@@ -248,6 +248,16 @@ class DemosTest < ActionDispatch::IntegrationTest
     assert_equal "const x = 1", response.parsed_body["body"]
   end
 
+  test "the stored endpoint renders the Trix demo to the HTML Trix saves" do
+    store(:trix, Updates::TRIX_LIST)
+
+    get "/demos/trix/room1/stored"
+
+    assert_response :success
+    assert_equal "<ul><li>one</li><li>two <strong>bold</strong></li><li>three</li></ul><div>after</div>",
+                 response.parsed_body["body"]
+  end
+
   test "the stored endpoint reads a Y.XmlFragment demo back as block text" do
     store(:tiptap, Updates::PROSEMIRROR_DEFAULT)
 

@@ -217,7 +217,8 @@ const refused = await js(A, `(() => { const el = document.querySelector("trix-ed
 check("a file handed to Trix is not attached", refused === 0)
 check("and the text is as it was", !!(await converge("trix after a file", trixShown, (v) => v.includes("trix from A"))))
 
-// The server reads the same text back in Ruby, with no browser involved.
+// The server renders the same document to HTML in Ruby (Y::Trix), with no
+// browser involved.
 // (One request every two seconds: the page limit is per IP, and this run has
 // already spent part of it on the Lexxy body above.)
 const trixStored = async () => {
@@ -229,7 +230,8 @@ for (let i = 0; i < 45 && !storedTrix.includes("trix from A"); i++) {
   storedTrix = await trixStored()
   if (!storedTrix.includes("trix from A")) await sleep(2000)
 }
-check("the server reads the trix document with read_text", storedTrix.includes("trix from A"))
+check(`the server renders the trix document to Trix's HTML (${storedTrix.slice(0, 50)})`,
+  storedTrix.startsWith("<div><strong>trix</strong> from A"))
 
 // --- 2) The room is the boundary ---------------------------------------------
 // A second room on the same demo is a different document, on the same process.

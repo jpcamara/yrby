@@ -7,6 +7,16 @@ module Updates
   # A Y.Text root named "content" holding "hello world".
   HELLO = b64("AQEBAAQBB2NvbnRlbnQLaGVsbG8gd29ybGQA")
 
+  # A Trix document as the y-trix binding keeps it, in a Y.Text root named
+  # "trix": a bullet list of "one", "two bold" (the last word bold) and
+  # "three", then a paragraph "after". From the gem's test/fixtures/trix.json.
+  TRIX_LIST = b64("ARm5upjVBQAEAQR0cml4A29uZYa5upjVBQIKYmxvY2tCcmVhawR0cnVlhrm6mNUFAwVibG9jaxdbImJ1bGxldExpc3QiLCJidWxsZXQiXYS5upjVBQQBCoa5" \
+                  "upjVBQUKYmxvY2tCcmVhawRudWxshrm6mNUFBgVibG9jawRudWxshLm6mNUFBwR0d28ghrm6mNUFCwRib2xkBHRydWWEubqY1QUMBGJvbGSGubqY1QUQBGJvbGQEbnVsbIa5" \
+                  "upjVBREKYmxvY2tCcmVhawR0cnVlhrm6mNUFEgVibG9jaxdbImJ1bGxldExpc3QiLCJidWxsZXQiXYS5upjVBRMBCoa5upjVBRQKYmxvY2tCcmVhawRudWxshrm6mNUFFQVi" \
+                  "bG9jawRudWxshLm6mNUFFgV0aHJlZYa5upjVBRsFYmxvY2sXWyJidWxsZXRMaXN0IiwiYnVsbGV0Il2GubqY1QUcCmJsb2NrQnJlYWsEdHJ1ZYS5upjVBR0BCoa5upjVBR4F" \
+                  "YmxvY2sEbnVsbIa5upjVBR8KYmxvY2tCcmVhawRudWxshLm6mNUFIAVhZnRlcoa5upjVBSUKYmxvY2tCcmVhawR0cnVlhLm6mNUFJgEKhrm6mNUFJwpibG9ja0JyZWFrBG51" \
+                  "bGwA")
+
   # Three causally dependent inserts from one client: "A", then "B", then "C".
   # U3 can't integrate until U2 is applied, so applying only U1 and U3 leaves
   # U3 as a pending struct.

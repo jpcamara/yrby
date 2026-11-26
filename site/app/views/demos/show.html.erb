@@ -52,7 +52,7 @@
       refetch after each change while open. read_text and read_xml return a
       string, and read_map and read_array return JSON. %>
   <% if @demo.read %>
-    <% call = %{doc.#{"read_#{@demo.read.kind}"}(\"#{@demo.read.root}\")} %>
+    <% call = Demos.read_call(@demo.read) %>
     <details class="stored group mt-4 rounded-xl border border-zinc-800 bg-panel">
       <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-400 select-none group-open:border-b group-open:border-zinc-800 hover:text-zinc-200">
         Server-side read: <code><%= call %></code>
