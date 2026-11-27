@@ -200,6 +200,14 @@ check("each trix editor shows what its Y.Text holds",
 await waitFor("A draws B's caret", async () => (await js(A, `document.querySelectorAll("[data-y-caret]").length`)) === 1)
 check("A draws one remote caret in the trix room", (await js(A, `document.querySelectorAll("[data-y-caret]").length`)) === 1)
 
+// A types exactly where B's caret is. B's caret stays one place: the new text
+// is not drawn as B's selection (y-trix before 0.2.2 drew it so).
+await js(A, `(() => { const e = document.querySelector("trix-editor").editor; const end = e.getDocument().getLength() - 1; e.setSelectedRange([end, end]); e.insertString(" Then A again."); return true })()`)
+check("text typed at B's caret arrives", !!(await converge("trix at the caret", trixShown, (v) => v.includes("Then A again."))))
+await sleep(300)
+check("and is not drawn as B's selection in A's window",
+  (await js(A, `document.querySelectorAll(".y-trix-selection").length`)) === 0 && (await js(A, `document.querySelectorAll("[data-y-caret]").length`)) === 1)
+
 // Undo in B takes back B's typing and leaves A's.
 await js(B, `(document.querySelector("trix-editor").editor.undo(), true)`)
 check("undo in B takes back only B's text",
