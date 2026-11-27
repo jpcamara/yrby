@@ -262,8 +262,7 @@ class CollaborativeFields extends HTMLElement {
       formData.set(name, toBase64(Y.encodeStateAsUpdate(this.current.doc)));
   };
   #schedule() {
-    clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => void this.#save(), SAVE_DELAY);
+    this.#timer ??= setTimeout(() => void this.#save(), SAVE_DELAY);
   }
   async#save() {
     clearTimeout(this.#timer);
@@ -308,5 +307,5 @@ export {
   CollaborativeFields
 };
 
-//# debugId=4D1856F888688AB364756E2164756E21
+//# debugId=5BAA20C075BDE35264756E2164756E21
 //# sourceMappingURL=yrby-forms.js.map

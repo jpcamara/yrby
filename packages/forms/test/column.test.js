@@ -137,13 +137,30 @@ test("autosave posts the form after an edit and merges the page that answers", a
   t.mock.timers.tick(300);
   for (let i = 0; i < 8; i++) await Promise.resolve();
 
-  assert.equal(requests.length, 1, "edits within the pause make one request");
+  assert.equal(requests.length, 1, "edits within the wait make one request");
   assert.deepEqual([requests[0].url, requests[0].method], ["/tickets/1", "POST"]);
   assert.equal(requests[0].params._method, "patch");
   assert.equal(requests[0].params["ticket[description]"], "Stored text!!");
   assert.equal(control("description").value, "Someone else: Stored text!!");
   t.mock.timers.tick(300);
   assert.equal(requests.length, 1, "merging the answer is not an edit");
+});
+
+test("autosave posts during steady typing", (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => ({ ok: false }));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { type } = makeForm(t, { state: base64(stored()), autosave: true });
+
+  type("description", "Stored text!");
+  t.mock.timers.tick(200);
+  type("description", "Stored text!!");
+  t.mock.timers.tick(100);
+
+  assert.equal(fetch.mock.callCount(), 1, "the second edit does not restart the wait");
+  assert.equal(fetch.mock.calls[0].arguments[1].body.get("ticket[description]"), "Stored text!!");
+  type("description", "Stored text!!!");
+  t.mock.timers.tick(300);
+  assert.equal(fetch.mock.callCount(), 2);
 });
 
 test("without autosave an edit posts nothing", (t) => {

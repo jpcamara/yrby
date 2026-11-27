@@ -211,9 +211,10 @@ callback merges the posted document into the stored one and reads the
 declared fields from the result. Two people who submit the same form both
 keep their edits, and nobody gets a `StaleObjectError`.
 
-Pass `autosave: true` to post the form 300 ms after each edit, without a
-page load. The page that answers holds the merged document, and the element
-merges it into the open form:
+Pass `autosave: true` to post the form 300 ms after an edit, without a page
+load. Edits made during the wait go in the same post, so steady typing saves
+every 300 ms. The page that answers holds the merged document, and the
+element merges it into the open form:
 
 ```erb
 <%= form.collaborative_fields autosave: true do %>

@@ -5,8 +5,9 @@
 // server merges it with the state it holds.
 //
 // When the `value` attribute changes, as it does when Turbo morphs the page,
-// the new state is merged into the document. With `autosave`, each edit posts
-// the form after a short pause and merges the state in the page that answers.
+// the new state is merged into the document. With `autosave`, an edit posts
+// the form 300 ms later, along with the edits made while it waited, and merges
+// the state in the page that answers.
 import * as Y from "yjs";
 
 const SAVE_DELAY = 300;
@@ -56,9 +57,10 @@ export class CollaborativeFields extends HTMLElement {
     if (name && this.current) formData.set(name, toBase64(Y.encodeStateAsUpdate(this.current.doc)));
   };
 
+  // The first edit starts the wait, and later edits join it. Steady typing
+  // saves every SAVE_DELAY. It does not wait for a pause.
   #schedule(): void {
-    clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => void this.#save(), SAVE_DELAY);
+    this.#timer ??= setTimeout(() => void this.#save(), SAVE_DELAY);
   }
 
   // Posts the form as a submit would. The answer is the page the server

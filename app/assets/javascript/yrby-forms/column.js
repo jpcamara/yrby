@@ -259,8 +259,7 @@ class CollaborativeFields extends HTMLElement {
       formData.set(name, toBase64(Y.encodeStateAsUpdate(this.current.doc)));
   };
   #schedule() {
-    clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => void this.#save(), SAVE_DELAY);
+    this.#timer ??= setTimeout(() => void this.#save(), SAVE_DELAY);
   }
   async#save() {
     clearTimeout(this.#timer);
@@ -305,5 +304,5 @@ export {
   CollaborativeFields
 };
 
-//# debugId=9C20B4CD31EB089964756E2164756E21
+//# debugId=267BE630360F3F2564756E2164756E21
 //# sourceMappingURL=column.js.map

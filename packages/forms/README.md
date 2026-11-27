@@ -91,7 +91,8 @@ element's `value` attribute:
   a submit carries every edit. The server merges it into the state it holds.
 - When the `value` attribute changes, the new state is merged into the open
   form. A Turbo morph of the page does this.
-- With `autosave`, each edit posts the form after 300 ms. The response is the
+- With `autosave`, an edit posts the form 300 ms later, along with the edits
+  made while it waited, so steady typing saves every 300 ms. The response is the
   page the server renders next, and the element merges the state it finds in
   that page's `<collaborative-fields>` of the same `name`.
 - A bound control cancels its own `turbo:before-morph-element`, so a morph
