@@ -25,6 +25,7 @@ examples/actioncable-demo/data
 
 # Rebuilt inside the image.
 packages/client/dist
+packages/forms/dist
 examples/actioncable-demo/public/app.js
 examples/actioncable-demo/public/lexxy.js
 examples/actioncable-demo/public/lexxy.css

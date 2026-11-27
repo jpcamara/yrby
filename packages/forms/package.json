@@ -1,0 +1,79 @@
+{
+  "name": "yrby-forms",
+  "version": "0.1.0-alpha.1",
+  "description": "Collaborative form fields over yrby. The <collaborative-field> custom element binds a plain form control to the document of the <yrby-document> around it. Selects, checkboxes, numbers, and dates are last-write-wins map entries, and text fields merge concurrent typing through Y.Text. A field shows who else has it focused. The yrby-forms Rails gem's form helpers render the elements.",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./column": {
+      "import": {
+        "types": "./dist/column.d.ts",
+        "default": "./dist/column.js"
+      },
+      "require": {
+        "types": "./dist/cjs/column.d.ts",
+        "default": "./dist/cjs/column.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({ type: 'commonjs' }) + '\\n')\"",
+    "typecheck": "tsc --noEmit",
+    "build:importmap": "bun scripts/build_importmap.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test"
+  },
+  "license": "MIT",
+  "author": "JP Camara <jp@jpcamara.com>",
+  "homepage": "https://github.com/jpcamara/yrby/tree/main/packages/forms#readme",
+  "bugs": {
+    "url": "https://github.com/jpcamara/yrby/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jpcamara/yrby.git",
+    "directory": "packages/forms"
+  },
+  "keywords": [
+    "yjs",
+    "crdt",
+    "yrby",
+    "forms",
+    "collaborative",
+    "actioncable",
+    "custom-elements"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "yjs": "^13.6.0",
+    "y-protocols": "^1.0.5"
+  },
+  "dependencies": {
+    "yrby-client": "^0.7.1"
+  },
+  "devDependencies": {
+    "happy-dom": "^21.0.4",
+    "typescript": "^5.6.0",
+    "y-protocols": "^1.0.5",
+    "yjs": "^13.6.0"
+  }
+}

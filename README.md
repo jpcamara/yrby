@@ -100,6 +100,7 @@ npm install yrby-client yjs y-protocols @rails/actioncable
 - [Install](#install)
 - [Docs](#docs)
 - [Editors](#editors)
+- [Forms](#forms)
 - [Usage](#usage)
   - [Doc (Low-Level Document Sync)](#doc-low-level-document-sync)
   - [Reading document contents](#reading-document-contents)
@@ -227,6 +228,15 @@ The demo also syncs plain Yjs shapes with no editor (a whiteboard on a
 same channel. The demo README's "Using this in your own app" section has the
 integration recipe, and its `NoteMaterializer` shows how to render a document
 to ActionText on the server with `Y::Tiptap` or `Y::Lexxy`.
+
+## Forms
+
+Plain form fields collaborate too. The `yrby-forms` gem and npm package add
+`has_collaborative_fields` to a model, two form helpers, and a
+`<collaborative-field>` element. Each record has one shared document for its
+fields. Selects and checkboxes are last-write-wins, text fields merge
+concurrent typing, and the server writes the values to the record's columns.
+See [README-forms.md](README-forms.md).
 
 ## Usage
 

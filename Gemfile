@@ -4,6 +4,7 @@ source "https://rubygems.org"
 
 gemspec name: "yrby"
 gemspec name: "yrby-rails"
+gemspec name: "yrby-forms"
 gemspec name: "yrby-agent"
 
 # json 3.0 changed JSON.parse's signature, and ActiveSupport 8.1's

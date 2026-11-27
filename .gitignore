@@ -53,6 +53,8 @@ bench/large_update.bin
 
 # TypeScript build output
 packages/client/dist/
+packages/forms/dist/
 
 # npm pack artifacts
 packages/client/*.tgz
+packages/forms/*.tgz
