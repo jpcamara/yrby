@@ -6,7 +6,6 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, open, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -32,8 +31,7 @@ async function run(framework, transport, port) {
   const started = Date.now();
   await mkdir(assets, { recursive: true });
   const entry = framework === "turbo" ? "client.js" : "client_turbolinks.js";
-  await build({ entryPoints: [fileURLToPath(new URL(entry, import.meta.url))], bundle: true,
-    splitting: true, format: "esm", outdir: assets });
+  await exec("bun", ["build", fileURLToPath(new URL(entry, import.meta.url)), "--splitting", "--format=esm", "--outdir", assets]);
   const log = await open(`${output}/server.log`, "w");
   const server = spawn("bundle", ["exec", "ruby", "-Ilib", "test/browser/app.rb"], {
     cwd: root, env: { ...process.env, PORT: String(port), BROWSER_ASSETS: assets, BROWSER_FRAMEWORK: framework,

@@ -6,7 +6,6 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, open } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -16,8 +15,7 @@ const base = `http://127.0.0.1:${port}`;
 const ab = process.env.AB_BIN || "agent-browser";
 const session = process.env.AB_SESSION || `yrby-turbolinks-${process.pid}`;
 await mkdir(assets, { recursive: true });
-await build({ entryPoints: [fileURLToPath(new URL("client_turbolinks.js", import.meta.url))], bundle: true,
-  splitting: true, format: "esm", outdir: assets });
+await exec("bun", ["build", fileURLToPath(new URL("client_turbolinks.js", import.meta.url)), "--splitting", "--format=esm", "--outdir", assets]);
 const log = await open(`${root}tmp/browser-server-turbolinks.log`, "w");
 const server = spawn("bundle", ["exec", "ruby", "-Ilib", "test/browser/app.rb"], {
   cwd: root, env: { ...process.env, PORT: port, BROWSER_ASSETS: assets, BROWSER_FRAMEWORK: "turbolinks",
