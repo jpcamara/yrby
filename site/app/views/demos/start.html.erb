@@ -1,0 +1,18 @@
+<% content_for :title, "#{@demo.title} · yrby demos" %>
+<%# A room nobody has started. Starting it creates the Room row its
+    documents belong to, which a GET never does (see DemosController#start). %>
+<% content_for :canonical, canonical_url("/demos") %>
+<% content_for :head do %>
+  <meta name="robots" content="noindex, nofollow">
+<% end %>
+
+<section class="mx-auto max-w-3xl">
+  <h1 class="font-serif text-4xl font-normal tracking-tight text-zinc-100 sm:text-5xl"><%= @demo.title %></h1>
+  <p class="mt-4 leading-7 text-zinc-400">
+    This room hasn't started yet. Starting it creates the room's record,
+    which holds a document for each demo. Anyone with the link can then join.
+  </p>
+  <%= button_to "Start the room", demo_start_path(@demo.slug, @slug), authenticity_token: false,
+                form_class: "mt-6",
+                class: "cursor-pointer rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500" %>
+</section>
